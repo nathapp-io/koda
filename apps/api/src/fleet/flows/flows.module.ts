@@ -22,6 +22,7 @@ import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { ProjectsModule } from '../../projects/projects.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { FleetReviewsModule } from '../reviews/fleet-reviews.module';
+import { FleetRulingsModule } from '../rulings/fleet-rulings.module';
 import { FLEET_FLOW_STEP_REPOSITORY } from './domain/fleet-flow-step.domain';
 import { PrismaFleetFlowStepRepository } from './prisma-fleet-flow-step.repository';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
@@ -36,7 +37,7 @@ import { FleetFlowStopTicketSubscriber } from './fleet-flow-stop-ticket.subscrib
   controllers: [ThreadPreApprovalController, ThreadFlowsController, FleetFlowsController, ProjectFlowsController],
   // ThreadsModule owns the thread-entry guards (`lockForFlow`); FleetReposModule owns the repo row lock
   // the nax entry serialises on; ApprovalEngineModule owns the ask both entries open.
-  imports: [ApprovalEngineModule, AuthRepositoryModule, AuditLogModule, FleetActivityModule, FleetReposModule, GitBrokerModule, ProjectsModule, ProjectAccessModule, ThreadsModule, PrismaModule, FleetJobsModule, FleetReviewsModule, OutboxModule, FleetTicketsModule, TicketsModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, AuditLogModule, FleetActivityModule, FleetReposModule, GitBrokerModule, ProjectsModule, ProjectAccessModule, ThreadsModule, PrismaModule, FleetJobsModule, FleetReviewsModule, FleetRulingsModule, OutboxModule, FleetTicketsModule, TicketsModule],
   providers: [
     PrismaFleetFlowRepository,
     { provide: FLEET_FLOW_REPOSITORY, useExisting: PrismaFleetFlowRepository },

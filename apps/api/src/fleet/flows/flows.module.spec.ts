@@ -53,6 +53,8 @@ import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { TicketsModule } from '../../tickets/tickets.module';
 import { TicketsService } from '../../tickets/tickets.service';
 import { FleetFlowStopTicketSubscriber } from './fleet-flow-stop-ticket.subscriber';
+import { FleetRulingsModule } from '../rulings/fleet-rulings.module';
+import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 
 const stubPublisher = { register: vi.fn() };
 @Global()
@@ -70,6 +72,11 @@ class StubAuthRepositoryModule {}
 class StubFleetTicketsModule {}
 @Module({ providers: [{ provide: TicketsService, useValue: { create: vi.fn() } }], exports: [TicketsService] })
 class StubTicketsModule {}
+@Module({
+  providers: [{ provide: FleetPrRulingsService, useValue: { ruledItemIds: vi.fn(async () => []), createForFlow: vi.fn(), commentRefused: vi.fn() } }],
+  exports: [FleetPrRulingsService],
+})
+class StubFleetRulingsModule {}
 
 @Module({
   providers: [
@@ -152,6 +159,7 @@ describe('FlowsModule', () => {
       .overrideModule(AuthRepositoryModule).useModule(StubAuthRepositoryModule)
       .overrideModule(FleetTicketsModule).useModule(StubFleetTicketsModule)
       .overrideModule(TicketsModule).useModule(StubTicketsModule)
+      .overrideModule(FleetRulingsModule).useModule(StubFleetRulingsModule)
       .overrideModule(ApprovalEngineModule).useModule(StubApprovalEngineModule)
       .overrideModule(AuditLogModule).useModule(StubAuditLogModule)
       .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)

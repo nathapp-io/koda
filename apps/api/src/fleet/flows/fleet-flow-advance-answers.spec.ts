@@ -81,7 +81,8 @@ function build(opts: Options = {}) {
   const outbox = { record: vi.fn(async () => { assertTx(); }) };
   const service = new FleetFlowAdvanceService(flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never, flowService as never,
-    github as never, {} as never, testFleetConfig(), calls as never, outbox as never);
+    github as never, {} as never, testFleetConfig(), calls as never, outbox as never,
+    { ruledItemIds: vi.fn(async () => []), createForFlow: vi.fn(), commentRefused: vi.fn() } as never);
   return { service, row, flows, steps, activity, audit, txManager, jobs, flowService, calls, outbox };
 }
 

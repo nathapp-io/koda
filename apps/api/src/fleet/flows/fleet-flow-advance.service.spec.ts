@@ -188,6 +188,7 @@ function build(opts: HarnessOptions = {}) {
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
     flowService as never, github as never, reviews as never, config, { apply: vi.fn() } as never, outbox as never,
+    { ruledItemIds: vi.fn(async () => []), createForFlow: vi.fn(), commentRefused: vi.fn() } as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
