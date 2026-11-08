@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T14:53:11.824Z",
+  "updatedAt": "2026-11-08T15:10:15.630Z",
   "userStories": [
     {
       "id": "US-001",
@@ -577,14 +577,17 @@
         "US-008",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Coordinates the new action across decisions, authenticated forge writes and atomic generation-fenced recording using existing patterns; creator-access checks require strict security TDD."
+        "reasoning": "Coordinates the new action across decisions, authenticated forge writes and atomic generation-fenced recording using existing patterns; creator-access checks require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -611,7 +614,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f0e4c76919400a8402b055e92e6f8c8ff3a53c34"
     },
     {
       "id": "US-011",
