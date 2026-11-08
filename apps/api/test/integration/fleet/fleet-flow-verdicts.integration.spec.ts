@@ -121,7 +121,7 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     };
   }
 
-  it('AC-1/AC-2: commits SPEC_REVIEW calls, then dispatches a linked PLAN on the second tick', async () => {
+  it('AC-1/AC-2: commits SPEC_REVIEW calls, then dispatches the second review on the calls commit', async () => {
     const { flow, job } = await seedReview('SPEC_REVIEW', minor);
     await ticker.tick(now);
 
@@ -142,10 +142,10 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     vi.mocked(github.getBranchHead).mockClear();
     await ticker.tick(new Date(now.getTime() + 1_000));
 
-    const plans = await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'PLAN' }, take: 2 });
-    expect(plans).toHaveLength(1);
-    // PLAN checks the approved head, but executes on the flow branch; real placement may assign it immediately.
-    expect(plans[0]).toMatchObject({ flowId: flow.id, flowStep: 'PLAN', command: 'PLAN', ref: BRANCH });
+    const reviews = await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'SPEC_REVIEW' }, take: 3 });
+    expect(reviews).toHaveLength(2);
+    expect(reviews[1]).toMatchObject({ flowId: flow.id, flowStep: 'SPEC_REVIEW', command: 'AGENT', ref: 'c2' });
+    expect(await db.fleetJob.count({ where: { flowId: flow.id, flowStep: 'PLAN' } })).toBe(0);
     expect(github.getBranchHead).toHaveBeenCalledWith('test-read-token', 'acme', repoName, BRANCH);
     expect(github.putFile).toHaveBeenCalledTimes(1);
     expect(forgeCallsOutsideTransaction.length).toBeGreaterThan(0);
@@ -225,11 +225,11 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     }
   });
 
-  it('AC-10: PRD_REVIEW minor findings stop after two PLAN jobs since approval', async () => {
-    const { flow } = await seedReview('PRD_REVIEW', minor);
+  it('AC-10: PRD_REVIEW minor findings are accepted after two PLAN jobs since approval', async () => {
+    const { flow, job } = await seedReview('PRD_REVIEW', minor);
     for (const secondsAgo of [90, 60]) {
       await db.fleetJob.create({ data: {
-        ...jobData(flow.id), flowStep: 'PLAN', resultSha: SHA,
+        ...jobData(flow.id), flowStep: 'PLAN', resultSha: SHA, resultBranch: BRANCH,
         queuedAt: new Date(now.getTime() - secondsAgo * 1_000),
         finishedAt: new Date(now.getTime() - (secondsAgo - 10) * 1_000),
       } });
@@ -239,9 +239,49 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     await ticker.tick(now);
 
     expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } }))
-      .toMatchObject({ state: 'STOPPED', stopReason: 'review_findings' });
+      .toMatchObject({ state: 'RUNNING', stopReason: null });
+    expect(await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } }))
+      .toMatchObject({ prdEditsJobId: job.id });
+    const activities = await db.fleetActivity.findMany({
+      where: { entityId: flow.id, action: 'flow.prd_edits' }, take: 2,
+    });
+    expect(activities).toHaveLength(1);
+    expect(activities[0].payload).toMatchObject({
+      jobId: job.id, sha: null, applied: 0, accepted: [minor.summary],
+    });
     expect(await db.fleetJob.count({ where: { flowId: flow.id } })).toBe(3);
     expect(github.putFile).not.toHaveBeenCalled();
+    expect(github.mintInstallationToken).not.toHaveBeenCalled();
+    expect(Logger.prototype.error).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: an accepted finding whose summary carries a NUL is stored, and the flow still reaches RUN', async () => {
+    const nulFinding = { id: 'F1', class: 'minor', summary: 'Missing\u0000coverage note', fix: 'Document the retry case' };
+    const { flow, job } = await seedReview('PRD_REVIEW', nulFinding);
+    for (const secondsAgo of [90, 60]) {
+      await db.fleetJob.create({ data: {
+        ...jobData(flow.id), flowStep: 'PLAN', resultSha: SHA, resultBranch: BRANCH,
+        queuedAt: new Date(now.getTime() - secondsAgo * 1_000),
+        finishedAt: new Date(now.getTime() - (secondsAgo - 10) * 1_000),
+      } });
+    }
+
+    await ticker.tick(now);
+
+    // The activity payload is a JSONB column: PostgreSQL rejects a NUL in it, so the write would
+    // roll back the marker on every tick and the flow would never reach RUN.
+    const activities = await db.fleetActivity.findMany({
+      where: { entityId: flow.id, action: 'flow.prd_edits' }, take: 2,
+    });
+    expect(activities).toHaveLength(1);
+    expect(activities[0].payload).toMatchObject({ jobId: job.id, accepted: ['Missing\uFFFDcoverage note'] });
+    expect(await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } }))
+      .toMatchObject({ prdEditsJobId: job.id });
+
+    await ticker.tick(new Date(now.getTime() + 1_000));
+
+    const run = await db.fleetJob.findFirstOrThrow({ where: { flowId: flow.id, flowStep: 'RUN' } });
+    expect(run).toMatchObject({ flowId: flow.id, flowStep: 'RUN', command: 'RUN' });
     expect(Logger.prototype.error).not.toHaveBeenCalled();
   });
 });

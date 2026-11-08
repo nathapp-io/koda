@@ -4,6 +4,7 @@ import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, oneLine, sanit
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
 import { needsAutomaticRule, parseRuleVerdict, type FlowOpenItem, type FlowRuling } from './flow-rulings';
 import type { FlowFinding } from './flow-verdict';
+import type { FlowPrdEdit } from './flow-prd-edits';
 import type { FixReady } from '../jobs/domain/fleet-job.domain';
 import type { FleetFlowState } from './flow-states';
 
@@ -38,6 +39,8 @@ export interface FlowStepInput {
   run?: { outcome: string | null; openItems: FlowOpenItem[] } | null;
   ruledItemIds?: string[];
   rulingsJobId?: string | null;
+  specReviewCount?: number;
+  prdEditsJobId?: string | null;
 }
 
 export type FlowStopReason =
@@ -62,10 +65,12 @@ export type FlowStepAction =
   | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string }; rule?: { answeredJobId: string | null } }
   | { kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }
   | { kind: 'apply_rulings'; jobId: string; rulings: FlowRuling[] }
+  | { kind: 'apply_prd_edits'; jobId: string; edits: FlowPrdEdit[]; accepted: FlowFinding[] }
   | { kind: 'wait_answer'; step: 'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX'; jobId: string; questions: FlowQuestion[] };
 
 export type ApplyCallsAction = Extract<FlowStepAction, { kind: 'apply_calls' }>;
 export type ApplyRulingsAction = Extract<FlowStepAction, { kind: 'apply_rulings' }>;
+export type ApplyPrdEditsAction = Extract<FlowStepAction, { kind: 'apply_prd_edits' }>;
 export type WaitAnswerAction = Extract<FlowStepAction, { kind: 'wait_answer' }>;
 
 const dispatch = (step: FlowStep): FlowStepAction => ({ kind: 'dispatch', step });
@@ -129,6 +134,10 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
         };
       }
       if (verdict.findings.length === 0) {
+        if (latestJob.step === 'PRD_REVIEW' && input.canApplyCalls
+          && verdict.prdEdits.length > 0 && input.prdEditsJobId !== latestJob.id) {
+          return { kind: 'apply_prd_edits', jobId: latestJob.id, edits: verdict.prdEdits, accepted: [] };
+        }
         return dispatch(latestJob.step === 'SPEC_REVIEW' ? 'PLAN' : 'RUN');
       }
       const ambiguous = verdict.findings.filter((finding) => finding.class === 'ambiguous');
@@ -144,8 +153,19 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
       if (ambiguous.length > 0 && !hasCurrentAnswers) {
         return { kind: 'wait_answer', step: latestJob.step, jobId: latestJob.id, questions: flowQuestions(verdict.findings) };
       }
-      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2 && ambiguous.length === 0) return stopFindings();
-      if (input.callsJobId === latestJob.id) return dispatch('PLAN');
+      // The second PRD round no longer re-plans: the RUN builds from the spec, so the review's own
+      // edits are committed and its findings are accepted instead of being written into the spec.
+      // A round the user answered still re-plans: the answer may change what is built.
+      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2 && !hasCurrentAnswers) {
+        if (input.prdEditsJobId === latestJob.id) return dispatch('RUN');
+        return { kind: 'apply_prd_edits', jobId: latestJob.id, edits: verdict.prdEdits, accepted: verdict.findings };
+      }
+      if (input.callsJobId === latestJob.id) {
+        return dispatch(latestJob.step === 'SPEC_REVIEW'
+          && input.specReviewCount !== undefined && input.specReviewCount < 2
+          ? 'SPEC_REVIEW'
+          : 'PLAN');
+      }
       const findings = hasCurrentAnswers
         ? verdict.findings.map((finding, index) => finding.class !== 'ambiguous'
           ? finding

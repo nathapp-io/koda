@@ -22,6 +22,7 @@ export interface BuildStepDispatchInput {
   };
   feature: { feature: string; specPath: string };
   step: FlowStep;
+  prdEdits?: boolean;
   remainingCapUsd: string;
   reviewAgent: string;
   plan?: { resultSha: string | null; resultBranch: string | null };
@@ -50,7 +51,7 @@ export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJ
         bashMode: 'raw',
         agent: {
           name: input.reviewAgent,
-          task: buildReviewTask(step, feature.specPath, feature.feature),
+          task: buildReviewTask(step, feature.specPath, feature.feature, { prdEdits: input.prdEdits === true }),
           model: flow.reviewerRole,
         },
       };

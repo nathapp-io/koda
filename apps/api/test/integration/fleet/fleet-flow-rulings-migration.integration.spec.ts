@@ -32,6 +32,10 @@ describeDb('fleet flow rulings migration (PG)', () => {
     expect(beforeColumns).toEqual([]);
 
     await applyMigration(scratch.db, MIGRATION);
+    // The generated client selects every FleetFlowFeature scalar, including `prdEditsJobId`, which only
+    // the later fleet_flow_prd_edits migration adds. Apply it before the client read; assertions remain
+    // scoped to the rulings migration.
+    await applyMigration(scratch.db, '20261202090000_fleet_flow_prd_edits');
 
     const columns = await scratch.db.$queryRaw<Array<{ column_name: string; is_nullable: string; data_type: string }>>`
       SELECT column_name, is_nullable, data_type FROM information_schema.columns

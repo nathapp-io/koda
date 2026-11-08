@@ -26,6 +26,18 @@ describe('buildStepDispatch', () => {
   it('builds a PLAN body from the flow branch and spec path', () => {
     expect(buildStepDispatch(baseInput('PLAN'))).toEqual({ repoId: 'repo-1', command: 'PLAN', ref: 'feat/f', feature: 'f', planFrom: '.nax/features/f/spec.md', profiles: [], maxCostUsd: 6.75 });
   });
+  it('forwards opt-in PRD edits to the PRD_REVIEW task', () => {
+    const input = { ...baseInput('PRD_REVIEW'), prdEdits: true, plan: { resultSha: 'plan-sha', resultBranch: 'plan-branch' } };
+    const dispatched = buildStepDispatch(input);
+    expect(dispatched).toMatchObject({
+      agent: { task: buildReviewTask('PRD_REVIEW', '.nax/features/f/spec.md', 'f', { prdEdits: true }) },
+    });
+    expect(dispatched.agent?.task).toContain('Do not edit any file: the flow commits your edits.');
+    const legacy = { ...baseInput('PRD_REVIEW'), plan: { resultSha: 'plan-sha', resultBranch: 'plan-branch' } };
+    expect(buildStepDispatch(legacy)).toMatchObject({
+      agent: { task: buildReviewTask('PRD_REVIEW', '.nax/features/f/spec.md', 'f') },
+    });
+  });
   it('builds PRD_REVIEW against the PLAN result sha', () => {
     const input = { ...baseInput('PRD_REVIEW'), plan: { resultSha: 'plan-sha', resultBranch: 'plan-branch' } };
     expect(buildStepDispatch(input)).toEqual({ repoId: 'repo-1', command: 'AGENT', feature: 'f', ref: 'plan-sha', bashMode: 'raw', maxCostUsd: 6.75,

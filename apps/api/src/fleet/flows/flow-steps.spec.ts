@@ -5,6 +5,7 @@ import {
   FLOW_CALLS_PRECEDENCE,
   FLOW_STOP_DETAIL_MAX,
   FLOW_VERDICT_INSTRUCTION,
+  FLOW_PRD_EDITS_INSTRUCTION,
 } from './flow-steps';
 
 describe('flow steps', () => {
@@ -18,6 +19,20 @@ describe('flow steps', () => {
     expect(buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a')).toBe(
       `/spec-review --spec .nax/features/a/spec.md --prd .nax/features/a/prd.json --phase 9\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`,
     );
+  });
+
+  it('adds PRD edit instructions only for opted-in PRD review', () => {
+    const task = buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a', { prdEdits: true });
+    expect(task.endsWith(`${FLOW_VERDICT_INSTRUCTION}\n\n${FLOW_PRD_EDITS_INSTRUCTION}`)).toBe(true);
+    expect(buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a', { prdEdits: true }))
+      .toBe(buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a'));
+    expect(buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a', { prdEdits: false }))
+      .toBe(buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a'));
+    for (const op of ['replace_description', 'replace_ac', 'remove_ac', 'add_ac', 'add_context_file', 'remove_context_file']) {
+      expect(FLOW_PRD_EDITS_INSTRUCTION).toContain(op);
+    }
+    expect(FLOW_PRD_EDITS_INSTRUCTION).toContain('Do not edit any file: the flow commits your edits.');
+    expect(FLOW_PRD_EDITS_INSTRUCTION).toContain('the object must still start with {"findings"');
   });
 
   it('keeps oversized PRD review tasks within the AGENT task bound', () => {

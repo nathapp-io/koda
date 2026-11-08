@@ -1273,6 +1273,7 @@ model FleetFlowFeature {
   prNumber    Int?
   callsJobId  String?
   rulingsJobId String?
+  prdEditsJobId String?
   questionsJobId String? // the review job the stored questions and answers belong to
   questions      Json? // FlowQuestion[]: the questions the review asked
   answers        Json? // FlowAnswer[]: the human answers, bound to questionsJobId
