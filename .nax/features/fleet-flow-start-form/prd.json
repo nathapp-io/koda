@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T12:56:39.968Z",
+  "updatedAt": "2026-11-09T13:22:49.570Z",
   "userStories": [
     {
       "id": "US-001",
@@ -403,14 +403,17 @@
         "US-004",
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends the existing dialog using supplied defaults/schema/body helpers and the established first-issue alert pattern; identity-sensitive pre-approval hints retain the strict security override."
+        "reasoning": "Extends the existing dialog using supplied defaults/schema/body helpers and the established first-issue alert pattern; identity-sensitive pre-approval hints retain the strict security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/ThreadStartFlowDialog.vue",
@@ -436,7 +439,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fa9429231b8bc6ef9837da9e65c748fc12f4f1cd"
     },
     {
       "id": "US-008",
