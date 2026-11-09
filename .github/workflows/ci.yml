@@ -309,6 +309,12 @@ jobs:
       - name: Build API
         run: bunx turbo run build --filter=@nathapp/koda-api
 
+      # The shard list and the denominator are edited independently. If they drift,
+      # the executed legs all pass while the missing denominators never run, and the
+      # aggregator would still go green. Fail before the suite starts instead.
+      - name: Verify shard matrix
+        run: test "${{ strategy.job-total }}" = "${{ matrix.shards }}"
+
       - name: Integration + e2e (Postgres, shard ${{ matrix.shard }}/${{ matrix.shards }})
         # Bun strips the first `--`; `bun run test:integration` forwards the shard flag to Vitest.
         run: cd apps/api && bun run test:integration -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
