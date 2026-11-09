@@ -877,6 +877,14 @@
   },
   "fleet": {
     "flows": {
+      "stop": {
+        "button": "停止流程",
+        "confirm": "确定要停止此流程吗？"
+      },
+      "toast": {
+        "stopped": "流程已停止",
+        "approvalRequested": "已请求停止审批"
+      },
       "detail": {
         "title": "流程",
         "overview": "流程详情",

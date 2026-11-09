@@ -29,6 +29,7 @@ async function mountPage(options: {
     globals: {
       useRoute: () => ({ params: { project: 'acme', id: 'f-1' } }),
       useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${Object.values(params).join(' ')}` : key }),
+      useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
       useFleetFlows: () => ({ get, overview: getOverview }),
       useProjectMemberNames: () => ({ members: [], load, nameOf }),
       useProjectPermissions: () => ({ permissions: { value: { has: () => false } } }),

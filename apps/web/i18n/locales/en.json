@@ -877,6 +877,14 @@
   },
   "fleet": {
     "flows": {
+      "stop": {
+        "button": "Stop flow",
+        "confirm": "Stop this flow?"
+      },
+      "toast": {
+        "stopped": "Flow stopped",
+        "approvalRequested": "Stop approval requested"
+      },
       "detail": {
         "title": "Flow",
         "overview": "Flow details",

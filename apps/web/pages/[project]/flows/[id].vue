@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ApiError } from '~/composables/useApi'
+import { ApiError, extractApiError } from '~/composables/useApi'
 import { useFleetFlows } from '~/composables/useFleetFlows'
 import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
-import { flowStateKey, flowStepKey, jobsByFeature } from '~/lib/fleet-flows'
+import { flowStateKey, flowStepKey, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
 import { useProjectPermissions } from '~/composables/usePermissions'
 import { formatUsd } from '~/lib/fleet-jobs'
 import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
@@ -18,6 +18,10 @@ const flows = useFleetFlows(slug)
 const people = useProjectMemberNames(slug)
 const { permissions } = useProjectPermissions(slug)
 const canAnswer = computed(() => permissions.value.has('fleet.flow.answer'))
+const canStop = computed(() => permissions.value.has('fleet.flow.stop'))
+const toast = useAppToast()
+const stopPending = ref(false)
+const stopBusy = ref(false)
 const flow = ref<FleetFlowDto | null>(null)
 const overview = ref<FleetFlowOverviewDto | null>(null)
 const pending = ref(true)
@@ -46,6 +50,34 @@ const flowJobStep = (step: string | null): string => {
 
 function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && (error.code === 404 || error.code === 40004)
+}
+
+const canStopFlow = computed(() => canStop.value && flow.value !== null && isLiveFlow(flow.value.state))
+
+async function stopFlow(): Promise<void> {
+  const current = flow.value
+  if (!current || !canStopFlow.value || stopBusy.value) return
+  if (!window.confirm(t('fleet.flows.stop.confirm'))) return
+
+  stopBusy.value = true
+  stopPending.value = false
+  try {
+    const result = await flows.stop(flowId)
+    if (result.kind === 'pending') {
+      stopPending.value = true
+      toast.success(t('fleet.flows.toast.approvalRequested'))
+    }
+    else {
+      toast.success(t('fleet.flows.toast.stopped'))
+    }
+  }
+  catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
+  finally {
+    await load()
+    stopBusy.value = false
+  }
 }
 
 async function load(): Promise<void> {
@@ -81,8 +113,16 @@ onMounted(() => {
       <PageHeader :title="t('fleet.flows.detail.title')" :subtitle="flow.id">
         <template #actions>
           <span data-testid="fleet-flow-state" class="rounded-md border border-border px-2 py-1 text-sm">{{ stateLabel }}</span>
+          <button v-if="canStopFlow" type="button" class="rounded-md border border-border px-3 py-1 text-sm" :disabled="stopBusy" @click="stopFlow">
+            {{ t('fleet.flows.stop.button') }}
+          </button>
         </template>
       </PageHeader>
+
+      <p v-if="stopPending" role="status" class="text-sm">
+        {{ t('fleet.flows.toast.approvalRequested') }}
+        <NuxtLink class="underline" :to="`/${slug}/approvals`">{{ t('fleet.flows.detail.openApprovals') }}</NuxtLink>
+      </p>
 
       <section class="space-y-2">
         <h2 class="text-sm font-medium">{{ t('fleet.flows.detail.overview') }}</h2>
