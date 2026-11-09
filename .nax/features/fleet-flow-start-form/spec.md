@@ -38,11 +38,25 @@ from koda's web app, which is where a brainstorm thread publishes its spec set.
 - **Cap default.** The tick's cap when the thread has a tick, else 5 (the thread handoff default).
 - **Tick hint.** The dialog tells the user whether this flow will start without asking: the API's rule
   (`coversFlow`) is that the flow's creator is the tick's user or the thread's creator, and the tick's cap is at least
-  the flow's cap. The hint is advisory; the API decides.
+  the flow's cap. `tickHint` returns one of four outcomes, checked in this order: `none` (no tick), `notYours` (the
+  viewer is neither the tick's user nor the thread's creator, whatever the cap), `exceeded` (the cap is above the
+  tick's cap), `covers`. The hint is advisory; the API decides. When `useAuth().user` is null the viewer id is `''`,
+  which no tick or thread creator matches.
+- **Feature names.** The schema also refuses a name containing `..` (as `fleet-dispatch.ts` does), although the
+  API's `FEATURE_RE` alone would accept it: git refuses the branch `feat/<a..b>`.
+- **Dependencies follow renames.** Dependencies are stored by feature name, so renaming a row rewrites that name in
+  every later row's `dependsOn`, and removing a row drops it from them.
+- **Checkboxes.** `components/ui/` has no Shadcn checkbox; the dependency checkboxes are native
+  `<input type="checkbox">`, as `ApprovalPolicyDialog.vue` does.
+- **Money.** The pre-approval cap arrives as a 4-place string and is shown with `usd()` from
+  `lib/fleet-analytics-format.ts`, never re-rounded (web context rule A7).
+- **Form errors.** The form shows the first zod issue only, in schema order: rows (top to bottom), then reviewer,
+  supervisor, cap.
 - **Start flow availability.** Shown on a REPO thread that is not archived when the viewer holds `fleet.flow.create`.
   Disabled with a reason when the thread has no published spec (`specPublished` false or `publishedSha` null) or when
   the thread has a live flow (listed through `useFleetFlows().list(1, threadId)` when the viewer holds
-  `fleet.flow.read`; without that key the check is skipped and the API's 409 is shown).
+  `fleet.flow.read`; without that key the check is skipped and the API's 409 is shown). Only the first page (20
+  flows, newest first) is read; the API's `fleet.flows.threadBusy` 409 is the backstop.
 - **After submit.** A created flow (state `PENDING` or `APPROVED`) navigates to `/:project/flows/:id`; the flow page
   already links pending flows to the approvals page. An approval-gated route answer (the `fleet.flow.create` route
   itself needs approval) shows the `fleet.flows.toast.approvalRequested` toast and a link to `/:project/approvals`.
@@ -99,11 +113,13 @@ New modules:
     enabled: boolean; reason: FlowStartBlock | null }`
 - `apps/web/lib/fleet-flow-start-defaults.ts` (pure, no Vue imports):
   - `defaultFlowRoles(thread: ThreadDto): { reviewer: string; supervisor: string }`
-  - `tickCovers(tick: ThreadPreApproval | null, costCapUsd: number, viewer: { userId: string; isThreadCreator: boolean }): boolean`
+  - `type TickHint = 'none' | 'notYours' | 'exceeded' | 'covers'`
+  - `tickHint(tick: ThreadPreApproval | null, costCapUsd: number, viewer: { userId: string; isThreadCreator: boolean }): TickHint`
 - `apps/web/lib/fleet-flow-start-form.ts`:
   - `FLOW_MAX_FEATURES = 20`, `FLOW_COST_CAP_MAX_USD = 1000`, `FLOW_ROLE_RE` (the API role pattern),
     `FLOW_SPEC_PATH_MAX = 300`
   - `buildFlowStartSchema(t)` (zod), `type FlowStartFormValues`, `buildPreApprovalSchema(t)`
+- `apps/web/lib/fleet-flow-start-body.ts`:
   - `interface FlowStartBody { features: { feature: string; specPath: string; dependsOn: string[] }[];
     roles: { reviewer: string; supervisor: string }; costCapUsd: number }`
   - `toFlowStartBody(values: FlowStartFormValues): FlowStartBody`
@@ -112,13 +128,13 @@ New modules:
   `type PreApprovalWrite = { kind: 'done' } | { kind: 'pending'; request: ApprovalRequestSummary }`.
 - `apps/web/components/fleet/threads/ThreadStartFlowDialog.vue`, `ThreadStartFlow.vue`, `ThreadPreApprovalCard.vue`.
 
-`tickCovers` compares caps as integers of ten-thousandths (`Math.round(x * 10000)`), never as raw floats.
+`tickHint` compares caps as integers of ten-thousandths (`Math.round(x * 10000)`), never as raw floats.
 
 ### Failure Handling
 
 | Case | Behaviour |
 |---|---|
-| Create route answers an error (400 invalid input, 403, 404, 409 thread busy or not published) | Toast `extractApiError(error)`; the dialog stays open with the values kept. |
+| Create route answers an error (400 invalid input, 403, 404, 409 `threadBusy`, `notPublished`, `runnerMissing`, `disabled`, `archived`) | Toast `extractApiError(error)`; the dialog stays open with the values kept. |
 | Create route answers an approval request summary | Toast `fleet.flows.toast.approvalRequested`, close the dialog, show a link to `/:project/approvals`. |
 | Live-flow list read fails | Treat as no live flow (the API's 409 still guards); no toast. |
 | Pre-approval set/clear answers an error | Toast `extractApiError(error)`; the card keeps its state. |
@@ -139,6 +155,9 @@ New modules:
 
 ## Stories
 
+Eleven stories, one capability: starting a flow from a published thread, with the thread's one-flow pre-approval.
+The start form and the pre-approval card share the thread page, the locale files and the composable story.
+
 ### US-001: Flow start rows and availability
 
 No dependencies. Workdir: `apps/web`.
@@ -147,72 +166,109 @@ No dependencies. Workdir: `apps/web`.
 `FLOW_SPEC_PATH_RE`, `FlowStartRow`, `flowStartRows`, `FlowStartBlock` and `flowStartState`, as in Design. Tests in
 `tests/lib/fleet-flow-start.spec.ts`.
 
-### US-002: Flow start defaults
+### US-002: Flow start defaults and tick hint
 
 Depends on US-001. Workdir: `apps/web`.
 
-New pure module `lib/fleet-flow-start-defaults.ts` with `defaultFlowRoles` and `tickCovers`, as in Design.
-`tickCovers` takes the `ThreadPreApproval` type US-001 adds. Tests in `tests/lib/fleet-flow-start-defaults.spec.ts`.
+New pure module `lib/fleet-flow-start-defaults.ts` with `defaultFlowRoles`, `TickHint` and `tickHint`, as in Design
+(outcomes checked in the order `none`, `notYours`, `exceeded`, `covers`). `tickHint` takes the `ThreadPreApproval`
+type US-001 adds. Tests in `tests/lib/fleet-flow-start-defaults.spec.ts`.
 
 ### US-003: Flow start form schema
 
 No dependencies. Workdir: `apps/web`.
 
-New module `lib/fleet-flow-start-form.ts` with the constants, `buildFlowStartSchema(t)`, `buildPreApprovalSchema(t)`
-(a `{ costCapUsd }` object with the same cap rule and the message key `fleet.flows.preapproval.validation`) and
-`toFlowStartBody`, mirroring `lib/thread-handoff-form.ts`. Validation messages are i18n keys under
-`fleet.flows.start.validation` and `fleet.flows.preapproval.validation` in `en.json` and `zh.json`. Tests in
-`tests/lib/fleet-flow-start-form.spec.ts`.
+New module `lib/fleet-flow-start-form.ts` with `FLOW_MAX_FEATURES`, `FLOW_COST_CAP_MAX_USD`, `FLOW_ROLE_RE`,
+`FLOW_SPEC_PATH_MAX`, `buildFlowStartSchema(t)`, `FlowStartFormValues` and `buildPreApprovalSchema(t)` (a
+`{ costCapUsd }` object with the same cap rule and the message key `fleet.flows.preapproval.validation`), mirroring
+`lib/thread-handoff-form.ts`. Issues are reported in schema order: rows top to bottom, then reviewer, supervisor, cap.
+Validation messages are i18n keys under `fleet.flows.start.validation` and `fleet.flows.preapproval.validation`.
+Tests in `tests/lib/fleet-flow-start-form.spec.ts`.
 
-### US-004: Flow start and pre-approval composables
+### US-004: Flow start request body
+
+Depends on US-003. Workdir: `apps/web`.
+
+New module `lib/fleet-flow-start-body.ts` with `FlowStartBody` and `toFlowStartBody(values: FlowStartFormValues)`,
+which trims feature names, spec paths and roles, sends `costCapUsd` as a number, and always sends `dependsOn` as an
+array. Tests in `tests/lib/fleet-flow-start-body.spec.ts`.
+
+### US-005: Flow start and pre-approval composables
+
+Depends on US-004. Workdir: `apps/web`.
+
+`useFleetFlows(slug)` gains `createFromThread(threadId, body: FlowStartBody)` posting to
+`/projects/:slug/threads/:threadId/flows` and mapping the answer with the existing `write` helper. New composable
+`composables/useThreadPreApproval.ts` with `set` (PUT) and `clear` (DELETE) on
+`/projects/:slug/threads/:threadId/preapproval`, mapping an answer that carries `permissionKey`
+(`isPendingFlowAnswer`) to `{ kind: 'pending', request }` and any other answer to `{ kind: 'done' }`. Tests in
+`tests/composables/useFleetFlows.spec.ts` and `tests/composables/useThreadPreApproval.spec.ts`.
+
+### US-006: Start flow dialog rows
 
 Depends on US-001, US-003. Workdir: `apps/web`.
 
-`useFleetFlows(slug)` gains `createFromThread(threadId, body)` posting to `/projects/:slug/threads/:threadId/flows`
-and mapping the answer with the existing `write` helper. New composable `composables/useThreadPreApproval.ts` with
-`set` (PUT) and `clear` (DELETE) on `/projects/:slug/threads/:threadId/preapproval`, mapping an answer that carries
-`permissionKey` (`isPendingFlowAnswer`) to `{ kind: 'pending', request }` and any other answer to `{ kind: 'done' }`.
-Tests in `tests/composables/useFleetFlows.spec.ts` and `tests/composables/useThreadPreApproval.spec.ts`.
+New `components/fleet/threads/ThreadStartFlowDialog.vue` (Shadcn `Dialog`, vee-validate + zod with
+`buildFlowStartSchema`). Props: `open`, `thread: ThreadDetailDto`, `viewerId: string`; emits `update:open` and
+`submit`. On each open it fills the rows from `flowStartRows(thread)`. Each row has feature and spec path inputs, one
+native checkbox per earlier row's feature for `dependsOn`, and a remove button; an add-row button appends an empty row
+with no dependencies. Renaming a row rewrites that name in later rows' `dependsOn`; removing a row drops it from them.
+This story builds the rows part of the dialog; US-007 adds the roles, cap, hint and submit to the same component.
+Tests in `tests/components/thread-start-flow-dialog.spec.ts`.
 
-### US-005: Start flow dialog
+### US-007: Start flow dialog defaults, hint and submit
 
-Depends on US-001, US-002, US-003. Workdir: `apps/web`.
+Depends on US-002, US-004, US-006. Workdir: `apps/web`.
 
-New `components/fleet/threads/ThreadStartFlowDialog.vue` (Shadcn `Dialog`, vee-validate + zod). Props: `open`,
-`thread: ThreadDetailDto`, `viewerId: string`. On open it fills the form from `flowStartRows(thread)`,
-`defaultFlowRoles(thread)` and the cap default (the tick's cap, else 5). Each row has feature and spec path inputs,
-one checkbox per earlier row's feature for `dependsOn`, and a remove button; an add-row button appends an empty row
-with no dependencies. A hint states whether the tick covers the current cap, using `tickCovers` with the viewer
-`{ userId: viewerId, isThreadCreator: thread.createdById === viewerId }`. Submit validates with
-`buildFlowStartSchema` and emits `submit` with `toFlowStartBody(values)`. i18n keys under `fleet.flows.start` in
-`en.json` and `zh.json`. Tests in `tests/components/thread-start-flow-dialog.spec.ts`.
+`ThreadStartFlowDialog.vue` (created by US-006) gains the reviewer and supervisor inputs filled from
+`defaultFlowRoles(thread)`, the cap input filled with the tick's cap or `5`, and a hint rendering the
+`fleet.flows.start.tick.<outcome>` text for `tickHint(thread.preApproval, cap, { userId: viewerId, isThreadCreator:
+thread.createdById === viewerId })`. Submit validates with `buildFlowStartSchema`, shows the first issue's message in
+an alert (cleared on the next edit), and on success emits `submit` with `toFlowStartBody(values)`. Tests in
+`tests/components/thread-start-flow-dialog-submit.spec.ts`.
 
-### US-006: Start flow on the thread page
+### US-008: Start flow button availability
 
-Depends on US-001, US-004, US-005. Workdir: `apps/web`.
+Depends on US-001. Workdir: `apps/web`.
 
 New `components/fleet/threads/ThreadStartFlow.vue` (props `slug`, `thread`): reads `fleet.flow.create` and
 `fleet.flow.read` from `useProjectPermissions(slug)`, lists the thread's flows with
 `useFleetFlows(slug).list(1, thread.id)` when `fleet.flow.read` is held (re-checked on a late grant, as
-`ThreadFlowsPanel` does), renders the Start flow button and its blocked reason from `flowStartState` (`liveFlow` is
-true when a listed flow's state passes `isLiveFlow`), opens `ThreadStartFlowDialog` with `viewerId` from
-`useAuth().user`, and on `submit` calls `createFromThread`: done navigates with `navigateTo('/<slug>/flows/<id>')`,
-pending toasts and shows the approvals link, an error toasts `extractApiError`. The thread page mounts it after
-`FleetThreadsThreadFlowsPanel`. Tests in `tests/components/thread-start-flow.spec.ts`; the thread page tests gain a
-stub for it.
+`ThreadFlowsPanel` does; a failed list counts as no live flow, with no toast), and renders the Start flow button and
+its blocked reason from `flowStartState` (`liveFlow` is true when a listed flow's state passes `isLiveFlow`). Tests in
+`tests/components/thread-start-flow.spec.ts`.
 
-### US-007: Pre-approval card on the thread page
+### US-009: Start flow submit and page mount
 
-Depends on US-001, US-003, US-004. Workdir: `apps/web`.
+Depends on US-005, US-007, US-008. Workdir: `apps/web`.
+
+`ThreadStartFlow.vue` (created by US-008) opens `ThreadStartFlowDialog` on click with `thread`, `open` and
+`viewerId` (`useAuth().user.value?.id ?? ''`), and on `submit` calls `createFromThread(thread.id, body)` once per
+submit (a submit while one is in flight is ignored): done navigates with `navigateTo('/<slug>/flows/<id>')`; pending
+closes the dialog, toasts `fleet.flows.toast.approvalRequested` and renders a link to `/<slug>/approvals`; an error
+toasts `extractApiError(error)` and keeps the dialog open. The thread page mounts it after
+`FleetThreadsThreadFlowsPanel`. Tests in `tests/components/thread-start-flow-submit.spec.ts`; the thread page tests
+gain a stub for it.
+
+### US-010: Pre-approval card display
+
+Depends on US-001. Workdir: `apps/web`.
 
 New `components/fleet/threads/ThreadPreApprovalCard.vue` (props `slug`, `thread`; emits `changed`): visible on a REPO
-thread that is not archived when the viewer holds `fleet.thread.preapprove`. With a tick it shows the cap, the set
-time as `new Date(tick.at).toLocaleString()` and a Clear button; without one, a cap input validated by
-`buildPreApprovalSchema` and a Set button. A done write emits `changed`; pending toasts
-`fleet.flows.toast.approvalRequested`; an error toasts `extractApiError`. The thread page mounts it after
-`FleetThreadsThreadStartFlow` and calls `controller.reloadThread()` on `changed`. i18n keys under
-`fleet.flows.preapproval`. Tests in `tests/components/thread-preapproval-card.spec.ts`; the thread page tests gain a
-stub for it and a `changed` case.
+thread that is not archived when the viewer holds `fleet.thread.preapprove`. With a tick it shows the cap with
+`usd(tick.costCapUsd)`, the set time as `new Date(tick.at).toLocaleString()` and a Clear button; without one, a cap
+input and a Set button. Tests in `tests/components/thread-preapproval-card.spec.ts`.
+
+### US-011: Pre-approval card actions and page mount
+
+Depends on US-003, US-005, US-010. Workdir: `apps/web`.
+
+`ThreadPreApprovalCard.vue` (created by US-010) validates the cap with `buildPreApprovalSchema` and calls
+`useThreadPreApproval(slug).set(thread.id, cap)` on Set and `clear(thread.id)` on Clear, ignoring clicks while a
+write is in flight. A done write emits `changed`; pending toasts `fleet.flows.toast.approvalRequested`; an error
+toasts `extractApiError(error)`; neither emits `changed`. The thread page mounts it after
+`FleetThreadsThreadStartFlow` and calls `controller.reloadThread()` on `changed`. Tests in
+`tests/components/thread-preapproval-card-actions.spec.ts`; the thread page tests gain a stub for it.
 
 ### Context Files
 
@@ -232,29 +288,49 @@ stub for it and a `changed` case.
 - `apps/api/src/fleet/flows/flow-input.ts`
 
 **US-004**
-- `apps/web/composables/useApi.ts`
-- `apps/web/lib/fleet-flows.ts`
+- `apps/web/lib/thread-handoff-form.ts`
 - `apps/web/lib/fleet-flow-start-form.ts` — created by US-003, consumed here
 
 **US-005**
-- `apps/web/components/fleet/threads/ThreadHandoffDialog.vue`
-- `apps/web/tests/components/thread-action-bar.spec.ts`
-- `apps/web/tests/helpers/fleet-harness.ts`
-- `apps/web/lib/fleet-flow-start.ts` — created by US-001, consumed here
-- `apps/web/lib/fleet-flow-start-defaults.ts` — created by US-002, consumed here
+- `apps/web/composables/useApi.ts`
+- `apps/web/lib/fleet-flows.ts`
+- `apps/web/lib/fleet-flow-start-body.ts` — created by US-004, consumed here
 
 **US-006**
-- `apps/web/components/fleet/threads/ThreadFlowsPanel.vue`
-- `apps/web/tests/components/thread-flows-panel.spec.ts`
-- `apps/web/components/fleet/flows/FlowAnswerForm.vue`
-- `apps/web/components/fleet/threads/ThreadStartFlowDialog.vue` — created by US-005, integrated here
+- `apps/web/components/fleet/threads/ThreadHandoffDialog.vue`
+- `apps/web/components/approvals/ApprovalPolicyDialog.vue`
+- `apps/web/tests/components/thread-action-bar.spec.ts`
 - `apps/web/lib/fleet-flow-start.ts` — created by US-001, consumed here
+- `apps/web/lib/fleet-flow-start-form.ts` — created by US-003, consumed here
 
 **US-007**
-- `apps/web/components/fleet/threads/ThreadControls.vue`
-- `apps/web/composables/useThreadPreApproval.ts` — created by US-004, consumed here
-- `apps/web/lib/fleet-flow-start-form.ts` — created by US-003, consumed here
+- `apps/web/components/fleet/threads/ThreadStartFlowDialog.vue` — created by US-006, extended here
+- `apps/web/lib/fleet-flow-start-defaults.ts` — created by US-002, consumed here
+- `apps/web/lib/fleet-flow-start-body.ts` — created by US-004, consumed here
 - `apps/web/tests/helpers/fleet-harness.ts`
+
+**US-008**
+- `apps/web/components/fleet/threads/ThreadFlowsPanel.vue`
+- `apps/web/tests/components/thread-flows-panel.spec.ts`
+- `apps/web/lib/fleet-flows.ts`
+- `apps/web/lib/fleet-flow-start.ts` — created by US-001, consumed here
+
+**US-009**
+- `apps/web/components/fleet/threads/ThreadStartFlow.vue` — created by US-008, extended here
+- `apps/web/components/fleet/flows/FlowAnswerForm.vue`
+- `apps/web/composables/useFleetFlows.ts`
+- `apps/web/tests/pages/threads-detail-page.spec.ts`
+
+**US-010**
+- `apps/web/components/fleet/threads/ThreadControls.vue`
+- `apps/web/lib/fleet-analytics-format.ts`
+- `apps/web/tests/helpers/fleet-harness.ts`
+
+**US-011**
+- `apps/web/components/fleet/threads/ThreadPreApprovalCard.vue` — created by US-010, extended here
+- `apps/web/composables/useThreadPreApproval.ts` — created by US-005, consumed here
+- `apps/web/lib/fleet-flow-start-form.ts` — created by US-003, consumed here
+- `apps/web/tests/pages/threads-detail-page.spec.ts`
 
 ### Creates
 
@@ -271,20 +347,33 @@ stub for it and a `changed` case.
 - `apps/web/tests/lib/fleet-flow-start-form.spec.ts`
 
 **US-004**
+- `apps/web/lib/fleet-flow-start-body.ts`
+- `apps/web/tests/lib/fleet-flow-start-body.spec.ts`
+
+**US-005**
 - `apps/web/composables/useThreadPreApproval.ts`
 - `apps/web/tests/composables/useThreadPreApproval.spec.ts`
 
-**US-005**
+**US-006**
 - `apps/web/components/fleet/threads/ThreadStartFlowDialog.vue`
 - `apps/web/tests/components/thread-start-flow-dialog.spec.ts`
 
-**US-006**
+**US-007**
+- `apps/web/tests/components/thread-start-flow-dialog-submit.spec.ts`
+
+**US-008**
 - `apps/web/components/fleet/threads/ThreadStartFlow.vue`
 - `apps/web/tests/components/thread-start-flow.spec.ts`
 
-**US-007**
+**US-009**
+- `apps/web/tests/components/thread-start-flow-submit.spec.ts`
+
+**US-010**
 - `apps/web/components/fleet/threads/ThreadPreApprovalCard.vue`
 - `apps/web/tests/components/thread-preapproval-card.spec.ts`
+
+**US-011**
+- `apps/web/tests/components/thread-preapproval-card-actions.spec.ts`
 
 ### Modifies
 
@@ -299,38 +388,52 @@ None. US-002 only creates `lib/fleet-flow-start-defaults.ts` and its test; it ch
 - `apps/web/i18n/locales/zh.json` — gains the same keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
 
 **US-004**
+None. US-004 only creates `lib/fleet-flow-start-body.ts` and its test; it changes no existing file.
+
+**US-005**
 - `apps/web/composables/useFleetFlows.ts` — the returned object gains `createFromThread`; `list`, `get`, `overview`, `stop` and `answer` are unchanged.
 - `apps/web/tests/composables/useFleetFlows.spec.ts` — gains the "createFromThread" cases; existing cases are unchanged.
 
-**US-005**
-- `apps/web/i18n/locales/en.json` — gains the `fleet.flows.start` dialog keys (title, feature, specPath, dependsOn, addRow, removeRow, reviewer, supervisor, costCap, submit, tickCovers, tickExceeded, noTick); existing keys are unchanged.
-- `apps/web/i18n/locales/zh.json` — gains the same `fleet.flows.start` dialog keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
-
 **US-006**
-- `apps/web/pages/[project]/threads/[id].vue` — mounts `FleetThreadsThreadStartFlow` with `slug` and the thread after `FleetThreadsThreadFlowsPanel`; nothing else on the page changes.
-- `apps/web/tests/pages/threads-detail-page.spec.ts` — its explicit `components` stub map gains a `FleetThreadsThreadStartFlow` stub (props `slug`, `thread`) and one case asserting the stub's props; existing assertions are unchanged.
-- `apps/web/tests/pages/threads-detail-actions-page.spec.ts` — its explicit `components` stub map gains the same `FleetThreadsThreadStartFlow` stub; existing assertions are unchanged.
-- `apps/web/i18n/locales/en.json` — gains `fleet.flows.start.button`, `fleet.flows.start.blocked.notPublished`, `fleet.flows.start.blocked.flowLive` and `fleet.flows.start.openApprovals`; existing keys are unchanged.
-- `apps/web/i18n/locales/zh.json` — gains the same four keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
+- `apps/web/i18n/locales/en.json` — gains the `fleet.flows.start` row keys (title, feature, specPath, dependsOn, addRow, removeRow); existing keys are unchanged.
+- `apps/web/i18n/locales/zh.json` — gains the same `fleet.flows.start` row keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
 
 **US-007**
-- `apps/web/pages/[project]/threads/[id].vue` — mounts `FleetThreadsThreadPreApprovalCard` with `slug` and the thread after `FleetThreadsThreadStartFlow`, and its `changed` event calls `controller.reloadThread()`; nothing else on the page changes.
-- `apps/web/tests/pages/threads-detail-page.spec.ts` — its `components` stub map gains a `FleetThreadsThreadPreApprovalCard` stub that can emit `changed`, and one case asserts the page reloads the thread on it; existing assertions are unchanged.
-- `apps/web/tests/pages/threads-detail-actions-page.spec.ts` — its `components` stub map gains the same `FleetThreadsThreadPreApprovalCard` stub; existing assertions are unchanged.
+- `apps/web/i18n/locales/en.json` — gains `fleet.flows.start.reviewer`, `supervisor`, `costCap`, `submit` and `fleet.flows.start.tick.none`, `tick.notYours`, `tick.exceeded`, `tick.covers`; existing keys are unchanged.
+- `apps/web/i18n/locales/zh.json` — gains the same keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
+
+**US-008**
+- `apps/web/i18n/locales/en.json` — gains `fleet.flows.start.button`, `fleet.flows.start.blocked.notPublished` and `fleet.flows.start.blocked.flowLive`; existing keys are unchanged.
+- `apps/web/i18n/locales/zh.json` — gains the same three keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
+
+**US-009**
+- `apps/web/pages/[project]/threads/[id].vue` — mounts `FleetThreadsThreadStartFlow` with `slug` and the thread after `FleetThreadsThreadFlowsPanel`; nothing else on the page changes.
+- `apps/web/tests/pages/threads-detail-page.spec.ts` — its explicit `components` stub map gains a `FleetThreadsThreadStartFlow` stub (props `slug`, `thread`) and cases asserting the stub's props; existing assertions are unchanged.
+- `apps/web/tests/pages/threads-detail-actions-page.spec.ts` — its explicit `components` stub map gains the same `FleetThreadsThreadStartFlow` stub; existing assertions are unchanged.
+- `apps/web/i18n/locales/en.json` — gains `fleet.flows.start.openApprovals`; existing keys are unchanged.
+- `apps/web/i18n/locales/zh.json` — gains `fleet.flows.start.openApprovals` so the locale parity check stays green; existing keys are unchanged.
+
+**US-010**
 - `apps/web/i18n/locales/en.json` — gains the `fleet.flows.preapproval` card keys (title, cap, setAt, set, clear, none); existing keys are unchanged.
 - `apps/web/i18n/locales/zh.json` — gains the same `fleet.flows.preapproval` card keys as the English locale file so the locale parity check stays green; existing keys are unchanged.
 
+**US-011**
+- `apps/web/pages/[project]/threads/[id].vue` — mounts `FleetThreadsThreadPreApprovalCard` with `slug` and the thread after `FleetThreadsThreadStartFlow`, and its `changed` event calls `controller.reloadThread()`; nothing else on the page changes.
+- `apps/web/tests/pages/threads-detail-page.spec.ts` — its `components` stub map gains a `FleetThreadsThreadPreApprovalCard` stub that can emit `changed`, and cases assert its props and that the page reloads the thread on it; existing assertions are unchanged.
+- `apps/web/tests/pages/threads-detail-actions-page.spec.ts` — its `components` stub map gains the same `FleetThreadsThreadPreApprovalCard` stub; existing assertions are unchanged.
+
 ### Seams
 
-- US-005 consumes `flowStartRows` (US-001), `defaultFlowRoles` and `tickCovers` (US-002), and `buildFlowStartSchema`
-  and `toFlowStartBody` (US-003): US-005 AC-1, AC-2, AC-11 and AC-12 render the dialog and assert the prefilled rows,
-  roles, the hint and the emitted body.
-- US-006 consumes `useFleetFlows().createFromThread` (US-004) and `ThreadStartFlowDialog` (US-005): US-006 AC-9 stubs
-  `createFromThread`, emits `submit` from the dialog stub and asserts the call arguments.
-- US-007 consumes `useThreadPreApproval().set|clear` (US-004): US-007 AC-7 and AC-9 stub them, click the card's
-  buttons and assert the call arguments.
-- The thread page consumes `ThreadStartFlow` (US-006) and `ThreadPreApprovalCard` (US-007): US-006 AC-15 and US-007
-  AC-14 and AC-15 mount the page and assert each stub's props and the reload on `changed`.
+- US-006 consumes `flowStartRows` (US-001) and `buildFlowStartSchema` (US-003): US-006 AC-1 to AC-4 mount the dialog
+  and assert the prefilled rows.
+- US-007 consumes `defaultFlowRoles` and `tickHint` (US-002) and `toFlowStartBody` (US-004): US-007 AC-1, AC-2 and
+  AC-9 to AC-13 mount the dialog and assert the roles, the emitted body and each hint.
+- US-009 consumes `useFleetFlows().createFromThread` (US-005) and `ThreadStartFlowDialog` (US-006, US-007): US-009
+  AC-2 to AC-5 assert the dialog stub's props and the `createFromThread` call.
+- US-011 consumes `useThreadPreApproval().set|clear` (US-005): US-011 AC-3 and AC-5 click the card's buttons and
+  assert the call arguments.
+- The thread page consumes `ThreadStartFlow` (US-009) and `ThreadPreApprovalCard` (US-011): US-009 AC-14, AC-15 and
+  US-011 AC-12 to AC-14 mount the page and assert each stub's props and the reload on `changed`.
 
 ## Acceptance Criteria
 
@@ -342,8 +445,10 @@ None. US-002 only creates `lib/fleet-flow-start-defaults.ts` and its test; it ch
    `['.nax/features/f-min/spec.md', 'docs/design.md', '.nax/features/f-clamp/spec.md']` returns two rows, the second
    `{ feature: 'f-clamp', specPath: '.nax/features/f-clamp/spec.md', dependsOn: ['f-min'] }`.
 3. [unit] `flowStartRows` on a thread with own feature `a` and published `paths` `['.nax/features/b/spec.md',
-   '.nax/features/c/spec.md']` returns rows `a`, `b`, `c` whose third row has `dependsOn: ['b']`.
-4. [unit] `flowStartRows` on a thread whose `lastWrite.kind` is `discarded` returns only the thread's own row.
+   '.nax/features/c/spec.md']` returns three rows whose third row is `{ feature: 'c', specPath:
+   '.nax/features/c/spec.md', dependsOn: ['b'] }`.
+4. [unit] `flowStartRows` on a thread with own feature `f-min` whose `lastWrite.kind` is `discarded` returns only the
+   thread's own row.
 5. [unit] `flowStartRows` on a thread with `feature: null` and published `paths` `['.nax/features/x/spec.md']`
    returns `[{ feature: 'x', specPath: '.nax/features/x/spec.md', dependsOn: [] }]`.
 6. [unit] `flowStartState` on a REPO thread with `archivedAt: null`, `specPublished: true`, `publishedSha: 'abc'` and
@@ -352,29 +457,33 @@ None. US-002 only creates `lib/fleet-flow-start-defaults.ts` and its test; it ch
 8. [unit] `flowStartState` on a REPO thread with `archivedAt` set returns `visible: false`.
 9. [unit] `flowStartState` with `canCreate: false` returns `visible: false`.
 10. [unit] `flowStartState` on a visible thread with `specPublished: false` and `liveFlow: true` returns
-    `{ visible: true, enabled: false, reason: 'notPublished' }` (the published check comes first).
+    `{ visible: true, enabled: false, reason: 'notPublished' }`.
 11. [unit] `flowStartState` on a visible thread with `specPublished: true` and `publishedSha: null` returns
-    `reason: 'notPublished'`.
+    `{ visible: true, enabled: false, reason: 'notPublished' }`.
 12. [unit] `flowStartState` on a visible published thread with `liveFlow: true` returns
     `{ visible: true, enabled: false, reason: 'flowLive' }`.
 
 ### US-002
 
 1. [unit] `defaultFlowRoles` on a thread whose backend is `{ kind: 'native', model: 'opencode-go/deepseek-v4.1-flash' }`
-   returns that model for both `reviewer` and `supervisor`.
+   returns `{ reviewer: 'opencode-go/deepseek-v4.1-flash', supervisor: 'opencode-go/deepseek-v4.1-flash' }`.
 2. [unit] `defaultFlowRoles` on a thread whose backend is `{ kind: 'native' }` returns
    `{ reviewer: '', supervisor: '' }`.
 3. [unit] `defaultFlowRoles` on a thread whose backend kind is `acp` with a model returns
    `{ reviewer: '', supervisor: '' }`.
-4. [unit] `tickCovers` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3`
-   and viewer `{ userId: 'u1', isThreadCreator: false }` returns true.
-5. [unit] `tickCovers` with that tick, cap `3.0001` and viewer `u1` returns false.
-6. [unit] `tickCovers` with tick cap `'0.3000'`, cap `0.1 + 0.2` and viewer equal to the tick's user returns true
-   (caps compared in ten-thousandths, not raw floats).
-7. [unit] `tickCovers` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3` and viewer `{ userId: 'u2', isThreadCreator: true }` returns true.
-8. [unit] `tickCovers` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3` and viewer `{ userId: 'u2', isThreadCreator: false }` returns
-   false.
-9. [unit] `tickCovers` with a `null` tick returns false.
+4. [unit] `tickHint` with a `null` tick, cap `3` and viewer `{ userId: 'u1', isThreadCreator: true }` returns `'none'`.
+5. [unit] `tickHint` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3` and
+   viewer `{ userId: 'u1', isThreadCreator: false }` returns `'covers'`.
+6. [unit] `tickHint` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3.0001`
+   and viewer `{ userId: 'u1', isThreadCreator: false }` returns `'exceeded'`.
+7. [unit] `tickHint` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '0.3000' }`, cap
+   `0.1 + 0.2` and viewer `{ userId: 'u1', isThreadCreator: false }` returns `'covers'`.
+8. [unit] `tickHint` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3` and
+   viewer `{ userId: 'u2', isThreadCreator: true }` returns `'covers'`.
+9. [unit] `tickHint` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `3` and
+   viewer `{ userId: 'u2', isThreadCreator: false }` returns `'notYours'`.
+10. [unit] `tickHint` with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }`, cap `9` and
+    viewer `{ userId: 'u2', isThreadCreator: false }` returns `'notYours'` (the viewer check comes before the cap).
 
 ### US-003
 
@@ -390,16 +499,28 @@ None. US-002 only creates `lib/fleet-flow-start-defaults.ts` and its test; it ch
 9. [unit] The schema rejects the spec path `docs/../spec.md` with `fleet.flows.start.validation.specPath`.
 10. [unit] The schema rejects a first row whose `dependsOn` is `['f-clamp']` while `f-clamp` is the second row, with
     `fleet.flows.start.validation.dependsOn`.
-11. [unit] The schema rejects the reviewer `has space` with `fleet.flows.start.validation.role`.
-12. [unit] The schema rejects the cap `1000.0001` with `fleet.flows.start.validation.costCap`.
-13. [unit] The schema rejects the cap `1.23456` with `fleet.flows.start.validation.costCap`.
-14. [unit] `toFlowStartBody` on valid values returns `{ features: [{ feature, specPath, dependsOn }], roles: {
-    reviewer, supervisor }, costCapUsd }` with `costCapUsd` a number and a row without dependencies carrying
-    `dependsOn: []`.
-15. [unit] `toFlowStartBody` on a row whose feature is `' f-min '` returns the feature `'f-min'` (surrounding spaces
-    trimmed; spec paths and roles are trimmed the same way).
+11. [unit] The schema rejects a row whose `dependsOn` is `['gone']` when no row is named `gone`, with
+    `fleet.flows.start.validation.dependsOn`.
+12. [unit] The schema rejects the reviewer `has space` with `fleet.flows.start.validation.role`.
+13. [unit] The schema rejects the cap `1000.0001` with `fleet.flows.start.validation.costCap`.
+14. [unit] The schema rejects the cap `1.23456` with `fleet.flows.start.validation.costCap`.
+15. [unit] `buildPreApprovalSchema(t).safeParse({ costCapUsd: 0 })` fails with `fleet.flows.preapproval.validation`.
 
 ### US-004
+
+1. [unit] `toFlowStartBody` on one row `{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }`,
+   roles `{ reviewer: 'm', supervisor: 'm' }` and cap `2` returns `{ features: [{ feature: 'f-min', specPath:
+   '.nax/features/f-min/spec.md', dependsOn: [] }], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 }`.
+2. [unit] `toFlowStartBody` on a form value whose cap is the string `'2.5'` returns `costCapUsd` as the number `2.5`.
+3. [unit] `toFlowStartBody` on a row whose feature is `' f-min '` returns the feature `'f-min'`.
+4. [unit] `toFlowStartBody` on a row whose spec path is `' .nax/features/f-min/spec.md '` returns the spec path
+   `'.nax/features/f-min/spec.md'`.
+5. [unit] `toFlowStartBody` on roles `{ reviewer: ' m ', supervisor: ' s ' }` returns roles
+   `{ reviewer: 'm', supervisor: 's' }`.
+6. [unit] `toFlowStartBody` on a row whose `dependsOn` is `['f-min']` returns that row's `dependsOn` as a new array
+   equal to `['f-min']` (the form's array is not shared).
+
+### US-005
 
 1. [unit] `useFleetFlows('web').createFromThread('t1', body)` calls `$api.post` with
    `/projects/web/threads/t1/flows` and exactly `body`.
@@ -409,85 +530,128 @@ None. US-002 only creates `lib/fleet-flow-start-defaults.ts` and its test; it ch
 4. [unit] `createFromThread` rejects with the identical error object the API call rejected with.
 5. [unit] `createFromThread('a/b', body)` calls `$api.post` with the path `/projects/web/threads/a%2Fb/flows`.
 6. [unit] `useThreadPreApproval('web').set('t1', 3)` calls `$api.put` with `/projects/web/threads/t1/preapproval`
-   and the body `{ costCapUsd: 3 }`, and resolves `{ kind: 'done' }` for a tick answer.
-7. [unit] `useThreadPreApproval('web').clear('t1')` calls `$api.delete` with `/projects/web/threads/t1/preapproval`
-   and resolves `{ kind: 'done' }` for `{ cleared: true }`.
-8. [unit] `set` resolves `{ kind: 'pending', request }` when the API answers an object carrying `permissionKey`.
-9. [unit] `clear` resolves `{ kind: 'pending', request }` when the API answers an object carrying `permissionKey`.
-10. [unit] `set` rejects with the identical error object the API call rejected with.
-11. [unit] `clear` rejects with the identical error object the API call rejected with.
-
-### US-005
-
-1. [unit] Mounting `ThreadStartFlowDialog` open on a thread with own feature `f-min` and a published
-   `.nax/features/f-clamp/spec.md` renders two rows whose inputs hold those names and paths, with the `f-min`
-   dependency checkbox of row 2 checked.
-2. [unit] On open the reviewer and supervisor inputs hold the thread's native backend model.
-3. [unit] On open on a thread with a tick of cap `'3.0000'` the cap input holds `3`.
-4. [unit] Clicking the add-row button appends an empty row with no dependency checked.
-5. [unit] Clicking row 2's remove button removes that row and leaves row 1 unchanged.
-6. [unit] Removing row 1 removes its feature from every later row's `dependsOn`.
-7. [unit] Row 1 renders no dependency checkboxes.
-8. [unit] Row 3 renders exactly two dependency checkboxes, labelled with the feature names of rows 1 and 2.
-9. [unit] Submitting with two rows named `f-min` renders the English text of
-   `fleet.flows.start.validation.featureDuplicate` in the form's alert and emits no `submit`.
-10. [unit] Editing any field after a failed submit clears the alert.
-11. [unit] Submitting the prefilled form on a thread with own feature `f-min`, a published `.nax/features/f-clamp/spec.md` and no tick, with both roles `m`, emits `submit` once
-    with `{ features: [{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }, { feature:
-    'f-clamp', specPath: '.nax/features/f-clamp/spec.md', dependsOn: ['f-min'] }], roles: { reviewer: 'm',
-    supervisor: 'm' }, costCapUsd: 5 }`.
-12. [unit] With a tick of cap `'3.0000'` whose `userId` is the `viewerId` and the cap input at `3`, the hint renders the
-    English text of `fleet.flows.start.tickCovers`.
-13. [unit] With the same tick and the cap input at `4`, the hint renders the English text of
-    `fleet.flows.start.tickExceeded`.
-14. [unit] On a thread without a tick the hint renders the English text of `fleet.flows.start.noTick`.
-15. [unit] Closing the dialog after adding a row and reopening it renders only the rows from `flowStartRows(thread)`.
+   and the body `{ costCapUsd: 3 }`.
+7. [unit] `set` resolves `{ kind: 'done' }` when the API answers a tick `{ userId, at, costCapUsd }`.
+8. [unit] `useThreadPreApproval('web').clear('t1')` calls `$api.delete` with `/projects/web/threads/t1/preapproval`.
+9. [unit] `clear` resolves `{ kind: 'done' }` when the API answers `{ cleared: true }`.
+10. [unit] `set` resolves `{ kind: 'pending', request }` when the API answers an object carrying `permissionKey`.
+11. [unit] `clear` resolves `{ kind: 'pending', request }` when the API answers an object carrying `permissionKey`.
+12. [unit] `set` rejects with the identical error object the API call rejected with.
+13. [unit] `clear` rejects with the identical error object the API call rejected with.
 
 ### US-006
+
+1. [unit] Mounting `ThreadStartFlowDialog` open on a thread with own feature `f-min` and a published
+   `.nax/features/f-clamp/spec.md` renders two rows.
+2. [unit] On that mount, row 2's feature input holds `f-clamp`.
+3. [unit] On that mount, row 2's spec path input holds `.nax/features/f-clamp/spec.md`.
+4. [unit] On that mount, row 2's `f-min` dependency checkbox is checked.
+5. [unit] Row 1 renders no dependency checkboxes.
+6. [unit] With three rows, row 3 renders exactly two dependency checkboxes.
+7. [unit] With rows `a`, `b`, `c`, row 3's dependency checkboxes are labelled `a` and `b`.
+8. [unit] Clicking the add-row button appends a row whose feature input is empty.
+9. [unit] A row appended with the add-row button has no dependency checkbox checked.
+10. [unit] Clicking row 2's remove button leaves one row.
+11. [unit] With rows `a`, `b`, `c` where `c` depends on `a`, removing row `a` leaves row `c` with no dependency
+    checked.
+12. [unit] Renaming row 1 from `f-min` to `f-low` leaves row 2's dependency checkbox labelled `f-low` checked.
+13. [unit] Closing the dialog after adding a row and reopening it renders the two rows from the thread.
+14. [unit] Closing the dialog emits `update:open` with `false`.
+
+### US-007
+
+1. [unit] Mounting `ThreadStartFlowDialog` open on a thread whose backend is
+   `{ kind: 'native', model: 'opencode-go/deepseek-v4.1-flash' }` fills the reviewer input with that model.
+2. [unit] On that mount the supervisor input holds the same model.
+3. [unit] On a thread with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }` the cap
+   input holds `3`.
+4. [unit] On a thread without a tick the cap input holds `5`.
+5. [unit] Submitting with two rows named `f-min` renders the English text of
+   `fleet.flows.start.validation.featureDuplicate` in the form's alert.
+6. [unit] Submitting with two rows named `f-min` emits no `submit`.
+7. [unit] Editing any field after a failed submit clears the alert.
+8. [unit] Submitting the prefilled form on a thread with own feature `f-min`, a published
+   `.nax/features/f-clamp/spec.md`, no tick and both roles `m` emits `submit` once with `{ features: [{ feature:
+   'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }, { feature: 'f-clamp', specPath:
+   '.nax/features/f-clamp/spec.md', dependsOn: ['f-min'] }], roles: { reviewer: 'm', supervisor: 'm' },
+   costCapUsd: 5 }`.
+9. [unit] On a thread without a tick the hint renders the English text of `fleet.flows.start.tick.none`.
+10. [unit] With a tick of cap `'3.0000'` whose `userId` equals `viewerId` and the cap input at `3`, the hint renders the
+    English text of `fleet.flows.start.tick.covers`.
+11. [unit] With that tick and the cap input at `4`, the hint renders the English text of
+    `fleet.flows.start.tick.exceeded`.
+12. [unit] With a tick whose `userId` is `u1`, `viewerId` `u2` and a thread created by `u3`, the hint renders the
+    English text of `fleet.flows.start.tick.notYours`.
+13. [unit] With a tick whose `userId` is `u1`, `viewerId` `u2`, a thread created by `u2` and the cap input at `3`, the
+    hint renders the English text of `fleet.flows.start.tick.covers`.
+
+### US-008
 
 1. [unit] `ThreadStartFlow` on a published REPO thread, with `fleet.flow.create` and `fleet.flow.read` held and no
    flow listed, renders an enabled Start flow button.
 2. [unit] Without `fleet.flow.create` it renders nothing.
-3. [unit] On a thread with `specPublished: false` the button is disabled and the English text of
-   `fleet.flows.start.blocked.notPublished` renders.
-4. [unit] When `list(1, thread.id)` returns a flow in state `RUNNING` the button is disabled and the English text of
+3. [unit] On a thread with `specPublished: false` the Start flow button is disabled.
+4. [unit] On a thread with `specPublished: false` the English text of `fleet.flows.start.blocked.notPublished`
+   renders.
+5. [unit] When `list(1, thread.id)` returns a flow in state `RUNNING` the Start flow button is disabled.
+6. [unit] When `list(1, thread.id)` returns a flow in state `RUNNING` the English text of
    `fleet.flows.start.blocked.flowLive` renders.
-5. [unit] When `list` returns only `COMPLETED` and `STOPPED` flows the button is enabled.
-6. [unit] Without `fleet.flow.read` the component does not call `list` and the button is enabled on a published
-   thread.
-7. [unit] A grant of `fleet.flow.read` after mount calls `list(1, thread.id)` once.
-8. [unit] When `list` rejects, the button is enabled and no toast is shown.
-9. [unit] Clicking the button opens the dialog, and the dialog stub emitting `submit` with a body calls
-   `createFromThread(thread.id, body)` once.
-10. [unit] A `{ kind: 'done', flow: { id: 'f9' } }` answer calls `navigateTo('/web/flows/f9')`.
-11. [unit] A `{ kind: 'pending' }` answer shows a success toast with the English text of
-    `fleet.flows.toast.approvalRequested` and does not navigate.
-12. [unit] After a `{ kind: 'pending' }` answer a link to `/web/approvals` renders.
-13. [unit] A rejected `createFromThread` shows an error toast with `extractApiError(error)`'s text and keeps the dialog
-    open.
-14. [unit] A second `submit` while the first `createFromThread` has not settled does not call it again.
-15. [unit] Mounting `pages/[project]/threads/[id].vue` renders the `FleetThreadsThreadStartFlow` stub with the page's
-    `slug` and the loaded thread.
+7. [unit] When `list` returns only `COMPLETED` and `STOPPED` flows the Start flow button is enabled.
+8. [unit] Without `fleet.flow.read` the component does not call `list`.
+9. [unit] Without `fleet.flow.read` the Start flow button on a published thread is enabled.
+10. [unit] A grant of `fleet.flow.read` after mount calls `list(1, thread.id)` once.
+11. [unit] When `list` rejects, the Start flow button is enabled.
+12. [unit] When `list` rejects, no toast is shown.
 
-### US-007
+### US-009
 
-1. [unit] `ThreadPreApprovalCard` on a REPO thread without a tick, with `fleet.thread.preapprove` held, renders the cap
-   input and the Set button.
-2. [unit] Without `fleet.thread.preapprove` it renders nothing.
-3. [unit] On an archived thread it renders nothing.
-4. [unit] On a thread with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }` it renders
-   the cap as `$3.00` and the set time as `new Date('2026-11-09T06:36:35.837Z').toLocaleString()`.
-5. [unit] On that thread it renders a Clear button and no Set button.
-6. [unit] Clicking Set with the cap input at `0` renders the English text of `fleet.flows.preapproval.validation` and
-   does not call `set`.
-7. [unit] Clicking Set with the cap input at `3` calls `useThreadPreApproval('web').set(thread.id, 3)` once.
-8. [unit] A `{ kind: 'done' }` answer to `set` emits `changed` once.
-9. [unit] Clicking Clear calls `clear(thread.id)` once.
-10. [unit] A `{ kind: 'done' }` answer to `clear` emits `changed` once.
-11. [unit] A `{ kind: 'pending' }` answer to `set` shows a success toast with the English text of
-    `fleet.flows.toast.approvalRequested` and does not emit `changed`.
-12. [unit] A rejected `set` shows an error toast with `extractApiError(error)`'s text and does not emit `changed`.
-13. [unit] While a `set` has not settled, a second click on Set does not call `set` again.
-14. [unit] Mounting `pages/[project]/threads/[id].vue` renders the `FleetThreadsThreadPreApprovalCard` stub with the
-    page's `slug` and the loaded thread.
-15. [unit] On that page, the card stub emitting `changed` calls the thread controller's `reloadThread` once.
+1. [unit] Clicking the Start flow button renders the `ThreadStartFlowDialog` stub with `open` true.
+2. [unit] The dialog stub receives the component's `thread` prop as `thread`.
+3. [unit] With `useAuth().user` holding `{ id: 'u1' }` the dialog stub receives `viewerId` `'u1'`.
+4. [unit] With `useAuth().user` null the dialog stub receives `viewerId` `''`.
+5. [unit] The dialog stub emitting `submit` with a body calls `createFromThread(thread.id, body)` once.
+6. [unit] A second `submit` before the first `createFromThread` settles does not call it again.
+7. [unit] A `{ kind: 'done', flow: { id: 'f9' } }` answer calls `navigateTo('/web/flows/f9')`.
+8. [unit] A `{ kind: 'pending' }` answer shows a success toast with the English text of
+   `fleet.flows.toast.approvalRequested`.
+9. [unit] A `{ kind: 'pending' }` answer does not call `navigateTo`.
+10. [unit] A `{ kind: 'pending' }` answer sets the dialog stub's `open` to false.
+11. [unit] After a `{ kind: 'pending' }` answer a link to `/web/approvals` renders.
+12. [unit] A rejected `createFromThread` shows an error toast with `extractApiError(error)`'s text.
+13. [unit] A rejected `createFromThread` leaves the dialog stub's `open` true.
+14. [unit] Mounting `pages/[project]/threads/[id].vue` renders the `FleetThreadsThreadStartFlow` stub with the page's
+    `slug`.
+15. [unit] On that page the `FleetThreadsThreadStartFlow` stub receives the loaded thread.
+
+### US-010
+
+1. [unit] `ThreadPreApprovalCard` on a REPO thread without a tick, with `fleet.thread.preapprove` held, renders the Set
+   button.
+2. [unit] On that thread it renders the cap input.
+3. [unit] Without `fleet.thread.preapprove` it renders nothing.
+4. [unit] On an archived thread it renders nothing.
+5. [unit] On a PROJECT thread it renders nothing.
+6. [unit] On a thread with tick `{ userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }` it renders
+   the cap as `$3.0000` (`usd()` of the string, not re-rounded).
+7. [unit] On that thread it renders the set time as `new Date('2026-11-09T06:36:35.837Z').toLocaleString()`.
+8. [unit] On that thread it renders a Clear button.
+9. [unit] On that thread it renders no Set button.
+
+### US-011
+
+1. [unit] Clicking Set with the cap input at `0` renders the English text of `fleet.flows.preapproval.validation`.
+2. [unit] Clicking Set with the cap input at `0` does not call `set`.
+3. [unit] Clicking Set with the cap input at `3` calls `useThreadPreApproval('web').set(thread.id, 3)` once.
+4. [unit] A `{ kind: 'done' }` answer to `set` emits `changed` once.
+5. [unit] Clicking Clear calls `clear(thread.id)` once.
+6. [unit] A `{ kind: 'done' }` answer to `clear` emits `changed` once.
+7. [unit] A `{ kind: 'pending' }` answer to `set` shows a success toast with the English text of
+   `fleet.flows.toast.approvalRequested`.
+8. [unit] A `{ kind: 'pending' }` answer to `set` does not emit `changed`.
+9. [unit] A rejected `clear` shows an error toast with `extractApiError(error)`'s text.
+10. [unit] A rejected `clear` does not emit `changed`.
+11. [unit] While a `set` has not settled, a second click on Set does not call `set` again.
+12. [unit] Mounting `pages/[project]/threads/[id].vue` renders the `FleetThreadsThreadPreApprovalCard` stub with the
+    page's `slug`.
+13. [unit] On that page the `FleetThreadsThreadPreApprovalCard` stub receives the loaded thread.
+14. [unit] On that page the card stub emitting `changed` calls the thread controller's `reloadThread` once.
