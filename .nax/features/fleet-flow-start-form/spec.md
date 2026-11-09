@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet flow start form
 
 ## Summary
@@ -51,7 +50,17 @@ from koda's web app, which is where a brainstorm thread publishes its spec set.
 - **Money.** The pre-approval cap arrives as a 4-place string and is shown with `usd()` from
   `lib/fleet-analytics-format.ts`, never re-rounded (web context rule A7).
 - **Form errors.** The form shows the first zod issue only, in schema order: rows (top to bottom), then reviewer,
-  supervisor, cap.
+  supervisor, cap. The duplicate-name and `dependsOn` checks are refinements on the `features` array (not the root
+  object), so an invalid role or cap never hides them.
+- **Form values.** `FlowStartFormValues = { features: FlowStartRow[]; roles: { reviewer: string; supervisor: string };
+  costCapUsd: number | string }`. The schema trims feature names, spec paths and roles (`z.string().trim()`) before
+  every other check, so duplicate and `dependsOn` checks compare trimmed names; it coerces the cap with `Number()` and
+  checks at most four decimals as `Math.round(x * 10000) / 10000 === x`. `toFlowStartBody` takes the schema's parsed
+  output and does not trim again.
+- **Composable imports.** Components import `useFleetFlows` and `useThreadPreApproval` explicitly from
+  `~/composables/...` (as `ThreadFlowsPanel.vue` does), because the Jest mount harness injects only its fixed
+  auto-import list; tests supply them through the mount `alias`. Composable paths are built with `apiPath`
+  (`lib/api-path.ts`), which the `api-path-guard` test enforces.
 - **Start flow availability.** Shown on a REPO thread that is not archived when the viewer holds `fleet.flow.create`.
   Disabled with a reason when the thread has no published spec (`specPublished` false or `publishedSha` null) or when
   the thread has a live flow (listed through `useFleetFlows().list(1, threadId)` when the viewer holds
@@ -152,6 +161,8 @@ New modules:
 - Reordering feature rows by drag and drop; rows are added at the end and removed individually.
 - Playwright end-to-end tests for the start form; component and page tests cover it.
 - Showing the tick setter's name instead of the cap and date; the card does not resolve user ids.
+- US-003 only: no acceptance criterion pins the 300-character spec path limit or a zero or negative flow cap; the schema enforces both and the API refuses them.
+- US-009 only: no acceptance criterion pins that the dialog keeps its field values after a failed create; it stays open and mounted, so its form state is not reset.
 
 ## Stories
 
@@ -182,22 +193,24 @@ New module `lib/fleet-flow-start-form.ts` with `FLOW_MAX_FEATURES`, `FLOW_COST_C
 `FLOW_SPEC_PATH_MAX`, `buildFlowStartSchema(t)`, `FlowStartFormValues` and `buildPreApprovalSchema(t)` (a
 `{ costCapUsd }` object with the same cap rule and the message key `fleet.flows.preapproval.validation`), mirroring
 `lib/thread-handoff-form.ts`. Issues are reported in schema order: rows top to bottom, then reviewer, supervisor, cap.
-Validation messages are i18n keys under `fleet.flows.start.validation` and `fleet.flows.preapproval.validation`.
+The schema trims strings and coerces the cap as in Design; the duplicate-name and `dependsOn` checks are
+refinements on the `features` array. Validation messages are i18n keys under `fleet.flows.start.validation` and
+`fleet.flows.preapproval.validation`.
 Tests in `tests/lib/fleet-flow-start-form.spec.ts`.
 
 ### US-004: Flow start request body
 
 Depends on US-003. Workdir: `apps/web`.
 
-New module `lib/fleet-flow-start-body.ts` with `FlowStartBody` and `toFlowStartBody(values: FlowStartFormValues)`,
-which trims feature names, spec paths and roles, sends `costCapUsd` as a number, and always sends `dependsOn` as an
-array. Tests in `tests/lib/fleet-flow-start-body.spec.ts`.
+New module `lib/fleet-flow-start-body.ts` with `FlowStartBody` and `toFlowStartBody(values: FlowStartFormValues)` over
+the schema's parsed (already trimmed) output: it sends `costCapUsd` as a number and every row's `dependsOn` as a new
+array, without mutating its input. Tests in `tests/lib/fleet-flow-start-body.spec.ts`.
 
 ### US-005: Flow start and pre-approval composables
 
 Depends on US-004. Workdir: `apps/web`.
 
-`useFleetFlows(slug)` gains `createFromThread(threadId, body: FlowStartBody)` posting to
+`useFleetFlows(slug)` gains `createFromThread(threadId, body: FlowStartBody)` posting (path built with `apiPath`) to
 `/projects/:slug/threads/:threadId/flows` and mapping the answer with the existing `write` helper. New composable
 `composables/useThreadPreApproval.ts` with `set` (PUT) and `clear` (DELETE) on
 `/projects/:slug/threads/:threadId/preapproval`, mapping an answer that carries `permissionKey`
@@ -233,7 +246,8 @@ Depends on US-001. Workdir: `apps/web`.
 
 New `components/fleet/threads/ThreadStartFlow.vue` (props `slug`, `thread`): reads `fleet.flow.create` and
 `fleet.flow.read` from `useProjectPermissions(slug)`, lists the thread's flows with
-`useFleetFlows(slug).list(1, thread.id)` when `fleet.flow.read` is held (re-checked on a late grant, as
+`useFleetFlows(slug).list(1, thread.id)` (imported explicitly from `~/composables/useFleetFlows`, as
+`ThreadFlowsPanel.vue` does) when `fleet.flow.read` is held (re-checked on a late grant, as
 `ThreadFlowsPanel` does; a failed list counts as no live flow, with no toast), and renders the Start flow button and
 its blocked reason from `flowStartState` (`liveFlow` is true when a listed flow's state passes `isLiveFlow`). Tests in
 `tests/components/thread-start-flow.spec.ts`.
@@ -261,10 +275,10 @@ input and a Set button. Tests in `tests/components/thread-preapproval-card.spec.
 
 ### US-011: Pre-approval card actions and page mount
 
-Depends on US-003, US-005, US-010. Workdir: `apps/web`.
+Depends on US-003, US-005, US-009, US-010. Workdir: `apps/web`.
 
 `ThreadPreApprovalCard.vue` (created by US-010) validates the cap with `buildPreApprovalSchema` and calls
-`useThreadPreApproval(slug).set(thread.id, cap)` on Set and `clear(thread.id)` on Clear, ignoring clicks while a
+(imported explicitly from `~/composables/useThreadPreApproval`) `useThreadPreApproval(slug).set(thread.id, cap)` on Set and `clear(thread.id)` on Clear, ignoring clicks while a
 write is in flight. A done write emits `changed`; pending toasts `fleet.flows.toast.approvalRequested`; an error
 toasts `extractApiError(error)`; neither emits `changed`. The thread page mounts it after
 `FleetThreadsThreadStartFlow` and calls `controller.reloadThread()` on `changed`. Tests in
@@ -293,6 +307,7 @@ toasts `extractApiError(error)`; neither emits `changed`. The thread page mounts
 
 **US-005**
 - `apps/web/composables/useApi.ts`
+- `apps/web/lib/api-path.ts`
 - `apps/web/lib/fleet-flows.ts`
 - `apps/web/lib/fleet-flow-start-body.ts` — created by US-004, consumed here
 
@@ -427,7 +442,7 @@ None. US-004 only creates `lib/fleet-flow-start-body.ts` and its test; it change
 - US-006 consumes `flowStartRows` (US-001) and `buildFlowStartSchema` (US-003): US-006 AC-1 to AC-4 mount the dialog
   and assert the prefilled rows.
 - US-007 consumes `defaultFlowRoles` and `tickHint` (US-002) and `toFlowStartBody` (US-004): US-007 AC-1, AC-2 and
-  AC-9 to AC-13 mount the dialog and assert the roles, the emitted body and each hint.
+  AC-8 to AC-13 mount the dialog and assert the roles, the emitted body and each hint.
 - US-009 consumes `useFleetFlows().createFromThread` (US-005) and `ThreadStartFlowDialog` (US-006, US-007): US-009
   AC-2 to AC-5 assert the dialog stub's props and the `createFromThread` call.
 - US-011 consumes `useThreadPreApproval().set|clear` (US-005): US-011 AC-3 and AC-5 click the card's buttons and
@@ -462,6 +477,10 @@ None. US-004 only creates `lib/fleet-flow-start-body.ts` and its test; it change
     `{ visible: true, enabled: false, reason: 'notPublished' }`.
 12. [unit] `flowStartState` on a visible published thread with `liveFlow: true` returns
     `{ visible: true, enabled: false, reason: 'flowLive' }`.
+13. [unit] `flowStartRows` on a thread with own feature `f-min` whose `lastWrite.kind` is `publish_failed` returns only
+    the thread's own row.
+14. [unit] `flowStartRows` on a thread with own feature `a` and published `paths` `['.nax/features/b/spec.md',
+    '.nax/features/b/spec.md']` returns two rows.
 
 ### US-002
 
@@ -487,38 +506,37 @@ None. US-004 only creates `lib/fleet-flow-start-body.ts` and its test; it change
 
 ### US-003
 
-1. [unit] `buildFlowStartSchema(t).safeParse` accepts one row `{ feature: 'f-min', specPath:
+1. [unit] `buildFlowStartSchema(t).safeParse` succeeds on one row `{ feature: 'f-min', specPath:
    '.nax/features/f-min/spec.md', dependsOn: [] }`, roles `{ reviewer: 'm', supervisor: 'm' }` and cap `2`.
-2. [unit] The schema rejects the feature name `bad name` with the message key `fleet.flows.start.validation.feature`.
-3. [unit] The schema rejects the feature name `a..b` with `fleet.flows.start.validation.feature`.
-4. [unit] The schema rejects two rows both named `f-min` with `fleet.flows.start.validation.featureDuplicate`.
-5. [unit] The schema rejects an empty row list with `fleet.flows.start.validation.featuresCount`.
-6. [unit] The schema rejects 21 valid, distinct rows with `fleet.flows.start.validation.featuresCount`.
-7. [unit] The schema rejects the spec path `/abs/spec.md` with `fleet.flows.start.validation.specPath`.
-8. [unit] The schema rejects the spec path `docs/spec.txt` with `fleet.flows.start.validation.specPath`.
-9. [unit] The schema rejects the spec path `docs/../spec.md` with `fleet.flows.start.validation.specPath`.
-10. [unit] The schema rejects a first row whose `dependsOn` is `['f-clamp']` while `f-clamp` is the second row, with
+2. [unit] On the feature name `bad name`, the parse's first issue message is `fleet.flows.start.validation.feature`.
+3. [unit] On the feature name `a..b`, the parse's first issue message is `fleet.flows.start.validation.feature`.
+4. [unit] On two rows both named `f-min`, the parse's first issue message is
+   `fleet.flows.start.validation.featureDuplicate`.
+5. [unit] On an empty row list, the parse's first issue message is `fleet.flows.start.validation.featuresCount`.
+6. [unit] On 21 valid, distinct rows, the parse's first issue message is `fleet.flows.start.validation.featuresCount`.
+7. [unit] On the spec path `/abs/spec.md`, the parse's first issue message is `fleet.flows.start.validation.specPath`.
+8. [unit] On the spec path `docs/spec.txt`, the parse's first issue message is `fleet.flows.start.validation.specPath`.
+9. [unit] On the spec path `docs/../spec.md`, the parse's first issue message is
+   `fleet.flows.start.validation.specPath`.
+10. [unit] On a first row whose `dependsOn` is `['f-clamp']` while `f-clamp` is the second row, the parse's first issue
+    message is `fleet.flows.start.validation.dependsOn`.
+11. [unit] On a row whose `dependsOn` is `['gone']` when no row is named `gone`, the parse's first issue message is
     `fleet.flows.start.validation.dependsOn`.
-11. [unit] The schema rejects a row whose `dependsOn` is `['gone']` when no row is named `gone`, with
-    `fleet.flows.start.validation.dependsOn`.
-12. [unit] The schema rejects the reviewer `has space` with `fleet.flows.start.validation.role`.
-13. [unit] The schema rejects the cap `1000.0001` with `fleet.flows.start.validation.costCap`.
-14. [unit] The schema rejects the cap `1.23456` with `fleet.flows.start.validation.costCap`.
-15. [unit] `buildPreApprovalSchema(t).safeParse({ costCapUsd: 0 })` fails with `fleet.flows.preapproval.validation`.
+12. [unit] On the reviewer `has space`, the parse's first issue message is `fleet.flows.start.validation.role`.
+13. [unit] On the cap `1000.0001`, the parse's first issue message is `fleet.flows.start.validation.costCap`.
+14. [unit] On the cap `1.23456`, the parse's first issue message is `fleet.flows.start.validation.costCap`.
+15. [unit] On the feature name `' f-min '`, the parse succeeds and its output feature is `'f-min'`.
 
 ### US-004
 
 1. [unit] `toFlowStartBody` on one row `{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }`,
    roles `{ reviewer: 'm', supervisor: 'm' }` and cap `2` returns `{ features: [{ feature: 'f-min', specPath:
    '.nax/features/f-min/spec.md', dependsOn: [] }], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 }`.
-2. [unit] `toFlowStartBody` on a form value whose cap is the string `'2.5'` returns `costCapUsd` as the number `2.5`.
-3. [unit] `toFlowStartBody` on a row whose feature is `' f-min '` returns the feature `'f-min'`.
-4. [unit] `toFlowStartBody` on a row whose spec path is `' .nax/features/f-min/spec.md '` returns the spec path
-   `'.nax/features/f-min/spec.md'`.
-5. [unit] `toFlowStartBody` on roles `{ reviewer: ' m ', supervisor: ' s ' }` returns roles
-   `{ reviewer: 'm', supervisor: 's' }`.
-6. [unit] `toFlowStartBody` on a row whose `dependsOn` is `['f-min']` returns that row's `dependsOn` as a new array
-   equal to `['f-min']` (the form's array is not shared).
+2. [unit] `toFlowStartBody` on parsed values whose cap is the string `'2.5'` returns `costCapUsd` as the number `2.5`.
+3. [unit] `toFlowStartBody` on a row whose `dependsOn` is `['f-min']` returns that row's `dependsOn` as a new array
+   equal to `['f-min']` (the input array is not shared).
+4. [unit] `toFlowStartBody` returns a `features` array that is not the input `features` array, leaving the input
+   unchanged.
 
 ### US-005
 
@@ -655,3 +673,4 @@ None. US-004 only creates `lib/fleet-flow-start-body.ts` and its test; it change
     page's `slug`.
 13. [unit] On that page the `FleetThreadsThreadPreApprovalCard` stub receives the loaded thread.
 14. [unit] On that page the card stub emitting `changed` calls the thread controller's `reloadThread` once.
+15. [unit] A `{ kind: 'pending' }` answer to `clear` does not emit `changed`.
