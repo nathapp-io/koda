@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T12:11:31.386Z",
+  "updatedAt": "2026-11-09T12:24:08.981Z",
   "userStories": [
     {
       "id": "US-001",
@@ -32,14 +32,17 @@
         "permissions"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Small additive type/helper change, but availability includes an access-control permission check and requires the security isolation override."
+        "reasoning": "Small additive type/helper change, but availability includes an access-control permission check and requires the security isolation override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-types.ts",
@@ -57,7 +60,11 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "83aa34aeed1989b0e2a084add248d3007584c2a1"
     },
     {
       "id": "US-002",
@@ -102,7 +109,10 @@
         "apps/web/tests/lib/fleet-flow-start-defaults.spec.ts"
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -162,7 +172,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -201,7 +214,10 @@
         "apps/web/tests/lib/fleet-flow-start-body.spec.ts"
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -262,7 +278,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -326,7 +345,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -391,7 +413,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -451,7 +476,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -528,7 +556,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -586,7 +617,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -655,7 +689,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Architecture and discovery: This is an additive enhancement to the existing human-facing web client, not greenfield work. Codebase-memory MCP tools are unavailable in this session, so discovery used direct source reads and text search at the supplied execution root. The automatically detected Next.js/Express labels in the prompt are inaccurate: apps/web/package.json:33 declares Nuxt 4.6.2 and apps/web/package.json:38 declares Vue 3; .nax/mono/apps/web/context.md:19 identifies Nuxt SSR with the existing root-level components/pages/composables layout. The API is the existing NestJS/Fastify system of record, not a new Express application. Implement only apps/web changes; do not change API DTOs, routes, Prisma, OpenAPI or generated clients. The phrase 'no DTO change' in feature exclusions refers to the API contract; the explicitly required hand-written web ThreadDto addition remains in scope. No database migration or client regeneration is needed.\n\nExisting wire types and impact: apps/web/lib/thread-types.ts:141 defines ThreadDto, :183 extends it as ThreadDetailDto, :27 defines native/acp backends, and :121 defines lastWrite's discriminated union. ThreadDto currently ends with writtenPaths, publishedSha, specPublished and lastWrite, without preApproval. Add the required exported ThreadPreApproval interface and required nullable preApproval property without changing existing fields. The API already exposes this nullable object at apps/api/src/fleet/threads/dto/thread.dto.ts:64. This corrects a web wire mirror rather than changing server behavior. ThreadDto/ThreadDetailDto are consumed by useThreads, useWorkspaceThreads, useThreadHandoffJobs, the thread controller, thread view/handoff/timeline helpers, and many thread components. apps/web/lib/thread-controller.ts:106 and :121 assign fetched ThreadDetailDto directly, so no new controller mapping is needed. Adding a required field can expose old typed fixtures: examples include apps/web/tests/pages/threads-detail-page.spec.ts:99, tests/pages/threads-detail-actions-page.spec.ts:30, tests/lib/thread-handoff.spec.ts:31, tests/lib/thread-controller.spec.ts:29, tests/composables/useThread.spec.ts:24, tests/composables/useWorkspaceThread.spec.ts:29, tests/composables/useThreads.spec.ts:4 and tests/composables/useWorkspaceThreads.spec.ts:9, plus component fixtures discovered by text search. If the required field exposes typing failures, add preApproval: null to affected existing fixture constructors without weakening their assertions or making the wire field optional. These are compatibility adjustments within US-001, not new stories. Legacy runtime fixtures may still omit the field; do not use that as a reason to change the specified nullable contract.\n\nPure logic: New fleet-flow-start.ts is Vue-free. Prefill the thread's feature/specPath first, then only matching .nax/features/<name>/spec.md paths from lastWrite.kind === 'published', de-duplicated by name in path order. Do not use writtenPaths, read documents, fetch historic publishes, or truncate into an invented pagination scheme. Chain each subsequent prefilled row to the immediately previous row. Existing handoff availability is pure and ordered at apps/web/lib/thread-handoff.ts:27 and :63, but start-flow availability has its own explicit REPO/not-archived/create-permission rule and publication-before-live-flow reason precedence; do not copy unrelated handoff/session/creator restrictions. fleet-flow-start-defaults.ts derives models only from native backends and computes an advisory tickHint in none/notYours/exceeded/covers order using ten-thousandth integers. The authoritative API coversFlow at apps/api/src/fleet/flows/fleet-flows.service.ts:358 checks actor ownership and Decimal caps; lockThreadEntry at :307 pins the thread and refuses a live flow, and consumeTick at :293 consumes the one-flow tick. The web hint is not authorization, does not consume the tick, and must not promise approval beyond the existing API. A null auth user maps to viewerId ''.\n\nValidation and request shape: apps/web/lib/thread-handoff-form.ts:18 demonstrates a translation-injected zod builder; apps/web/package.json:37-41 establishes vee-validate and zod 3.24. Keep the feature-specific specified cap test Math.round(x * 10000) / 10000 === x rather than copying the handoff schema's tolerance-based test. Reuse FEATURE_RE from apps/web/lib/fleet-dispatch.ts:8 and the additional name '..' exclusion already used at :49. The read-only server input parser apps/api/src/fleet/flows/flow-input.ts:23 defines the exact role regex, :40 limits features to 1..20, :47 bounds spec paths and rejects unsafe paths, :49 validates dependencies, and :56-59 validates roles/cap. The new web schema trims feature names/spec paths/roles before checks, compares trimmed names, allows dependencies only on earlier names, coerces cap with Number(), and validates >0, <=1000, at most four decimals. Reject absolute, non-.md and traversal paths and enforce the 300-character bound. Keep duplicate/dependency refinements on the features array so invalid roles/cap cannot suppress them. Error order is rows top-to-bottom, reviewer, supervisor, cap; render only the first issue. FlowStartFormValues deliberately accepts number|string cap; parsed output is passed to toFlowStartBody, which does not trim again, converts cap to number and copies arrays without mutating input. US-003 still implements the 300-character and positive-cap rules even though its explicit ACs intentionally do not pin those cases.\n\nAPI integration: apps/web/composables/useFleetFlows.ts:6 exports FlowWrite, :15 provides the thread-filtered 20-row list, :23 maps writes through isPendingFlowAnswer, and :32 returns the current five methods. Add createFromThread through that same write helper without changing existing methods. apps/web/lib/fleet-flows.ts:106 defines all live states (PENDING, APPROVED, RUNNING, WAITING_MERGE, WAITING_ANSWER), and :181 discriminates an approval summary by permissionKey. A saved flow whose state is PENDING is still a done write and navigates; it must not be confused with a pending approval-summary response. New useThreadPreApproval maps PUT/DELETE responses to done without replacing the thread locally; only the card's done event causes a thread reload. Approval summaries from all three writes mean the route itself was approval-gated, not that the mutation happened. Errors propagate unchanged from composables. apps/web/lib/api-path.ts:11 encodes dynamic path segments and refuses empty ones; use apiPath directly without manual double encoding. apps/web/tests/lib/api-path-guard.spec.ts:7-16 and :56 enforce this across composables/components/pages. useApi already unwraps Nathapp envelopes (apps/web/composables/useApi.ts:48), extracts API errors (:72), and selects server/browser base URLs (:156); callers supply /projects/... rather than adding another /api prefix. Existing composable coverage at apps/web/tests/composables/useFleetFlows.spec.ts:16-70 tests list/get/overview/stop/answer and identical rejection objects; append creation cases without replacing those anchors.\n\nComponents, permission hydration and form lifecycle: apps/web/components/fleet/threads/ThreadHandoffDialog.vue:1-37 is the Shadcn Dialog + toTypedSchema/useForm + explicit first-issue pattern. New ThreadStartFlowDialog receives open/thread/viewerId, resets from the current thread on every opening, edits features and dependency arrays, and gains roles/cap/hint/submit in US-007. Use native dependency checkboxes as apps/web/components/approvals/ApprovalPolicyDialog.vue:110 demonstrates, not a nonexistent Checkbox primitive. Feature rename/removal must update later references while preserving row order; appended rows have empty names/paths and no dependencies. Keep the dialog mounted on failed creation to retain values; do not reset on a rejected write or a normal prop refresh while it stays open. Reset only at the next open. Parent write guards ignore duplicate submits while unresolved. Start-flow availability reads permission keys rather than roles or creator status. apps/web/components/fleet/threads/ThreadFlowsPanel.vue:2-19 explicitly imports useFleetFlows and fetches after mount or a late fleet.flow.read grant; mirror its bounded permission-watch approach without duplicate mount reads or an unfiltered read. If read is absent or listing fails, assume no known live flow and leave the API's threadBusy 409 as the backstop. Read only list(1, thread.id), never poll or exhaust pagination for this feature. Existing tests/components/thread-flows-panel.spec.ts:8-21 shows alias-based mocking and quiet failure behavior. ThreadPreApprovalCard is REPO/not-archived/preapprove-key gated independently of publication and flow creation; with a tick display usd(string) and local date-time, with no tick show cap entry/Set. apps/web/lib/fleet-analytics-format.ts:4 preserves a four-place money string verbatim; no toFixed/re-rounding in card display. Do not resolve the setter's name. Actions validate before writing, ignore concurrent clicks, emit changed only on done, and keep state on errors.\n\nPage seam: apps/web/pages/[project]/threads/[id].vue:30 creates the controller; :105-106 mounts the header and existing flows panel. Insert FleetThreadsThreadStartFlow after that panel in US-009 and FleetThreadsThreadPreApprovalCard immediately after StartFlow in US-011, passing slug and controller.thread.value and wiring changed to controller.reloadThread(). Preserve all existing controls, event handlers, handoff jobs, streaming and approval rendering. The page tests have explicit component maps (apps/web/tests/pages/threads-detail-page.spec.ts:199-210 and the corresponding actions-page test); both need inert stubs for each new child or they may accidentally mount networking code or emit unresolved-component warnings. Pin props on the page and changed->reload on the card; do not assert only that a source tag exists.\n\nTesting and locale seams: Component tests run under Jest in node with the custom Vue renderer (apps/web/tests/helpers/mount-sfc.ts:1-13 and :122 onward), not a browser/Next testing stack. Nuxt auto-import injection is a fixed list, so explicitly import useFleetFlows and useThreadPreApproval in production components and supply module aliases in tests; do not modify the harness to paper over missing imports. uiStubs and toastRecorder/enI18n in apps/web/tests/helpers/fleet-harness.ts:80, :185 and :211 allow real English text and observable emitted events. Use reactive permission refs for the late-grant test, deferred promises for write concurrency, native input change events for checkboxes, and stub Dialog/open props rather than relying on DOM APIs. Add the exact per-story Jest files listed in expectedFiles; append page/composable assertions without deleting existing assertions. Update both locales incrementally under fleet.flows.start/preapproval; the current flow locale subtree begins at apps/web/i18n/locales/en.json:880 and already contains fleet.flows.toast.approvalRequested at :895. Locale parity and api-path guard remain regression checks, not acceptance criteria. No Playwright start-form suite is requested. Standard web test command is bun run test (Jest plus existing real-sanitizer harnesses, apps/web/package.json:14-15); targeted Jest files can be run with bunx jest. Generated acceptance material is separate under apps/web/.nax/features/fleet-flow-start-form and must not be edited or copied into tests; .nax/mono/apps/web/context.md:86 explains its bun test command. No tests were executed while drafting this PRD. Keep untrusted thread/model/path text in interpolation and existing semantic CSS tokens; no v-html or new navigation destination is needed. docs/ux/redesign/MASTER-PLAN.md:35-44 sets existing UI constraints; this feature adds page-local controls, not a shell/navigation/token redesign.\n\nOrdering and risks: Preserve exactly the binding story ids/workdirs/dependencies. The binding table intentionally says US-006 dependencies are not stated, despite the narrative listing US-001 and US-003. Its dependencies array is therefore empty; do not silently add edges. This is a scheduling hazard: US-006 consumes their helpers, so execute the numbered stories in a sequence that has those outputs available or coordinate their availability before running US-006. US-006 contextFiles now includes the two helper paths explicitly recommended by the spec, as required by the refinement audit; they are outputs of US-001/US-003, not US-006 outputs. Because the binding table does not declare those dependencies, these two paths will be missing if US-006 is scheduled before their owners complete. This is an unresolved input scheduling inconsistency, not permission to create duplicate helpers, silently change the binding dependencies, or pretend the paths exist today. The orchestrator must make the numbered prerequisite outputs available before executing this story. US-007 can read the dialog created by its declared US-006 dependency; US-009 can read the wrapper created by US-008; US-011 can read the card created by US-010. Shared locale files across many stories and page/stub maps across US-009/US-011 are merge hotspots: make additive edits and preserve preceding keys/components. No new abstraction, package or backend service is required. The main behavioral risks are stale/late permissions, advisory live-flow races, pending-flow versus pending-route confusion, error-triggered form resets, decimal float comparisons, validation issue precedence, and dangling dependencies after rename/removal. Security-related visibility/ownership/preapproval stories use three-session-tdd even where implementation complexity is otherwise medium. Every explicit spec AC is preserved in its assigned story. Failure Handling rows are mapped to US-007 invalid-form behavior, US-008 quiet read failure, US-009 create errors/pending outcomes and US-011 set/clear errors/pending outcomes. The initial extra criteria in those stories enumerate the specified failure rows. The second-turn refinement additionally requires negative-path and backward-compatibility assertions: US-004 now pins no mutation TypeError on frozen valid parsed input, US-006 pins publish_failed prefill behavior at the component seam, US-005 pins the existing five composable methods, US-009 pins existing composer dispatch, and US-011 pins the preceding StartFlow page props. These audit additions do not invent invalid-input semantics for the parsed-only mapper. The explicit exclusions on US-003 and US-009 remain unpinned as requested. Done means a permitted human can create a flow from a published REPO thread using an editable, validated spec set, navigate to a returned flow or follow an approval-request link, and set/clear a thread tick with correct done-versus-pending behavior, all without changing existing API contracts or thread-page behavior.\n\nSecond-turn preservation audit: All 134 explicit spec criteria were compared individually against the criteria in their original story; each spec ordinal maps to the same ordinal in that story's acceptanceCriteria, before appended failure/regression assertions. Enumeration of preserved spec ordinals: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-002 [1,2,3,4,5,6,7,8,9,10]; US-003 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-004 [1,2,3,4]; US-005 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-007 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-008 [1,2,3,4,5,6,7,8,9,10,11,12]; US-009 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-010 [1,2,3,4,5,6,7,8,9]; US-011 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]. Qualifiers preserved include US-002/10 viewer-before-cap precedence, US-004/3 non-shared dependency array, US-004/4 input unchanged and US-010/6 exact usd string without re-rounding. US-009/12 retains its rejection-to-extracted-error assertion while explicitly enumerating the specified error statuses. No deprecated file-check criteria occur in this spec. Every criterion observes returned data, errors, rendered content/props, calls or emitted events; none is a build gate or test-existence assertion. Negative-path coverage is present in every story: US-001/13 failed publish, US-002/9 unauthorized hint, US-003/2 invalid name, US-004/5 frozen input mutation-failure prevention, US-005/4 identical rejection, US-006/15 failed-publish dialog prefill, US-007/6 invalid form emits nothing, US-008/11-12 failed list, US-009/12-13 rejected create, US-010/3 denied card, US-011/9-10 failed clear. Existing-method regressions are pinned in US-005/14-18, existing composer wiring in US-009/16 and the earlier flow-start page seam in US-011/21. All 11 top-level exclusions are retained verbatim from the feature-level section, including its explicitly US-003-only and US-009-only items; there are no separate story-local exclusion blocks to hoist. All binding workdirs/dependency arrays are unchanged, and every referenced id exists. Context lists retain all spec-recommended paths subject to five entries; the US-006 missing-edge exception is explicitly recorded above. Complexity was reduced where existing dialog and write-feedback patterns suffice, while mandated security strategy overrides remain. This is a source/spec audit, not a claim that implementation tests or a JSON parser were executed.",
