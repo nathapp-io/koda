@@ -21,6 +21,7 @@ import {
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService, type FleetFlowCallsTarget } from './fleet-flow-calls.service';
+import { runFeatureStart, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
 import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
@@ -39,7 +40,9 @@ import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
 import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
-type FlowPassAction = DispatchAction | ApplyCallsAction | ApplyRulingsAction | ApplyPrdEditsAction;
+/** US-011: a later feature starts on its own branch; the start pass creates it outside a transaction. */
+interface StartFeatureAction { kind: 'start_feature'; featureId: string; base: FeatureStartBase }
+type FlowPassAction = DispatchAction | ApplyCallsAction | ApplyRulingsAction | ApplyPrdEditsAction | StartFeatureAction;
 interface DispatchPass<A extends FlowPassAction = FlowPassAction> {
   flow: FleetFlowRecord;
   /**
@@ -93,6 +96,10 @@ export class FleetFlowAdvanceService {
       await this.advancePrdEdits(flow, feature, action, pass.plan, now);
       return;
     }
+    if (action.kind === 'start_feature') {
+      await this.advanceStart({ ...pass, action }, now);
+      return;
+    }
     const dispatchPass = { ...pass, action };
     if (action.step === 'REVIEW') {
       await this.advanceReview(dispatchPass, now);
@@ -110,6 +117,29 @@ export class FleetFlowAdvanceService {
       if (!current) return; // A stop/re-ask does not cancel the dispatched job.
       await this.recordStep(current, feature.id, action.step, jobId, action.pr?.number);
     });
+  }
+
+  /**
+   * US-011: the start of a later feature. Its branch is created outside any transaction, and the
+   * flow records it under its locks: a stop, a re-approval or a feature that already started
+   * drops the progress. A refusal stops the flow; a transient forge failure waits for the next tick.
+   */
+  private async advanceStart(pass: DispatchPass<StartFeatureAction>, now: Date): Promise<void> {
+    const outcome = await runFeatureStart(this.featurePassDeps(), {
+      flow: pass.flow, feature: pass.feature, base: pass.action.base,
+    });
+    if (outcome.kind === 'stop') {
+      await this.writeStop(pass.flow, pass.feature, outcome.reason, outcome.detail, now);
+    }
+  }
+
+  /** The collaborators the feature passes need; the passes themselves live in their own module. */
+  private featurePassDeps(): FeaturePassDeps {
+    return {
+      steps: this.steps, repos: this.repos, github: this.github,
+      activity: this.activity, audit: this.audit, txManager: this.txManager,
+      lockLive: (previous) => this.lockLive(previous),
+    };
   }
 
   /** Forge writes never hold locks; their progress belongs to the approval generation that chose them. */
@@ -515,14 +545,33 @@ export class FleetFlowAdvanceService {
       const feature = this.activeFeature(current);
       if (!feature) {
         const next = nextFlowFeature(current.features);
+        if (next.kind === 'active') return; // the active feature's row is gone: there is nothing to start
         if (next.kind === 'complete') {
           await this.steps.complete(current.id, now);
           await this.record(current, 'flow completed', 'flow.completed', { flowId: current.id, step: null, jobId: null });
-        } else if (next.kind === 'wait_merge') {
+          return;
+        }
+        if (next.kind === 'wait_merge') {
           await this.steps.setFlowState(current.id, 'WAITING_MERGE');
           await this.record(current, 'flow waiting merge', 'flow.waiting_merge', { featureIds: next.featureIds });
+          return;
         }
-        return;
+        // A later feature starts on its own branch. The branch is created outside this transaction,
+        // so the decision only selects the feature and checks that its creator may still dispatch.
+        const starting = this.orderedFeatures(current).find(({ id }) => id === next.featureId);
+        if (!starting) return;
+        if (!(await this.creatorMayDispatch(current))) {
+          await this.writeDecision(current, starting, null, {
+            kind: 'stop', reason: 'creator_lost_access', detail: 'flow creator lost dispatch access',
+          }, now);
+          return;
+        }
+        return {
+          flow: current, feature: starting,
+          action: { kind: 'start_feature', featureId: starting.id, base: next.base },
+          // Starting a feature spends nothing: the cap is checked before every billed step.
+          plan: null, remainingCapUsd: '0.0000',
+        };
       }
 
       const spentUsd = await this.refreshSpent(current);
@@ -562,10 +611,7 @@ export class FleetFlowAdvanceService {
         }, now);
         return;
       }
-      const creatorRef: PrincipalRef = { type: current.createdByType, id: current.createdById };
-      const access = await this.steps.creatorAccess(creatorRef);
-      const keys = await this.permissions.effectiveKeys(creatorRef, { projectId: current.projectId });
-      if (!mayDispatch(access, keys)) {
+      if (!(await this.creatorMayDispatch(current))) {
         await this.writeDecision(current, feature, job ?? null, {
           kind: 'stop', reason: 'creator_lost_access', detail: 'flow creator lost dispatch access',
         }, now);
@@ -704,6 +750,17 @@ export class FleetFlowAdvanceService {
     if (!repo || repo.githubInstallationId === null) return null;
     const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
     return this.github.getBranchHead(token, repo.owner, repo.name, flow.branch);
+  }
+
+  /**
+   * The flow's creator must still be allowed to dispatch: a creator that lost its access stops the
+   * flow before anything is spent or created on the forge.
+   */
+  private async creatorMayDispatch(flow: FleetFlowRecord): Promise<boolean> {
+    const creatorRef: PrincipalRef = { type: flow.createdByType, id: flow.createdById };
+    const access = await this.steps.creatorAccess(creatorRef);
+    const keys = await this.permissions.effectiveKeys(creatorRef, { projectId: flow.projectId });
+    return mayDispatch(access, keys);
   }
 
   /**
