@@ -881,6 +881,12 @@
         "button": "停止流程",
         "confirm": "确定要停止此流程吗？"
       },
+      "answer": {
+        "required": "必须填写回答",
+        "submit": "提交回答",
+        "success": "回答已提交",
+        "openApprovals": "查看审批"
+      },
       "toast": {
         "stopped": "流程已停止",
         "approvalRequested": "已请求停止审批"

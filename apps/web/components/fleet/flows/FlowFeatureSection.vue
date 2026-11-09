@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { featureBranch, featureStateKey, flowStepKey, prUrl } from '~/lib/fleet-flows'
+import { featureBranch, featureStateKey, flowStepKey, openQuestions, prUrl } from '~/lib/fleet-flows'
 import type { FleetFlowDto, FleetFlowFeatureDto, FleetFlowJobDto, FlowRepo } from '~/lib/fleet-flows'
 import { formatUsd } from '~/lib/fleet-jobs'
 
@@ -12,7 +12,7 @@ const props = defineProps<{
   jobs: FleetFlowJobDto[]
   canAnswer: boolean
 }>()
-defineEmits<{ answered: [] }>()
+const emit = defineEmits<{ answered: [] }>()
 const { t } = useI18n()
 const stateLabel = computed(() => {
   const key = featureStateKey(props.feature.state)
@@ -25,6 +25,8 @@ const stepLabel = computed(() => {
   return key ? t(key) : step
 })
 const pullRequestUrl = computed(() => prUrl(props.repo, props.feature.prNumber))
+const questions = computed(() => openQuestions(props.feature))
+function onAnswered(): void { emit('answered') }
 </script>
 
 <template>
@@ -47,5 +49,12 @@ const pullRequestUrl = computed(() => prUrl(props.repo, props.feature.prNumber))
         </NuxtLink>
       </li>
     </ul>
+    <FlowAnswerForm
+      v-if="flow.state === 'WAITING_ANSWER' && canAnswer && questions.length && feature.questionsJobId"
+      :slug="slug"
+      :flow-id="flow.id"
+      :feature="feature"
+      @answered="onAnswered"
+    />
   </section>
 </template>

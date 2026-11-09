@@ -881,6 +881,12 @@
         "button": "Stop flow",
         "confirm": "Stop this flow?"
       },
+      "answer": {
+        "required": "Answer is required",
+        "submit": "Submit answers",
+        "success": "Answers submitted",
+        "openApprovals": "Open approvals"
+      },
       "toast": {
         "stopped": "Flow stopped",
         "approvalRequested": "Stop approval requested"

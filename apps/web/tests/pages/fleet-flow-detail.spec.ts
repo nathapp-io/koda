@@ -42,7 +42,7 @@ async function mountPage(options: {
     },
     components: {
       LoadingState: { template: '<div>loading</div>' },
-      FlowFeatureSection: { props: ['feature'], template: '<article :data-feature="feature.feature">{{ feature.feature }}</article>' },
+      FlowFeatureSection: { props: ['feature'], emits: ['answered'], template: '<article :data-feature="feature.feature">{{ feature.feature }}<button @click="$emit(\'answered\')">answer</button></article>' },
       PageHeader: { props: ['title', 'subtitle'], template: '<header>{{ title }} {{ subtitle }}<slot name="actions" /><slot /></header>' },
       NuxtLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
     },
@@ -175,6 +175,15 @@ describe('fleet flow detail page (US-006)', () => {
     expect(failed.mounted.text()).toContain('US-1')
     expect(failed.mounted.text()).toContain('fleet.flows.detail.jobsFailed')
     failed.mounted.unmount()
+  })
+
+  test('AC-10 reloads flow after feature answer event', async () => {
+    const feature = { feature: 'US-1', specPath: 'a', branch: null, dependsOn: [], state: 'WAITING_ANSWER', currentStep: null, prNumber: null, questionsJobId: 'j1', questions: [{ id: 'q1', question: 'Q?' }], answers: null, answeredAt: null }
+    const { mounted, get } = await mountPage({ flow: flow({ state: 'WAITING_ANSWER', features: [feature] }) })
+    ;(mounted.find('button')[0]?.props.onClick as (() => void) | undefined)?.()
+    await Promise.resolve(); await Promise.resolve()
+    expect(get).toHaveBeenCalledTimes(2)
+    mounted.unmount()
   })
 
   test('AC-11 falls back to approver id when member name is unavailable', async () => {

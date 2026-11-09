@@ -162,6 +162,7 @@ onMounted(() => {
         :repo="overview?.repo ?? null"
         :jobs="groupedJobs.byFeature.get(feature.feature) ?? []"
         :can-answer="canAnswer"
+        @answered="load"
       />
 
       <section v-if="groupedJobs.flowJobs.length" class="space-y-3">
