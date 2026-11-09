@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T12:24:08.981Z",
+  "updatedAt": "2026-11-09T12:27:45.856Z",
   "userStories": [
     {
       "id": "US-001",
@@ -91,14 +91,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One small pure helper module and its test need no new abstraction; the identity-sensitive coverage check still requires the security strategy override."
+        "reasoning": "One small pure helper module and its test need no new abstraction; the identity-sensitive coverage check still requires the security strategy override.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-types.ts",
@@ -112,7 +115,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "693e1d38810fddc8a9978fd1527e4712763456d6"
     },
     {
       "id": "US-003",
