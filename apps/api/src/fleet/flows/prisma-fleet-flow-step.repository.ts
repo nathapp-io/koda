@@ -63,8 +63,11 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
    * One statement, so the row and the status belong to the same snapshot: an ingest that fills a RUN's
    * `resultPrUrl` also marks its attempt settled, in one transaction, and reading the two apart could
    * pair a row from before that commit with a status from after it.
+   *
+   * US-001: the row is the flow's job of one feature, so a job of a later feature never answers for the
+   * feature that is running.
    */
-  async latestJobWithIngest(flowId: string): Promise<LatestFlowJob | null> {
+  async latestJobWithIngest(flowId: string, featureId: string): Promise<LatestFlowJob | null> {
     const rows = await this.db.$queryRaw<Array<FleetJobRow & { ingestSettled: boolean }>>(Prisma.sql`
       SELECT job.*, EXISTS (
                SELECT 1
@@ -75,6 +78,7 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
              ) AS "ingestSettled"
         FROM "FleetJob" AS job
        WHERE job."flowId" = ${flowId}
+         AND job."flowFeatureId" = ${featureId}
        ORDER BY job."queuedAt" DESC, job."id" DESC
        LIMIT 1
     `);
@@ -84,13 +88,13 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     return { job: this.toJob(job), ingestSettled };
   }
 
-  async latestJobForStep(flowId: string, step: FlowStep): Promise<FleetJobRecord | null> {
-    const row = await this.db.fleetJob.findFirst({ where: { flowId, flowStep: step }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
+  async latestJobForStep(flowId: string, featureId: string, step: FlowStep): Promise<FleetJobRecord | null> {
+    const row = await this.db.fleetJob.findFirst({ where: { flowId, flowFeatureId: featureId, flowStep: step }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
     return row ? this.toJob(row) : null;
   }
 
-  async countJobsForStepSince(flowId: string, step: FlowStep, since: Date): Promise<number> {
-    return this.db.fleetJob.count({ where: { flowId, flowStep: step, queuedAt: { gte: since } } });
+  async countJobsForStepSince(flowId: string, featureId: string, step: FlowStep, since: Date): Promise<number> {
+    return this.db.fleetJob.count({ where: { flowId, flowFeatureId: featureId, flowStep: step, queuedAt: { gte: since } } });
   }
 
   async projectSlug(projectId: string): Promise<string | null> {

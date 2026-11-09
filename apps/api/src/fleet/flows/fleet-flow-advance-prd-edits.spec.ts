@@ -80,7 +80,7 @@ function build(opts: Options = {}) {
     creatorAccess: vi.fn<IFleetFlowStepRepository['creatorAccess']>(async (): Promise<CreatorAccess> => {
       assertTx(); return { exists: true, disabled: false };
     }),
-    countJobsForStepSince: vi.fn<IFleetFlowStepRepository['countJobsForStepSince']>(async (_flowId, step) => (
+    countJobsForStepSince: vi.fn<IFleetFlowStepRepository['countJobsForStepSince']>(async (_flowId, _featureId, step) => (
       step === 'PLAN' ? (opts.planCount ?? 0) : 0
     )),
     setBranch: vi.fn(async (_id: string, branch: string) => { assertTx(); row.branch = branch; }),

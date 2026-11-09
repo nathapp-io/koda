@@ -40,10 +40,13 @@ export interface IFleetFlowStepRepository {
   complete(flowId: string, now: Date): Promise<void>;
   listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]>;
   latestJob(flowId: string): Promise<FleetJobRecord | null>;
-  /** The flow's latest job and the ingest status of its own lease, from one statement (see `LatestFlowJob`). */
-  latestJobWithIngest(flowId: string): Promise<LatestFlowJob | null>;
-  latestJobForStep(flowId: string, step: FlowStep): Promise<FleetJobRecord | null>;
-  countJobsForStepSince(flowId: string, step: FlowStep, since: Date): Promise<number>;
+  /**
+   * The flow's latest job of one feature and the ingest status of its own lease, from one statement
+   * (see `LatestFlowJob`). US-001: a job of another feature never answers for this one.
+   */
+  latestJobWithIngest(flowId: string, featureId: string): Promise<LatestFlowJob | null>;
+  latestJobForStep(flowId: string, featureId: string, step: FlowStep): Promise<FleetJobRecord | null>;
+  countJobsForStepSince(flowId: string, featureId: string, step: FlowStep, since: Date): Promise<number>;
   projectSlug(projectId: string): Promise<string | null>;
   /** Adopt the PLAN output branch before applying PRD calls or re-asking that branch's head. */
   setBranch(flowId: string, branch: string): Promise<void>;

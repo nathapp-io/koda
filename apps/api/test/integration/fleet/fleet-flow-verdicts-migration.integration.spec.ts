@@ -90,16 +90,16 @@ describeDb('fleet flow verdicts migration and repositories (PG)', () => {
   async function createFlow() {
     return prisma.fleetFlow.create({ data: {
       projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: creatorId,
-      branch: `branch-${randomUUID()}`, specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor',
+      branch: `branch-${randomUUID()}`, specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor',
       costCapUsd: 10,
       features: { create: [{ position: 0, feature: `feature-${randomUUID()}`, specPath: 'spec.md', dependsOn: [] }] },
-    } });
+    }, include: { features: true } });
   }
 
-  async function createJob(flowId: string, flowStep: string, queuedAt: Date) {
+  async function createJob(flowId: string, flowFeatureId: string, flowStep: string, queuedAt: Date) {
     return prisma.fleetJob.create({ data: {
       projectId, repoId, ref: 'main', command: 'PLAN', feature: `job-${randomUUID()}`, profiles: [], maxCostUsd: 5,
-      selectorLabels: [], requestedById: creatorId, flowId, flowStep, queuedAt,
+      selectorLabels: [], requestedById: creatorId, flowId, flowFeatureId, flowStep, queuedAt,
     } });
   }
 
@@ -118,7 +118,7 @@ describeDb('fleet flow verdicts migration and repositories (PG)', () => {
     const ticket = await prisma.ticket.create({ data: { projectId, number: 1, type: 'TASK', title: 'Flow ticket' } });
     const flow = await prisma.fleetFlow.create({ data: {
       projectId, repoId, ticketId: ticket.id, entry: 'NAX', createdByType: 'USER', createdById: creatorId,
-      branch: `branch-${randomUUID()}`, specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10,
+      branch: `branch-${randomUUID()}`, specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10,
     } });
     await prisma.ticket.delete({ where: { id: ticket.id } });
     expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ ticketId: null });
@@ -126,17 +126,18 @@ describeDb('fleet flow verdicts migration and repositories (PG)', () => {
 
   it('AC-4/5: count matching jobs queued at or after the timestamp', async () => {
     const flow = await createFlow();
+    const featureId = flow.features[0].id;
     const since = new Date('2026-11-01T00:00:00Z');
-    await createJob(flow.id, 'PLAN', new Date('2026-11-02T00:00:00Z'));
-    await createJob(flow.id, 'PLAN', new Date('2026-11-03T00:00:00Z'));
-    await createJob(flow.id, 'SPEC_REVIEW', new Date('2026-11-04T00:00:00Z'));
-    await createJob(flow.id, 'PLAN', new Date('2026-10-31T00:00:00Z'));
-    expect(await stepRepository.countJobsForStepSince(flow.id, 'PLAN', since)).toBe(2);
+    await createJob(flow.id, featureId, 'PLAN', new Date('2026-11-02T00:00:00Z'));
+    await createJob(flow.id, featureId, 'PLAN', new Date('2026-11-03T00:00:00Z'));
+    await createJob(flow.id, featureId, 'SPEC_REVIEW', new Date('2026-11-04T00:00:00Z'));
+    await createJob(flow.id, featureId, 'PLAN', new Date('2026-10-31T00:00:00Z'));
+    expect(await stepRepository.countJobsForStepSince(flow.id, featureId, 'PLAN', since)).toBe(2);
   });
 
   it('AC-6: count is zero when a flow has no jobs', async () => {
     const flow = await createFlow();
-    expect(await stepRepository.countJobsForStepSince(flow.id, 'PLAN', new Date())).toBe(0);
+    expect(await stepRepository.countJobsForStepSince(flow.id, flow.features[0].id, 'PLAN', new Date())).toBe(0);
   });
 
   it('AC-7: projectSlug resolves a live project slug', async () => {
@@ -170,7 +171,7 @@ describeDb('fleet flow verdicts migration and repositories (PG)', () => {
     const ticket = await prisma.ticket.create({ data: { projectId, number: 1, type: 'TASK', title: 'Flow ticket' } });
     const flow = await prisma.fleetFlow.create({ data: {
       projectId, repoId, ticketId: ticket.id, entry: 'NAX', createdByType: 'USER', createdById: creatorId,
-      branch: `branch-${randomUUID()}`, specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10,
+      branch: `branch-${randomUUID()}`, specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10,
       features: { create: [{ position: 0, feature: `feature-${randomUUID()}`, specPath: 'spec.md', dependsOn: [], callsJobId: 'j1' }] },
     } });
     expect(await flowRepository.findById(flow.id)).toMatchObject({ ticketId: ticket.id, features: [{ callsJobId: 'j1' }] });

@@ -19,7 +19,7 @@ const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 
-interface FlowFieldsRow { flowId: string | null; flowStep: string | null }
+interface FlowFieldsRow { flowId: string | null; flowStep: string | null; flowFeatureId: string | null }
 
 describeIntegration('fleet job flow fields (PG)', () => {
   let app: NathApplication;
@@ -31,6 +31,9 @@ describeIntegration('fleet job flow fields (PG)', () => {
   let userId: string;
   let flowId: string;
   let otherFlowId: string;
+  /** The ids of the two features of `flowId`, in position order. */
+  let featureIds: string[];
+  let otherFeatureIds: string[];
 
   /** A PLAN job the flow engine dispatches: the flow's branch as `ref`, its spec as `planFrom`. */
   const planDto = (feature: string): DispatchFleetJobDto => ({
@@ -41,18 +44,25 @@ describeIntegration('fleet job flow fields (PG)', () => {
   const dispatch = (feature: string, opts: Parameters<FleetJobsService['dispatch']>[3] = {}) =>
     withTestActor({ type: 'USER', id: userId }, () => jobs.dispatch(userId, projectId, planDto(feature), opts));
 
-  const createFlow = async (branch: string): Promise<string> => {
+  /** A flow with two features, so a job can be scoped to either of them. */
+  const createFlow = async (branch: string): Promise<{ id: string; featureIds: string[] }> => {
     const flow = await db.fleetFlow.create({
       data: {
         projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: userId, branch, specSha: 'a'.repeat(40),
+        setSha: 'a'.repeat(40),
         reviewerRole: 'opus', supervisorRole: 'native:fast', costCapUsd: new Prisma.Decimal(25),
+        features: { create: [
+          { position: 0, feature: `one-${branch}`, specPath: 'docs/one.md', dependsOn: [] },
+          { position: 1, feature: `two-${branch}`, specPath: 'docs/two.md', dependsOn: [] },
+        ] },
       },
+      include: { features: { orderBy: { position: 'asc' } } },
     });
-    return flow.id;
+    return { id: flow.id, featureIds: flow.features.map((feature) => feature.id) };
   };
 
   const rowOf = async (jobId: string): Promise<FlowFieldsRow> =>
-    db.fleetJob.findUniqueOrThrow({ where: { id: jobId }, select: { flowId: true, flowStep: true } });
+    db.fleetJob.findUniqueOrThrow({ where: { id: jobId }, select: { flowId: true, flowStep: true, flowFeatureId: true } });
 
   beforeAll(async () => {
     await resetDb();
@@ -63,8 +73,12 @@ describeIntegration('fleet job flow fields (PG)', () => {
     userId = base.adminId;
     jobs = app.get(FleetJobsService);
     repository = app.get<IFleetJobRepository>(FLEET_JOB_REPOSITORY);
-    flowId = await createFlow('feat/x');
-    otherFlowId = await createFlow('feat/other');
+    const flow = await createFlow('feat/x');
+    flowId = flow.id;
+    featureIds = flow.featureIds;
+    const other = await createFlow('feat/other');
+    otherFlowId = other.id;
+    otherFeatureIds = other.featureIds;
   });
   afterAll(async () => {
     await app.close();
@@ -73,7 +87,7 @@ describeIntegration('fleet job flow fields (PG)', () => {
   it('AC-1: dispatch with a flowId and flowStep stores both on the created job', async () => {
     const res = await dispatch('flow-plan', { flowId, flowStep: 'PLAN', auditKey: 'system.flow.advance' });
 
-    expect(await rowOf(res.job.id)).toEqual({ flowId, flowStep: 'PLAN' });
+    expect(await rowOf(res.job.id)).toEqual({ flowId, flowStep: 'PLAN', flowFeatureId: null });
     const audit = await db.auditEntry.findFirstOrThrow({ where: { resourceId: res.job.id, resourceType: 'fleet-job' } });
     expect(audit.key).toBe('system.flow.advance');
   });
@@ -81,7 +95,7 @@ describeIntegration('fleet job flow fields (PG)', () => {
   it('AC-2: dispatch without a flowId stores null flowId and flowStep', async () => {
     const res = await dispatch('no-flow');
 
-    expect(await rowOf(res.job.id)).toEqual({ flowId: null, flowStep: null });
+    expect(await rowOf(res.job.id)).toEqual({ flowId: null, flowStep: null, flowFeatureId: null });
   });
 
   it('AC-3: a job created with a flowId reads back through findById with flowId and flowStep', async () => {
@@ -90,19 +104,31 @@ describeIntegration('fleet job flow fields (PG)', () => {
     expect(await repository.findById(res.job.id)).toEqual(expect.objectContaining({ flowId, flowStep: 'SPEC_REVIEW' }));
   });
 
-  it('AC-4: adoptForFlow links a job that has no flow and reports true', async () => {
-    const res = await dispatch('flow-adopt');
+  it('US-001 AC-4: dispatch with a flowId and a flowFeatureId stores the feature on the created job', async () => {
+    const res = await dispatch('flow-feature', { flowId, flowStep: 'PLAN', flowFeatureId: featureIds[1], auditKey: 'system.flow.advance' });
 
-    await expect(withTestActor({ type: 'SYSTEM', id: 'flow' }, () => jobs.adoptForFlow(res.job.id, otherFlowId, 'REVIEW')))
-      .resolves.toBe(true);
-    expect(await rowOf(res.job.id)).toEqual({ flowId: otherFlowId, flowStep: 'REVIEW' });
+    expect(await rowOf(res.job.id)).toEqual({ flowId, flowStep: 'PLAN', flowFeatureId: featureIds[1] });
   });
 
-  it('AC-5: adoptForFlow writes nothing and reports false when the job belongs to another flow', async () => {
-    const res = await dispatch('flow-adopt-taken', { flowId, flowStep: 'PLAN' });
+  it('US-001 AC-5: dispatch without a flowId stores no flow feature, even when one is offered', async () => {
+    const res = await dispatch('no-flow-feature', { flowFeatureId: featureIds[1] });
 
-    await expect(withTestActor({ type: 'SYSTEM', id: 'flow' }, () => jobs.adoptForFlow(res.job.id, otherFlowId, 'REVIEW')))
+    expect(await rowOf(res.job.id)).toEqual({ flowId: null, flowStep: null, flowFeatureId: null });
+  });
+
+  it('US-001 AC-6: adoptForFlow links a job that has no flow to the flow and its feature', async () => {
+    const res = await dispatch('flow-adopt');
+
+    await expect(withTestActor({ type: 'SYSTEM', id: 'flow' }, () => jobs.adoptForFlow(res.job.id, otherFlowId, otherFeatureIds[0], 'REVIEW')))
+      .resolves.toBe(true);
+    expect(await rowOf(res.job.id)).toEqual({ flowId: otherFlowId, flowStep: 'REVIEW', flowFeatureId: otherFeatureIds[0] });
+  });
+
+  it('US-001 AC-7: adoptForFlow writes nothing and reports false when the job belongs to another flow', async () => {
+    const res = await dispatch('flow-adopt-taken', { flowId, flowStep: 'PLAN', flowFeatureId: featureIds[0] });
+
+    await expect(withTestActor({ type: 'SYSTEM', id: 'flow' }, () => jobs.adoptForFlow(res.job.id, otherFlowId, otherFeatureIds[0], 'REVIEW')))
       .resolves.toBe(false);
-    expect(await rowOf(res.job.id)).toEqual({ flowId, flowStep: 'PLAN' });
+    expect(await rowOf(res.job.id)).toEqual({ flowId, flowStep: 'PLAN', flowFeatureId: featureIds[0] });
   });
 });

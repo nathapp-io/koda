@@ -166,7 +166,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
   it('AC-7: PRD_REVIEW calls use the latest PLAN result sha', async () => {
     const h = build({ latest: { flowStep: 'PRD_REVIEW' }, planCount: 1 });
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.latestJobForStep).toHaveBeenCalledWith('flow-1', 'PLAN');
+    expect(h.steps.latestJobForStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'PLAN');
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'j1', findings: [FINDING],
     }, 'plan-sha');
@@ -244,7 +244,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
   });
   it('AC-11: retains the applied SPEC_REVIEW despite its old ref and dispatches PLAN', async () => {
     const h = build({ flow: { specSha: 's2', features: [feature({ callsJobId: 'j1' })] } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }),
       expect.objectContaining({ flowStep: 'PLAN' }));
@@ -271,7 +271,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
   it('AC-14: counts PLAN jobs since approval to accept second-round findings', async () => {
     const h = build({ latest: { flowStep: 'PRD_REVIEW' }, planCount: 2 });
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'PLAN', APPROVED_AT);
+    expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'feature-1', 'PLAN', APPROVED_AT);
     expect(h.calls.applyPrdEdits).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_prd_edits', jobId: 'j1', edits: [], accepted: [FINDING],
     }, 'plan-sha');

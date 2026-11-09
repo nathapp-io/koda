@@ -126,7 +126,7 @@ function build(opts: Options = {}) {
     recordCalls: vi.fn(async () => { assertTx(); }),
     recordRulings: vi.fn(async () => { assertTx(); }),
     setWaiting: vi.fn(async () => { assertTx(); }),
-    latestJobForStep: vi.fn(async (_flowId: string, step: string) => (step === 'RUN' ? run : null)),
+    latestJobForStep: vi.fn(async (_flowId: string, _featureId: string, step: string) => (step === 'RUN' ? run : null)),
     projectSlug: vi.fn(async () => (opts.slug === undefined ? 'web' : opts.slug)),
   };
   const repos = {

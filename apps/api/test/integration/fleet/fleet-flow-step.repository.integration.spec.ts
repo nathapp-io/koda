@@ -44,15 +44,18 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
   async function createFlow(state: string, featureCount = 1) {
     return prisma.fleetFlow.create({ data: {
       projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: creatorId, branch: `branch-${crypto.randomUUID()}`,
-      specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10, state,
+      specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10, state,
       features: { create: Array.from({ length: featureCount }, (_, position) => ({ position, feature: `feature-${crypto.randomUUID()}-${position}`, specPath: 'spec.md', dependsOn: [] })) },
-    } });
+    }, include: { features: { orderBy: { position: 'asc' } } } });
   }
 
-  async function createJob(flowId: string, values: { flowStep?: string; queuedAt?: Date; costSpentUsd?: string; costCarriedUsd?: string } = {}) {
+  /** A job of the flow's first feature, unless the test names the feature it belongs to. */
+  async function createJob(flowId: string, values: { flowStep?: string; queuedAt?: Date; costSpentUsd?: string; costCarriedUsd?: string; flowFeatureId?: string } = {}) {
+    const flowFeatureId = values.flowFeatureId
+      ?? (await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId }, orderBy: { position: 'asc' } })).id;
     return prisma.fleetJob.create({ data: {
       projectId, repoId, ref: 'main', command: 'PLAN', feature: `job-${crypto.randomUUID()}`, profiles: [], maxCostUsd: 5,
-      selectorLabels: [], requestedById: creatorId, flowId, flowStep: values.flowStep ?? null,
+      selectorLabels: [], requestedById: creatorId, flowId, flowStep: values.flowStep ?? null, flowFeatureId,
       queuedAt: values.queuedAt ?? new Date(), costSpentUsd: values.costSpentUsd ?? '0', costCarriedUsd: values.costCarriedUsd ?? '0',
     } });
   }
@@ -86,8 +89,43 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     const plan = await createJob(flow.id, { flowStep: 'PLAN', queuedAt: new Date('2026-01-01T00:00:00Z') });
     await createJob(flow.id, { flowStep: 'RUN', queuedAt: new Date('2026-01-03T00:00:00Z') });
     const newestPlan = await createJob(flow.id, { flowStep: 'PLAN', queuedAt: new Date('2026-01-02T00:00:00Z') });
-    expect(await repo.latestJobForStep(flow.id, 'PLAN')).toMatchObject({ id: newestPlan.id });
+    expect(await repo.latestJobForStep(flow.id, flow.features[0].id, 'PLAN')).toMatchObject({ id: newestPlan.id });
     expect(plan.id).not.toBe(newestPlan.id);
+  });
+
+  it('US-001 AC-8: latestJobWithIngest answers for the feature, not for the flow', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    const mine = await createJob(flow.id, { flowFeatureId: first.id, queuedAt: new Date('2026-01-01T00:00:00Z') });
+    const newer = await createJob(flow.id, { flowFeatureId: second.id, queuedAt: new Date('2026-01-02T00:00:00Z') });
+
+    const latest = await repo.latestJobWithIngest(flow.id, first.id);
+
+    expect(latest?.job.id).toBe(mine.id);
+    expect(latest?.job.flowFeatureId).toBe(first.id);
+    expect(newer.id).not.toBe(mine.id);
+  });
+
+  it('US-001 AC-9: latestJobForStep answers for the feature, not for the flow', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    const plan = await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2026-01-02T00:00:00Z') });
+    const otherPlan = await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: first.id, queuedAt: new Date('2026-01-03T00:00:00Z') });
+
+    expect(await repo.latestJobForStep(flow.id, second.id, 'PLAN')).toMatchObject({ id: plan.id });
+    expect(otherPlan.id).not.toBe(plan.id);
+  });
+
+  it('US-001 AC-10: countJobsForStepSince counts the jobs of the feature only', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    const since = new Date('2026-01-01T00:00:00Z');
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2026-01-02T00:00:00Z') });
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2026-01-03T00:00:00Z') });
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: first.id, queuedAt: new Date('2026-01-04T00:00:00Z') });
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2025-12-31T00:00:00Z') });
+
+    expect(await repo.countJobsForStepSince(flow.id, second.id, 'PLAN', since)).toBe(2);
   });
 
   it('AC-8/9/10 sums spent and carried cost only for this flow, formatting four places', async () => {

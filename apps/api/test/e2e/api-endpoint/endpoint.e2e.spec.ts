@@ -4975,7 +4975,7 @@ describeIntegration('API Integration Tests', () => {
       async function seedFlow() {
         return db().fleetFlow.create({ data: {
           projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
-          branch: `feat/read-stop-e2e-${++sequence}`, specSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          branch: `feat/read-stop-e2e-${++sequence}`, specSha: 'a'.repeat(40), setSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
           features: { create: [{ position: 0, feature: 'read-stop', specPath: 'docs/read-stop.md', dependsOn: [] }] },
         } });
       }
@@ -4983,7 +4983,7 @@ describeIntegration('API Integration Tests', () => {
       async function seedWaitingFlow() {
         return db().fleetFlow.create({ data: {
           projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
-          branch: `feat/answers-e2e-${++sequence}`, specSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          branch: `feat/answers-e2e-${++sequence}`, specSha: 'a'.repeat(40), setSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
           state: 'WAITING_ANSWER',
           features: { create: [{ position: 0, feature: 'answers', specPath: 'docs/answers.md', dependsOn: [],
             state: 'WAITING_ANSWER', questionsJobId: 'job-1', questions: [{ id: '2', question: 'Clamp the bound?' }] }] },

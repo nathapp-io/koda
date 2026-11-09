@@ -25,7 +25,7 @@ describeDb('FleetFlow schema defaults and constraints', () => {
     const flow = await prisma.fleetFlow.create({
       data: {
         projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: 'creator',
-        branch: 'main', specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '4.25',
+        branch: 'main', specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '4.25',
       },
     });
     expect(flow.state).toBe('PENDING');
@@ -36,7 +36,7 @@ describeDb('FleetFlow schema defaults and constraints', () => {
     const flow = await prisma.fleetFlow.create({
       data: {
         projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: 'creator',
-        branch: 'main', specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '4.25',
+        branch: 'main', specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '4.25',
       },
     });
     const feature = { flowId: flow.id, position: 1, feature: 'alpha', specPath: '.nax/features/alpha/spec.md', dependsOn: [] };

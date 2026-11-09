@@ -1119,6 +1119,7 @@ model FleetJob {
   threadId           String? // S5a: the ChatThread a THREAD job serves
   flowId             String?
   flowStep           String?
+  flowFeatureId      String? // US-001: the flow feature this job belongs to (null for a job no flow owns)
   updatedAt          DateTime  @updatedAt
 
   project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -1157,6 +1158,7 @@ model FleetJob {
   @@index([scheduleId, queuedAt])
   @@index([threadId])
   @@index([flowId, queuedAt])
+  @@index([flowId, flowFeatureId, queuedAt]) // US-001: a flow's jobs are read per feature
 }
 
 /// Fleet S5b §1 (US-002): the hash-only audit of one koda tool call a THREAD session made. The input is never stored,
@@ -1231,6 +1233,7 @@ model FleetFlow {
   createdById       String
   branch            String
   specSha            String
+  setSha             String // US-001: the sha of the approved set of features (backfilled from specSha)
   pinnedRunnerId    String?
   reviewerRole      String
   supervisorRole    String
@@ -1267,6 +1270,7 @@ model FleetFlowFeature {
   position    Int
   feature     String
   specPath    String
+  branch      String? // US-001: the feature's own branch, once a later feature is started
   dependsOn   String[]
   state       String    @default("PENDING")
   currentStep String?

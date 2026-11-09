@@ -100,7 +100,7 @@ integration('fleet flow advancement through the database', () => {
       projectId, repoId, ref: step === 'SPEC_REVIEW' ? SHA : 'main', command, feature: flow.features[0].feature,
       profiles: [], maxCostUsd: '10', selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId,
       state: 'COMPLETED', queuedAt: new Date(now.getTime() - 60_000), finishedAt: new Date(now.getTime() - 30_000),
-      flowId, flowStep: step, ...data,
+      flowId, flowFeatureId: flow.features[0].id, flowStep: step, ...data,
     } });
   }
 

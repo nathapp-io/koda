@@ -114,14 +114,16 @@ integration('manual fleet flow loop through ticker and persistence (PG)', () => 
     return flow;
   }
 
-  function jobData(flowId: string): Prisma.FleetJobUncheckedCreateInput {
-    return { projectId, repoId, flowId, ref: forgeHead, command: 'PLAN', feature: FEATURE, profiles: [], maxCostUsd: '10',
+  /** A flow job belongs to the flow's feature (US-001), so the engine's per-feature reads find it. */
+  async function jobData(flowId: string): Promise<Prisma.FleetJobUncheckedCreateInput> {
+    const flowFeature = await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId }, orderBy: { position: 'asc' } });
+    return { projectId, repoId, flowId, flowFeatureId: flowFeature.id, ref: forgeHead, command: 'PLAN', feature: FEATURE, profiles: [], maxCostUsd: '10',
       selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId, state: 'COMPLETED' };
   }
 
   async function createCompletedReview(flowId: string, step: 'SPEC_REVIEW' | 'PRD_REVIEW', output: unknown) {
     return db.fleetJob.create({ data: {
-      ...jobData(flowId), command: 'AGENT', flowStep: step,
+      ...(await jobData(flowId)), command: 'AGENT', flowStep: step,
       queuedAt: new Date(now.getTime() - 30_000), finishedAt: new Date(now.getTime() - 10_000),
       agentResult: { status: 'completed', output: JSON.stringify(output), truncated: false, deniedAsks: [], deniedAsksTruncated: false },
     } });

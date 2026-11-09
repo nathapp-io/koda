@@ -31,6 +31,8 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
     return this.toDomain(await this.prisma.client.fleetFlow.create({ data: {
       projectId: data.projectId, repoId: data.repoId, threadId: data.threadId ?? null, entry: data.entry,
       createdByType: data.createdByType, createdById: data.createdById, branch: data.branch, specSha: data.specSha,
+      // US-001: a new flow's set sha is the sha it was approved with.
+      setSha: data.specSha,
       pinnedRunnerId: data.pinnedRunnerId ?? null, reviewerRole: data.reviewerRole, supervisorRole: data.supervisorRole,
       costCapUsd: data.costCapUsd, approvalMode: data.approvalMode ?? null,
       features: { create: data.features.map(({ feature, specPath, dependsOn }, position) => ({ position, feature, specPath: posix.normalize(specPath), dependsOn, state: 'PENDING' })) },

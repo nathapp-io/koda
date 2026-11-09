@@ -527,7 +527,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
       },
     });
     expect(decisions.inputs.at(-1)?.prWaitMs).toBeGreaterThan(0);
-    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1', 'feature-1');
   });
 });
 
@@ -618,7 +618,7 @@ describe('FleetFlowAdvanceService pre-push spec guard (US-015)', () => {
   ] as const)('%s: does not read forge head for a post-push or active job', async (_ac, latest) => {
     const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: latest, ingestSettled: false } });
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1', 'feature-1');
     expect(h.github.getBranchHead).not.toHaveBeenCalled();
     expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
@@ -857,8 +857,23 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const h = build();
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch.mock.calls[0]?.[3]).toEqual({
-      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', auditKey: 'system.flow.advance',
+      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', flowFeatureId: 'feature-1', auditKey: 'system.flow.advance',
     });
+  });
+
+  it('US-001 AC-11: dispatches SPEC_REVIEW with the feature of a single-feature flow', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.jobs.dispatch.mock.calls[0]?.[3]).toMatchObject({
+      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', flowFeatureId: 'feature-1',
+    });
+  });
+
+  it('US-001 AC-12: reads the latest job of the feature of a single-feature flow', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1', 'feature-1');
   });
 
   it('dispatch AC-3: marks SPEC_REVIEW RUNNING inside the record transaction', async () => {
@@ -901,7 +916,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
       flow: h.record, feature: h.record.features[0], step: 'PLAN', remainingCapUsd: '10.0000', reviewAgent: 'Explore',
-    }), { flowId: 'flow-1', flowStep: 'PLAN', auditKey: 'system.flow.advance' });
+    }), { flowId: 'flow-1', flowStep: 'PLAN', flowFeatureId: 'feature-1', auditKey: 'system.flow.advance' });
     expect(h.outbox.record).not.toHaveBeenCalled();
     expect(h.activity.record.mock.calls.map(([entry]) => entry.action)).toEqual(['flow.step']);
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: { step: 'PLAN', jobId: 'j1' } }));
@@ -1018,7 +1033,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
       flow: h.record, feature: h.record.features[0], step, remainingCapUsd: '10.0000', reviewAgent: 'Explore',
       plan, ...(step === 'PRD_REVIEW' ? { prdEdits: true } : {}), ...(step === 'FIX' ? { pr: { number: 12 } } : {}),
-    }), { flowId: 'flow-1', flowStep: step, auditKey: 'system.flow.advance' });
+    }), { flowId: 'flow-1', flowStep: step, flowFeatureId: 'feature-1', auditKey: 'system.flow.advance' });
     if (step === 'FIX') expect(h.rulings.ruledItemIds).not.toHaveBeenCalled();
     expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', step,
       { flowState: 'RUNNING', ...(step === 'FIX' ? { prNumber: 12 } : {}) });
@@ -1028,14 +1043,14 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const review = job({ flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), state: 'COMPLETED',
       agentResult: { status: 'completed', output: JSON.stringify({ findings: [SPEC_FINDING] }) } });
     const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW', callsJobId: 'job-1' })] }, snapshot: { job: review, ingestSettled: true } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'SPEC_REVIEW', APPROVED_AT);
+    expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', APPROVED_AT);
     expect(decisions.inputs.at(-1)).toMatchObject({ specReviewCount: 1 });
 
     const plan = build({ flow: { state: 'RUNNING' }, snapshot: { job: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED' }), ingestSettled: true } });
     await plan.service.advance('flow-1', NOW);
-    expect(plan.steps.countJobsForStepSince).not.toHaveBeenCalledWith('flow-1', 'SPEC_REVIEW', expect.any(Date));
+    expect(plan.steps.countJobsForStepSince).not.toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', expect.any(Date));
     expect(decisions.inputs.at(-1)).not.toHaveProperty('specReviewCount');
   });
 
@@ -1044,7 +1059,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
       state: 'RUNNING', currentStep: 'SPEC_REVIEW', callsJobId: 'review-1',
     })] }, snapshot: { job: job({ id: 'review-1', flowStep: 'SPEC_REVIEW', ref: 's1', state: 'COMPLETED', queuedAt: new Date(APPROVED_AT.getTime() + 1),
       agentResult: { status: 'completed', output: JSON.stringify({ findings: [SPEC_FINDING] }) } }), ingestSettled: true } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
     h.github.getBranchHead.mockResolvedValue('calls-sha');
     await h.service.advance('flow-1', NOW);
     expect(decisions.inputs.at(-1)).toMatchObject({ latestJob: { id: 'review-1', step: 'SPEC_REVIEW' }, specReviewCount: 1, callsJobId: 'review-1' });
@@ -1056,7 +1071,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW', callsJobId: 'review-1' })] },
       snapshot: { job: job({ id: 'review-1', flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), state: 'COMPLETED',
         agentResult: { status: 'completed', output: JSON.stringify({ findings: [SPEC_FINDING] }) } }), ingestSettled: true } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }),
       expect.objectContaining({ flowStep: 'PLAN' }));

@@ -36,6 +36,7 @@ integration('fleet flow start approval decision endpoint', () => {
       data: {
         projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER',
         createdById: options.onBehalfOf?.id ?? world.ids.dev, branch: 'feat/flow', specSha: options.flowSha ?? sha,
+        setSha: options.flowSha ?? sha,
         reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: new Prisma.Decimal(5),
         state: options.state ?? 'PENDING', approvalRequestId: null,
         features: { create: [{ position: 0, feature: 'one', specPath: 'docs/one.md', dependsOn: [] }] },

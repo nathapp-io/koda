@@ -46,15 +46,15 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
   });
 
   it('returns null when the flow has no job', async () => {
-    await expect(repo.latestJobWithIngest('flow-1')).resolves.toBeNull();
+    await expect(repo.latestJobWithIngest('flow-1', 'feature-1')).resolves.toBeNull();
     expect(queryRaw).toHaveBeenCalledTimes(1);
-    expect(sqlOf().values).toEqual(['flow-1']);
+    expect(sqlOf().values).toEqual(['flow-1', 'feature-1']);
   });
 
   it('pairs the job row with the settled mark of its own lease in one statement', async () => {
     queryRaw.mockResolvedValue([row()]);
 
-    const latest = await repo.latestJobWithIngest('flow-1');
+    const latest = await repo.latestJobWithIngest('flow-1', 'feature-1');
 
     expect(latest?.ingestSettled).toBe(true);
     expect(latest?.job).toMatchObject({
@@ -68,19 +68,20 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
   it('answers unsettled for a job whose lease has no settled ingest', async () => {
     queryRaw.mockResolvedValue([row({ ingestSettled: false })]);
 
-    await expect(repo.latestJobWithIngest('flow-1')).resolves.toMatchObject({ ingestSettled: false });
+    await expect(repo.latestJobWithIngest('flow-1', 'feature-1')).resolves.toMatchObject({ ingestSettled: false });
   });
 
   it('scopes the status to the job and its own lease, counting done, partial and failed as settled', async () => {
-    await repo.latestJobWithIngest('flow-1');
+    await repo.latestJobWithIngest('flow-1', 'feature-1');
 
     const { text } = sqlOf();
     expect(text).toContain('FROM "FleetBundleIngest" AS ingest');
     expect(text).toContain('ingest."jobId" = job."id"');
     expect(text).toContain('ingest."leaseEpoch" = job."leaseEpoch"');
     expect(text).toContain("ingest.\"status\" IN ('done', 'partial', 'failed')");
-    // The latest job of the flow, by the same order the plain read uses.
+    // The latest job of the flow's feature, by the same order the plain read uses.
     expect(text).toContain('WHERE job."flowId" = ?');
+    expect(text).toContain('AND job."flowFeatureId" = ?');
     expect(text).toContain('ORDER BY job."queuedAt" DESC, job."id" DESC');
     expect(text).toContain('LIMIT 1');
   });

@@ -94,7 +94,7 @@ export class FleetJobsService {
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; flowFeatureId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX || dto.command === FleetJobKind.AGENT) && repo.provider !== 'github') {
@@ -145,6 +145,9 @@ export class FleetJobsService {
           // the process dies before the bookkeeping that follows the dispatch.
           ...(opts.flowId ? { flowId: opts.flowId } : {}),
           ...(opts.flowId && opts.flowStep ? { flowStep: opts.flowStep } : {}),
+          // US-001: the job is scoped to the flow feature it belongs to, written with the flow link: a job
+          // dispatched without a flow has no feature either.
+          ...(opts.flowId && opts.flowFeatureId ? { flowFeatureId: opts.flowFeatureId } : {}),
         });
         await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
@@ -189,9 +192,10 @@ export class FleetJobsService {
    * The repository's conditional update is the whole rule: a job whose `flowId` is already set — by this flow's own
    * dispatch, or by another flow — is left untouched and the answer is `false`. Call inside the caller's
    * transaction (US-016 records the adoption there).
+   * US-001: the flow feature is written in the same update, so an adopted job is scoped like a dispatched one.
    */
-  async adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean> {
-    return await this.repo.adoptForFlow(jobId, flowId, step);
+  async adoptForFlow(jobId: string, flowId: string, flowFeatureId: string, step: FlowStep): Promise<boolean> {
+    return await this.repo.adoptForFlow(jobId, flowId, flowFeatureId, step);
   }
 
   async list(filters: FleetJobFilters, page: IPageOption): Promise<IPageResult<FleetJobDto>> {

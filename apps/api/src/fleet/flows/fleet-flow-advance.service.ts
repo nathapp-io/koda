@@ -180,7 +180,7 @@ export class FleetFlowAdvanceService {
       this.logger.warn(`Flow ${flow.id}: project slug unavailable; the RULE verdict is skipped`);
       return;
     }
-    const run = await this.steps.latestJobForStep(flow.id, 'RUN');
+    const run = await this.steps.latestJobForStep(flow.id, flow.features[0].id, 'RUN');
     const openItems = run?.workflow?.openItems ?? [];
     const ruled = run === null ? [] : await this.rulings.ruledItemIds(run.id);
     // The RULE task lists the RUN's items that are still open and not ruled yet.
@@ -273,7 +273,7 @@ export class FleetFlowAdvanceService {
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
-      if (!(await this.jobs.adoptForFlow(jobId, current.id, 'REVIEW'))) {
+      if (!(await this.jobs.adoptForFlow(jobId, current.id, current.features[0].id, 'REVIEW'))) {
         await this.writeDecision(current, null, {
           kind: 'stop', reason: 'dispatch_refused', detail: 'REVIEW: head claimed by another flow',
         }, now);
@@ -294,7 +294,8 @@ export class FleetFlowAdvanceService {
       prdEdits: flow.entry === 'NAX',
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
-      flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
+      // US-001: the job belongs to the flow's feature, so a later feature's jobs never answer for it.
+      flowId: flow.id, flowStep: action.step, flowFeatureId: flow.features[0].id, auditKey: 'system.flow.advance',
     });
     return result.job.id;
   }
@@ -369,7 +370,7 @@ export class FleetFlowAdvanceService {
       const spentUsd = await this.refreshSpent(current);
       // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
       // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
-      const snapshot = await this.steps.latestJobWithIngest(current.id);
+      const snapshot = await this.steps.latestJobWithIngest(current.id, current.features[0].id);
       // A dispatch can finish preflight and insert after a different spec was re-approved. queuedAt
       // alone cannot identify that approval's review: ignore the old SHA for both decision and recovery.
       // Our own calls commit is the exception: keep its review only within this approval generation.
@@ -420,7 +421,7 @@ export class FleetFlowAdvanceService {
       if (action.kind === 'apply_calls' || action.kind === 'apply_prd_edits') {
         // The PRD edit action has no step of its own: it belongs to the PRD_REVIEW branch.
         const prdReview = action.kind === 'apply_prd_edits' || action.step === 'PRD_REVIEW';
-        const plan = prdReview ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
+        const plan = prdReview ? await this.steps.latestJobForStep(current.id, current.features[0].id, 'PLAN') : null;
         if (prdReview) {
           if (!plan?.resultBranch || !plan.resultSha) throw new Error('PRD_REVIEW calls require a PLAN result branch and sha');
           // PLAN pushes to the PRD's branchName, not necessarily the accepted input branch. Persist
@@ -453,10 +454,10 @@ export class FleetFlowAdvanceService {
         }
       }
       const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
-        ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
+        ? await this.steps.latestJobForStep(current.id, current.features[0].id, 'PLAN') : null;
       let rule: DispatchPass['rule'];
       if (action.step === 'RULE') {
-        const run = await this.steps.latestJobForStep(current.id, 'RUN');
+        const run = await this.steps.latestJobForStep(current.id, current.features[0].id, 'RUN');
         if (!run?.resultBranch) {
           await this.writeDecision(current, job ?? null, {
             kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: RUN has no result branch',
@@ -505,7 +506,7 @@ export class FleetFlowAdvanceService {
   /** undefined: not a candidate; null: disconnected. Only a head SHA survives forge preflight. */
   private async readSpecHead(flow: FleetFlowRecord, now: Date): Promise<string | null | undefined> {
     if (flow.threadId !== null || (flow.state !== 'APPROVED' && flow.state !== 'RUNNING')) return;
-    const snapshot = await this.steps.latestJobWithIngest(flow.id);
+    const snapshot = await this.steps.latestJobWithIngest(flow.id, flow.features[0].id);
     const latest = snapshot?.job;
     // Calls own forge failure classification, including permanent installation failures. A dispatch
     // preflight here would swallow them before the transactional calls_failed stop/outbox path.
@@ -537,11 +538,11 @@ export class FleetFlowAdvanceService {
   private async decisionInput(flow: FleetFlowRecord, latest: LatestFlowJob | null, now: Date): Promise<FlowStepInput> {
     const latestJob = latest === null ? null : await this.jobView(flow, latest.job);
     const needsRuleInputs = latestJob?.step === 'REVIEW' || latestJob?.step === 'RULE';
-    const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, 'RUN') : null;
+    const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, flow.features[0].id, 'RUN') : null;
     const workflow = run?.workflow ?? null;
     const ruledItemIds = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
     const specReviewCount = latestJob?.step === 'SPEC_REVIEW'
-      ? await this.steps.countJobsForStepSince(flow.id, 'SPEC_REVIEW', flow.approvedAt ?? now)
+      ? await this.steps.countJobsForStepSince(flow.id, flow.features[0].id, 'SPEC_REVIEW', flow.approvedAt ?? now)
       : undefined;
     return {
       state: flow.state,
@@ -560,7 +561,7 @@ export class FleetFlowAdvanceService {
       ingestSettled: latest?.ingestSettled ?? false,
       featurePrNumber: flow.features[0]?.prNumber ?? null,
       callsJobId: flow.features[0]?.callsJobId ?? null,
-      planCount: await this.steps.countJobsForStepSince(flow.id, 'PLAN', flow.approvedAt ?? now),
+      planCount: await this.steps.countJobsForStepSince(flow.id, flow.features[0].id, 'PLAN', flow.approvedAt ?? now),
       ...(specReviewCount !== undefined ? { specReviewCount } : {}),
       prdEditsJobId: flow.features[0]?.prdEditsJobId ?? null,
       canApplyCalls: flow.entry === 'NAX',
