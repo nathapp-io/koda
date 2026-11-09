@@ -36,6 +36,7 @@ async function mountPage(options: {
     },
     alias: {
       '~/composables/useFleetFlows': { useFleetFlows: () => ({ get, overview: getOverview }) },
+      '~/composables/useVisiblePolling': { useVisiblePolling: () => ({ start: jest.fn(), stop: jest.fn(), runNow: async () => undefined, isActive: () => false }) },
       '~/composables/useApi': { ApiError },
       '~/composables/useProjectMemberNames': { useProjectMemberNames: () => ({ members: [], load, nameOf }) },
       '~/composables/usePermissions': { useProjectPermissions: () => ({ permissions: { value: { has: () => false } } }) },

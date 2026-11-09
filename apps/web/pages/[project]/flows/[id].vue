@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ApiError, extractApiError } from '~/composables/useApi'
+import { useVisiblePolling } from '~/composables/useVisiblePolling'
 import { useFleetFlows } from '~/composables/useFleetFlows'
 import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
 import { flowStateKey, flowStepKey, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
@@ -26,6 +27,9 @@ const flow = ref<FleetFlowDto | null>(null)
 const overview = ref<FleetFlowOverviewDto | null>(null)
 const pending = ref(true)
 const failure = ref<'notFound' | 'loadFailed' | null>(null)
+let pageMounted = false
+
+const polling = useVisiblePolling(refresh, 15_000)
 
 const stateLabel = computed(() => {
   const current = flow.value
@@ -88,18 +92,38 @@ async function load(): Promise<void> {
     failure.value = isNotFound(flowResult.reason) ? 'notFound' : 'loadFailed'
     flow.value = null
     overview.value = null
+    polling.stop()
   }
   else {
     flow.value = flowResult.value
     overview.value = overviewResult.status === 'fulfilled' ? overviewResult.value : null
+    if (!isLiveFlow(flowResult.value.state)) polling.stop()
   }
   pending.value = false
 }
 
+/** Poll reads are independent: a failed endpoint leaves its last successful data on screen. */
+async function refresh(): Promise<void> {
+  const [flowResult, overviewResult] = await Promise.allSettled([flows.get(flowId), flows.overview(flowId)])
+  if (flowResult.status === 'fulfilled') {
+    flow.value = flowResult.value
+    if (!isLiveFlow(flowResult.value.state)) polling.stop()
+  }
+  if (overviewResult.status === 'fulfilled') overview.value = overviewResult.value
+}
+
 onMounted(() => {
-  void load()
+  pageMounted = true
+  void load().then(() => {
+    if (pageMounted && flow.value && isLiveFlow(flow.value.state) && !failure.value) polling.start()
+  })
   // Member names are cosmetic; an unavailable/departed member falls back to their id.
   void people.load().catch(() => undefined)
+})
+
+onBeforeUnmount(() => {
+  pageMounted = false
+  polling.stop()
 })
 </script>
 
