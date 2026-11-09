@@ -7,7 +7,7 @@ import type { FlowPrdEdit } from './flow-prd-edits';
 
 const approvedAt = new Date('2026-11-07T12:00:00.000Z');
 const input = (overrides: Partial<FlowStepInput> = {}): FlowStepInput => ({
-  state: 'RUNNING', featureCount: 1, approvedAt, latestJob: null, now: new Date(10_000),
+  state: 'RUNNING', firstFeature: true, approvedAt, latestJob: null, now: new Date(10_000),
   prWaitMs: 5_000, ingestSettled: false, featurePrNumber: null,
   callsJobId: null, planCount: 0, canApplyCalls: false, questionsJobId: null, answers: null, ...overrides,
 });
@@ -18,8 +18,26 @@ const job = (overrides: Partial<FlowJobView> = {}): FlowJobView => ({
 });
 
 describe('decideFlowStep', () => {
-  it('AC-1 skips flows with multiple features', () => {
-    expect(decideFlowStep(input({ featureCount: 2 }))).toEqual({ kind: 'skip' });
+  it('US-006 AC-1 dispatches PLAN at a later feature with no job', () => {
+    expect(decideFlowStep(input({ firstFeature: false }))).toEqual({ kind: 'dispatch', step: 'PLAN' });
+  });
+  it('US-006 AC-2 dispatches SPEC_REVIEW at the first feature with no job', () => {
+    expect(decideFlowStep(input({ firstFeature: true }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
+  });
+  it('US-006 AC-3 dispatches SPEC_REVIEW when APPROVED at first feature', () => {
+    expect(decideFlowStep(input({ state: 'APPROVED', firstFeature: true }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
+  });
+  it('US-006 AC-4 dispatches PRD_REVIEW after later-feature PLAN with results', () => {
+    expect(decideFlowStep(input({ firstFeature: false, latestJob: job({ step: 'PLAN', resultBranch: 'feature/a', resultSha: 'abc123' }) })))
+      .toEqual({ kind: 'dispatch', step: 'PRD_REVIEW' });
+  });
+  it('US-006 AC-5 completes an already-ready later-feature FIX', () => {
+    expect(decideFlowStep(input({ firstFeature: false, latestJob: job({ step: 'FIX', fixReady: { markedReady: true } }) })))
+      .toEqual({ kind: 'complete' });
+  });
+  it.each([true, false])('US-006 AC-7 retains incomplete PLAN guard for firstFeature=%s', (firstFeature) => {
+    expect(decideFlowStep(input({ firstFeature, latestJob: job({ step: 'PLAN', resultBranch: null, resultSha: null }) })))
+      .toEqual({ kind: 'stop', reason: 'plan_no_result', detail: 'PLAN job has no result branch or sha' });
   });
   it('AC-2 starts an approved flow with spec review', () => {
     expect(decideFlowStep(input({ state: 'APPROVED' }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });

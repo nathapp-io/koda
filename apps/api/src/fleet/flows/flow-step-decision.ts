@@ -24,7 +24,7 @@ export interface FlowJobView {
 
 export interface FlowStepInput {
   state: FleetFlowState;
-  featureCount: number;
+  firstFeature: boolean;
   approvedAt: Date;
   latestJob: FlowJobView | null;
   now: Date;
@@ -55,10 +55,11 @@ export type FlowStopReason =
   | 'cost_cap'
   | 'creator_lost_access'
   | 'budget_paused'
-  | 'dispatch_refused';
+  | 'dispatch_refused'
+  | 'pr_closed'
+  | 'spec_changed';
 
 export type FlowStepAction =
-  | { kind: 'skip' }
   | { kind: 'wait' }
   | { kind: 'complete' }
   | { kind: 'stop'; reason: FlowStopReason; detail: string }
@@ -86,14 +87,16 @@ function failed(job: FlowJobView): FlowStepAction {
 }
 
 export function decideFlowStep(input: FlowStepInput): FlowStepAction {
-  if (input.featureCount !== 1) return { kind: 'skip' };
-
-  const { state, latestJob } = input;
-  if (!latestJob) return state === 'APPROVED' || state === 'RUNNING' ? dispatch('SPEC_REVIEW') : { kind: 'wait' };
+  const { state, latestJob, firstFeature } = input;
+  if (!latestJob) {
+    if (state === 'APPROVED') return firstFeature ? dispatch('SPEC_REVIEW') : { kind: 'wait' };
+    if (state === 'RUNNING') return dispatch(firstFeature ? 'SPEC_REVIEW' : 'PLAN');
+    return { kind: 'wait' };
+  }
 
   const adoptedSpecReview = latestJob.step === 'SPEC_REVIEW'
     && latestJob.queuedAt.getTime() >= input.approvedAt.getTime();
-  if (state === 'APPROVED' && !adoptedSpecReview) return dispatch('SPEC_REVIEW');
+  if (state === 'APPROVED' && firstFeature && !adoptedSpecReview) return dispatch('SPEC_REVIEW');
 
   if (latestJob.state === 'FAILED' || latestJob.state === 'CANCELLED' || latestJob.state === 'CRASHED') {
     return failed(latestJob);

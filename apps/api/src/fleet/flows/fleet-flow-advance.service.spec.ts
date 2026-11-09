@@ -473,7 +473,8 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     await h.service.advance('flow-1', NOW);
 
     expect(h.wrote()).toBe(false);
-    expect(decisions.inputs.at(-1)).toMatchObject({ state: 'RUNNING', featureCount: 1 });
+    expect(decisions.inputs.at(-1)).toMatchObject({ state: 'RUNNING', firstFeature: true });
+    expect(decisions.inputs.at(-1)).not.toHaveProperty('featureCount');
   });
 
   it('AC-15: writes nothing when the nax-entry repo row is gone at lock time', async () => {
@@ -520,7 +521,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     await h.service.advance('flow-1', NOW);
 
     expect(decisions.inputs.at(-1)).toMatchObject({
-      state: 'RUNNING', featureCount: 1, approvedAt: APPROVED_AT, now: NOW, featurePrNumber: 7, ingestSettled: true,
+      state: 'RUNNING', firstFeature: true, approvedAt: APPROVED_AT, now: NOW, featurePrNumber: 7, ingestSettled: true,
       latestJob: {
         id: 'job-1', step: 'RUN', state: 'COMPLETED', prNumber: 12, resultSha: 'c'.repeat(40),
         stateReason: null, agentOutput: null, fixReady: null,
@@ -836,11 +837,11 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.wrote()).toBe(false);
   });
 
-  it('leaves multi-feature flows alone', async () => {
+  it('advances the first feature of a multi-feature flow pending active-feature selection', async () => {
     const h = build({ flow: { features: [feature(), feature({ id: 'feature-2', position: 1 })] } });
     await h.service.advance('flow-1', NOW);
-    expect(h.jobs.dispatch).not.toHaveBeenCalled();
-    expect(h.wrote()).toBe(false);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'AGENT' }),
+      expect.objectContaining({ flowId: 'flow-1', flowFeatureId: 'feature-1', flowStep: 'SPEC_REVIEW' }));
   });
 
   it('dispatch AC-1: sends exactly buildStepDispatch output on behalf of the creator outside a transaction', async () => {

@@ -380,7 +380,7 @@ export class FleetFlowAdvanceService {
         ? null : snapshot;
       const input = await this.decisionInput(current, latest, now);
       const action = decideFlowStep(input);
-      if (current.features.length !== 1) return;
+      // US-006: until active-feature selection lands, advance the first feature only.
       // The insert carries the flow link even if dispatch/record crashed. Reconcile once, then let the
       // next tick decide from RUNNING. An older approval's job must never be mistaken for this start.
       const job = latest?.job;
@@ -546,7 +546,7 @@ export class FleetFlowAdvanceService {
       : undefined;
     return {
       state: flow.state,
-      featureCount: flow.features.length,
+      firstFeature: true,
       // An APPROVED or RUNNING flow was approved before it became live; the fallback only widens the type.
       approvedAt: flow.approvedAt ?? now,
       latestJob,
