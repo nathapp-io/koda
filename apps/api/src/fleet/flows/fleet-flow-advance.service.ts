@@ -15,7 +15,7 @@ import { FleetReposService } from '../repos/fleet-repos.service';
 import { prNumberFor } from '../sync/pr-attribution.service';
 import { ThreadsService } from '../threads/threads.service';
 import { FLEET_FLOW_REPOSITORY, type FleetFlowFeatureRecord, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
-import { nextFlowFeature } from './flow-features';
+import { groupFindingsByFeature, nextFlowFeature } from './flow-features';
 import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
@@ -117,7 +117,12 @@ export class FleetFlowAdvanceService {
     flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, action: ApplyCallsAction,
     plan: FleetJobRecord | null, now: Date,
   ): Promise<void> {
-    const expectedHead = action.step === 'SPEC_REVIEW' ? flow.specSha : plan?.resultSha;
+    // The set review covers every spec of the flow: its findings are committed spec by spec.
+    if (action.step === 'SPEC_REVIEW') {
+      await this.advanceSetCalls(flow, feature, action, now);
+      return;
+    }
+    const expectedHead = plan?.resultSha;
     if (!expectedHead) throw new Error('PRD_REVIEW calls require a PLAN result sha');
     const outcome = await this.calls.apply(flow, action, expectedHead, this.callsTarget(flow, feature));
     if (outcome.kind === 'retry') return;
@@ -147,6 +152,89 @@ export class FleetFlowAdvanceService {
         step: action.step, jobId: action.jobId, specSha: outcome.specSha, count: action.findings.length,
       });
     });
+  }
+
+  /**
+   * The set's `SPEC_REVIEW` findings are committed spec by spec: every feature's own findings go
+   * into its own spec, in position order, and each commit lands on the flow branch on top of the
+   * previous one. A finding without a feature, or with a name no flow feature has, goes into the
+   * set's first spec. The forge calls stay outside the transactions; the markers, the shas and the
+   * activity are written once, under the locks, after the last commit.
+   */
+  private async advanceSetCalls(
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, action: ApplyCallsAction, now: Date,
+  ): Promise<void> {
+    const features = this.orderedFeatures(flow);
+    const byId = new Map(features.map((item) => [item.id, item]));
+    const commits: { target: FleetFlowFeatureRecord; sha: string }[] = [];
+    let head = flow.specSha;
+    let staleHead: string | null = null;
+    for (const group of groupFindingsByFeature(action.findings, features)) {
+      const target = byId.get(group.feature.id);
+      if (!target) continue;
+      const outcome = await this.calls.apply(flow, { ...action, findings: group.findings }, head, {
+        feature: target.feature, specPath: target.specPath, branch: flow.branch,
+      });
+      // A retry writes no progress: the next pass starts again at the first feature.
+      if (outcome.kind === 'retry') return;
+      if (outcome.kind === 'failed') {
+        await this.writeStop(flow, feature, 'calls_failed', `${action.step}: ${outcome.detail}`, now);
+        return;
+      }
+      // A stale head ends the pass: the branch moved under the flow.
+      if (outcome.kind === 'stale') {
+        staleHead = outcome.head;
+        break;
+      }
+      head = outcome.specSha;
+      commits.push({ target, sha: outcome.specSha });
+    }
+
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return;
+      if (staleHead !== null) {
+        // The set review belongs to the flow's first feature: a stale head re-asks the flow.
+        if (isFirstFeature(feature)) {
+          await this.flowService.reaskLocked(current, staleHead, now);
+          return;
+        }
+        await this.writeDecision(current, feature, null, {
+          kind: 'stop', reason: 'spec_changed', detail: `${action.step}: spec changed at ${staleHead}`,
+        }, now);
+        return;
+      }
+      const last = commits.at(-1);
+      for (const target of this.setCallTargets(features, commits)) {
+        if (last !== undefined && target.id === last.target.id) {
+          // The last commit is the set's head: it moves the flow's spec sha and its set sha.
+          await this.steps.recordCalls(current.id, target.id, action.jobId, last.sha, { setSha: true });
+          continue;
+        }
+        // A marker without a sha: only the last commit moves the flow's shas.
+        await this.steps.recordCalls(current.id, target.id, action.jobId, null);
+      }
+      await this.record(current, `flow calls ${action.step}`, 'flow.calls', {
+        step: action.step, jobId: action.jobId, specSha: last?.sha ?? null, count: action.findings.length,
+      });
+    });
+  }
+
+  /**
+   * The features whose marker the set pass writes: the set's first feature, which carries the
+   * marker the decision reads even when no finding is its own, and every spec the pass committed.
+   */
+  private setCallTargets(
+    features: FleetFlowFeatureRecord[], commits: { target: FleetFlowFeatureRecord; sha: string }[],
+  ): FleetFlowFeatureRecord[] {
+    const ids = [features[0]?.id, ...commits.map(({ target }) => target.id)];
+    const targets: FleetFlowFeatureRecord[] = [];
+    for (const id of ids) {
+      if (id === undefined || targets.some((target) => target.id === id)) continue;
+      const found = features.find((item) => item.id === id);
+      if (found) targets.push(found);
+    }
+    return targets;
   }
 
   /**

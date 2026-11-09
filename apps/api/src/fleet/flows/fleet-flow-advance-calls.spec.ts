@@ -132,7 +132,8 @@ describe('FleetFlowAdvanceService.advance calls', () => {
   it('AC-2: records committed calls under parent then flow locks', async () => {
     const h = build();
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.recordCalls).toHaveBeenCalledExactlyOnceWith('flow-1', 'feature-1', 'j1', 's2');
+    // US-010: a SPEC_REVIEW calls commit is the set's head: it moves the spec sha and the set sha.
+    expect(h.steps.recordCalls).toHaveBeenCalledExactlyOnceWith('flow-1', 'feature-1', 'j1', 's2', { setSha: true });
     expect(h.order).toEqual(['repo', 'flow', 'repo', 'flow']);
   });
   it('AC-3: records flow.calls activity in the record transaction', async () => {
