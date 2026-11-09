@@ -126,7 +126,8 @@ describe('PrismaFleetFlowStepRepository — the advanceable flows', () => {
 
     const sql = queryRaw.mock.calls[0][0] as unknown as { strings: string[]; values: unknown[] };
     const text = sql.strings.join('?');
-    expect(text).toContain("flow.\"state\" IN ('APPROVED', 'RUNNING')");
+    // US-012: a flow that waits for a merge is advanced too, so its awaited PRs are polled.
+    expect(text).toContain("flow.\"state\" IN ('APPROVED', 'RUNNING', 'WAITING_MERGE')");
     // No feature count: a flow of a set is advanced by its active feature.
     expect(text).not.toContain('COUNT(*)');
     expect(text).not.toContain('"FleetFlowFeature"');

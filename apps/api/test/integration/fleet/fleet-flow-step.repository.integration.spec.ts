@@ -60,17 +60,20 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     } });
   }
 
-  it('AC-1/2/3 returns only APPROVED/RUNNING flows, whatever their feature count, ordered by id', async () => {
+  it('AC-1/2/3 returns only APPROVED/RUNNING/WAITING_MERGE flows, whatever their feature count, ordered by id', async () => {
     const approved = await createFlow('APPROVED');
     const running = await createFlow('RUNNING');
     // US-008: a flow of a set is advanced too, one feature at a time.
     const approvedSet = await createFlow('APPROVED', 2);
-    for (const state of ['PENDING', 'WAITING_MERGE', 'WAITING_ANSWER', 'COMPLETED', 'STOPPED']) await createFlow(state);
+    // US-012: a flow that waits for a merge is advanced too, so its awaited PRs are polled.
+    const waitingMerge = await createFlow('WAITING_MERGE');
+    for (const state of ['PENDING', 'WAITING_ANSWER', 'COMPLETED', 'STOPPED']) await createFlow(state);
     const rows = await repo.listAdvanceable(50, null);
     expect(rows).toEqual([
       { id: approved.id, createdByType: 'USER', createdById: creatorId },
       { id: approvedSet.id, createdByType: 'USER', createdById: creatorId },
       { id: running.id, createdByType: 'USER', createdById: creatorId },
+      { id: waitingMerge.id, createdByType: 'USER', createdById: creatorId },
     ].sort((a, b) => a.id.localeCompare(b.id)));
   });
 

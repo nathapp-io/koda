@@ -21,7 +21,7 @@ import {
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService, type FleetFlowCallsTarget } from './fleet-flow-calls.service';
-import { runFeatureStart, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
+import { runFeatureStart, runMergeWatch, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
 import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
@@ -81,7 +81,15 @@ export class FleetFlowAdvanceService {
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
-    const pass = await this.decide(flowId, now);
+    const live = await this.flows.findById(flowId);
+    if (!live) return;
+    // US-012: a flow that waits for a merge is watched, not decided: the pass polls the awaited
+    // PRs and resumes the flow when the next feature can start.
+    if (live.state === 'WAITING_MERGE') {
+      await runMergeWatch(this.featurePassDeps(), { flow: live, now });
+      return;
+    }
+    const pass = await this.decide(live, now);
     if (!pass) return;
     const { flow, feature, action } = pass;
     if (action.kind === 'apply_calls') {
@@ -139,6 +147,9 @@ export class FleetFlowAdvanceService {
       steps: this.steps, repos: this.repos, github: this.github,
       activity: this.activity, audit: this.audit, txManager: this.txManager,
       lockLive: (previous) => this.lockLive(previous),
+      lockWaitingMerge: (previous) => this.lockWaitingMerge(previous),
+      stopLocked: (flow, feature, reason, detail, now) =>
+        this.writeDecision(flow, feature, null, { kind: 'stop', reason, detail }, now),
     };
   }
 
@@ -494,6 +505,18 @@ export class FleetFlowAdvanceService {
     return current;
   }
 
+  /**
+   * US-012: the merge watch's re-read. The flow must still wait for the same approval: a flow that
+   * stopped, was approved again or resumed meanwhile owns nothing of the pass.
+   */
+  private async lockWaitingMerge(previous: FleetFlowRecord): Promise<FleetFlowRecord | null> {
+    if (!(await this.lockParent(previous))) return null;
+    const current = await this.flows.lockById(previous.id);
+    if (!current || current.state !== 'WAITING_MERGE') return null;
+    if (current.approvedAt?.getTime() !== previous.approvedAt?.getTime()) return null;
+    return current;
+  }
+
   /** Called only with the parent and flow locked, including crash recovery in the decide transaction. */
   private async recordStep(
     flow: FleetFlowRecord, featureId: string, step: FlowStep, jobId: string, prNumber?: number,
@@ -514,10 +537,7 @@ export class FleetFlowAdvanceService {
    * job are read again under the locks, so a stop, a re-ask or a dispatch another pass made in between
    * is what this pass acts on.
    */
-  private async decide(flowId: string, now: Date): Promise<DispatchPass | undefined> {
-    const flow = await this.flows.findById(flowId);
-    if (!flow) return;
-
+  private async decide(flow: FleetFlowRecord, now: Date): Promise<DispatchPass | undefined> {
     // The spec preflight belongs to the flow's first feature: once it has run, the flow branch carries
     // its PLAN, RUN and FIX commits, so its head no longer matches `flow.specSha`. A later feature's
     // spec was checked by its start pass.

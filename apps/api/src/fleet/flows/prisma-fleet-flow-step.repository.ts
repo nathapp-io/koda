@@ -59,13 +59,14 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
 
   /**
    * Every live flow is advanceable, whatever the number of its features: the advance service picks
-   * the feature the flow has active (US-008), so a flow of a set is no longer left alone.
+   * the feature the flow has active (US-008), so a flow of a set is no longer left alone. US-012: a
+   * flow that waits for a merge is advanced too, so its awaited PRs are polled.
    */
   async listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]> {
     const rows = await this.db.$queryRaw<Array<{ id: string; createdByType: string; createdById: string }>>(Prisma.sql`
       SELECT flow."id", flow."createdByType", flow."createdById"
         FROM "FleetFlow" AS flow
-       WHERE flow."state" IN ('APPROVED', 'RUNNING')
+       WHERE flow."state" IN ('APPROVED', 'RUNNING', 'WAITING_MERGE')
          AND (${afterId}::text IS NULL OR flow."id" > ${afterId})
        ORDER BY flow."id" ASC
        LIMIT ${limit}
