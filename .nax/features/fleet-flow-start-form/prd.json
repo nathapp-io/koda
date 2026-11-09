@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T12:34:48.635Z",
+  "updatedAt": "2026-11-09T12:38:31.677Z",
   "userStories": [
     {
       "id": "US-001",
@@ -204,14 +204,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "Single pure request mapper with a companion test, no new dependencies or stateful behavior."
+        "reasoning": "Single pure request mapper with a companion test, no new dependencies or stateful behavior.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-handoff-form.ts",
@@ -225,7 +228,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "709d043dfe7912e8223ba92d7f4023474c07bf52"
     },
     {
       "id": "US-005",
