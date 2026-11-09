@@ -135,12 +135,13 @@ describe('FleetFlowDto', () => {
   });
 
   it('maps stop detail and branch while preserving feature position order and pending approval', () => {
+    const sourceFeatures = record().features;
+    const flowA = sourceFeatures.find(({ feature }) => feature === 'flow-a');
+    const flowB = sourceFeatures.find(({ feature }) => feature === 'flow-b');
+    if (!flowA || !flowB) throw new Error('DTO fixture is missing a feature');
     const source = record({
       stopDetail: 'job j1 failed', approvalMode: null, approvalRequestId: 'request-1',
-      features: [
-        record().features[1]!,
-        { ...record().features[0]!, branch: 'feat/f14-clamp' },
-      ],
+      features: [flowA, { ...flowB, branch: 'feat/f14-clamp' }],
     });
     const dto = FleetFlowDto.from(source, 'web');
     expect(dto.stopDetail).toBe('job j1 failed');
