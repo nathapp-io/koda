@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T12:27:45.856Z",
+  "updatedAt": "2026-11-09T12:34:48.635Z",
   "userStories": [
     {
       "id": "US-001",
@@ -146,14 +146,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard zod input validation and two locale additions; role strings are model identifiers, not authentication roles or authorization checks."
+        "reasoning": "Standard zod input validation and two locale additions; role strings are model identifiers, not authentication roles or authorization checks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-handoff-form.ts",
@@ -179,7 +182,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ea1d9ef46e667a8ae19d6e5a59cbea43309fa40f"
     },
     {
       "id": "US-004",
