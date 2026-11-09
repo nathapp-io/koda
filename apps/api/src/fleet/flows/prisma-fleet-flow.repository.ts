@@ -46,9 +46,9 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
     const rows = await this.prisma.client.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM "FleetFlow" WHERE id = ${id} FOR UPDATE`);
     return rows.length ? this.findById(id) : null;
   }
-  async findPage(filters: { projectId: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>> {
+  async findPage(filters: { projectId: string; threadId?: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>> {
     const { current, size } = resolvePageOption(page, PAGE_SIZE_MAX);
-    const result = await Paginate(this.prisma.client.fleetFlow, { current, size }, { where: { projectId: filters.projectId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: { features: { orderBy: { position: 'asc' } } } });
+    const result = await Paginate(this.prisma.client.fleetFlow, { current, size }, { where: { projectId: filters.projectId, ...(filters.threadId ? { threadId: filters.threadId } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: { features: { orderBy: { position: 'asc' } } } });
     return result.remap((row) => this.toDomain(row));
   }
   async findLiveForThread(threadId: string): Promise<FleetFlowRecord | null> {

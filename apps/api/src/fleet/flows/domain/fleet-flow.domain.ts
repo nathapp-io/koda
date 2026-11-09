@@ -89,7 +89,7 @@ export interface IFleetFlowRepository {
   create(data: CreateFleetFlow): Promise<FleetFlowRecord>;
   findById(id: string): Promise<FleetFlowRecord | null>;
   lockById(id: string): Promise<FleetFlowRecord | null>;
-  findPage(filters: { projectId: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>>;
+  findPage(filters: { projectId: string; threadId?: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>>;
   findLiveForThread(threadId: string): Promise<FleetFlowRecord | null>;
   findLiveForSpec(repoId: string, branch: string, specSha: string): Promise<FleetFlowRecord | null>;
   /**

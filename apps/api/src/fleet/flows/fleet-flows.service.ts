@@ -81,8 +81,8 @@ export class FleetFlowsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  list(projectId: string, page: IPageOption): Promise<IPageResult<FleetFlowRecord>> {
-    return this.flows.findPage({ projectId }, page);
+  list(projectId: string, page: IPageOption, filters: { threadId?: string } = {}): Promise<IPageResult<FleetFlowRecord>> {
+    return this.flows.findPage({ projectId, ...(filters.threadId ? { threadId: filters.threadId } : {}) }, page);
   }
 
   /** Global readers resolve project reach before returning this record to the caller. */

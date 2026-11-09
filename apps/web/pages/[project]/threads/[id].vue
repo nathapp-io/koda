@@ -103,6 +103,7 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
   <div class="space-y-5">
     <template v-if="controller.thread.value">
       <FleetThreadsThreadHeader :thread="controller.thread.value" :runners="options.runners.value" />
+      <FleetThreadsThreadFlowsPanel :slug="slug" :thread-id="threadId" />
       <FleetThreadsThreadControls
         :is-creator="isCreator"
         :can-manage="canManage"

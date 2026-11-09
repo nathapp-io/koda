@@ -6,7 +6,7 @@ import { agentInputOf, agentResultOf, fixOutcomeOf, type FleetJobRecord } from '
 import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStep } from './flow-steps';
 import type { FlowQuestion } from './flow-calls';
-import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, LatestFlowJob, MarkFlowStepData } from './domain/fleet-flow-step.domain';
+import type { AdvanceableFlow, CreatorAccess, FlowJobRow, IFleetFlowStepRepository, LatestFlowJob, MarkFlowStepData } from './domain/fleet-flow-step.domain';
 
 @Injectable()
 export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
@@ -77,6 +77,22 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
   async latestJob(flowId: string): Promise<FleetJobRecord | null> {
     const row = await this.db.fleetJob.findFirst({ where: { flowId }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
     return row ? this.toJob(row) : null;
+  }
+
+  async listFlowJobs(flowId: string, limit: number): Promise<{ jobs: FlowJobRow[]; truncated: boolean }> {
+    const rows = await this.db.fleetJob.findMany({
+      where: { flowId },
+      orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }],
+      take: Math.max(0, limit) + 1,
+      select: { id: true, flowFeatureId: true, flowStep: true, command: true, state: true, costSpentUsd: true, costCarriedUsd: true, queuedAt: true, finishedAt: true },
+    });
+    const truncated = rows.length > limit;
+    const jobs = rows.slice(0, Math.max(0, limit)).reverse().map((row) => ({
+      ...row,
+      costSpentUsd: row.costSpentUsd.toFixed(4),
+      costCarriedUsd: row.costCarriedUsd.toFixed(4),
+    }));
+    return { jobs, truncated };
   }
 
   /**

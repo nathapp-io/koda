@@ -65,6 +65,7 @@ export class FleetFlowAnswerDto {
 export class FleetFlowFeatureDto {
   @ApiProperty() declare feature: string;
   @ApiProperty() declare specPath: string;
+  @ApiPropertyOptional({ type: String, nullable: true }) declare branch: string | null;
   @ApiProperty({ type: [String] }) declare dependsOn: string[];
   @ApiProperty() declare state: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare currentStep: string | null;
@@ -77,7 +78,7 @@ export class FleetFlowFeatureDto {
 
   static from(feature: FleetFlowFeatureRecord): FleetFlowFeatureDto {
     return Object.assign(new FleetFlowFeatureDto(), {
-      feature: feature.feature, specPath: feature.specPath, dependsOn: feature.dependsOn ?? [],
+      feature: feature.feature, specPath: feature.specPath, branch: feature.branch ?? null, dependsOn: feature.dependsOn ?? [],
       state: feature.state, currentStep: feature.currentStep, prNumber: feature.prNumber,
       questionsJobId: feature.questionsJobId ?? null,
       questions: feature.questions?.map((question) => ({ id: question.id, question: question.question })) ?? null,
@@ -108,6 +109,7 @@ export class FleetFlowDto {
   declare state: string;
   @ApiPropertyOptional({ type: FleetFlowApprovalDto, nullable: true }) declare approval: FleetFlowApprovalDto | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare stopReason: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true }) declare stopDetail: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare endedAt: string | null;
   @ApiProperty() declare createdAt: string;
   @ApiProperty({ type: [FleetFlowFeatureDto] }) declare features: FleetFlowFeatureDto[];
@@ -131,6 +133,7 @@ export class FleetFlowDto {
       state: record.state,
       approval: approvalOf(record),
       stopReason: record.stopReason,
+      stopDetail: record.stopDetail ?? null,
       endedAt: iso(record.endedAt),
       createdAt: record.createdAt.toISOString(),
       features: features.map((feature) => FleetFlowFeatureDto.from(feature)),

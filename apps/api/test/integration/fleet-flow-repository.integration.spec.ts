@@ -184,6 +184,15 @@ describeDb('PrismaFleetFlowRepository', () => {
     await expect(repo.stop(flow.id, 'human_stop', new Date())).rejects.toBeInstanceOf(FlowTransitionError);
     expect(await repo.findById(flow.id)).toEqual(terminal);
   });
+  it('AC-8 filters project flows to the requested thread', async () => {
+    const thread1 = await prisma.chatThread.create({ data: { projectId, title: 'thread one', createdById: 'creator', backend: {}, skills: [] } });
+    const thread2 = await prisma.chatThread.create({ data: { projectId, title: 'thread two', createdById: 'creator', backend: {}, skills: [] } });
+    const flow1 = await createFlow({ threadId: thread1.id });
+    await createFlow({ threadId: thread2.id });
+    const page = await repo.findPage({ projectId, threadId: thread1.id }, { current: 1, size: 20 });
+    expect(page.records.map(({ id }) => id)).toEqual([flow1.id]);
+  });
+
   it('AC-12 pages project flows newest first and filters other projects', async () => {
     const older = await createFlow(); await new Promise((resolve) => setTimeout(resolve, 5)); const newer = await createFlow();
     const otherProject = await seedFleetBase(prisma);

@@ -201,6 +201,7 @@ function mountPage(over: {
       FleetThreadsThreadApprovalCard: approvalCard,
       ThreadHeader: header,
       FleetThreadsThreadHeader: header,
+      FleetThreadsThreadFlowsPanel: { props: ['slug', 'threadId'], template: '<aside data-testid="thread-flows-panel" :data-slug="slug" :data-thread-id="threadId" />' },
       ThreadTimeline: timeline,
       FleetThreadsThreadTimeline: timeline,
       ThreadMessage: threadMessage,
@@ -267,6 +268,14 @@ function headTitle(head: CapturedHead): unknown {
 }
 
 describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
+  test('US-010 AC-10: mounts the flow panel for the current project and thread', async () => {
+    const m = mountPage()
+    const panel = m.app.one('[data-testid="thread-flows-panel"]')
+    expect(panel?.props['data-slug']).toBe('web')
+    expect(panel?.props['data-thread-id']).toBe('th1')
+    m.app.unmount()
+  })
+
   test('AC14: with a stubbed useThread holding t and one assistant message Hi there, ThreadHeader shows the title Auth spec and ThreadTimeline shows Hi there', async () => {
     const m = mountPage({ messages: [message({ content: 'Hi there' })] })
     await m.settle()

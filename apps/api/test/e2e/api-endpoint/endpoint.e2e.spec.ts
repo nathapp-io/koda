@@ -47,6 +47,8 @@ import { KnowledgeStoreUnavailableError } from '../../../src/fleet/knowledge/kno
 import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
 import { DEFAULT_KNOWLEDGE_PATTERNS } from '../../../src/fleet/knowledge/knowledge-patterns';
 import { PrismaCiWebhookRepository } from '../../../src/ci-webhook/prisma-ci-webhook.repository';
+import { FleetFlowDto } from '../../../src/fleet/flows/dto/fleet-flow.dto';
+import { FLEET_FLOW_REPOSITORY } from '../../../src/fleet/flows/domain/fleet-flow.domain';
 import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -4979,6 +4981,13 @@ describeIntegration('API Integration Tests', () => {
           features: { create: [{ position: 0, feature: 'read-stop', specPath: 'docs/read-stop.md', dependsOn: [] }] },
         } });
       }
+      async function seedThreadFlow(threadId: string, branch: string) {
+        return db().fleetFlow.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, threadId, entry: 'THREAD', createdByType: 'USER', createdById: world.ids.dev,
+          branch, specSha: 'a'.repeat(40), setSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          features: { create: [{ position: 0, feature: branch, specPath: `docs/${branch}.md`, dependsOn: [] }] },
+        } });
+      }
       /** A flow a review left waiting for the answers of one job. */
       async function seedWaitingFlow() {
         return db().fleetFlow.create({ data: {
@@ -4990,11 +4999,41 @@ describeIntegration('API Integration Tests', () => {
         } });
       }
       const answerBody = { jobId: 'job-1', answers: [{ id: '2', answer: 'Clamp it' }] };
+      /** A flow with two jobs: one whose cost is unknown (an AGENT job at zero), one with a known cost. */
+      async function seedFlowWithJobs() {
+        const flow = await seedFlow();
+        const feature = await db().fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } });
+        const unknownCost = await db().fleetJob.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, ref: flow.branch, command: 'AGENT', feature: 'read-stop',
+          profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED',
+          flowId: flow.id, flowStep: 'RUN', flowFeatureId: feature.id, queuedAt: new Date('2026-01-01T00:00:00Z'),
+          finishedAt: new Date('2026-01-01T01:00:00Z'),
+        } });
+        const knownCost = await db().fleetJob.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, ref: flow.branch, command: 'RUN', feature: 'read-stop',
+          profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED',
+          flowId: flow.id, flowStep: 'RUN', flowFeatureId: feature.id, queuedAt: new Date('2026-01-02T00:00:00Z'),
+          finishedAt: new Date('2026-01-02T01:00:00Z'), costSpentUsd: '0.2500',
+        } });
+        return { flow, feature, unknownCost, knownCost };
+      }
       it('GET /projects/:slug/flows returns 200 with records and total', async () => {
         const flow = await seedFlow();
         const page = body<{ records: { id: string }[]; total: number }>(await request(httpServer).get(flowsUrl()).set(flowAuth()).expect(200));
         expect(page.records.map(({ id }) => id)).toContain(flow.id);
         expect(page.total).toBeGreaterThan(0);
+      });
+      it('AC-9 GET /projects/:slug/flows filters records to the requested thread', async () => {
+        const thread = await newThread('flow-list-thread');
+        const otherThread = await newThread('flow-list-other-thread');
+        const matching = await seedThreadFlow(thread.id, 'flow-list-matching');
+        await seedThreadFlow(otherThread.id, 'flow-list-other');
+        const page = body<{ records: { id: string }[] }>(await request(httpServer)
+          .get(`${flowsUrl()}?threadId=${thread.id}`).set(flowAuth()).expect(200));
+        expect(page.records.map(({ id }) => id)).toEqual([matching.id]);
+      });
+      it('AC-10 GET /projects/:slug/flows rejects an overlength threadId', async () => {
+        await request(httpServer).get(`${flowsUrl()}?threadId=${'t'.repeat(65)}`).set(flowAuth()).expect(400);
       });
       it('GET /projects/:slug/flows returns 404 for an unknown project', async () => {
         await request(httpServer).get('/api/projects/missing-flow-project/flows').set(flowAuth()).expect(404);
@@ -5006,6 +5045,45 @@ describeIntegration('API Integration Tests', () => {
       });
       it('GET /projects/:slug/flows/:flowId returns fleet.flows.notFound 404 for a missing flow', async () => {
         refusal(await request(httpServer).get(`${flowsUrl()}/missing`).set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('AC-10 GET /projects/:slug/flows/:flowId/overview answers 200 with the repo, the jobs and the unknown-cost count', async () => {
+        const { flow, unknownCost, knownCost } = await seedFlowWithJobs();
+        const overview = body<{
+          repo: { provider: string; owner: string; name: string } | null;
+          ticketRef: string | null;
+          jobs: { id: string; feature: string | null; step: string | null; command: string; state: string;
+            costUsd: string; queuedAt: string; finishedAt: string | null }[];
+          truncated: boolean; unknownCostCount: number;
+        }>(await request(httpServer).get(`${flowsUrl()}/${flow.id}/overview`).set(flowAuth()).expect(200));
+        expect(overview.repo).toMatchObject({ provider: 'github', owner: 'acme' });
+        expect(overview.ticketRef).toBeNull();
+        expect(overview.truncated).toBe(false);
+        expect(overview.unknownCostCount).toBe(1);
+        expect(overview.jobs.map((job) => job.id)).toEqual([unknownCost.id, knownCost.id]);
+        expect(overview.jobs[0]).toMatchObject({ feature: 'read-stop', step: 'RUN', command: 'AGENT', state: 'COMPLETED',
+          costUsd: '0.0000', queuedAt: '2026-01-01T00:00:00.000Z', finishedAt: '2026-01-01T01:00:00.000Z' });
+        expect(overview.jobs[1]).toMatchObject({ feature: 'read-stop', step: 'RUN', command: 'RUN', costUsd: '0.2500',
+          queuedAt: '2026-01-02T00:00:00.000Z', finishedAt: '2026-01-02T01:00:00.000Z' });
+      });
+      it('AC-10 GET /projects/:slug/flows/:flowId/overview answers 404 for an unknown flow id', async () => {
+        refusal(await request(httpServer).get(`${flowsUrl()}/missing/overview`).set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('AC-11 GET /projects/:slug/flows/:flowId/overview answers 404 for a flow of another project', async () => {
+        const foreign = await db().fleetFlow.create({ data: {
+          projectId: world.opsProjectId, repoId: world.foreignRepoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
+          branch: `feat/foreign-overview-${++sequence}`, specSha: 'a'.repeat(40), setSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          features: { create: [{ position: 0, feature: 'foreign-overview', specPath: 'docs/foreign-overview.md', dependsOn: [] }] },
+        } });
+        refusal(await request(httpServer).get(`${flowsUrl()}/${foreign.id}/overview`).set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('AC-12 GET /projects/:slug/flows/:flowId still answers the flow DTO beside the overview route', async () => {
+        const flow = await seedFlow();
+        const response = await request(httpServer).get(`${flowsUrl()}/${flow.id}`).set(flowAuth()).expect(200);
+        expect(response.body).toHaveProperty('ret', 0);
+        const record = await app.get(FLEET_FLOW_REPOSITORY, { strict: false }).findById(flow.id);
+        if (!record) throw new Error('the seeded flow is gone');
+        expect(body(response)).toEqual(FleetFlowDto.from(record, projectSlug));
+        expect(body<{ url: string }>(response).url).toBe(`/${projectSlug}/flows/${flow.id}`);
       });
       it('GET /fleet/flows/:flowId returns 200 with the same DTO', async () => {
         const flow = await seedFlow();

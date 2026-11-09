@@ -90,6 +90,7 @@
     "sectionKnowledge": "Knowledge",
     "sectionFleet": "Fleet",
     "threads": "Threads",
+    "flows": "Flows",
     "myThreads": "My threads",
     "approvals": "Approvals",
     "approvalPolicies": "Approval policies"
@@ -876,6 +877,80 @@
     }
   },
   "fleet": {
+    "flows": {
+      "list": { "title": "Flows", "empty": "No flows yet", "state": "State", "features": "Features", "spend": "Spend / cap", "createdAt": "Created", "previous": "Previous", "next": "Next", "pagination": "Flow pages" },
+      "panel": { "title": "Flows" },
+      "stop": {
+        "button": "Stop flow",
+        "confirm": "Stop this flow?"
+      },
+      "answer": {
+        "required": "Answer is required",
+        "submit": "Submit answers",
+        "success": "Answers submitted",
+        "openApprovals": "Open approvals"
+      },
+      "toast": {
+        "stopped": "Flow stopped",
+        "approvalRequested": "Approval requested"
+      },
+      "detail": {
+        "title": "Flow",
+        "overview": "Flow details",
+        "entry": "Entry",
+        "entryValue": { "THREAD": "Thread", "NAX": "Nax" },
+        "branch": "Branch",
+        "reviewer": "Reviewer role",
+        "supervisor": "Supervisor role",
+        "createdAt": "Created",
+        "spend": "Spend / cap",
+        "unknownCost": "Cap excludes {count} jobs with unknown cost",
+        "approval": "Approval",
+        "pendingApproval": "Start approval is pending",
+        "openApprovals": "Open approvals",
+        "approvalMode": "Approval mode",
+        "approvalModeValue": { "REQUEST": "Requested", "PRE_APPROVED": "Pre-approved" },
+        "approver": "Approver",
+        "approvedAt": "Recorded",
+        "stop": "Stop context",
+        "stopReason": "Stop reason",
+        "stopDetail": "Details",
+        "ticket": "Ticket {ref}",
+        "notFound": "Flow not found",
+        "loadFailed": "Could not load flow",
+        "jobsFailed": "Could not load flow jobs; feature details are still available.",
+        "truncated": "Showing the newest 500 jobs; older jobs are not included.",
+        "flowJobs": "Flow jobs"
+      },
+      "state": {
+        "PENDING": "Pending approval",
+        "APPROVED": "Approved",
+        "RUNNING": "Running",
+        "WAITING_MERGE": "Waiting for merge",
+        "WAITING_ANSWER": "Waiting for answers",
+        "COMPLETED": "Completed",
+        "STOPPED": "Stopped"
+      },
+      "feature": { "branch": "Branch", "dependsOn": "Depends on", "pullRequest": "Pull request" },
+      "featureState": {
+        "PENDING": "Pending",
+        "RUNNING": "Running",
+        "WAITING_ANSWER": "Waiting for answers",
+        "READY": "Ready",
+        "MERGED": "Merged",
+        "COMPLETED": "Completed",
+        "STOPPED": "Stopped"
+      },
+      "step": {
+        "SPEC_REVIEW": "Spec review",
+        "PLAN": "Plan",
+        "PRD_REVIEW": "PRD review",
+        "RUN": "Run",
+        "REVIEW": "Review",
+        "RULE": "Rule",
+        "FIX": "Fix"
+      }
+    },
     "threads": {
       "kind": {
         "project": "Project thread",

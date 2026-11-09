@@ -61,11 +61,12 @@ describe('FleetFlowDto', () => {
       state: 'PENDING',
       approval: null,
       stopReason: null,
+      stopDetail: null,
       endedAt: null,
       createdAt: CREATED_AT.toISOString(),
       features: [
-        { feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [], state: 'RUNNING', currentStep: 'spec-review', prNumber: 12, questionsJobId: null, questions: null, answers: null, answeredAt: null },
-        { feature: 'flow-b', specPath: '.nax/features/flow-b/spec.md', dependsOn: ['flow-a'], state: 'PENDING', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null },
+        { feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [], state: 'RUNNING', currentStep: 'spec-review', prNumber: 12, questionsJobId: null, questions: null, answers: null, answeredAt: null, branch: null },
+        { feature: 'flow-b', specPath: '.nax/features/flow-b/spec.md', dependsOn: ['flow-a'], state: 'PENDING', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null, branch: null },
       ],
       url: '/web/flows/flow-1',
     });
@@ -126,11 +127,28 @@ describe('FleetFlowDto', () => {
     }));
 
     expect(dto).toEqual({
-      feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [], state: 'WAITING_ANSWER',
+      feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', branch: null, dependsOn: [], state: 'WAITING_ANSWER',
       currentStep: 'SPEC_REVIEW', prNumber: null,
       questionsJobId: 'j1', questions: [{ id: '2', question: 'Q1' }], answers: [{ id: '2', answer: 'A1' }],
       answeredAt: ANSWERED_AT.toISOString(),
     });
+  });
+
+  it('maps stop detail and branch while preserving feature position order and pending approval', () => {
+    const sourceFeatures = record().features;
+    const flowA = sourceFeatures.find(({ feature }) => feature === 'flow-a');
+    const flowB = sourceFeatures.find(({ feature }) => feature === 'flow-b');
+    if (!flowA || !flowB) throw new Error('DTO fixture is missing a feature');
+    const source = record({
+      stopDetail: 'job j1 failed', approvalMode: null, approvalRequestId: 'request-1',
+      features: [flowA, { ...flowB, branch: 'feat/f14-clamp' }],
+    });
+    const dto = FleetFlowDto.from(source, 'web');
+    expect(dto.stopDetail).toBe('job j1 failed');
+    expect(dto.features.map(({ feature }) => feature)).toEqual(['flow-a', 'flow-b']);
+    expect(dto.features[1]?.branch).toBe('feat/f14-clamp');
+    expect(dto.approval).toEqual({ mode: 'REQUEST', approverId: null, approvedAt: null, approvalRequestId: 'request-1' });
+    expect(FleetFlowDto.from(record(), 'web').stopDetail).toBeNull();
   });
 
   it('AC-7 answers null for a feature without the question and answer columns', () => {

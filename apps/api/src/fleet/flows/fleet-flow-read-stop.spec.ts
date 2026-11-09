@@ -53,6 +53,16 @@ describe('fleet flow read and stop (no database)', () => {
     expect(flows.findPage).toHaveBeenCalledWith({ projectId: 'project' }, { current: 2, size: 1 });
     expect(result.data).toMatchObject({ records: [{ id: 'flow', url: '/web/flows/flow' }], total: 1 });
   });
+  it('passes the parsed thread filter from controller to service and omits it in repository filters when absent', async () => {
+    const { service, flows } = setup();
+    const { controller } = await projectController(service);
+    await controller.list({ threadId: 't1' } as never, ctx);
+    expect(flows.findPage).toHaveBeenCalledWith({ projectId: 'project', threadId: 't1' }, { current: 1, size: 20 });
+    flows.findPage.mockClear();
+    await service.list('project', { current: 1, size: 20 }, {});
+    expect(flows.findPage).toHaveBeenCalledWith({ projectId: 'project' }, { current: 1, size: 20 });
+  });
+
   it('AC-2: detail returns a complete DTO with position-ordered features and decimal strings', async () => {
     const { service, row } = setup();
     const { controller } = await projectController(service);
