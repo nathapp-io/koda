@@ -2,9 +2,14 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import ts from 'typescript'
+import type { Component } from 'vue'
 
 const requireFromSanitizer = createRequire(createRequire(import.meta.url).resolve('isomorphic-dompurify'))
-const { JSDOM } = requireFromSanitizer('jsdom') as { JSDOM: new (html: string) => { window: Window & typeof globalThis } }
+// jsdom's constructor takes the markup and an options bag; the type has to allow the second
+// argument, or the `url` option below is a type error.
+const { JSDOM } = requireFromSanitizer('jsdom') as {
+  JSDOM: new (html: string, options?: { url?: string }) => { window: Window & typeof globalThis }
+}
 const dom = new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>', { url: 'http://localhost/' })
 for (const key of ['window', 'document', 'Node', 'Element', 'HTMLElement', 'SVGElement', 'Event', 'MouseEvent', 'navigator']) {
   Object.defineProperty(globalThis, key, { configurable: true, value: (dom.window as unknown as Record<string, unknown>)[key] })
@@ -32,14 +37,17 @@ const mocks = {
   useFleetFlows: () => ({ answer }),
   openQuestions: (feature: { questions: Array<{ id: string; question: string }> | null; answeredAt: string | null }) => feature.answeredAt === null ? feature.questions ?? [] : [],
 }
-const factory = new Function('Vue', 'veeValidate', 'veeZod', 'zod', 'mocks', 'useI18n', 'useAppToast', compiled) as (...args: unknown[]) => Vue.Component
+const factory = new Function('Vue', 'veeValidate', 'veeZod', 'zod', 'mocks', 'useI18n', 'useAppToast', compiled) as (...args: unknown[]) => Component
 const component = factory(Vue, { useForm }, { toTypedSchema }, { z }, mocks, () => ({ t: (key: string) => key }), () => ({ success() {}, error() {} }))
 const app = Vue.createApp(component, {
   slug: 'web', flowId: 'flow-1',
   feature: { feature: 'feature-1', questionsJobId: 'job-1', questions: [{ id: 'q1', question: 'First?' }, { id: 'q2', question: 'Second?' }], answeredAt: null },
 })
-app.config.globalProperties.useI18n = () => ({ t: (key: string) => key })
-app.config.globalProperties.useAppToast = () => ({ success() {}, error() {} })
+// Nuxt's type augmentation declares these global properties as read-only, so the harness assigns
+// them through a mutable view of `globalProperties`.
+const globalProperties = app.config.globalProperties as unknown as Record<string, unknown>
+globalProperties.useI18n = () => ({ t: (key: string) => key })
+globalProperties.useAppToast = () => ({ success() {}, error() {} })
 app.component('NuxtLink', { props: ['to'], template: '<a :href="to"><slot /></a>' })
 const root = dom.window.document.querySelector('#app')
 if (!root) throw new Error('DOM mount root missing')
