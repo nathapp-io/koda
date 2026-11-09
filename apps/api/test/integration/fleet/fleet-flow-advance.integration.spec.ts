@@ -163,10 +163,16 @@ integration('fleet flow advancement through the database', () => {
     expect(await db.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toMatchObject([{ prNumber: 12, currentStep: 'REVIEW' }]);
   });
 
-  it('AC-6/7: multiple features remain approved and do not dispatch', async () => {
+  it('AC-6/7: a flow of a set dispatches the set review for its first feature', async () => {
     const flow = await createFlow(['flow', 'other']);
     await ticker.tick(now);
-    expect(await db.fleetJob.count({ where: { flowId: flow.id } })).toBe(0);
-    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'APPROVED' });
+    const jobs = await db.fleetJob.findMany({ where: { flowId: flow.id } });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ flowStep: 'SPEC_REVIEW', command: 'AGENT' });
+    const features = await db.fleetFlowFeature.findMany({ where: { flowId: flow.id }, orderBy: { position: 'asc' } });
+    expect(features[0]).toMatchObject({ currentStep: 'SPEC_REVIEW', state: 'RUNNING' });
+    expect(features[1]).toMatchObject({ currentStep: null, state: 'PENDING' });
+    expect(jobs[0]?.flowFeatureId).toBe(features[0]?.id);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'RUNNING' });
   });
 });

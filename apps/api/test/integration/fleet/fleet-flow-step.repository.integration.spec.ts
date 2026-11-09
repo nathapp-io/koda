@@ -60,13 +60,18 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     } });
   }
 
-  it('AC-1/2/3 returns only APPROVED/RUNNING flows with exactly one feature, ordered by id', async () => {
+  it('AC-1/2/3 returns only APPROVED/RUNNING flows, whatever their feature count, ordered by id', async () => {
     const approved = await createFlow('APPROVED');
     const running = await createFlow('RUNNING');
-    await createFlow('APPROVED', 2);
+    // US-008: a flow of a set is advanced too, one feature at a time.
+    const approvedSet = await createFlow('APPROVED', 2);
     for (const state of ['PENDING', 'WAITING_MERGE', 'WAITING_ANSWER', 'COMPLETED', 'STOPPED']) await createFlow(state);
     const rows = await repo.listAdvanceable(50, null);
-    expect(rows).toEqual([{ id: approved.id, createdByType: 'USER', createdById: creatorId }, { id: running.id, createdByType: 'USER', createdById: creatorId }].sort((a, b) => a.id.localeCompare(b.id)));
+    expect(rows).toEqual([
+      { id: approved.id, createdByType: 'USER', createdById: creatorId },
+      { id: approvedSet.id, createdByType: 'USER', createdById: creatorId },
+      { id: running.id, createdByType: 'USER', createdById: creatorId },
+    ].sort((a, b) => a.id.localeCompare(b.id)));
   });
 
   it('AC-4 pages eligible flows by id after the cursor', async () => {

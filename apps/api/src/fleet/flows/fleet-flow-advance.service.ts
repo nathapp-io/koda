@@ -14,7 +14,8 @@ import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { prNumberFor } from '../sync/pr-attribution.service';
 import { ThreadsService } from '../threads/threads.service';
-import { FLEET_FLOW_REPOSITORY, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
+import { FLEET_FLOW_REPOSITORY, type FleetFlowFeatureRecord, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
+import { nextFlowFeature } from './flow-features';
 import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
@@ -41,6 +42,11 @@ type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
 type FlowPassAction = DispatchAction | ApplyCallsAction | ApplyRulingsAction | ApplyPrdEditsAction;
 interface DispatchPass<A extends FlowPassAction = FlowPassAction> {
   flow: FleetFlowRecord;
+  /**
+   * The feature the pass runs for (US-008): its own jobs, its own ids and, for a later feature,
+   * its own branch. The flow's first feature is the one at position 0.
+   */
+  feature: FleetFlowFeatureRecord;
   action: A;
   plan: FleetJobRecord | null;
   remainingCapUsd: string;
@@ -74,17 +80,17 @@ export class FleetFlowAdvanceService {
   async advance(flowId: string, now: Date): Promise<void> {
     const pass = await this.decide(flowId, now);
     if (!pass) return;
-    const { flow, action } = pass;
+    const { flow, feature, action } = pass;
     if (action.kind === 'apply_calls') {
-      await this.advanceCalls(flow, action, pass.plan, now);
+      await this.advanceCalls(flow, feature, action, pass.plan, now);
       return;
     }
     if (action.kind === 'apply_rulings') {
-      await this.advanceRulings(flow, action);
+      await this.advanceRulings(flow, feature, action);
       return;
     }
     if (action.kind === 'apply_prd_edits') {
-      await this.advancePrdEdits(flow, action, pass.plan, now);
+      await this.advancePrdEdits(flow, feature, action, pass.plan, now);
       return;
     }
     const dispatchPass = { ...pass, action };
@@ -96,36 +102,47 @@ export class FleetFlowAdvanceService {
     try {
       jobId = await this.dispatchStep(dispatchPass);
     } catch (error) {
-      await this.refuseDispatch(flow, action.step, error, now);
+      await this.refuseDispatch(flow, feature, action.step, error, now);
       return;
     }
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return; // A stop/re-ask does not cancel the dispatched job.
-      await this.recordStep(current, action.step, jobId, action.pr?.number);
+      await this.recordStep(current, feature.id, action.step, jobId, action.pr?.number);
     });
   }
 
   /** Forge writes never hold locks; their progress belongs to the approval generation that chose them. */
   private async advanceCalls(
-    flow: FleetFlowRecord, action: ApplyCallsAction, plan: FleetJobRecord | null, now: Date,
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, action: ApplyCallsAction,
+    plan: FleetJobRecord | null, now: Date,
   ): Promise<void> {
     const expectedHead = action.step === 'SPEC_REVIEW' ? flow.specSha : plan?.resultSha;
     if (!expectedHead) throw new Error('PRD_REVIEW calls require a PLAN result sha');
-    const outcome = await this.calls.apply(flow, action, expectedHead, this.callsTarget(flow));
+    const outcome = await this.calls.apply(flow, action, expectedHead, this.callsTarget(flow, feature));
     if (outcome.kind === 'retry') return;
     if (outcome.kind === 'failed') {
-      await this.writeStop(flow, 'calls_failed', `${action.step}: ${outcome.detail}`, now);
+      await this.writeStop(flow, feature, 'calls_failed', `${action.step}: ${outcome.detail}`, now);
       return;
     }
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
       if (outcome.kind === 'stale') {
-        await this.flowService.reaskLocked(current, outcome.head, now);
+        // A later feature is never re-asked: its spec was checked by its start pass, and a stopped
+        // flow is cloned rather than restarted.
+        if (isFirstFeature(feature)) {
+          await this.flowService.reaskLocked(current, outcome.head, now);
+          return;
+        }
+        await this.writeDecision(current, feature, null, {
+          kind: 'stop', reason: 'spec_changed', detail: `${action.step}: spec changed at ${outcome.head}`,
+        }, now);
         return;
       }
-      await this.steps.recordCalls(current.id, current.features[0].id, action.jobId, outcome.specSha);
+      // A later feature's calls land on its own branch: they move neither the flow's spec sha nor its set sha.
+      const specSha = isFirstFeature(feature) ? outcome.specSha : null;
+      await this.steps.recordCalls(current.id, feature.id, action.jobId, specSha);
       await this.record(current, `flow calls ${action.step}`, 'flow.calls', {
         step: action.step, jobId: action.jobId, specSha: outcome.specSha, count: action.findings.length,
       });
@@ -134,12 +151,11 @@ export class FleetFlowAdvanceService {
 
   /**
    * The calls target of the feature the step runs for: its spec path and the branch it lives on.
-   * Until the active feature is selected (US-008) that is the flow's first feature, on the flow's
-   * branch; a later feature brings its own branch.
+   * The flow's first feature keeps the flow's branch; a later feature brings its own branch.
    */
-  private callsTarget(flow: FleetFlowRecord): FleetFlowCallsTarget {
-    const feature = flow.features[0];
-    return { feature: feature.feature, specPath: feature.specPath, branch: flow.branch };
+  private callsTarget(flow: FleetFlowRecord, feature: FleetFlowFeatureRecord): FleetFlowCallsTarget {
+    const branch = isFirstFeature(feature) ? flow.branch : (feature.branch ?? flow.branch);
+    return { feature: feature.feature, specPath: feature.specPath, branch };
   }
 
   /**
@@ -150,24 +166,31 @@ export class FleetFlowAdvanceService {
    * the payload is a JSON column, and a NUL or a lone surrogate would fail the write on every tick.
    */
   private async advancePrdEdits(
-    flow: FleetFlowRecord, action: ApplyPrdEditsAction, plan: FleetJobRecord | null, now: Date,
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, action: ApplyPrdEditsAction,
+    plan: FleetJobRecord | null, now: Date,
   ): Promise<void> {
     const expectedHead = plan?.resultSha;
     if (!expectedHead) throw new Error('PRD_REVIEW edits require a PLAN result sha');
-    const outcome = await this.calls.applyPrdEdits(flow, action, expectedHead, this.callsTarget(flow));
+    const outcome = await this.calls.applyPrdEdits(flow, action, expectedHead, this.callsTarget(flow, feature));
     if (outcome.kind === 'retry') return;
     if (outcome.kind === 'failed') {
-      await this.writeStop(flow, 'calls_failed', `PRD_REVIEW edits: ${outcome.detail}`, now);
+      await this.writeStop(flow, feature, 'calls_failed', `PRD_REVIEW edits: ${outcome.detail}`, now);
       return;
     }
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
       if (outcome.kind === 'stale') {
-        await this.flowService.reaskLocked(current, outcome.head, now);
+        if (isFirstFeature(feature)) {
+          await this.flowService.reaskLocked(current, outcome.head, now);
+          return;
+        }
+        await this.writeDecision(current, feature, null, {
+          kind: 'stop', reason: 'spec_changed', detail: `PRD_REVIEW edits: spec changed at ${outcome.head}`,
+        }, now);
         return;
       }
-      await this.steps.recordPrdEdits(current.id, current.features[0].id, action.jobId);
+      await this.steps.recordPrdEdits(current.id, feature.id, action.jobId);
       await this.record(current, 'flow PRD edits', 'flow.prd_edits', {
         jobId: action.jobId,
         sha: outcome.kind === 'committed' ? outcome.sha : null,
@@ -183,14 +206,16 @@ export class FleetFlowAdvanceService {
    * ruling that cannot be written is a refusal the flow reports, never a failed pass. A ruling for an
    * item the RULE task does not list is refused as well: the task is what the flow may rule.
    */
-  private async advanceRulings(flow: FleetFlowRecord, action: ApplyRulingsAction): Promise<void> {
+  private async advanceRulings(
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, action: ApplyRulingsAction,
+  ): Promise<void> {
     const slug = await this.steps.projectSlug(flow.projectId);
     if (slug === null) {
       // The project is gone: there is nothing left to rule, and no slug to rule it in.
       this.logger.warn(`Flow ${flow.id}: project slug unavailable; the RULE verdict is skipped`);
       return;
     }
-    const run = await this.steps.latestJobForStep(flow.id, flow.features[0].id, 'RUN');
+    const run = await this.steps.latestJobForStep(flow.id, feature.id, 'RUN');
     const openItems = run?.workflow?.openItems ?? [];
     const ruled = run === null ? [] : await this.rulings.ruledItemIds(run.id);
     // The RULE task lists the RUN's items that are still open and not ruled yet.
@@ -219,7 +244,7 @@ export class FleetFlowAdvanceService {
       const current = await this.lockLive(flow);
       // A stop that landed while the rulings were written keeps the rulings: they are already committed.
       if (!current) return;
-      await this.steps.recordRulings(current.id, current.features[0].id, action.jobId);
+      await this.steps.recordRulings(current.id, feature.id, action.jobId);
       await this.record(current, 'flow rulings', 'flow.rulings', {
         jobId: action.jobId, recorded, refused,
       });
@@ -237,7 +262,7 @@ export class FleetFlowAdvanceService {
    * feature branch between the `RUN` and this `REVIEW`. Every claim write happens outside a transaction.
    */
   private async advanceReview(pass: DispatchPass<DispatchAction>, now: Date): Promise<void> {
-    const { flow, action } = pass;
+    const { flow, feature, action } = pass;
     const pr = action.pr;
     // The decision engine waits or stops on missing RUN results before selecting REVIEW.
     if (!pr?.headSha) throw new Error('REVIEW requires a RUN result sha');
@@ -246,7 +271,7 @@ export class FleetFlowAdvanceService {
     // A live pass owns this head but has not linked its job yet: this pass waits rather than duplicate it.
     if (claim.kind === 'busy') return;
     if (claim.kind === 'failed') {
-      await this.writeStop(flow, 'dispatch_refused', `REVIEW: ${claim.outcome}`, now);
+      await this.writeStop(flow, feature, 'dispatch_refused', `REVIEW: ${claim.outcome}`, now);
       return;
     }
     if (claim.kind === 'owned') {
@@ -261,7 +286,7 @@ export class FleetFlowAdvanceService {
       // The claim is ours and the dispatch failed: release it so a later pass can retry this head,
       // then handle the error exactly as the other steps do.
       await this.reviews.release(claim.claimId);
-      await this.refuseDispatch(flow, 'REVIEW', error, now);
+      await this.refuseDispatch(flow, feature, 'REVIEW', error, now);
       return;
     }
     // Link the claim before the record phase: the job exists now, so a record that skips still leaves a
@@ -270,7 +295,7 @@ export class FleetFlowAdvanceService {
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
-      await this.recordStep(current, 'REVIEW', jobId, pr.number);
+      await this.recordStep(current, feature.id, 'REVIEW', jobId, pr.number);
     });
   }
 
@@ -279,25 +304,28 @@ export class FleetFlowAdvanceService {
    * the record transaction, after the flow-state check; a job another flow already owns is a refusal.
    */
   private async adoptReview(pass: DispatchPass<DispatchAction>, jobId: string, now: Date): Promise<void> {
-    const { flow, action } = pass;
+    const { flow, feature, action } = pass;
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
-      if (!(await this.jobs.adoptForFlow(jobId, current.id, current.features[0].id, 'REVIEW'))) {
-        await this.writeDecision(current, null, {
+      if (!(await this.jobs.adoptForFlow(jobId, current.id, feature.id, 'REVIEW'))) {
+        await this.writeDecision(current, feature, null, {
           kind: 'stop', reason: 'dispatch_refused', detail: 'REVIEW: head claimed by another flow',
         }, now);
         return;
       }
-      await this.recordStep(current, 'REVIEW', jobId, action.pr?.number);
+      await this.recordStep(current, feature.id, 'REVIEW', jobId, action.pr?.number);
     });
   }
 
   /** The exact body for the step the decision chose, dispatched for the flow's creator outside a transaction. */
   private async dispatchStep(pass: DispatchPass<DispatchAction>): Promise<string> {
-    const { flow, action, plan } = pass;
+    const { flow, feature, action, plan } = pass;
+    const setSpecPaths = action.step === 'SPEC_REVIEW' ? this.setSpecPaths(flow) : undefined;
     const body = buildStepDispatch({
-      flow, feature: flow.features[0], step: action.step,
+      flow, feature, step: action.step,
+      // The set review covers every spec of the flow at once, in position order.
+      ...(setSpecPaths !== undefined ? { setSpecPaths } : {}),
       // The dispatch guard supplies the remaining cap; the API config selects the review agent.
       remainingCapUsd: pass.remainingCapUsd, reviewAgent: this.config.flowReviewAgent,
       ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}), ...(pass.rule ? { rule: pass.rule } : {}),
@@ -305,26 +333,36 @@ export class FleetFlowAdvanceService {
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
       // US-001: the job belongs to the flow's feature, so a later feature's jobs never answer for it.
-      flowId: flow.id, flowStep: action.step, flowFeatureId: flow.features[0].id, auditKey: 'system.flow.advance',
+      flowId: flow.id, flowStep: action.step, flowFeatureId: feature.id, auditKey: 'system.flow.advance',
     });
     return result.job.id;
   }
 
+  /** The spec paths of the flow's set, in position order; a flow of one spec has no set. */
+  private setSpecPaths(flow: FleetFlowRecord): string[] | undefined {
+    const features = this.orderedFeatures(flow);
+    return features.length > 1 ? features.map(({ specPath }) => specPath) : undefined;
+  }
+
   /** A declared dispatch refusal stops the flow; any other error propagates after the caller released its claim. */
-  private async refuseDispatch(flow: FleetFlowRecord, step: FlowStep, error: unknown, now: Date): Promise<void> {
+  private async refuseDispatch(
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, step: FlowStep, error: unknown, now: Date,
+  ): Promise<void> {
     if (!(error instanceof BudgetPausedException || error instanceof ConflictAppException
       || error instanceof ValidationAppException || error instanceof NotFoundAppException
       || error instanceof FleetDispatchException)) throw error;
     const reason = error instanceof BudgetPausedException ? 'budget_paused' : 'dispatch_refused';
-    await this.writeStop(flow, reason, `${step}: ${dispatchRefusalReason(error)}`, now);
+    await this.writeStop(flow, feature, reason, `${step}: ${dispatchRefusalReason(error)}`, now);
   }
 
   /** The write half of a refusal: re-read under the parent/flow locks, then stop with activity and audit. */
-  private async writeStop(flow: FleetFlowRecord, reason: FlowStopReason, detail: string, now: Date): Promise<void> {
+  private async writeStop(
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, reason: FlowStopReason, detail: string, now: Date,
+  ): Promise<void> {
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
-      await this.writeDecision(current, null, { kind: 'stop', reason, detail }, now);
+      await this.writeDecision(current, feature, null, { kind: 'stop', reason, detail }, now);
     });
   }
 
@@ -339,9 +377,10 @@ export class FleetFlowAdvanceService {
   }
 
   /** Called only with the parent and flow locked, including crash recovery in the decide transaction. */
-  private async recordStep(flow: FleetFlowRecord, step: FlowStep, jobId: string, prNumber?: number): Promise<void> {
-    const feature = flow.features[0];
-    await this.steps.markStep(flow.id, feature.id, step, {
+  private async recordStep(
+    flow: FleetFlowRecord, featureId: string, step: FlowStep, jobId: string, prNumber?: number,
+  ): Promise<void> {
+    await this.steps.markStep(flow.id, featureId, step, {
       flowState: 'RUNNING', ...(prNumber !== undefined ? { prNumber } : {}),
     });
     if (flow.state === 'APPROVED') {
@@ -361,14 +400,20 @@ export class FleetFlowAdvanceService {
     const flow = await this.flows.findById(flowId);
     if (!flow) return;
 
+    // The spec preflight belongs to the flow's first feature: once it has run, the flow branch carries
+    // its PLAN, RUN and FIX commits, so its head no longer matches `flow.specSha`. A later feature's
+    // spec was checked by its start pass.
+    const candidate = this.activeFeature(flow);
     // Forge I/O is only a preflight hint. Re-read state/jobs under locks below, and never let a
     // transient forge failure commit even a bookkeeping write. No token crosses this boundary.
     let forgeHead: string | null | undefined;
-    try {
-      forgeHead = await this.readSpecHead(flow, now);
-    } catch (error) {
-      if (error instanceof RepoCheckException) return;
-      throw error;
+    if (candidate !== null && isFirstFeature(candidate)) {
+      try {
+        forgeHead = await this.readSpecHead(flow, now);
+      } catch (error) {
+        if (error instanceof RepoCheckException) return;
+        throw error;
+      }
     }
 
     return this.txManager.run(async () => {
@@ -377,40 +422,44 @@ export class FleetFlowAdvanceService {
       const current = await this.flows.lockById(flow.id);
       if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return;
 
+      // The feature the flow runs now. A flow with no active feature waits for the next-feature
+      // transitions: a feature start, a merge wait or the flow's completion.
+      const feature = this.activeFeature(current);
+      if (!feature) return;
+
       const spentUsd = await this.refreshSpent(current);
       // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
       // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
-      const snapshot = await this.steps.latestJobWithIngest(current.id, current.features[0].id);
+      const snapshot = await this.steps.latestJobWithIngest(current.id, feature.id);
       // A dispatch can finish preflight and insert after a different spec was re-approved. queuedAt
       // alone cannot identify that approval's review: ignore the old SHA for both decision and recovery.
       // Our own calls commit is the exception: keep its review only within this approval generation.
-      const appliedReview = snapshot !== null && snapshot.job.id === current.features[0]?.callsJobId
+      const appliedReview = snapshot !== null && snapshot.job.id === feature.callsJobId
         && current.approvedAt !== null && snapshot.job.queuedAt.getTime() >= current.approvedAt.getTime();
       const latest = snapshot?.job.flowStep === 'SPEC_REVIEW' && snapshot.job.ref !== current.specSha && !appliedReview
         ? null : snapshot;
-      const input = await this.decisionInput(current, latest, now);
+      const input = await this.decisionInput(current, feature, latest, now);
       const action = decideFlowStep(input);
-      // US-006: until active-feature selection lands, advance the first feature only.
       // The insert carries the flow link even if dispatch/record crashed. Reconcile once, then let the
       // next tick decide from RUNNING. An older approval's job must never be mistaken for this start.
       const job = latest?.job;
       const recoverable = current.state === 'RUNNING' || (job?.flowStep === 'SPEC_REVIEW'
         && current.approvedAt !== null && job.queuedAt.getTime() >= current.approvedAt.getTime());
       if (job && recoverable && (current.state === 'APPROVED'
-        || current.features[0].currentStep !== job.flowStep || current.features[0].state !== 'RUNNING'
-        || (job.flowStep === 'REVIEW' && current.features[0].prNumber === null && input.latestJob?.prNumber != null))) {
-        await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
+        || feature.currentStep !== job.flowStep || feature.state !== 'RUNNING'
+        || (job.flowStep === 'REVIEW' && feature.prNumber === null && input.latestJob?.prNumber != null))) {
+        await this.recordStep(current, feature.id, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
         return;
       }
       if (action.kind !== 'dispatch' && action.kind !== 'apply_calls' && action.kind !== 'apply_rulings'
         && action.kind !== 'apply_prd_edits') {
-        await this.writeDecision(current, job ?? null, action, now);
+        await this.writeDecision(current, feature, job ?? null, action, now);
         return;
       }
       // Calls and rulings are not billed. Dispatch guards retain their order; every path checks creator access.
       const remaining = action.kind === 'dispatch' ? remainingCapUsd(current.costCapUsd, spentUsd) : '0.0000';
       if (remaining === null) {
-        await this.writeDecision(current, job ?? null, {
+        await this.writeDecision(current, feature, job ?? null, {
           kind: 'stop', reason: 'cost_cap', detail: `spent ${spentUsd} of cap ${current.costCapUsd}`,
         }, now);
         return;
@@ -419,39 +468,50 @@ export class FleetFlowAdvanceService {
       const access = await this.steps.creatorAccess(creatorRef);
       const keys = await this.permissions.effectiveKeys(creatorRef, { projectId: current.projectId });
       if (!mayDispatch(access, keys)) {
-        await this.writeDecision(current, job ?? null, {
+        await this.writeDecision(current, feature, job ?? null, {
           kind: 'stop', reason: 'creator_lost_access', detail: 'flow creator lost dispatch access',
         }, now);
         return;
       }
       if (action.kind === 'apply_rulings') {
         // Rulings are written outside this transaction, each in its own: the flow records them after.
-        return { flow: current, action, plan: null, remainingCapUsd: remaining };
+        return { flow: current, feature, action, plan: null, remainingCapUsd: remaining };
       }
       if (action.kind === 'apply_calls' || action.kind === 'apply_prd_edits') {
         // The PRD edit action has no step of its own: it belongs to the PRD_REVIEW branch.
         const prdReview = action.kind === 'apply_prd_edits' || action.step === 'PRD_REVIEW';
-        const plan = prdReview ? await this.steps.latestJobForStep(current.id, current.features[0].id, 'PLAN') : null;
+        const plan = prdReview ? await this.steps.latestJobForStep(current.id, feature.id, 'PLAN') : null;
         if (prdReview) {
           if (!plan?.resultBranch || !plan.resultSha) throw new Error('PRD_REVIEW calls require a PLAN result branch and sha');
-          // PLAN pushes to the PRD's branchName, not necessarily the accepted input branch. Persist
-          // its target under the locks so calls, re-asks and the following PLAN all use that branch.
-          if (current.branch !== plan.resultBranch) {
-            await this.steps.setBranch(current.id, plan.resultBranch);
-            await this.record(current, 'flow PLAN output branch', 'flow.branch', { branch: plan.resultBranch, jobId: plan.id });
-            current.branch = plan.resultBranch;
+          if (isFirstFeature(feature)) {
+            // PLAN pushes to the PRD's branchName, not necessarily the accepted input branch. Persist
+            // its target under the locks so calls, re-asks and the following PLAN all use that branch.
+            if (current.branch !== plan.resultBranch) {
+              await this.steps.setBranch(current.id, plan.resultBranch);
+              await this.record(current, 'flow PLAN output branch', 'flow.branch', { branch: plan.resultBranch, jobId: plan.id });
+              current.branch = plan.resultBranch;
+            }
+          } else {
+            // A later feature plans on its own branch: a PLAN that pushed elsewhere is a refusal.
+            const expected = feature.branch ?? current.branch;
+            if (plan.resultBranch !== expected) {
+              await this.writeDecision(current, feature, job ?? null, {
+                kind: 'stop', reason: 'dispatch_refused', detail: `PLAN pushed ${plan.resultBranch}, expected ${expected}`,
+              }, now);
+              return;
+            }
           }
         }
-        return { flow: current, action, plan, remainingCapUsd: remaining };
+        return { flow: current, feature, action, plan, remainingCapUsd: remaining };
       }
-      if (action.step === 'SPEC_REVIEW' || action.step === 'PLAN') {
+      if (isFirstFeature(feature) && (action.step === 'SPEC_REVIEW' || action.step === 'PLAN')) {
         // A different approval/target or a newly eligible step needs its own preflight next pass.
         // In particular, never re-ask a freshly approved spec using an older generation's head.
         if (current.threadId === null && (forgeHead === undefined
           || current.repoId !== flow.repoId || current.branch !== flow.branch || current.specSha !== flow.specSha
           || current.approvedAt?.getTime() !== flow.approvedAt?.getTime())) return;
         if (current.threadId === null && forgeHead === null) {
-          await this.writeDecision(current, job ?? null, {
+          await this.writeDecision(current, feature, job ?? null, {
             kind: 'stop', reason: 'dispatch_refused', detail: `${action.step}: repo not connected`,
           }, now);
           return;
@@ -464,21 +524,20 @@ export class FleetFlowAdvanceService {
         }
       }
       const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
-        ? await this.steps.latestJobForStep(current.id, current.features[0].id, 'PLAN') : null;
+        ? await this.steps.latestJobForStep(current.id, feature.id, 'PLAN') : null;
       let rule: DispatchPass['rule'];
       if (action.step === 'RULE') {
-        const run = await this.steps.latestJobForStep(current.id, current.features[0].id, 'RUN');
+        const run = await this.steps.latestJobForStep(current.id, feature.id, 'RUN');
         if (!run?.resultBranch) {
-          await this.writeDecision(current, job ?? null, {
+          await this.writeDecision(current, feature, job ?? null, {
             kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: RUN has no result branch',
           }, now);
           return;
         }
         const workflow = run.workflow;
         const ruled = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
-        const feature = current.features[0];
         if (feature.prNumber === null) {
-          await this.writeDecision(current, job ?? null, {
+          await this.writeDecision(current, feature, job ?? null, {
             kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: feature has no PR number',
           }, now);
           return;
@@ -497,8 +556,23 @@ export class FleetFlowAdvanceService {
           guidance,
         };
       }
-      return { flow: current, action, plan, remainingCapUsd: remaining, ...(rule ? { rule } : {}) };
+      return { flow: current, feature, action, plan, remainingCapUsd: remaining, ...(rule ? { rule } : {}) };
     });
+  }
+
+  /**
+   * The feature the flow runs now, or null when it has none: `nextFlowFeature` picks the running
+   * feature, else the first pending one, else answers that the flow waits for a merge or completes.
+   */
+  private activeFeature(flow: FleetFlowRecord): FleetFlowFeatureRecord | null {
+    const action = nextFlowFeature(flow.features);
+    if (action.kind !== 'active') return null;
+    return this.orderedFeatures(flow).find(({ id }) => id === action.featureId) ?? null;
+  }
+
+  /** The features of the flow in position order: the position is the run order, not the row order. */
+  private orderedFeatures(flow: FleetFlowRecord): FleetFlowFeatureRecord[] {
+    return [...flow.features].sort((left, right) => left.position - right.position);
   }
 
   /**
@@ -516,16 +590,18 @@ export class FleetFlowAdvanceService {
   /** undefined: not a candidate; null: disconnected. Only a head SHA survives forge preflight. */
   private async readSpecHead(flow: FleetFlowRecord, now: Date): Promise<string | null | undefined> {
     if (flow.threadId !== null || (flow.state !== 'APPROVED' && flow.state !== 'RUNNING')) return;
-    const snapshot = await this.steps.latestJobWithIngest(flow.id, flow.features[0].id);
+    const first = this.orderedFeatures(flow)[0];
+    if (!first) return;
+    const snapshot = await this.steps.latestJobWithIngest(flow.id, first.id);
     const latest = snapshot?.job;
     // Calls own forge failure classification, including permanent installation failures. A dispatch
     // preflight here would swallow them before the transactional calls_failed stop/outbox path.
     // The locked decision still re-reads everything; an action that changes to dispatch waits a tick.
     if (latest?.flowStep === 'SPEC_REVIEW' && latest.ref === flow.specSha
-      && decideFlowStep(await this.decisionInput(flow, snapshot, now)).kind === 'apply_calls') return;
+      && decideFlowStep(await this.decisionInput(flow, first, snapshot, now)).kind === 'apply_calls') return;
     if (flow.state !== 'APPROVED' && latest
       && !(isTerminal(latest.state) && (latest.flowStep === 'SPEC_REVIEW'
-        || (latest.flowStep === 'PRD_REVIEW' && latest.id === flow.features[0]?.callsJobId)))) return;
+        || (latest.flowStep === 'PRD_REVIEW' && latest.id === first.callsJobId)))) return;
     const repo = await this.repos.findReviewRepo(flow.repoId);
     if (!repo || repo.githubInstallationId === null) return null;
     const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
@@ -545,38 +621,41 @@ export class FleetFlowAdvanceService {
     return sum;
   }
 
-  private async decisionInput(flow: FleetFlowRecord, latest: LatestFlowJob | null, now: Date): Promise<FlowStepInput> {
+  private async decisionInput(
+    flow: FleetFlowRecord, feature: FleetFlowFeatureRecord, latest: LatestFlowJob | null, now: Date,
+  ): Promise<FlowStepInput> {
     const latestJob = latest === null ? null : await this.jobView(flow, latest.job);
     const needsRuleInputs = latestJob?.step === 'REVIEW' || latestJob?.step === 'RULE';
-    const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, flow.features[0].id, 'RUN') : null;
+    const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, feature.id, 'RUN') : null;
     const workflow = run?.workflow ?? null;
     const ruledItemIds = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
     const specReviewCount = latestJob?.step === 'SPEC_REVIEW'
-      ? await this.steps.countJobsForStepSince(flow.id, flow.features[0].id, 'SPEC_REVIEW', flow.approvedAt ?? now)
+      ? await this.steps.countJobsForStepSince(flow.id, feature.id, 'SPEC_REVIEW', flow.approvedAt ?? now)
       : undefined;
     return {
       state: flow.state,
-      firstFeature: true,
+      // The flow's first feature is the one at position 0; every later feature starts at its PLAN.
+      firstFeature: isFirstFeature(feature),
       // An APPROVED or RUNNING flow was approved before it became live; the fallback only widens the type.
       approvedAt: flow.approvedAt ?? now,
       latestJob,
       ...(needsRuleInputs ? {
         run: workflow === null ? null : { outcome: workflow.outcome, openItems: workflow.openItems as FlowOpenItem[] },
         ruledItemIds,
-        rulingsJobId: flow.features[0]?.rulingsJobId ?? null,
+        rulingsJobId: feature.rulingsJobId ?? null,
       } : {}),
       now,
       prWaitMs: this.config.flowPrWaitMs,
       // Only a finished RUN consults this, and it arrives with the row it belongs to.
       ingestSettled: latest?.ingestSettled ?? false,
-      featurePrNumber: flow.features[0]?.prNumber ?? null,
-      callsJobId: flow.features[0]?.callsJobId ?? null,
-      planCount: await this.steps.countJobsForStepSince(flow.id, flow.features[0].id, 'PLAN', flow.approvedAt ?? now),
+      featurePrNumber: feature.prNumber ?? null,
+      callsJobId: feature.callsJobId ?? null,
+      planCount: await this.steps.countJobsForStepSince(flow.id, feature.id, 'PLAN', flow.approvedAt ?? now),
       ...(specReviewCount !== undefined ? { specReviewCount } : {}),
-      prdEditsJobId: flow.features[0]?.prdEditsJobId ?? null,
+      prdEditsJobId: feature.prdEditsJobId ?? null,
       canApplyCalls: flow.entry === 'NAX',
-      questionsJobId: flow.features[0]?.questionsJobId ?? null,
-      answers: flow.features[0]?.answers ?? null,
+      questionsJobId: feature.questionsJobId ?? null,
+      answers: feature.answers ?? null,
     };
   }
 
@@ -618,6 +697,7 @@ export class FleetFlowAdvanceService {
    */
   private async writeDecision(
     flow: FleetFlowRecord,
+    feature: FleetFlowFeatureRecord,
     job: FleetJobRecord | null,
     action: FlowStepAction,
     now: Date,
@@ -632,7 +712,7 @@ export class FleetFlowAdvanceService {
       await this.outbox.record({
         type: FLEET_FLOW_STOPPED,
         payload: {
-          flowId: flow.id, projectId: flow.projectId, feature: flow.features[0].feature,
+          flowId: flow.id, projectId: flow.projectId, feature: feature.feature,
           stopReason: action.reason, detail: detail.slice(0, 500), approverId: flow.approverId,
           creatorType: flow.createdByType, creatorId: flow.createdById,
         },
@@ -641,7 +721,6 @@ export class FleetFlowAdvanceService {
       return;
     }
     if (action.kind === 'wait_answer') {
-      const feature = flow.features[0];
       await this.steps.setWaiting(flow.id, feature.id, { jobId: action.jobId, questions: action.questions });
       await this.audit.record({
         key: 'system.flow.advance', resourceType: 'flow', resourceId: flow.id, projectId: flow.projectId,
@@ -693,6 +772,14 @@ export class FleetFlowAdvanceService {
  */
 function safeItemLabel(item: string): string {
   return oneLine(safeFlowJsonText(item));
+}
+
+/**
+ * The flow's first feature is the one at position 0 (US-008): it keeps the flow's branch and owns
+ * the set's `SPEC_REVIEW`. Every later feature runs on its own branch and starts at its `PLAN`.
+ */
+function isFirstFeature(feature: FleetFlowFeatureRecord): boolean {
+  return feature.position === 0;
 }
 
 /**

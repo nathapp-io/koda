@@ -837,7 +837,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.wrote()).toBe(false);
   });
 
-  it('advances the first feature of a multi-feature flow pending active-feature selection', async () => {
+  it('advances the first feature of a multi-feature flow', async () => {
     const h = build({ flow: { features: [feature(), feature({ id: 'feature-2', position: 1 })] } });
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'AGENT' }),

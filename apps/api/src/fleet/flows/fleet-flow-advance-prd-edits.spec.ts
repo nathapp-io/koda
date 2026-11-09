@@ -149,6 +149,7 @@ describe('FleetFlowAdvanceService PRD edit dispatch', () => {
     const invoke = service as unknown as {
       dispatchStep(pass: {
         flow: FleetFlowRecord;
+        feature: FleetFlowFeatureRecord;
         action: FlowStepAction;
         plan: FleetJobRecord;
         remainingCapUsd: string;
@@ -157,6 +158,7 @@ describe('FleetFlowAdvanceService PRD edit dispatch', () => {
 
     await expect(invoke.dispatchStep({
       flow: flowRecord,
+      feature: featureRecord,
       action: { kind: 'dispatch', step: 'PRD_REVIEW' },
       plan,
       remainingCapUsd: '10.0000',

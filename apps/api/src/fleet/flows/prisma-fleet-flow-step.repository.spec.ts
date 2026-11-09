@@ -101,3 +101,34 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
     expect(text).toContain('LIMIT 1');
   });
 });
+
+/**
+ * US-008: a flow of a set is advanced too, one feature at a time, so the eligible flows are not
+ * filtered by the number of their features any more.
+ */
+describe('PrismaFleetFlowStepRepository — the advanceable flows', () => {
+  type MockPrisma = ReturnType<typeof createMockPrismaService>;
+
+  let prisma: MockPrisma;
+  let repo: PrismaFleetFlowStepRepository;
+  let queryRaw: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    prisma = createMockPrismaService({ fn: vi.fn });
+    queryRaw = vi.fn().mockResolvedValue([]);
+    prisma.client.$queryRaw = queryRaw as never;
+    const transactionManager = { run: vi.fn((work: () => Promise<unknown>) => work()) };
+    repo = new PrismaFleetFlowStepRepository(transactionManager as never, prisma as PrismaService<never>);
+  });
+
+  it('lists every live flow, whatever the number of its features', async () => {
+    await repo.listAdvanceable(50, null);
+
+    const sql = queryRaw.mock.calls[0][0] as unknown as { strings: string[]; values: unknown[] };
+    const text = sql.strings.join('?');
+    expect(text).toContain("flow.\"state\" IN ('APPROVED', 'RUNNING')");
+    // No feature count: a flow of a set is advanced by its active feature.
+    expect(text).not.toContain('COUNT(*)');
+    expect(text).not.toContain('"FleetFlowFeature"');
+  });
+});
