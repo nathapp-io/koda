@@ -138,6 +138,12 @@ export interface ThreadHandoff {
   run: ThreadHandoffJob | null
 }
 
+export interface ThreadPreApproval {
+  userId: string
+  at: string
+  costCapUsd: string
+}
+
 export interface ThreadDto {
   id: string
   kind: ChatThreadKind
@@ -178,6 +184,7 @@ export interface ThreadDto {
   publishedSha: string | null
   specPublished: boolean
   lastWrite: ThreadWriteResult | null
+  preApproval: ThreadPreApproval | null
 }
 
 export interface ThreadDetailDto extends ThreadDto {
