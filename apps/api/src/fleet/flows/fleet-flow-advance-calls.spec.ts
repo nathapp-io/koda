@@ -126,7 +126,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     await h.service.advance('flow-1', NOW);
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [FINDING],
-    }, 's1');
+    }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
   });
   it('AC-2: records committed calls under parent then flow locks', async () => {
@@ -169,7 +169,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     expect(h.steps.latestJobForStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'PLAN');
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'j1', findings: [FINDING],
-    }, 'plan-sha');
+    }, 'plan-sha', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
   });
   it('B2: follows a different PLAN result branch through real calls and the re-plan', async () => {
     const h = build({ latest: { flowStep: 'PRD_REVIEW' }, planCount: 1 });
@@ -274,7 +274,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'feature-1', 'PLAN', APPROVED_AT);
     expect(h.calls.applyPrdEdits).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_prd_edits', jobId: 'j1', edits: [], accepted: [FINDING],
-    }, 'plan-sha');
+    }, 'plan-sha', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
     expect(h.flows.stop).not.toHaveBeenCalled();
     expect(h.calls.apply).not.toHaveBeenCalled();
   });

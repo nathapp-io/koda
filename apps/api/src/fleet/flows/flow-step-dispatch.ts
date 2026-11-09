@@ -20,7 +20,10 @@ export interface BuildStepDispatchInput {
     reviewerRole: string;
     pinnedRunnerId: string | null;
   };
-  feature: { feature: string; specPath: string };
+  /** The feature the step runs for; its own branch wins over the flow branch once it has one. */
+  feature: { feature: string; specPath: string; branch?: string | null };
+  /** Every spec path of the flow's set, in position order: a set review covers them all at once. */
+  setSpecPaths?: string[];
   step: FlowStep;
   prdEdits?: boolean;
   remainingCapUsd: string;
@@ -51,14 +54,19 @@ export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJ
         bashMode: 'raw',
         agent: {
           name: input.reviewAgent,
-          task: buildReviewTask(step, feature.specPath, feature.feature, { prdEdits: input.prdEdits === true }),
+          task: buildReviewTask(step, feature.specPath, feature.feature, {
+            prdEdits: input.prdEdits === true,
+            // The set review covers every spec of the flow at once.
+            ...(step === 'SPEC_REVIEW' && input.setSpecPaths !== undefined ? { setSpecPaths: input.setSpecPaths } : {}),
+          }),
           model: flow.reviewerRole,
         },
       };
     }
     case 'PLAN':
+      // A feature that has its own branch plans against it; the flow branch is the fallback.
       return {
-        ...common, command: 'PLAN', ref: flow.branch, feature: feature.feature,
+        ...common, command: 'PLAN', ref: feature.branch ?? flow.branch, feature: feature.feature,
         planFrom: feature.specPath, profiles: [],
       };
     case 'RUN': {

@@ -21,6 +21,10 @@ const TOKEN = 'test-only-token';
 const SPEC = '# Spec\n\nSome text\n';
 const BLOB_SHA = 'blob-1';
 const MOVED_BLOB_SHA = 'blob-2';
+/** The explicit target of a calls write: the feature, its spec path and the branch it lives on. */
+const TARGET = { feature: 'f', specPath: SPEC_PATH, branch: BRANCH };
+/** A target for another feature than the flow's first one. */
+const OTHER_TARGET = { feature: 'b', specPath: '.nax/features/b/spec.md', branch: 'feat/b' };
 
 const feature = (over: Partial<FleetFlowFeatureRecord> = {}): FleetFlowFeatureRecord => ({
   id: 'feature-1', flowId: 'flow-1', position: 0, feature: 'f', specPath: SPEC_PATH,
@@ -95,6 +99,7 @@ function build(opts: HarnessOptions = {}) {
 }
 
 const PRD_PATH = '.nax/features/f/prd.json';
+const PRD_TARGET = { feature: 'f', specPath: PRD_PATH, branch: BRANCH };
 const PRD = JSON.stringify({ userStories: [{ id: 'US-001', acceptanceCriteria: ['old criterion'] }] });
 const prdAction = (edits: FlowPrdEdit[]): ApplyPrdEditsAction => ({
   kind: 'apply_prd_edits', jobId: 'j-prd', edits, accepted: [],
@@ -107,7 +112,7 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
 
   it('AC-1: writes the PRD on the flow branch with the pinned blob sha', async () => {
     const h = build({ files: [prdFile()] });
-    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD);
+    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET);
     const [token, owner, name, path, input] = h.putArgs();
     expect([token, owner, name, path]).toEqual([TOKEN, 'o', 'r', PRD_PATH]);
     expect(input.branch).toBe(BRANCH);
@@ -116,13 +121,13 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
 
   it('AC-2: uses the PRD review job in the commit message', async () => {
     const h = build({ files: [prdFile()] });
-    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD);
+    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET);
     expect(h.putArgs()[4].message).toBe('chore(f): flow PRD edits from PRD_REVIEW job j-prd');
   });
 
   it('AC-3: returns the committed sha, applied count and refusals', async () => {
     const h = build({ files: [prdFile()], put: { kind: 'committed', commitSha: COMMIT_SHA } });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({
       kind: 'committed', sha: COMMIT_SHA, applied: 1, refused: [],
     });
   });
@@ -130,7 +135,7 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
   it('AC-4: writes the exact text returned by applyPrdEditsToText', async () => {
     const h = build({ files: [prdFile()] });
     const apply = vi.spyOn(prdEdits, 'applyPrdEditsToText').mockReturnValue({ kind: 'ok', text: 'T', applied: 1, refused: [] });
-    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD);
+    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET);
     expect(apply).toHaveBeenCalledWith(PRD, [onePrdEdit]);
     expect(h.putArgs()[4].content).toEqual(Buffer.from('T', 'utf8'));
     apply.mockRestore();
@@ -138,7 +143,7 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
 
   it('AC-5: empty edits are unchanged without minting a token', async () => {
     const h = build();
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'unchanged', refused: [] });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'unchanged', refused: [] });
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
   });
 
@@ -146,44 +151,55 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
     const h = build({ files: [prdFile()] });
     const refused = [{ index: 0, story: 'US-001', op: 'replace_ac', reason: 'text not found' }];
     vi.spyOn(prdEdits, 'applyPrdEditsToText').mockReturnValue({ kind: 'ok', text: PRD, applied: 0, refused });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'unchanged', refused });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'unchanged', refused });
     expect(h.github.putFile).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 
   it('AC-8: missing PRD fails with the branch name', async () => {
     const h = build({ files: [null] });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: `prd.json missing on ${BRANCH}` });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: `prd.json missing on ${BRANCH}` });
   });
 
   it('AC-9: unreadable PRD fails', async () => {
     const h = build({ files: [prdFile('not json')] });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'prd.json unreadable' });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: 'prd.json unreadable' });
   });
 
   it('AC-10/12: missing or disconnected repo fails before minting', async () => {
     for (const repo of [null, reviewRepo({ githubInstallationId: null })]) {
       const h = build({ repo });
-      await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
+      await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
       expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
     }
   });
 
+  it('US-007 AC-12: reads and writes the target PRD on the target branch', async () => {
+    const h = build({ files: [prdFile()] });
+    await h.service.applyPrdEdits(flow(), prdAction([onePrdEdit]), EXPECTED_HEAD, OTHER_TARGET);
+    expect(h.github.getBranchHead).toHaveBeenCalledWith(TOKEN, 'o', 'r', 'feat/b');
+    expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', '.nax/features/b/prd.json', EXPECTED_HEAD);
+    const [token, owner, name, path, input] = h.putArgs();
+    expect([token, owner, name, path]).toEqual([TOKEN, 'o', 'r', '.nax/features/b/prd.json']);
+    expect(input.branch).toBe('feat/b');
+    expect(input.message).toBe('chore(b): flow PRD edits from PRD_REVIEW job j-prd');
+  });
+
   it('AC-11: missing feature fails before minting', async () => {
     const h = build();
-    await expect(h.service.applyPrdEdits(flow({ features: [] }), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'feature missing' });
+    await expect(h.service.applyPrdEdits(flow({ features: [] }), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: 'feature missing' });
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
   });
 
   it('AC-1/2: returns stale and never writes when the moved head is not our commit', async () => {
     const h = build({ files: [prdFile(), prdFile()], head: OTHER_HEAD, singleFileCommit: false });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
   it('AC-1: returns stale when a moved head no longer contains the PRD file', async () => {
     const h = build({ files: [null], head: OTHER_HEAD });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
@@ -192,37 +208,37 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
     if (editedResult.kind !== 'ok') throw new Error('test fixture PRD must be readable');
     const edited = editedResult.text;
     const h = build({ files: [prdFile(edited), prdFile()], head: OTHER_HEAD, singleFileCommit: true });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', sha: OTHER_HEAD, applied: 1, refused: [] });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'committed', sha: OTHER_HEAD, applied: 1, refused: [] });
     expect(h.github.isSingleFileCommit).toHaveBeenCalledWith(TOKEN, 'o', 'r', EXPECTED_HEAD, OTHER_HEAD, PRD_PATH);
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
   it('AC-5: a proved commit with different bytes is stale', async () => {
     const h = build({ files: [prdFile(JSON.stringify({ userStories: [] })), prdFile()], head: OTHER_HEAD, singleFileCommit: true });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
   it('AC-6: a refused PRD contents write is a permanent failure', async () => {
     const h = build({ files: [prdFile()], put: { kind: 'refused' } });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'prd.json write refused' });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: 'prd.json write refused' });
   });
 
   it('AC-7: conflict with unchanged blob sha is a refusal', async () => {
     const h = build({ files: [prdFile(), prdFile()], put: { kind: 'conflict' } });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'prd.json write refused' });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: 'prd.json write refused' });
   });
 
   it('AC-8: conflict with moved blob sha retries', async () => {
     const h = build({ files: [prdFile(), prdFile(PRD, MOVED_BLOB_SHA)], put: { kind: 'conflict' } });
-    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'retry' });
   });
 
   it('AC-9/10: maps permanent and transient forge exceptions', async () => {
     const permanent = build({ mintError: new RepoCheckException('app_not_installed') });
-    await expect(permanent.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'app_not_installed' });
+    await expect(permanent.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'failed', detail: 'app_not_installed' });
     const transient = build({ mintError: new RepoCheckException('provider_error') });
-    await expect(transient.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+    await expect(transient.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD, PRD_TARGET)).resolves.toEqual({ kind: 'retry' });
   });
 });
 
@@ -230,17 +246,37 @@ describe('FleetFlowCallsService.apply', () => {
   it('AC-1: reads the spec at the immutable head of the flow branch with an installation token', async () => {
     const h = build();
 
-    await h.service.apply(flow(), action(), EXPECTED_HEAD);
+    await h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET);
 
     expect(h.repos.findReviewRepo).toHaveBeenCalledWith('repo-1');
     expect(h.github.mintInstallationToken).toHaveBeenCalledWith(1n, 'r');
     expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', SPEC_PATH, EXPECTED_HEAD);
   });
 
+  it('US-007 AC-10: reads the target branch head and the target spec path', async () => {
+    const h = build();
+
+    await h.service.apply(flow(), action(), EXPECTED_HEAD, OTHER_TARGET);
+
+    expect(h.github.getBranchHead).toHaveBeenCalledWith(TOKEN, 'o', 'r', 'feat/b');
+    expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', '.nax/features/b/spec.md', EXPECTED_HEAD);
+  });
+
+  it('US-007 AC-11: commits on the target branch at the target spec path', async () => {
+    const h = build();
+
+    await h.service.apply(flow(), action(), EXPECTED_HEAD, OTHER_TARGET);
+
+    const [token, owner, name, path, input] = h.putArgs();
+    expect([token, owner, name, path]).toEqual([TOKEN, 'o', 'r', '.nax/features/b/spec.md']);
+    expect(input.branch).toBe('feat/b');
+    expect(input.message).toBe('docs(b): flow calls from SPEC_REVIEW job j1');
+  });
+
   it('AC-2: writes the spec path, the flow branch and the read blob sha', async () => {
     const h = build();
 
-    await h.service.apply(flow(), action(), EXPECTED_HEAD);
+    await h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET);
 
     const [token, owner, name, path, input] = h.putArgs();
     expect([token, owner, name, path]).toEqual([TOKEN, 'o', 'r', SPEC_PATH]);
@@ -253,7 +289,7 @@ describe('FleetFlowCallsService.apply', () => {
     const built = buildFlowCalls(SPEC, action());
     expect(built.alreadyApplied).toBe(false);
 
-    await h.service.apply(flow(), action(), EXPECTED_HEAD);
+    await h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET);
 
     const content = h.putArgs()[4].content;
     expect(Buffer.isBuffer(content)).toBe(true);
@@ -265,7 +301,7 @@ describe('FleetFlowCallsService.apply', () => {
     const spec = '# Spec — naïve\n';
     const h = build({ files: [file(spec)] });
 
-    await h.service.apply(flow(), action(), EXPECTED_HEAD);
+    await h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET);
 
     expect(h.putArgs()[4].content.toString('utf8')).toBe(buildFlowCalls(spec, action()).text);
   });
@@ -273,7 +309,7 @@ describe('FleetFlowCallsService.apply', () => {
   it('AC-4: names the feature, the step and the job in the commit message', async () => {
     const h = build();
 
-    await h.service.apply(flow(), action({ step: 'PRD_REVIEW', jobId: 'j7' }), EXPECTED_HEAD);
+    await h.service.apply(flow(), action({ step: 'PRD_REVIEW', jobId: 'j7' }), EXPECTED_HEAD, TARGET);
 
     expect(h.putArgs()[4].message).toBe('docs(f): flow calls from PRD_REVIEW job j7');
   });
@@ -281,13 +317,13 @@ describe('FleetFlowCallsService.apply', () => {
   it('AC-5: returns the commit sha the contents write produced', async () => {
     const h = build({ put: { kind: 'committed', commitSha: COMMIT_SHA } });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
   });
 
   it('AC-6: recovers only the exact calls commit without writing twice', async () => {
     const h = build({ files: [file(buildFlowCalls(SPEC, action()).text), file(SPEC)], head: COMMIT_SHA });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
     expect(h.github.isSingleFileCommit).toHaveBeenCalledWith(TOKEN, 'o', 'r', EXPECTED_HEAD, COMMIT_SHA, SPEC_PATH);
     expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', SPEC_PATH, EXPECTED_HEAD);
     expect(h.github.putFile).not.toHaveBeenCalled();
@@ -296,80 +332,80 @@ describe('FleetFlowCallsService.apply', () => {
   it('B1: re-asks when an external rewrite retains the calls heading', async () => {
     const rewritten = buildFlowCalls('# External spec rewrite\n', action()).text;
     const h = build({ files: [file(rewritten), file(SPEC)], head: OTHER_HEAD });
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
   it('B1: re-asks after any later commit, even when the spec is unchanged', async () => {
     const h = build({ files: [file(buildFlowCalls(SPEC, action()).text), file(SPEC)], head: OTHER_HEAD, singleFileCommit: false });
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
   it('AC-7: a repo that is gone fails as not connected', async () => {
     const h = build({ repo: null });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
   });
 
   it('AC-8: a repo without an installation fails as not connected', async () => {
     const h = build({ repo: reviewRepo({ githubInstallationId: null }) });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
   });
 
   it('AC-9: a spec missing on the branch fails with the branch name', async () => {
     const h = build({ files: [null] });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: `spec missing on ${BRANCH}` });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: `spec missing on ${BRANCH}` });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
   it('AC-10: a conflict whose re-read finds the same blob sha is a refusal', async () => {
     const h = build({ files: [file(SPEC, BLOB_SHA), file(SPEC, BLOB_SHA)], put: { kind: 'conflict' } });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'spec write refused' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: 'spec write refused' });
     expect(h.reads()).toBe(2);
   });
 
   it('AC-11: a conflict whose re-read finds a moved blob sha retries', async () => {
     const h = build({ files: [file(SPEC, BLOB_SHA), file(`${SPEC}more\n`, MOVED_BLOB_SHA)], put: { kind: 'conflict' } });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'retry' });
     expect(h.reads()).toBe(2);
   });
 
   it('AC-11b: a conflict whose re-read finds no file retries', async () => {
     const h = build({ files: [file(SPEC, BLOB_SHA), null], put: { kind: 'conflict' } });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'retry' });
   });
 
   it('AC-12: an installation the app cannot use fails with that reason', async () => {
     const h = build({ mintError: new RepoCheckException('app_not_installed') });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'app_not_installed' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: 'app_not_installed' });
     expect(h.github.getFile).not.toHaveBeenCalled();
   });
 
   it('AC-13: an unreachable provider retries', async () => {
     const h = build({ putError: new RepoCheckException('provider_unreachable') });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'retry' });
   });
 
   it('AC-14: a refused contents write fails the calls step', async () => {
     const h = build({ put: { kind: 'refused' } });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'spec write refused' });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: 'spec write refused' });
   });
 
   it('AC-15: a head that moved since the review is stale and writes nothing', async () => {
     const h = build({ head: OTHER_HEAD });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.getBranchHead).toHaveBeenCalledWith(TOKEN, 'o', 'r', BRANCH);
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
@@ -377,20 +413,20 @@ describe('FleetFlowCallsService.apply', () => {
   it('writes when the head still matches the head the review saw', async () => {
     const h = build({ head: EXPECTED_HEAD });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
     expect(h.github.putFile).toHaveBeenCalledTimes(1);
   });
 
   it('a non-forge error from the write propagates', async () => {
     const h = build({ putError: new Error('bug') });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).rejects.toThrow('bug');
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).rejects.toThrow('bug');
   });
 
   it('a flow without a feature fails without touching the forge', async () => {
     const h = build();
 
-    await expect(h.service.apply(flow({ features: [] }), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'feature missing' });
+    await expect(h.service.apply(flow({ features: [] }), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'failed', detail: 'feature missing' });
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
   });
 });

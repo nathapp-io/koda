@@ -26,6 +26,30 @@ describe('buildStepDispatch', () => {
   it('builds a PLAN body from the flow branch and spec path', () => {
     expect(buildStepDispatch(baseInput('PLAN'))).toEqual({ repoId: 'repo-1', command: 'PLAN', ref: 'feat/f', feature: 'f', planFrom: '.nax/features/f/spec.md', profiles: [], maxCostUsd: 6.75 });
   });
+  it('US-007 AC-7: a SPEC_REVIEW of a set names every spec path of the set', () => {
+    const input = {
+      ...baseInput('SPEC_REVIEW'),
+      setSpecPaths: ['.nax/features/a/spec.md', '.nax/features/b/spec.md'],
+    };
+    const dispatched = buildStepDispatch(input);
+    expect(dispatched.agent?.task).toContain('.nax/features/a/spec.md');
+    expect(dispatched.agent?.task).toContain('.nax/features/b/spec.md');
+  });
+  it('US-007 AC-8: a PLAN plans from the feature branch', () => {
+    const input = {
+      ...baseInput('PLAN'),
+      feature: { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/b' },
+    };
+    expect(buildStepDispatch(input)).toMatchObject({ command: 'PLAN', ref: 'feat/b', feature: 'f' });
+  });
+  it('US-007 AC-9: a PLAN without a feature branch plans from the flow branch', () => {
+    const nullBranch = {
+      ...baseInput('PLAN'),
+      feature: { feature: 'f', specPath: '.nax/features/f/spec.md', branch: null },
+    };
+    expect(buildStepDispatch(nullBranch)).toMatchObject({ command: 'PLAN', ref: 'feat/f' });
+    expect(buildStepDispatch(baseInput('PLAN'))).toMatchObject({ command: 'PLAN', ref: 'feat/f' });
+  });
   it('forwards opt-in PRD edits to the PRD_REVIEW task', () => {
     const input = { ...baseInput('PRD_REVIEW'), prdEdits: true, plan: { resultSha: 'plan-sha', resultBranch: 'plan-branch' } };
     const dispatched = buildStepDispatch(input);

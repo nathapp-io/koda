@@ -174,7 +174,7 @@ describe('FleetFlowAdvanceService.advance PRD edits', () => {
     await h.service.advance('flow-1', NOW);
     expect(h.calls.applyPrdEdits).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_prd_edits', jobId: 'j1', edits: [EDIT], accepted: [],
-    }, 'plan-sha');
+    }, 'plan-sha', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
   });
   it('AC-5: dispatches no job during the pass that applies the PRD edits', async () => {
     const h = build();
@@ -220,7 +220,7 @@ describe('FleetFlowAdvanceService.advance PRD edits', () => {
     await h.service.advance('flow-1', NOW);
     expect(h.calls.applyPrdEdits).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_prd_edits', jobId: 'j1', edits: [EDIT], accepted: [{ id: 'F1', class: 'minor', summary: 'bad \uD800 text', fix: 'fix' }],
-    }, 'plan-sha');
+    }, 'plan-sha', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
     expect(h.activity.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       action: 'flow.prd_edits',
       payload: expect.objectContaining({ accepted: ['bad \uFFFD text'] }),
@@ -287,6 +287,7 @@ describe('FleetFlowAdvanceService.advance PRD edits', () => {
       expect.objectContaining({ branch: 'prd/output' }),
       expect.objectContaining({ kind: 'apply_prd_edits' }),
       'plan-sha',
+      { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'prd/output' },
     );
   });
   it('AC-15: dispatches RUN on the PLAN result branch once the edits are recorded', async () => {

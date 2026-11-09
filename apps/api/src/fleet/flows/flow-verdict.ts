@@ -10,6 +10,8 @@ export interface FlowFinding {
   fix?: string;
   question?: string;
   answer?: string;
+  /** The feature the finding belongs to: a set review names the feature on every finding. */
+  feature?: string;
 }
 
 /**
@@ -64,7 +66,10 @@ export function parseFlowVerdict(output: string | null | undefined): FlowVerdict
       continue;
     }
     const id = 'id' in finding && typeof finding.id === 'string' ? finding.id : undefined;
-    result.push({ ...(id === undefined ? {} : { id }), class: classification, summary: finding.summary, ...(fix === undefined ? {} : { fix }), ...(question === undefined ? {} : { question }) });
+    // A set review names the feature on every finding. A finding that carries no usable name keeps
+    // its own text: the feature is optional, so a missing one never drops the finding.
+    const feature = 'feature' in finding && typeof finding.feature === 'string' ? finding.feature : undefined;
+    result.push({ ...(id === undefined ? {} : { id }), class: classification, summary: finding.summary, ...(fix === undefined ? {} : { fix }), ...(question === undefined ? {} : { question }), ...(feature === undefined ? {} : { feature }) });
   }
 
   const prdEdits = 'prdEdits' in parsed ? parsePrdEdits(parsed.prdEdits) : [];

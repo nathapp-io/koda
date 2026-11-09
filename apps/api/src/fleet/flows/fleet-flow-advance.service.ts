@@ -19,7 +19,7 @@ import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
-import { FleetFlowCallsService } from './fleet-flow-calls.service';
+import { FleetFlowCallsService, type FleetFlowCallsTarget } from './fleet-flow-calls.service';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
 import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
@@ -112,7 +112,7 @@ export class FleetFlowAdvanceService {
   ): Promise<void> {
     const expectedHead = action.step === 'SPEC_REVIEW' ? flow.specSha : plan?.resultSha;
     if (!expectedHead) throw new Error('PRD_REVIEW calls require a PLAN result sha');
-    const outcome = await this.calls.apply(flow, action, expectedHead);
+    const outcome = await this.calls.apply(flow, action, expectedHead, this.callsTarget(flow));
     if (outcome.kind === 'retry') return;
     if (outcome.kind === 'failed') {
       await this.writeStop(flow, 'calls_failed', `${action.step}: ${outcome.detail}`, now);
@@ -133,6 +133,16 @@ export class FleetFlowAdvanceService {
   }
 
   /**
+   * The calls target of the feature the step runs for: its spec path and the branch it lives on.
+   * Until the active feature is selected (US-008) that is the flow's first feature, on the flow's
+   * branch; a later feature brings its own branch.
+   */
+  private callsTarget(flow: FleetFlowRecord): FleetFlowCallsTarget {
+    const feature = flow.features[0];
+    return { feature: feature.feature, specPath: feature.specPath, branch: flow.branch };
+  }
+
+  /**
    * The PRD edits are committed on the flow's branch outside any transaction, exactly like the spec
    * calls: the forge call never holds the flow locks. The marker and the activity are written in a
    * second transaction, under the locks, so a stop or a re-ask that lands in between keeps the commit
@@ -144,7 +154,7 @@ export class FleetFlowAdvanceService {
   ): Promise<void> {
     const expectedHead = plan?.resultSha;
     if (!expectedHead) throw new Error('PRD_REVIEW edits require a PLAN result sha');
-    const outcome = await this.calls.applyPrdEdits(flow, action, expectedHead);
+    const outcome = await this.calls.applyPrdEdits(flow, action, expectedHead, this.callsTarget(flow));
     if (outcome.kind === 'retry') return;
     if (outcome.kind === 'failed') {
       await this.writeStop(flow, 'calls_failed', `PRD_REVIEW edits: ${outcome.detail}`, now);
