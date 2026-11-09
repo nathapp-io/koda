@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T05:04:58.561Z",
+  "updatedAt": "2026-11-09T05:14:54.199Z",
   "userStories": [
     {
       "id": "US-001",
@@ -566,14 +566,17 @@
       "dependencies": [
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Sequential external commits followed by generation-fenced atomic markers introduce partial-failure and idempotency risks without changing token minting."
+        "reasoning": "Sequential external commits followed by generation-fenced atomic markers introduce partial-failure and idempotency risks without changing token minting.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -589,7 +592,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "df911e1b69085264cc56d63820a5566d51fe3a18"
     },
     {
       "id": "US-011",
