@@ -134,6 +134,7 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
       ThreadHeader: inertThreadStub,
       FleetThreadsThreadHeader: inertThreadStub,
       FleetThreadsThreadStartFlow: { props: ['slug', 'thread'], template: '<aside data-testid="thread-start-flow" />' },
+      FleetThreadsThreadPreApprovalCard: { props: ['slug', 'thread'], emits: ['changed'], template: '<button data-testid="thread-preapproval-card" @click="$emit(\'changed\')" />' },
       ThreadTimeline: inertThreadStub,
       FleetThreadsThreadTimeline: inertThreadStub,
       ThreadMessage: inertThreadStub,

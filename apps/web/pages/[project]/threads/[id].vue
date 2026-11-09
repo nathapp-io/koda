@@ -105,6 +105,7 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
       <FleetThreadsThreadHeader :thread="controller.thread.value" :runners="options.runners.value" />
       <FleetThreadsThreadFlowsPanel :slug="slug" :thread-id="threadId" />
       <FleetThreadsThreadStartFlow :slug="slug" :thread="controller.thread.value" />
+      <FleetThreadsThreadPreApprovalCard :slug="slug" :thread="controller.thread.value" @changed="controller.reloadThread()" />
       <FleetThreadsThreadControls
         :is-creator="isCreator"
         :can-manage="canManage"

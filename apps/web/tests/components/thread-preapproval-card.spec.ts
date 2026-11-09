@@ -1,7 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
-import { enI18n } from '../helpers/fleet-harness'
+import { enI18n, toastRecorder } from '../helpers/fleet-harness'
 import type { ThreadDetailDto } from '~/lib/thread-types'
 
 const thread = (overrides: Partial<ThreadDetailDto> = {}): ThreadDetailDto => ({
@@ -15,7 +15,8 @@ const thread = (overrides: Partial<ThreadDetailDto> = {}): ThreadDetailDto => ({
 async function mountCard(value: ThreadDetailDto, held = true) {
   const mounted = mountSfc(webFile('components', 'fleet', 'threads', 'ThreadPreApprovalCard.vue'), {
     props: { slug: 'web', thread: value },
-    globals: { useI18n: () => enI18n(), useProjectPermissions: () => ({ permissions: { value: { has: () => held } } }) },
+    globals: { useI18n: () => enI18n(), useAppToast: () => toastRecorder(), useProjectPermissions: () => ({ permissions: { value: { has: () => held } } }) },
+    alias: { '~/composables/useThreadPreApproval': { useThreadPreApproval: () => ({ set: async () => ({ kind: 'done' as const }), clear: async () => ({ kind: 'done' as const }) }) } },
     components: {
       Button: { template: '<button><slot /></button>' },
       Label: { template: '<label><slot /></label>' },
