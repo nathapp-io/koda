@@ -10,7 +10,7 @@ const props = defineProps<{ open: boolean; thread: import('~/lib/thread-types').
 const emit = defineEmits<{ (event: 'update:open', value: boolean): void; (event: 'submit', body: unknown): void }>()
 const { t } = useI18n()
 const schema = buildFlowStartSchema(t)
-const { values, setFieldValue } = useForm({
+const { setFieldValue } = useForm({
   validationSchema: toTypedSchema(schema),
   initialValues: { features: [] as FlowStartRow[], roles: { reviewer: '', supervisor: '' }, costCapUsd: 5 },
 })
@@ -45,8 +45,8 @@ function addRow(): void { rows.value.push({ feature: '', specPath: '', dependsOn
     <DialogContent v-if="props.open" data-testid="flow-start-dialog">
       <DialogHeader><DialogTitle>{{ t('fleet.flows.start.title') }}</DialogTitle></DialogHeader>
       <div v-for="(row, index) in rows" :key="index" data-testid="flow-start-row" class="space-y-3 rounded-md border border-border p-3">
-        <div class="space-y-1"><Label>{{ t('fleet.flows.start.feature') }}</Label><Input :model-value="row.feature" data-testid="flow-start-feature" @update:model-value="updateFeature(index, String($event))" /></div>
-        <div class="space-y-1"><Label>{{ t('fleet.flows.start.specPath') }}</Label><Input :model-value="row.specPath" data-testid="flow-start-spec-path" @update:model-value="row.specPath = String($event)" /></div>
+        <div class="space-y-1"><Label>{{ t('fleet.flows.start.feature') }}</Label><input :value="row.feature" data-testid="flow-start-feature" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="updateFeature(index, ($event.target as HTMLInputElement).value)"></div>
+        <div class="space-y-1"><Label>{{ t('fleet.flows.start.specPath') }}</Label><input :value="row.specPath" data-testid="flow-start-spec-path" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.specPath = ($event.target as HTMLInputElement).value"></div>
         <div v-if="index > 0" class="space-y-2">
           <label v-for="earlier in rows.slice(0, index)" :key="earlier.feature" class="flex items-center gap-2 text-sm">
             <input type="checkbox" data-testid="flow-start-dependency" :value="earlier.feature" :checked="row.dependsOn.includes(earlier.feature)" @change="toggleDependency(index, earlier.feature, ($event.target as HTMLInputElement).checked)">
