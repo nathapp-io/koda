@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, type FleetJob as FleetJobRow } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { agentInputOf, agentResultOf, fixOutcomeOf, type FleetJobRecord } from '../jobs/domain/fleet-job.domain';
@@ -9,7 +10,10 @@ import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, LatestFl
 
 @Injectable()
 export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    @Inject(TRANSACTION_MANAGER) private readonly transactionManager: ITransactionManager,
+    private readonly prisma: PrismaService<PrismaClient>,
+  ) {}
 
   private get db() {
     return this.prisma.client;
@@ -119,10 +123,12 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
   }
 
   async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string | null, options: { setSha?: boolean } = {}): Promise<void> {
-    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
-    if (specSha !== null) {
-      await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha, ...(options.setSha ? { setSha: specSha } : {}) } });
-    }
+    await this.transactionManager.run(async () => {
+      await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
+      if (specSha !== null) {
+        await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha, ...(options.setSha ? { setSha: specSha } : {}) } });
+      }
+    });
   }
 
   async recordRulings(flowId: string, featureId: string, jobId: string): Promise<void> {

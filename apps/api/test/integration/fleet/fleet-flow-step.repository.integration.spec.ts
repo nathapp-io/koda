@@ -194,6 +194,13 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ specSha: 'sha4', setSha: 'sha4' });
   });
 
+  it('US-002 recordCalls rolls back the feature marker when the flow SHA write fails', async () => {
+    const flow = await createFlow('RUNNING');
+    const feature = flow.features[0];
+    await expect(repo.recordCalls('missing-flow', feature.id, 'job-rollback', 'sha-failure')).rejects.toThrow();
+    expect(await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).toMatchObject({ callsJobId: null });
+  });
+
   it('US-002 missing-flow completion rejects before changing unrelated rows', async () => {
     const flow = await createFlow('RUNNING');
     const before = await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } });
