@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T12:44:03.169Z",
+  "updatedAt": "2026-11-09T12:56:39.968Z",
   "userStories": [
     {
       "id": "US-001",
@@ -330,14 +330,17 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One dialog, its mount test and two locale additions reuse the existing handoff form pattern; row-array edits and rename/removal rewrites need no novel integration or authorization logic."
+        "reasoning": "One dialog, its mount test and two locale additions reuse the existing handoff form pattern; row-array edits and rename/removal rewrites need no novel integration or authorization logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/ThreadHandoffDialog.vue",
@@ -364,7 +367,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "84c4e71e00960dc374e1d85a7ec1084de4a1ce4c"
     },
     {
       "id": "US-007",
