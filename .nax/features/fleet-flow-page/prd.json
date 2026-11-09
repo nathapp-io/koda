@@ -3,7 +3,7 @@
   "feature": "fleet-flow-page",
   "branchName": "feat/fleet-flow-page",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T09:29:49.270Z",
+  "updatedAt": "2026-11-09T09:35:10.864Z",
   "userStories": [
     {
       "id": "US-001",
@@ -326,14 +326,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "One thin composable forwards five established API calls and classifies their bodies using an upstream helper; it adds no client state, dependencies, auth logic or session handling."
+        "reasoning": "One thin composable forwards five established API calls and classifies their bodies using an upstream helper; it adds no client state, dependencies, auth logic or session handling.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useFleetSchedules.ts",
@@ -351,7 +354,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c4d872fd12284be61074abf504a575642c1a9b2e"
     },
     {
       "id": "US-006",
