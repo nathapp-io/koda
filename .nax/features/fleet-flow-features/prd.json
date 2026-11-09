@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T03:54:21.330Z",
+  "updatedAt": "2026-11-09T04:03:41.786Z",
   "userStories": [
     {
       "id": "US-001",
@@ -258,14 +258,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing HTTP integration patterns are straightforward, but bearer-token handling and forge permission classification require the security override."
+        "reasoning": "Existing HTTP integration patterns are straightforward, but bearer-token handling and forge permission classification require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/github-app-client.ts",
@@ -288,7 +291,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0b36f135ab9724c0712ae5fe82a1068a0145d19e"
     },
     {
       "id": "US-006",
