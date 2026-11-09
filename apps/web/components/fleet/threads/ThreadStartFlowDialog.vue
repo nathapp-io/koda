@@ -81,7 +81,7 @@ function addRow(): void { rows.value.push({ feature: '', specPath: '', dependsOn
       <div class="space-y-1"><Label>{{ t('fleet.flows.start.supervisor') }}</Label><input :value="values.roles.supervisor" data-testid="flow-start-supervisor" @input="setFieldValue('roles.supervisor', ($event.target as HTMLInputElement).value); changed()"></div>
       <div class="space-y-1"><Label>{{ t('fleet.flows.start.costCap') }}</Label><input type="number" :value="values.costCapUsd" data-testid="flow-start-cost-cap" @input="setFieldValue('costCapUsd', ($event.target as HTMLInputElement).value); changed()"></div>
       <p data-testid="flow-start-tick-hint" class="text-sm text-muted-foreground">{{ t(`fleet.flows.start.tick.${hint}`) }}</p>
-      <p v-if="error" role="alert" class="text-sm text-destructive">{{ error }}</p>
+      <p v-if="error" role="alert" class="text-sm text-status-rejected">{{ error }}</p>
       <Button type="submit" data-testid="flow-start-submit">{{ t('fleet.flows.start.submit') }}</Button>
       <Button type="button" data-testid="flow-start-add-row" @click="addRow(); changed()">{{ t('fleet.flows.start.addRow') }}</Button>
       </form>
