@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T04:08:43.084Z",
+  "updatedAt": "2026-11-09T04:19:36.504Z",
   "userStories": [
     {
       "id": "US-001",
@@ -375,14 +375,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module parsing/prompt/dispatch seams and token-bearing branch-targeted forge writes require strict security-isolated TDD."
+        "reasoning": "Cross-module parsing/prompt/dispatch seams and token-bearing branch-targeted forge writes require strict security-isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-verdict.ts",
@@ -409,7 +412,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "aabb9a69b8a1bc32ac39020fcefa549cdfe99e64"
     },
     {
       "id": "US-008",
