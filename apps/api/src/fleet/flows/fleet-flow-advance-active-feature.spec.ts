@@ -116,11 +116,10 @@ function build(opts: Options = {}) {
     } })
     : opts.run;
   let inTransaction = false;
-  const order: string[] = [];
   const assertTx = () => { expect(inTransaction).toBe(true); };
   const flows = {
     findById: vi.fn(async () => row),
-    lockById: vi.fn(async () => { assertTx(); order.push('flow'); return row; }),
+    lockById: vi.fn(async () => { assertTx(); return row; }),
     stop: vi.fn(async () => { assertTx(); return row; }),
   };
   const steps = {
@@ -143,7 +142,7 @@ function build(opts: Options = {}) {
     projectSlug: vi.fn(async () => 'web'),
   };
   const repos = {
-    lockById: vi.fn(async () => { assertTx(); order.push('repo'); return { id: row.repoId }; }),
+    lockById: vi.fn(async () => { assertTx(); return { id: row.repoId }; }),
     findReviewRepo: vi.fn(async () => ({ id: row.repoId, owner: 'o', name: 'r', githubInstallationId: 1n })),
   };
   const threads = { lockForFlowTransition: vi.fn(async () => { assertTx(); return { publishedSha: row.specSha }; }) };
@@ -187,11 +186,8 @@ function build(opts: Options = {}) {
     { claimHead: vi.fn(), markDispatched: vi.fn(), release: vi.fn() } as never, testFleetConfig(),
     calls as never, outbox as never, rulings as never,
   );
-  const wrote = () => [flows.stop, steps.setSpent, steps.complete, steps.markStep, steps.recordCalls,
-    steps.recordPrdEdits, steps.recordRulings, steps.setWaiting, steps.setBranch,
-    audit.record, activity.record, flowService.reaskLocked].some((fn) => fn.mock.calls.length > 0);
   return { service, row, flows, steps, repos, activity, audit, txManager, jobs, permissions, flowService,
-    github, calls, outbox, rulings, order, wrote, inTransaction: () => inTransaction };
+    github, calls, outbox, rulings };
 }
 
 /** A flow whose first feature is ready and whose second feature runs on its own branch. */
