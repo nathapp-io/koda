@@ -182,13 +182,13 @@ describe('FleetFlowAdvanceService.advance, the set SPEC_REVIEW calls', () => {
       h.row,
       { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: JOB_ID, findings: [FINDING_A] },
       SPEC_SHA,
-      { feature: 'a', specPath: SPEC_A, branch: BRANCH },
+      { feature: 'a', specPath: SPEC_A, branch: BRANCH, replay: expect.anything() },
     ]);
     expect(h.calls.apply.mock.calls[1]).toEqual([
       h.row,
       { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: JOB_ID, findings: [FINDING_B] },
       'commit-1',
-      { feature: 'b', specPath: SPEC_B, branch: BRANCH },
+      { feature: 'b', specPath: SPEC_B, branch: BRANCH, replay: expect.anything() },
     ]);
   });
 
@@ -199,8 +199,8 @@ describe('FleetFlowAdvanceService.advance, the set SPEC_REVIEW calls', () => {
 
     const targets = h.calls.apply.mock.calls.map((call) => call[3]);
     expect(targets).toEqual([
-      { feature: 'a', specPath: SPEC_A, branch: BRANCH },
-      { feature: 'b', specPath: SPEC_B, branch: BRANCH },
+      { feature: 'a', specPath: SPEC_A, branch: BRANCH, replay: expect.anything() },
+      { feature: 'b', specPath: SPEC_B, branch: BRANCH, replay: expect.anything() },
     ]);
     expect(h.calls.apply.mock.calls[0]?.[1].findings).toEqual([FINDING_A]);
     expect(h.calls.apply.mock.calls[1]?.[1].findings).toEqual([FINDING_B]);
@@ -215,7 +215,7 @@ describe('FleetFlowAdvanceService.advance, the set SPEC_REVIEW calls', () => {
 
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: JOB_ID, findings: [missing, unknown],
-    }, SPEC_SHA, { feature: 'a', specPath: SPEC_A, branch: BRANCH });
+    }, SPEC_SHA, { feature: 'a', specPath: SPEC_A, branch: BRANCH, replay: expect.anything() });
   });
 
   it('AC-4: records the marker of every target feature and promotes both shas on the last commit', async () => {
@@ -259,7 +259,40 @@ describe('FleetFlowAdvanceService.advance, the set SPEC_REVIEW calls', () => {
 
     expect(h.calls.apply).toHaveBeenCalledTimes(4);
     expect(h.calls.apply.mock.calls[2]?.[2]).toBe(SPEC_SHA);
-    expect(h.calls.apply.mock.calls[2]?.[3]).toEqual({ feature: 'a', specPath: SPEC_A, branch: BRANCH });
+    expect(h.calls.apply.mock.calls[2]?.[3]).toEqual({
+      feature: 'a', specPath: SPEC_A, branch: BRANCH, replay: { reviewedHead: SPEC_SHA, paths: [SPEC_A, SPEC_B] },
+    });
+  });
+
+  it('B1: a retry on the third spec replays from the reviewed head so the earlier commits are recovered', async () => {
+    const featureC = (): FleetFlowFeatureRecord => featureB({
+      id: 'feature-c', position: 2, feature: 'c', specPath: '.nax/features/c/spec.md',
+    });
+    const finding = (feature: string) => ({ id: `F-${feature}`, class: 'minor', summary: 'Missing AC', fix: 'add it', feature });
+    let tick = 0;
+    const h = build({
+      features: [featureA(), featureB(), featureC()],
+      findings: [finding('a'), finding('b'), finding('c')],
+      applyOutcome: (index) => {
+        if (index < 3) return index === 2 ? { kind: 'retry' } : { kind: 'committed', specSha: `commit-${index + 1}` };
+        tick += 1;
+        // The replay finds a and b already on the branch: the service answers with the branch head.
+        return tick <= 2 ? { kind: 'committed', specSha: 'commit-2' } : { kind: 'committed', specSha: 'commit-3' };
+      },
+    });
+
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.recordCalls).not.toHaveBeenCalled();
+    await h.service.advance('flow-1', NOW);
+
+    const replayTargets = h.calls.apply.mock.calls.slice(3).map((call) => call[3]);
+    expect(replayTargets).toHaveLength(3);
+    for (const target of replayTargets) {
+      expect(target.replay).toEqual({ reviewedHead: SPEC_SHA, paths: [SPEC_A, SPEC_B, '.nax/features/c/spec.md'] });
+    }
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+    expect(h.row.specSha).toBe('commit-3');
+    expect(h.row.setSha).toBe('commit-3');
   });
 
   it('a stale head re-asks the flow and never reaches the next spec', async () => {
@@ -280,7 +313,7 @@ describe('FleetFlowAdvanceService.advance, the set SPEC_REVIEW calls', () => {
 
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: JOB_ID, findings: [FINDING_B],
-    }, SPEC_SHA, { feature: 'b', specPath: SPEC_B, branch: BRANCH });
+    }, SPEC_SHA, { feature: 'b', specPath: SPEC_B, branch: BRANCH, replay: expect.anything() });
     expect(h.steps.recordCalls.mock.calls[0]).toEqual(['flow-1', 'feature-a', JOB_ID, null]);
     expect(h.steps.recordCalls.mock.calls[1]).toEqual(['flow-1', 'feature-b', JOB_ID, 'commit-1', { setSha: true }]);
     expect(h.row.features[0]?.callsJobId).toBe(JOB_ID);
@@ -319,7 +352,7 @@ describe('FleetFlowAdvanceService.advance, the set SPEC_REVIEW calls', () => {
 
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: JOB_ID, findings: [finding],
-    }, SPEC_SHA, { feature: 'f', specPath: '.nax/features/f/spec.md', branch: BRANCH });
+    }, SPEC_SHA, { feature: 'f', specPath: '.nax/features/f/spec.md', branch: BRANCH, replay: expect.anything() });
     expect(h.steps.recordCalls).toHaveBeenCalledExactlyOnceWith('flow-1', 'feature-a', JOB_ID, 'commit-1', { setSha: true });
   });
 });

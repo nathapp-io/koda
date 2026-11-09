@@ -370,6 +370,37 @@ export class GitHubAppClient {
       && obj(files[0]).filename === path && obj(files[0]).status === 'modified';
   }
 
+  /**
+   * True when `base...head` is a linear run of commits that only modify the given paths and whose
+   * messages all carry `marker`: the flow's own earlier commits of one calls pass, never an outside edit.
+   */
+  async isOwnCallsRun(
+    token: string, owner: string, name: string, base: string, head: string,
+    own: { paths: readonly string[]; marker: string },
+  ): Promise<boolean> {
+    const url = `${this.api}${this.repoPath(owner, name)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const res = await this.http.request('GET', url, this.headers(token));
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const body = obj(res.body);
+    const commits = body.commits;
+    const files = body.files;
+    if (body.status !== 'ahead' || obj(body.merge_base_commit).sha !== base
+      || !Array.isArray(commits) || commits.length === 0 || body.total_commits !== commits.length
+      || obj(commits.at(-1)).sha !== head || !Array.isArray(files) || files.length === 0) return false;
+    let parent = base;
+    for (const raw of commits) {
+      const commit = obj(raw);
+      const parents = commit.parents;
+      if (!Array.isArray(parents) || parents.length !== 1 || obj(parents[0]).sha !== parent
+        || typeof obj(commit.commit).message !== 'string'
+        || !(obj(commit.commit).message as string).includes(own.marker)) return false;
+      parent = String(commit.sha);
+    }
+    return files.every((file) => own.paths.includes(String(obj(file).filename)) && obj(file).status === 'modified');
+  }
+
   /** Fleet S3 §4.1: a tree by commit or tree SHA. Entries other than blob/tree (submodules) are dropped. */
   async getTree(token: string, owner: string, name: string, treeish: string, recursive: boolean): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }> {
     const query = recursive ? '?recursive=1' : '';

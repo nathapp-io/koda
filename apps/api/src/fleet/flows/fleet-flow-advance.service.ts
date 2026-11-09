@@ -209,14 +209,16 @@ export class FleetFlowAdvanceService {
     const byId = new Map(features.map((item) => [item.id, item]));
     const commits: { target: FleetFlowFeatureRecord; sha: string }[] = [];
     let head = flow.specSha;
+    const replay = { reviewedHead: flow.specSha, paths: features.map((item) => item.specPath) };
     let staleHead: string | null = null;
     for (const group of groupFindingsByFeature(action.findings, features)) {
       const target = byId.get(group.feature.id);
       if (!target) continue;
       const outcome = await this.calls.apply(flow, { ...action, findings: group.findings }, head, {
-        feature: target.feature, specPath: target.specPath, branch: flow.branch,
+        feature: target.feature, specPath: target.specPath, branch: flow.branch, replay,
       });
-      // A retry writes no progress: the next pass starts again at the first feature.
+      // A retry writes no progress: the next pass starts again at the first feature, and the replay
+      // recovers the specs this pass already committed.
       if (outcome.kind === 'retry') return;
       if (outcome.kind === 'failed') {
         await this.writeStop(flow, feature, 'calls_failed', `${action.step}: ${outcome.detail}`, now);

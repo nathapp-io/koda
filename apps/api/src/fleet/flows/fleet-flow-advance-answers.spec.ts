@@ -183,7 +183,7 @@ describe('FleetFlowAdvanceService answer lifecycle', () => {
   it('AC-9: passes stored answers on matching review to calls.apply', async () => {
     const h = build({ flow: { features: [feature({ questionsJobId: 'j1', answers: ANSWERS })] } });
     await h.service.advance('flow-1', NOW);
-    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [FINDINGS[0], { ...FINDINGS[1], answer: 'A1' }] }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
+    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [FINDINGS[0], { ...FINDINGS[1], answer: 'A1' }] }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
   });
   it('AC-10: stale calls re-ask with the new head and do not record calls', async () => {
     const h = build({ flow: { features: [feature({ questionsJobId: 'j1', answers: ANSWERS })] }, outcome: { kind: 'stale', head: 'h2' } });
@@ -195,6 +195,6 @@ describe('FleetFlowAdvanceService answer lifecycle', () => {
     const minor = { id: 'F1', class: 'minor', summary: 'Missing AC', fix: 'add it' };
     const h = build({ latest: { agentResult: { status: 'completed', output: JSON.stringify({ findings: [minor] }) } } });
     await h.service.advance('flow-1', NOW);
-    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [minor] }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
+    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [minor] }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
   });
 });

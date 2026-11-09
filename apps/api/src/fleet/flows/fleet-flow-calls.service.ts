@@ -33,6 +33,11 @@ export interface FleetFlowCallsTarget {
   feature: string;
   specPath: string;
   branch: string;
+  /**
+   * The set pass commits several specs in a row, so a replay after a transient failure finds its own
+   * earlier commits above the reviewed head. With this, those commits (and only those) are recovered.
+   */
+  replay?: { reviewedHead: string; paths: readonly string[] };
 }
 
 /**
@@ -103,6 +108,18 @@ export class FleetFlowCallsService {
     }
   }
 
+  /** One spec-only commit after the reviewed head, or, for a set replay, a run of this job's own commits. */
+  private async isOwnEarlierCommit(
+    token: string, repo: { owner: string; name: string }, baseHead: string, head: string,
+    action: ApplyCallsAction, target: FleetFlowCallsTarget,
+  ): Promise<boolean> {
+    if (await this.github.isSingleFileCommit(token, repo.owner, repo.name, baseHead, head, target.specPath)) return true;
+    if (!target.replay) return false;
+    return this.github.isOwnCallsRun(token, repo.owner, repo.name, baseHead, head, {
+      paths: target.replay.paths, marker: `flow calls from ${action.step} job ${action.jobId}`,
+    });
+  }
+
   async apply(
     flow: FleetFlowRecord, action: ApplyCallsAction, expectedHead: string, target: FleetFlowCallsTarget,
   ): Promise<CallsOutcome> {
@@ -124,10 +141,11 @@ export class FleetFlowCallsService {
         // A heading alone is not proof of our commit: an external edit may have retained it.
         // Recover only a single spec-only commit directly after the reviewed head, containing exactly
         // the expected append. Any later commit (even outside the spec) must re-ask approval.
-        const base = await this.github.getFile(token, repo.owner, repo.name, target.specPath, expectedHead);
+        const baseHead = target.replay?.reviewedHead ?? expectedHead;
+        const base = await this.github.getFile(token, repo.owner, repo.name, target.specPath, baseHead);
         const expected = base && buildFlowCalls(base.content.toString('utf8'), action);
         if (!expected || expected.alreadyApplied || !file.content.equals(Buffer.from(expected.text, 'utf8'))
-          || !(await this.github.isSingleFileCommit(token, repo.owner, repo.name, expectedHead, head, target.specPath))) {
+          || !(await this.isOwnEarlierCommit(token, repo, baseHead, head, action, target))) {
           return { kind: 'stale', head };
         }
         return { kind: 'committed', specSha: head };

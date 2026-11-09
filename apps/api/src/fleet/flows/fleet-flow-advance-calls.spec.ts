@@ -126,7 +126,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     await h.service.advance('flow-1', NOW);
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [FINDING],
-    }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
+    }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
   });
   it('AC-2: records committed calls under parent then flow locks', async () => {

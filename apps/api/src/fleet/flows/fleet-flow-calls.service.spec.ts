@@ -62,6 +62,7 @@ interface HarnessOptions {
   files?: (ForgeFile | null)[];
   head?: string;
   singleFileCommit?: boolean;
+  ownRun?: boolean;
   /** What `putFile` answers, or the error it throws. */
   put?: PutFileResult;
   putError?: Error;
@@ -83,6 +84,7 @@ function build(opts: HarnessOptions = {}) {
     getFile: vi.fn<GitHubAppClient['getFile']>(async () => nextFile()),
     getBranchHead: vi.fn<GitHubAppClient['getBranchHead']>(async () => opts.head ?? EXPECTED_HEAD),
     isSingleFileCommit: vi.fn(async () => opts.singleFileCommit ?? true),
+    isOwnCallsRun: vi.fn(async () => opts.ownRun ?? false),
     putFile: vi.fn<GitHubAppClient['putFile']>(async () => {
       if (opts.putError) throw opts.putError;
       return opts.put ?? { kind: 'committed', commitSha: COMMIT_SHA };
@@ -340,6 +342,41 @@ describe('FleetFlowCallsService.apply', () => {
     const h = build({ files: [file(buildFlowCalls(SPEC, action()).text), file(SPEC)], head: OTHER_HEAD, singleFileCommit: false });
     await expect(h.service.apply(flow(), action(), EXPECTED_HEAD, TARGET)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
+  describe('replay of the set pass own earlier commits', () => {
+    const replay = { reviewedHead: EXPECTED_HEAD, paths: [SPEC_PATH, '.nax/features/b/spec.md'] };
+    const target = { ...TARGET, replay };
+    const applied = () => file(buildFlowCalls(SPEC, action()).text);
+
+    it('B1: accepts a run of this job own commits after the reviewed head', async () => {
+      const h = build({ files: [applied(), file(SPEC)], head: OTHER_HEAD, singleFileCommit: false, ownRun: true });
+
+      await expect(h.service.apply(flow(), action(), OTHER_HEAD, target)).resolves.toEqual({ kind: 'committed', specSha: OTHER_HEAD });
+      expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', SPEC_PATH, EXPECTED_HEAD);
+      expect(h.github.isOwnCallsRun).toHaveBeenCalledWith(TOKEN, 'o', 'r', EXPECTED_HEAD, OTHER_HEAD,
+        { paths: replay.paths, marker: 'flow calls from SPEC_REVIEW job j1' });
+      expect(h.github.putFile).not.toHaveBeenCalled();
+    });
+
+    it('B1: re-asks when the commits after the reviewed head are not this job own', async () => {
+      const h = build({ files: [applied(), file(SPEC)], head: OTHER_HEAD, singleFileCommit: false, ownRun: false });
+
+      await expect(h.service.apply(flow(), action(), OTHER_HEAD, target)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    });
+
+    it('B1: re-asks when the spec at the head is not the exact expected append', async () => {
+      const h = build({ files: [file(buildFlowCalls('# Rewritten\n', action()).text), file(SPEC)], head: OTHER_HEAD, singleFileCommit: false, ownRun: true });
+
+      await expect(h.service.apply(flow(), action(), OTHER_HEAD, target)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    });
+
+    it('B1: writes a spec not yet applied on top of the current head', async () => {
+      const h = build({ files: [file(SPEC)], head: OTHER_HEAD });
+
+      await expect(h.service.apply(flow(), action(), OTHER_HEAD, target)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
+      expect(h.github.putFile).toHaveBeenCalledOnce();
+    });
   });
 
   it('AC-7: a repo that is gone fails as not connected', async () => {

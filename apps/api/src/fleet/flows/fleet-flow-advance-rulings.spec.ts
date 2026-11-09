@@ -462,7 +462,7 @@ describe('FleetFlowAdvanceService.advance, the RULE verdict', () => {
 
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: RULE_JOB, findings: [FINDING],
-    }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f' });
+    }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
     expect(h.rulings.createForFlow).not.toHaveBeenCalled();
   });
 });
