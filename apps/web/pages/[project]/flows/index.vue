@@ -22,7 +22,8 @@ async function load(current: number): Promise<void> {
     page.value = current
     failed.value = false
   } catch (err: unknown) {
-    if (result.value === null) failed.value = true
+    result.value = null
+    failed.value = true
     toast.error(extractApiError(err))
   } finally { pending.value = false }
 }
