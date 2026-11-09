@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T05:27:18.689Z",
+  "updatedAt": "2026-11-09T05:44:15.576Z",
   "userStories": [
     {
       "id": "US-001",
@@ -690,14 +690,17 @@
         "US-005",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Private-PR read-token grants, external polling and same-generation locked partial merges/stops require security-isolated tests."
+        "reasoning": "Private-PR read-token grants, external polling and same-generation locked partial merges/stops require security-isolated tests.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -722,7 +725,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f82a3fe7e1c72cf023c7dd2c7eff5809c8b88b5f"
     },
     {
       "id": "US-013",
