@@ -3,10 +3,17 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import { computed, ref, watch } from 'vue'
 import { flowStartRows } from '~/lib/fleet-flow-start'
-import { buildFlowStartSchema } from '~/lib/fleet-flow-start-form'
+import { buildFlowStartSchema, firstFlowStartIssue } from '~/lib/fleet-flow-start-form'
 import type { FlowStartRow, FlowStartFormValues } from '~/lib/fleet-flow-start-form'
 import { defaultFlowRoles, tickHint } from '~/lib/fleet-flow-start-defaults'
 import { toFlowStartBody } from '~/lib/fleet-flow-start-body'
+
+/**
+ * One editable row. Dependencies hold a row id, never a feature name: a name is text the user
+ * retypes, so renaming `a` to `b2` passes through `b` and a name-keyed rewrite would retarget every
+ * later row that depends on `b`. Names are produced only when the form is serialized for submit.
+ */
+interface EditRow { id: number; feature: string; specPath: string; dependsOn: number[] }
 
 const props = defineProps<{ open: boolean; thread: import('~/lib/thread-types').ThreadDetailDto; viewerId: string }>()
 const emit = defineEmits<{ (event: 'update:open', value: boolean): void; (event: 'submit', body: unknown): void }>()
@@ -16,62 +23,75 @@ const { setFieldValue, values } = useForm<FlowStartFormValues>({
   validationSchema: toTypedSchema(schema),
   initialValues: { features: [] as FlowStartRow[], roles: { reviewer: '', supervisor: '' }, costCapUsd: 5 },
 })
-const rows = ref<FlowStartRow[]>([])
+const rows = ref<EditRow[]>([])
+let nextRowId = 1
 const error = ref('')
 const hint = computed(() => tickHint(props.thread.preApproval, Number(values.costCapUsd), {
   userId: props.viewerId,
   isThreadCreator: props.thread.createdById === props.viewerId,
 }))
 function resetRows(): void {
-  rows.value = flowStartRows(props.thread).map(row => ({ ...row, dependsOn: [...row.dependsOn] }))
+  const idByName = new Map<string, number>()
+  rows.value = flowStartRows(props.thread).map(row => {
+    const id = nextRowId++
+    const dependsOn = row.dependsOn
+      .map(name => idByName.get(name))
+      .filter((dep): dep is number => dep !== undefined)
+    if (!idByName.has(row.feature)) idByName.set(row.feature, id)
+    return { id, feature: row.feature, specPath: row.specPath, dependsOn }
+  })
   const roles = defaultFlowRoles(props.thread)
-  setFieldValue('features', rows.value)
+  setFieldValue('features', serializeRows())
   setFieldValue('roles', roles)
   setFieldValue('costCapUsd', props.thread.preApproval ? Number(props.thread.preApproval.costCapUsd) : 5)
   error.value = ''
 }
 watch(() => props.open, open => { if (open) resetRows() }, { immediate: true })
-function updateFeature(index: number, feature: string): void {
-  const previous = rows.value[index]?.feature
-  if (previous !== undefined) {
-    for (const row of rows.value.slice(index + 1)) row.dependsOn = row.dependsOn.map(dep => dep === previous ? feature : dep)
-  }
-  const row = rows.value[index]
-  if (row !== undefined) row.feature = feature
+/** Rows as the schema and the API see them: names, in row order, dependencies naming earlier rows. */
+function serializeRows(): FlowStartRow[] {
+  const indexById = new Map(rows.value.map((row, index) => [row.id, index]))
+  return rows.value.map((row, index) => {
+    const dependsOn: string[] = []
+    for (const id of row.dependsOn) {
+      const at = indexById.get(id)
+      if (at === undefined || at >= index) continue
+      dependsOn.push(rows.value[at]?.feature ?? '')
+    }
+    return { feature: row.feature, specPath: row.specPath, dependsOn }
+  })
 }
-function toggleDependency(index: number, feature: string, checked: boolean): void {
+function toggleDependency(index: number, id: number, checked: boolean): void {
   const row = rows.value[index]
   if (!row) return
-  row.dependsOn = checked ? [...row.dependsOn, feature] : row.dependsOn.filter(dep => dep !== feature)
+  row.dependsOn = checked ? [...row.dependsOn, id] : row.dependsOn.filter(dep => dep !== id)
 }
 function removeRow(index: number): void {
-  const removed = rows.value[index]
+  const [removed] = rows.value.splice(index, 1)
   if (!removed) return
-  rows.value.splice(index, 1)
-  for (const row of rows.value.slice(index)) row.dependsOn = row.dependsOn.filter(dep => dep !== removed.feature)
+  for (const row of rows.value) row.dependsOn = row.dependsOn.filter(dep => dep !== removed.id)
 }
-function syncRows(): void { setFieldValue('features', rows.value.map(row => ({ ...row, dependsOn: [...row.dependsOn] }))) }
+function syncRows(): void { setFieldValue('features', serializeRows()) }
 watch(rows, syncRows, { deep: true })
 function changed(): void { error.value = '' }
 function submit(): void {
-  const result = schema.safeParse({ features: rows.value, roles: values.roles, costCapUsd: values.costCapUsd })
-  if (!result.success) { error.value = result.error.issues[0]?.message ?? ''; return }
+  const result = schema.safeParse({ features: serializeRows(), roles: values.roles, costCapUsd: values.costCapUsd })
+  if (!result.success) { error.value = firstFlowStartIssue(result.error.issues)?.message ?? ''; return }
   error.value = ''
   emit('submit', toFlowStartBody(result.data))
 }
-function addRow(): void { rows.value.push({ feature: '', specPath: '', dependsOn: [] }) }
+function addRow(): void { rows.value.push({ id: nextRowId++, feature: '', specPath: '', dependsOn: [] }) }
 </script>
 <template>
   <Dialog :open="props.open" @update:open="emit('update:open', $event)">
-    <DialogContent v-if="props.open" data-testid="flow-start-dialog">
+    <DialogContent v-if="props.open" data-testid="flow-start-dialog" class="max-h-[85vh] w-[calc(100%-2rem)] overflow-y-auto">
       <DialogHeader><DialogTitle>{{ t('fleet.flows.start.title') }}</DialogTitle></DialogHeader>
       <form data-testid="flow-start-form" class="space-y-4" @submit.prevent="submit">
-      <div v-for="(row, index) in rows" :key="index" data-testid="flow-start-row" class="space-y-3 rounded-md border border-border p-3">
-        <div class="space-y-1"><Label>{{ t('fleet.flows.start.feature') }}</Label><input :value="row.feature" data-testid="flow-start-feature" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="updateFeature(index, ($event.target as HTMLInputElement).value); changed()"></div>
+      <div v-for="(row, index) in rows" :key="row.id" data-testid="flow-start-row" class="space-y-3 rounded-md border border-border p-3">
+        <div class="space-y-1"><Label>{{ t('fleet.flows.start.feature') }}</Label><input :value="row.feature" data-testid="flow-start-feature" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.feature = ($event.target as HTMLInputElement).value; changed()"></div>
         <div class="space-y-1"><Label>{{ t('fleet.flows.start.specPath') }}</Label><input :value="row.specPath" data-testid="flow-start-spec-path" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.specPath = ($event.target as HTMLInputElement).value; changed()"></div>
         <div v-if="index > 0" data-testid="flow-start-dependency-row" :data-feature="row.feature" class="space-y-2">
-          <label v-for="earlier in rows.slice(0, index)" :key="earlier.feature" class="flex items-center gap-2 text-sm">
-            <input type="checkbox" data-testid="flow-start-dependency" :value="earlier.feature" :checked="row.dependsOn.includes(earlier.feature)" @change="toggleDependency(index, earlier.feature, ($event.target as HTMLInputElement).checked); changed()">
+          <label v-for="earlier in rows.slice(0, index)" :key="earlier.id" class="flex items-center gap-2 text-sm">
+            <input type="checkbox" data-testid="flow-start-dependency" :value="earlier.feature" :checked="row.dependsOn.includes(earlier.id)" @change="toggleDependency(index, earlier.id, ($event.target as HTMLInputElement).checked); changed()">
             <span>{{ earlier.feature }}</span>
           </label>
         </div>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { buildFlowStartSchema, buildPreApprovalSchema, type FlowStartFormValues } from '~/lib/fleet-flow-start-form'
+import { buildFlowStartSchema, buildPreApprovalSchema, firstFlowStartIssue, type FlowStartFormValues } from '~/lib/fleet-flow-start-form'
 
 const t = (key: string): string => key
 const schema = buildFlowStartSchema(t)
@@ -55,6 +55,52 @@ describe('buildFlowStartSchema', () => {
   })
   test('duplicate and dependency errors precede later role and cap errors', () => {
     expect(firstMessage(values({ features: [{ ...row }, { ...row }], roles: { reviewer: 'bad role', supervisor: 'm' }, costCapUsd: -1 }))).toBe('fleet.flows.start.validation.featureDuplicate')
+  })
+})
+
+describe('firstFlowStartIssue', () => {
+  // A row refinement (dependsOn) is collected after every row's field checks, so the raw issue list
+  // can put a later row ahead of an earlier one; the form must still report the earliest row first.
+  const mixed = () => {
+    const result = schema.safeParse(values({ features: [
+      { feature: 'a', specPath: '.nax/features/a/spec.md', dependsOn: ['gone'] },
+      { feature: 'b', specPath: 'docs/spec.txt', dependsOn: ['a'] },
+    ] }))
+    if (result.success) throw new Error('expected the probe to fail validation')
+    return result.error.issues
+  }
+
+  test('picks the earlier row refinement over a later row field issue', () => {
+    const issues = mixed()
+    expect(issues.map(issue => issue.path.join('.'))).toEqual(['features.1.specPath', 'features.0.dependsOn'])
+    expect(firstFlowStartIssue(issues)?.path).toEqual(['features', 0, 'dependsOn'])
+  })
+
+  test('orders rows before reviewer, supervisor and the cap', () => {
+    const result = schema.safeParse(values({ features: [{ ...row, feature: 'bad name' }], roles: { reviewer: 'bad role', supervisor: 'bad role' }, costCapUsd: 0 }))
+    if (result.success) throw new Error('expected the probe to fail validation')
+    expect(firstFlowStartIssue(result.error.issues)?.message).toBe('fleet.flows.start.validation.feature')
+    expect(firstFlowStartIssue([])).toBeUndefined()
+  })
+
+  test('orders the feature count, each row field, then reviewer, supervisor and the cap', () => {
+    const issue = (path: (string | number)[]) => ({ code: 'custom' as const, path, message: path.join('.') })
+    // Given in reverse: the selection must follow the design's order, not the input order.
+    const issues = [
+      issue(['costCapUsd']), issue(['roles', 'supervisor']), issue(['roles', 'reviewer']),
+      issue(['features', 1, 'specPath']), issue(['features', 0, 'dependsOn']),
+      issue(['features', 0, 'specPath']), issue(['features', 0, 'feature']), issue(['features']),
+    ]
+    const ordered: string[] = []
+    let remaining = issues
+    for (let taken = firstFlowStartIssue(remaining); taken; taken = firstFlowStartIssue(remaining)) {
+      ordered.push(taken.message)
+      remaining = remaining.filter(candidate => candidate !== taken)
+    }
+    expect(ordered).toEqual([
+      'features', 'features.0.feature', 'features.0.specPath', 'features.0.dependsOn',
+      'features.1.specPath', 'roles.reviewer', 'roles.supervisor', 'costCapUsd',
+    ])
   })
 })
 

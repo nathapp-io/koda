@@ -65,3 +65,57 @@ export function buildFlowStartSchema(t: Translate) {
 export function buildPreApprovalSchema(t: Translate) {
   return z.object({ costCapUsd: costCap(t('fleet.flows.preapproval.validation')) })
 }
+
+/** The issue shape the ordering below needs; `z.ZodIssue` satisfies it. */
+export interface FlowIssueLike {
+  path: ReadonlyArray<string | number>
+  message: string
+}
+
+const ROW_FIELDS = ['feature', 'specPath', 'dependsOn']
+const ROLES = ['reviewer', 'supervisor']
+
+/** Position of a path segment in a fixed order; an unknown segment sorts after every known one. */
+const ordinal = (order: string[], segment: string | number | undefined): number => {
+  const at = typeof segment === 'string' ? order.indexOf(segment) : -1
+  return at < 0 ? order.length : at
+}
+
+/**
+ * Rank an issue in the form's display order: the feature count, rows top to bottom (feature, spec
+ * path, dependencies), then reviewer, supervisor and the cap. Zod collects an array's item issues
+ * before its own refinements, so the raw list can put a later row ahead of an earlier one.
+ */
+function issueRank(issue: FlowIssueLike): number[] {
+  const [head, second, third] = issue.path
+  if (head === 'features') {
+    if (typeof second === 'number') return [0, second, ordinal(ROW_FIELDS, third)]
+    return [0, -1, -1]
+  }
+  if (head === 'roles') return [1, ordinal(ROLES, second), 0]
+  if (head === 'costCapUsd') return [2, 0, 0]
+  return [3, 0, 0]
+}
+
+const ranksBefore = (left: number[], right: number[]): boolean => {
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index] ?? 0
+    const b = right[index] ?? 0
+    if (a !== b) return a < b
+  }
+  return false
+}
+
+/** The issue the form shows: the first one in the design's order, not merely the first Zod found. */
+export function firstFlowStartIssue<T extends FlowIssueLike>(issues: readonly T[]): T | undefined {
+  let best: T | undefined
+  let bestRank: number[] | undefined
+  for (const issue of issues) {
+    const rank = issueRank(issue)
+    if (bestRank === undefined || ranksBefore(rank, bestRank)) {
+      best = issue
+      bestRank = rank
+    }
+  }
+  return best
+}
