@@ -892,7 +892,7 @@
       },
       "toast": {
         "stopped": "流程已停止",
-        "approvalRequested": "已请求停止审批"
+        "approvalRequested": "已请求审批"
       },
       "detail": {
         "title": "流程",

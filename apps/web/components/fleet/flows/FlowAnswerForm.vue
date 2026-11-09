@@ -1,41 +1,83 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { useFleetFlows } from '~/composables/useFleetFlows'
 import { openQuestions } from '~/lib/fleet-flows'
-import type { FleetFlowFeatureDto } from '~/lib/fleet-flows'
+import type { FleetFlowFeatureDto, FleetFlowQuestionDto } from '~/lib/fleet-flows'
 
 const props = defineProps<{ slug: string; flowId: string; feature: FleetFlowFeatureDto }>()
-const emit = defineEmits<{ answered: [] }>()
+/** `pending` tells the page that the answer needs an approval, so it keeps its own link to it. */
+const emit = defineEmits<{ answered: [pending?: boolean] }>()
 const { t } = useI18n()
 const toast = useAppToast()
 const flows = useFleetFlows(props.slug)
-const questions = computed(() => openQuestions(props.feature))
-const values = ref<Record<string, string>>(Object.fromEntries(questions.value.map(q => [q.id, ''])))
-const schema = toTypedSchema(z.object(Object.fromEntries(questions.value.map(q => [q.id, z.string().trim().min(1, t('fleet.flows.answer.required'))]))))
-const { handleSubmit, errors, defineField, isSubmitting } = useForm({ validationSchema: schema, initialValues: values.value })
-const fields = questions.value.map(q => ({ question: q, field: defineField(q.id) }))
+
+/** One question round: the job that asked the questions and the questions it asked. */
+interface AnswerRound {
+  jobId: string
+  questions: FleetFlowQuestionDto[]
+}
+
+const liveQuestions = computed(() => openQuestions(props.feature))
+/** A round is a job plus its question ids; a later round may reuse the same ordinal ids. */
+const liveRoundKey = computed(() => `${props.feature.questionsJobId ?? ''}|${liveQuestions.value.map(q => q.id).join(',')}`)
+
+/** The round the form shows and submits. A later round replaces it whole. */
+const round = ref<AnswerRound>({
+  jobId: props.feature.questionsJobId ?? '',
+  questions: liveQuestions.value,
+})
+
+const schema = computed(() => toTypedSchema(z.object(Object.fromEntries(
+  round.value.questions.map(q => [q.id, z.string().trim().min(1, t('fleet.flows.answer.required'))])),
+)))
+
+const { handleSubmit, errors, defineField, isSubmitting, resetForm } = useForm({
+  validationSchema: schema,
+  initialValues: Object.fromEntries(liveQuestions.value.map(q => [q.id, ''])),
+})
+
+type AnswerField = { question: FleetFlowQuestionDto; field: ReturnType<typeof defineField> }
+const fields = ref<AnswerField[]>([])
+
+function defineFields(questions: FleetFlowQuestionDto[]): void {
+  fields.value = questions.map(q => ({ question: q, field: defineField(q.id) }))
+}
+defineFields(round.value.questions)
+
+/**
+ * Polling can hand the page a later question round (a new job, the same ordinal question ids).
+ * The form then shows that round's questions and submits against its job, so answers typed for
+ * the round that was on screen are never sent to the round that replaced it.
+ */
+watch(liveRoundKey, () => {
+  const next: AnswerRound = { jobId: props.feature.questionsJobId ?? '', questions: liveQuestions.value }
+  round.value = next
+  defineFields(next.questions)
+  resetForm({ values: Object.fromEntries(next.questions.map(q => [q.id, ''])) }, { force: true })
+})
+
 const showApprovalLink = ref(false)
 
 const submit = handleSubmit(async (answers) => {
   showApprovalLink.value = false
-  const jobId = props.feature.questionsJobId
-  if (!jobId) return
+  const current = round.value
+  if (!current.jobId) return
   try {
-    const result = await flows.answer(props.flowId, jobId, questions.value.map(q => ({ id: q.id, answer: answers[q.id] ?? '' })))
+    const result = await flows.answer(props.flowId, current.jobId, current.questions.map(q => ({ id: q.id, answer: answers[q.id] ?? '' })))
     if (result.kind === 'pending') {
       showApprovalLink.value = true
       toast.success(t('fleet.flows.toast.approvalRequested'))
     }
     else toast.success(t('fleet.flows.answer.success'))
-    emit('answered')
+    emit('answered', result.kind === 'pending')
   }
   catch (err: unknown) {
     toast.error(extractApiError(err))
-    emit('answered')
+    emit('answered', false)
   }
 })
 </script>

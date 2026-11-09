@@ -892,7 +892,7 @@
       },
       "toast": {
         "stopped": "Flow stopped",
-        "approvalRequested": "Stop approval requested"
+        "approvalRequested": "Approval requested"
       },
       "detail": {
         "title": "Flow",

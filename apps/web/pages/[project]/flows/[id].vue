@@ -7,6 +7,7 @@ import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
 import { flowStateKey, flowStepKey, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
 import { useProjectPermissions } from '~/composables/usePermissions'
 import { formatUsd } from '~/lib/fleet-jobs'
+import FlowFeatureSection from '~/components/fleet/flows/FlowFeatureSection.vue'
 import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
 
 definePageMeta({ layout: 'default' })
@@ -22,6 +23,8 @@ const canAnswer = computed(() => permissions.value.has('fleet.flow.answer'))
 const canStop = computed(() => permissions.value.has('fleet.flow.stop'))
 const toast = useAppToast()
 const stopPending = ref(false)
+/** An answer that needs an approval keeps its link here, so the reload cannot take it away. */
+const answerPending = ref(false)
 const stopBusy = ref(false)
 const flow = ref<FleetFlowDto | null>(null)
 const overview = ref<FleetFlowOverviewDto | null>(null)
@@ -112,6 +115,16 @@ async function refresh(): Promise<void> {
   if (overviewResult.status === 'fulfilled') overview.value = overviewResult.value
 }
 
+/**
+ * A submitted answer asks the page to reload the flow. The reload is silent (it keeps the page
+ * content mounted) and the pending-approval notice lives here, so the answer form's own notice
+ * cannot be taken away by the reload it triggers.
+ */
+function onAnswered(pendingApproval?: boolean): void {
+  answerPending.value = pendingApproval === true
+  void refresh()
+}
+
 onMounted(() => {
   pageMounted = true
   void load().then(() => {
@@ -146,6 +159,11 @@ onBeforeUnmount(() => {
       <p v-if="stopPending" role="status" class="text-sm">
         {{ t('fleet.flows.toast.approvalRequested') }}
         <NuxtLink class="underline" :to="`/${slug}/approvals`">{{ t('fleet.flows.detail.openApprovals') }}</NuxtLink>
+      </p>
+
+      <p v-if="answerPending" role="status" class="text-sm">
+        {{ t('fleet.flows.toast.approvalRequested') }}
+        <NuxtLink class="underline" :to="`/${slug}/approvals`">{{ t('fleet.flows.answer.openApprovals') }}</NuxtLink>
       </p>
 
       <section class="space-y-2">
@@ -186,7 +204,7 @@ onBeforeUnmount(() => {
         :repo="overview?.repo ?? null"
         :jobs="groupedJobs.byFeature.get(feature.feature) ?? []"
         :can-answer="canAnswer"
-        @answered="load"
+        @answered="onAnswered"
       />
 
       <section v-if="groupedJobs.flowJobs.length" class="space-y-3">

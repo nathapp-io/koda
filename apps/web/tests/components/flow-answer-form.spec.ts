@@ -137,4 +137,21 @@ describe('FlowAnswerForm', () => {
     const failure = { code }; const { mounted, error } = await setup(jest.fn().mockRejectedValue(failure))
     await enterAnswers(mounted, ['A', 'B']); expect(error).toHaveBeenCalledWith(failure); expect(mounted.emitted('answered')).toBeTruthy(); mounted.unmount()
   })
+  test('AC-6 a later question round replaces the fields and submits against the new job', async () => {
+    const answer = jest.fn().mockResolvedValue({ kind: 'done', flow: {} })
+    const { mounted } = await setup(answer)
+    // An answer is typed for the round on screen.
+    const typed = mounted.find('input')[0]
+    ;(typed?.props.onInput as (event: unknown) => void)({ target: { value: 'A' } })
+    // Polling hands the page a later round: a new job that reuses the ordinal question id.
+    mounted.setProps({ feature: { ...feature, questionsJobId: 'j10', questions: [{ id: 'q1', question: 'Second round?' }] } })
+    await Vue.nextTick()
+    expect(mounted.text()).toContain('Second round?')
+    expect(mounted.find('input')).toHaveLength(1)
+    // The answer typed for the round that was on screen is gone.
+    expect(mounted.find('input')[0]?.props.value).toBe('')
+    await enterAnswers(mounted, ['B'])
+    expect(answer).toHaveBeenCalledWith('f1', 'j10', [{ id: 'q1', answer: 'B' }])
+    mounted.unmount()
+  })
 })

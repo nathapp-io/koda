@@ -47,7 +47,7 @@ onMounted(() => { void load(1) })
           </tr></tbody>
         </table>
       </div>
-      <nav class="flex gap-2" aria-label="{{ t('fleet.flows.list.pagination') }}">
+      <nav class="flex gap-2" :aria-label="t('fleet.flows.list.pagination')">
         <button data-testid="flows-prev" :disabled="!result.hasPrev || pending" @click="load(page - 1)">{{ t('fleet.flows.list.previous') }}</button>
         <span>{{ result.current }}</span>
         <button data-testid="flows-next" :disabled="!result.hasNext || pending" @click="load(page + 1)">{{ t('fleet.flows.list.next') }}</button>

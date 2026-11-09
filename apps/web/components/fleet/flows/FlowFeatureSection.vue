@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import FlowAnswerForm from '~/components/fleet/flows/FlowAnswerForm.vue'
 import { featureBranch, featureStateKey, flowStepKey, openQuestions, prUrl } from '~/lib/fleet-flows'
 import type { FleetFlowDto, FleetFlowFeatureDto, FleetFlowJobDto, FlowRepo } from '~/lib/fleet-flows'
 import { formatUsd } from '~/lib/fleet-jobs'
@@ -12,7 +13,7 @@ const props = defineProps<{
   jobs: FleetFlowJobDto[]
   canAnswer: boolean
 }>()
-const emit = defineEmits<{ answered: [] }>()
+const emit = defineEmits<{ answered: [pending?: boolean] }>()
 const { t } = useI18n()
 const stateLabel = computed(() => {
   const key = featureStateKey(props.feature.state)
@@ -26,7 +27,12 @@ const stepLabel = computed(() => {
 })
 const pullRequestUrl = computed(() => prUrl(props.repo, props.feature.prNumber))
 const questions = computed(() => openQuestions(props.feature))
-function onAnswered(): void { emit('answered') }
+/**
+ * The answer form belongs to one question round (the asking job and its question ids). A later
+ * round gets a fresh form, so answers typed for the round on screen are never sent to it.
+ */
+const answerRoundKey = computed(() => `${props.feature.questionsJobId ?? ''}|${questions.value.map(q => q.id).join(',')}`)
+function onAnswered(pending?: boolean): void { emit('answered', pending) }
 </script>
 
 <template>
@@ -51,6 +57,7 @@ function onAnswered(): void { emit('answered') }
     </ul>
     <FlowAnswerForm
       v-if="flow.state === 'WAITING_ANSWER' && canAnswer && questions.length && feature.questionsJobId"
+      :key="answerRoundKey"
       :slug="slug"
       :flow-id="flow.id"
       :feature="feature"
