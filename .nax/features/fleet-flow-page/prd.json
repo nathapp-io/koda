@@ -3,7 +3,7 @@
   "feature": "fleet-flow-page",
   "branchName": "feat/fleet-flow-page",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T09:05:43.932Z",
+  "updatedAt": "2026-11-09T09:21:15.337Z",
   "userStories": [
     {
       "id": "US-001",
@@ -191,14 +191,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A new guarded HTTP route composes multiple modules and must enforce project isolation before any related-data read; access control requires strict three-session isolation."
+        "reasoning": "A new guarded HTTP route composes multiple modules and must enforce project isolation before any related-data read; access control requires strict three-session isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/project-flows.controller.ts",
@@ -236,7 +239,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d050c27f584faab61260b420f6a8934cf8f6a34f"
     },
     {
       "id": "US-004",
