@@ -909,6 +909,12 @@
         }
       },
       "preapproval": {
+        "title": "Thread pre-approval",
+        "cap": "Cost cap",
+        "setAt": "Set at",
+        "set": "Set",
+        "clear": "Clear",
+        "none": "No pre-approval is set.",
         "validation": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places."
       },
       "stop": {
