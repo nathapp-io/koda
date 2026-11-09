@@ -174,11 +174,11 @@ export class FleetReposService {
     return this.repo.lockById(id);
   }
 
-  async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId'> | null> {
+  async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId' | 'defaultBranch'> | null> {
     const row = await this.repo.findById(id);
     if (!row) return null;
-    const { projectId, owner, name, githubInstallationId } = row;
-    return { id: row.id, projectId, owner, name, githubInstallationId };
+    const { projectId, owner, name, githubInstallationId, defaultBranch } = row;
+    return { id: row.id, projectId, owner, name, githubInstallationId, defaultBranch };
   }
 
   async listAutoReviewRepos(limit: number): Promise<FleetRepoRecord[]> {

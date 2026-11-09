@@ -32,7 +32,7 @@ describe('FleetReposService', () => {
   it('findReviewRepo exposes only the review projection, preserving bigint and null', async () => {
     for (const installation of [77n, null]) {
       repo.findById.mockResolvedValue(created({ githubInstallationId: installation }));
-      expect(await make().findReviewRepo('fr1')).toEqual({ id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: installation });
+      expect(await make().findReviewRepo('fr1')).toEqual({ id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: installation, defaultBranch: 'trunk' });
     }
   });
 

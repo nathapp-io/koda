@@ -310,6 +310,33 @@ export class GitHubAppClient {
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   }
 
+  /** Create a Git ref, distinguishing an existing branch from a rejected ref. */
+  async createBranch(
+    token: string,
+    owner: string,
+    name: string,
+    branch: string,
+    sha: string,
+  ): Promise<{ kind: 'created' } | { kind: 'exists'; sha: string } | { kind: 'refused' }> {
+    const res = await this.http.request('POST', `${this.api}${this.repoPath(owner, name)}/git/refs`, this.headers(token), {
+      ref: `refs/heads/${branch}`,
+      sha,
+    });
+    if (res.status === 201) return { kind: 'created' };
+    if (res.status === 422) {
+      try {
+        const head = await this.getBranchHead(token, owner, name, branch);
+        return { kind: 'exists', sha: head };
+      } catch (error) {
+        if (error instanceof RepoCheckException && error.reason === 'repo_not_found') return { kind: 'refused' };
+        throw error;
+      }
+    }
+    if (res.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    throw new RepoCheckException('provider_error');
+  }
+
   /** Fleet S3 §4.1: the commit a branch points at. */
   async getBranchHead(token: string, owner: string, name: string, branch: string): Promise<string> {
     const ref = branch.split('/').map(encodeURIComponent).join('/');

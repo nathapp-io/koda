@@ -48,6 +48,7 @@ const file = (text: string = SPEC, sha: string = BLOB_SHA): ForgeFile => ({
 const reviewRepo = (over: { githubInstallationId?: bigint | null } = {}) => ({
   id: 'repo-1', projectId: 'p1', owner: 'o', name: 'r',
   githubInstallationId: 'githubInstallationId' in over ? over.githubInstallationId ?? null : 1n,
+  defaultBranch: 'main',
 });
 
 interface HarnessOptions {
