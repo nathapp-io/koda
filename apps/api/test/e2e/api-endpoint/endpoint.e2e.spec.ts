@@ -4979,6 +4979,13 @@ describeIntegration('API Integration Tests', () => {
           features: { create: [{ position: 0, feature: 'read-stop', specPath: 'docs/read-stop.md', dependsOn: [] }] },
         } });
       }
+      async function seedThreadFlow(threadId: string, branch: string) {
+        return db().fleetFlow.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, threadId, entry: 'THREAD', createdByType: 'USER', createdById: world.ids.dev,
+          branch, specSha: 'a'.repeat(40), setSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          features: { create: [{ position: 0, feature: branch, specPath: `docs/${branch}.md`, dependsOn: [] }] },
+        } });
+      }
       /** A flow a review left waiting for the answers of one job. */
       async function seedWaitingFlow() {
         return db().fleetFlow.create({ data: {
@@ -4995,6 +5002,18 @@ describeIntegration('API Integration Tests', () => {
         const page = body<{ records: { id: string }[]; total: number }>(await request(httpServer).get(flowsUrl()).set(flowAuth()).expect(200));
         expect(page.records.map(({ id }) => id)).toContain(flow.id);
         expect(page.total).toBeGreaterThan(0);
+      });
+      it('AC-9 GET /projects/:slug/flows filters records to the requested thread', async () => {
+        const thread = await newThread('flow-list-thread');
+        const otherThread = await newThread('flow-list-other-thread');
+        const matching = await seedThreadFlow(thread.id, 'flow-list-matching');
+        await seedThreadFlow(otherThread.id, 'flow-list-other');
+        const page = body<{ records: { id: string }[] }>(await request(httpServer)
+          .get(`${flowsUrl()}?threadId=${thread.id}`).set(flowAuth()).expect(200));
+        expect(page.records.map(({ id }) => id)).toEqual([matching.id]);
+      });
+      it('AC-10 GET /projects/:slug/flows rejects an overlength threadId', async () => {
+        await request(httpServer).get(`${flowsUrl()}?threadId=${'t'.repeat(65)}`).set(flowAuth()).expect(400);
       });
       it('GET /projects/:slug/flows returns 404 for an unknown project', async () => {
         await request(httpServer).get('/api/projects/missing-flow-project/flows').set(flowAuth()).expect(404);
