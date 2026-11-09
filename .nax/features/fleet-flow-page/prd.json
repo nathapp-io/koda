@@ -3,7 +3,7 @@
   "feature": "fleet-flow-page",
   "branchName": "feat/fleet-flow-page",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T08:14:56.746Z",
+  "updatedAt": "2026-11-09T08:54:05.903Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,17 @@
         "project-scope"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive DTO fields and an optional narrowing filter follow existing pagination tests; the existing project scope, membership guard and permission checks are unchanged, so ordinary TDD is sufficient."
+        "reasoning": "Additive DTO fields and an optional narrowing filter follow existing pagination tests; the existing project scope, membership guard and permission checks are unchanged, so ordinary TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/dto/fleet-flow.dto.ts",
@@ -74,7 +77,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "122fab9f594454b9e25346fe709e5424372fbfa0"
     },
     {
       "id": "US-002",
@@ -147,7 +154,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -219,7 +229,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -273,7 +286,10 @@
         "isLiveFlow returns false for an unknown state code."
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -320,7 +336,10 @@
         "answer returns { kind: 'done', flow } when the API answers a flow DTO."
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -389,7 +408,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -454,7 +476,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -516,7 +541,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -582,7 +610,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -659,7 +690,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -709,7 +743,10 @@
         "When an overview fails on first load but get succeeds as RUNNING, advancing timers by 15 s retries get and overview."
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -764,7 +801,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Repository discovery: codebase-memory MCP tools are not exposed in this session, so exploration used direct Read, Grep and Glob tools against the supplied repository root. This is an enhancement of an existing engine, not a greenfield application. The supplied automated stack detection is misleading: apps/api is NestJS with Fastify, Prisma 7 and Vitest, and apps/web is Nuxt 4/Vue with Jest, vee-validate and zod, not an Express/Next.js implementation (.nax/mono/apps/api/context.md:23-35; .nax/mono/apps/web/context.md:22-32). Read those app contexts before implementation. API agents must also read the nathapp-nestjs-patterns skill before writing NestJS code; a repository glob found no skill file with that name, so obtain it through the implementation host's skill mechanism rather than inventing a local replacement. Only the PRD is authored by this planning task; no code, tests, generated contracts or schema have been changed or executed.\n\nProduct goal and completion: expose existing flows at /:project/flows/:flowId, with ordered feature progress, branches, PRs, jobs, spend versus cap and unknown-cost notice, approvals, stop context and ticket, open questions and existing Stop/Answer actions. Project list, thread panel and ungated project navigation make the page discoverable. Completion means the additive read contract and thread filter are wired through the existing API layers, all page/action/error/polling behaviors below are observable, both web locales cover the new literals, and existing endpoints/engine/navigation behaviors remain unchanged. No flow creation, approval decisions, workflow changes, CLI command, new event stream or schema redesign belongs here. Preserve the exact 12-story decomposition, workdirs and dependency edges.\n\nAPI baseline and US-001 impact: apps/api/src/fleet/flows/dto/fleet-flow.dto.ts:65-87 currently maps features without branch; :94-139 maps flows without stopDetail, already sorts features by position and builds url as /<slug>/flows/<id>. Its approvalOf helper at :17-27 deliberately exposes REQUEST for a PENDING flow carrying an approvalRequestId even without approvalMode. Retain this behavior so the web can link pending approval. The existing record already contains optional feature.branch and flow.stopDetail/ticketId (apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:12-62); no new record fields or relation include are needed. Modify the DTO plus its exact-object assertions in apps/api/src/fleet/flows/dto/fleet-flow.dto.spec.ts:47-77 and :123-137, adding only stopDetail:null to flow expectations and branch:null to feature expectations where unset. ProjectFlowsController.list currently parses KodaPageQuery and calls list with two arguments (apps/api/src/fleet/flows/project-flows.controller.ts:21-38). Introduce ListFleetFlowsQuery extending KodaPageQuery, with an emitted instance field discoverable by parseQuery (not a type-only declaration that disappears at runtime), Swagger optional query metadata and IsOptional/IsString/MaxLength(64). parseQuery strips undeclared fields rather than performing validation itself (apps/api/src/common/dto/koda-page.query.ts:9-29, :33-66), so both the new class argument and actual ValidationPipe behavior matter. Keep current=1,size=20 defaults; test validation directly and HTTP 400 for 65 characters. FleetFlowsService.list currently sends exactly {projectId} and get enforces the same notFound on missing/cross-project flow (apps/api/src/fleet/flows/fleet-flows.service.ts:73-98). Extend list with a default third filters argument and conditionally spread threadId only when truthy; this preserves existing findPage assertions for unfiltered callers. Update IFleetFlowRepository.findPage at apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:88-93 and Prisma implementation at apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:49-53, keeping the current createdAt desc/id desc pagination and position-ordered features. Existing service/controller coverage is apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts:49-87; it directly instantiates controllers/services, so do not change their constructor signatures. Extend the findPage cases in apps/api/test/integration/fleet-flow-repository.integration.spec.ts. The endpoint flow block is apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:4971-5050; its enclosing newThread helper is at :4653. Use that helper for thread-linked endpoint fixtures rather than dangling thread IDs.\n\nAPI overview design and US-002/003: the flow module already imports FleetReposModule and TicketsModule and binds both flow repository tokens through useExisting (apps/api/src/fleet/flows/flows.module.ts:36-62). Add a separate FleetFlowOverviewService provider and ProjectFlowOverviewController controller without altering FleetFlowsService or ProjectFlowsController constructors, imports/exports or existing providers. The public controller depends only on that service. Mirror the project controller's ApiTags('fleet'), ApiBearerAuth, ApiParam slug and ProjectMembershipGuard then RequiresGuard decorators (apps/api/src/fleet/flows/project-flows.controller.ts:21-25); enforce Requires('fleet.flow.read') on GET :flowId/overview and document 200/403/404. FleetFlowsService.get(projectId,flowId) is the first awaited fence, before any repo, ticket or job lookup, so another project's flow produces fleet.flows.notFound without disclosing associated data. Reads across modules use services, not their repositories or Prisma (.nax/rules/api-data.md:21-67). Add FleetReposService.findIdentity(id) as a narrow provider/owner/name projection via its existing repository, following findReviewRepo (apps/api/src/fleet/repos/fleet-repos.service.ts:177-182). It must return null when missing and never expose installation identifiers, tokens or unrelated settings. Existing repo service tests start at apps/api/src/fleet/repos/fleet-repos.service.spec.ts:7 and the findReviewRepo projection cases are :26-35. Resolve ticket ref with TicketsService.findRefsByIds(projectId,[ticketId]); this existing method omits soft-deleted and cross-project IDs (apps/api/src/tickets/tickets.service.ts:234-243), so a missing map entry is null, and no-ticket flows skip the call entirely.\n\nThe step repository already reads fleetJob for latestJob and latestJobForStep and sums costs using Prisma.Decimal (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:76-79, :111-118, :169-174). Extend its interface in apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:36-67 with FlowJobRow and listFlowJobs; this is a module-internal read, not a new cross-module repository export. Fetch only this flow's newest limit jobs using queuedAt desc then id desc, determine truncation with a bounded extra row or equivalent bounded/count read, remove the extra row before reversing, and return the retained rows oldest first with the same id tie ordering. Both cost columns must be 4-decimal strings. The existing flow-job indexes support this read; flowFeatureId deliberately has no Prisma relation (apps/api/prisma/schema.prisma:1120-1131, :1160-1161). Map feature IDs to names using the fenced flow's own features, never job.feature or a made-up join. Schema already stores stopDetail, ticketId and feature.branch and has project/creation and thread/state indexes (apps/api/prisma/schema.prisma:1226-1290). Thus no migration/backfill is required. Repo deletion currently cascades flows in schema, but the API's null-repo projection must still tolerate a disappearing or mocked repo; do not change deletion semantics.\n\nPure flow-overview.ts must add money with Prisma.Decimal, not JS floating point, and emit 4 places. Unknown-cost jobs are only AGENT, PLAN, REVIEW, FIX in the existing TERMINAL_STATES and with exact zero summed cost; terminal is COMPLETED/FAILED/ESCALATED/CRASHED/CANCELLED (apps/api/src/fleet/jobs/job-state.ts:8-11). RUN is excluded. Count only retained overview jobs, never discarded older rows; flow.spentUsd remains the engine's full recorded flow spend and must not be recomputed from the capped list. Overview DTO has repo, ticketRef, jobs, truncated and unknownCostCount; job DTO has id, feature, step, command, state, costUsd, queuedAt and finishedAt. Dates become ISO strings and null stays null. Every new DTO field needs ApiProperty with appropriate nested/nullable metadata. The service delegates to listFlowJobs(flowId,500), formats rows with pure helpers and copies truncated. Modify the existing step repository integration suite (apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts:13-67) for isolation, ordering, truncation, fields and costs. The new fleet-flow-overview.spec.ts owns no-DB service/controller tests, including project fence and decorator checks. If module compilation coverage needs expansion, use the existing apps/api/src/fleet/flows/flows.module.spec.ts or another co-located unit module test, not a DB integration test. Add happy/missing overview endpoints to the existing endpoint suite, preserving every prior case.\n\nContracts and compatibility: export root openapi.json after US-001 and again after US-003 with bun run api:export-spec from repository root; it is generated, not hand-maintained. The workdir remains apps/api as explicitly bound despite that root artifact. Fields and query are additive; unfiltered list ordering, pagination envelope and existing stop/answer responses stay compatible. Root guidance requires bun run generate for contract changes affecting CLI; no flows CLI command is requested, but if generation is required by the existing CLI consumer, use the generator only and never hand-edit apps/cli/src/generated. There is intentionally no generated web client. Adding interface members may affect typed mocks: IFleetFlowStepRepository is consumed by FleetFlowAdvanceService, ticker, feature-pass helpers and stop-ticket subscriber, while IFleetFlowRepository is consumed by start, read/stop, publish and advance code (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:65-66; fleet-flow.ticker.ts:21; fleet-flow-stop-ticket.subscriber.ts:25-26; fleet-flow-start.command.ts:18). Add only additive mock stubs if necessary; do not change advancement or stop rules.\n\nWeb foundation and US-004/005: author DTO mirrors and pure helpers in apps/web/lib/fleet-flows.ts, reflecting the actual serialized API rather than persistence records (features expose names, not record IDs/position; position order is already applied server-side). Keep costs as server strings. Reuse formatUsd from apps/web/lib/fleet-jobs.ts:59-66 for presentation. FlowRepo and the overview types must be shared through the helper module so the service/composable/page seam is exact. Define literal maps for all seven flow states, seven feature states and seven steps; unknown codes return null from key helpers and render raw, never generate unknown translation keys. isLiveFlow has precisely five states. jobsByFeature creates an empty Map entry per feature, preserves input job order and separates only null-feature jobs into flowJobs. openQuestions returns stored questions only when unanswered. ApprovalRequestSummary already exists in apps/web/lib/approval-requests.ts:44-66; the permissionKey discriminant is established in apps/web/composables/useProviderCredentials.ts:56-59. Check non-null object before using 'permissionKey' in data. useFleetFlows uses the existing useApi $api methods; useApi already supplies /api, auth cookies, locale, SSR-safe forwarding, JSON-envelope unwrapping and ApiError handling (apps/web/composables/useApi.ts:39-62, :162-194, :241-253). Composable paths therefore start /projects, not /api/projects. Serialize list current and size=20 in the exact specified query order, URL-encoding supplied identifiers/query values; do not swallow errors in this layer. stop and answer return a done/pending discriminated union based on body shape, not status inspection; an HTTP 202 is a successful envelope.\n\nDetail shell and US-006: follow the schedule detail page for Nuxt setup, explicit imports, member-name loading and error conventions (apps/web/pages/[project]/fleet/schedules/[id].vue:1-36, :65-87, :116-132). Do not copy its always-start polling or error-clearing behavior, which conflicts with this feature's first-success/retained-poll design. ApiError.code may be envelope 40004 or HTTP-like 404 (same page :61-62), so not-found handling must recognize both; distinguish generic first-load failure from overview-only failure. Load flow and overview independently so a rejected overview never prevents the header/features from rendering. Member names are cosmetic: useProjectMemberNames.load/nameOf returns null for unresolved IDs (apps/web/composables/useProjectMemberNames.ts:6-21); fall back to approverId on absence or name-load failure. Render flow entry, branch, reviewer/supervisor, createdAt, spend/cap, approval mode/approver/time/request link and stopped context with overview ticketRef. The literal unknown-cost text is 'cap excludes N jobs with unknown cost' and appears only for positive count. Use ordinary interpolation for stopReason, stopDetail and question text. Add both locales' fleet.flows groups and the three exact enum sets to apps/web/tests/i18n/fleet-locale-parity.spec.ts:21-94, retaining existing entries and keys.\n\nFeatures and US-007: iterate the server DTO features in their existing order, pass slug, flow, feature, overview repo or null, that feature's jobs and a page-evaluated canAnswer boolean. The section must not call useProjectPermissions. Its branch uses feature.branch ?? flow.branch; GitHub repo identity yields https://github.com/<owner>/<name>/pull/<n>; missing overview, null repo and other providers show #<n> without links. Render dependencies and all required job row fields with links /:project/fleet/jobs/<id>. Render Flow jobs only for null-feature jobs and preserve their returned order. Overview failure shows fleet.flows.detail.jobsFailed while features stay visible and PRs fall back to numbers. Surface truncated as a bounded-data notice; no jobs paging. Extend US-006's page tests for section order, unfeatured jobs and overview failure, alongside the new section spec.\n\nActions and US-008/009: existing stop/answer project endpoints are membership/permission guarded and approval-gated; they already fence the flow and enforce human-only answers before the gate (apps/api/src/fleet/flows/project-flows.controller.ts:51-111). Do not create endpoints, bypass gates or implement a client actor rule. Read const { permissions } = useProjectPermissions(slug) and permissions.value.has(key), never roles or an alternate return shape. This composable fails closed while unresolved/refreshing/failed (apps/web/composables/usePermissions.ts:1-16, :68-91). Stop is only a live-flow control for fleet.flow.stop; window.confirm cancellation sends no request. Reuse the existing mutation error/reload convention (apps/web/composables/useFleetScheduleActions.ts:16-44), with success versus approval-requested notices and approvals link. Every refused 403/404/409 mutation must toast extractApiError and trigger reload, not retry the write. The form receives open questions inside the section only for WAITING_ANSWER plus canAnswer; require one vee-validate/zod text answer per question and preserve question order/IDs when posting feature.questionsJobId. Emit answered on done, pending and error so the section re-emits and the page reloads. Pending responses are not completed writes: show fleet.flows.toast.approvalRequested and a link to /:project/approvals, then reload. Tests must stub window.confirm on globalThis.window, not an unrelated global confirm.\n\nDiscovery and US-010/012: create project list with 20-item API pagination, existing server newest-first order, state labels, feature names, spend/cap and createdAt; use errors as toasts and empty rows. The thread panel self-checks fleet.flow.read, never calls list without it, calls list(1,threadId), and is entirely absent without data or after failure with no toast. Mount it immediately below the thread header in apps/web/pages/[project]/threads/[id].vue:107-112 and extend apps/web/tests/pages/threads-detail-page.spec.ts without altering existing thread controller, streams, handoff or composer behavior. US-010 does not own navigation changes: US-012 adds nav.flows, flow list/detail breadcrumbs and an inline ungated Flows link after Threads. Current breadcrumb logic is apps/web/layouts/default.vue:106-150 and project Threads link is :282-290. Do not add any setup binding for Flows, refactor nav to arrays or gate the link. Tests in apps/web/tests/layouts/threads-nav.spec.ts:28-66 and :118-151 evaluate real layout setup and SSR a fixed binding set; mirror their helpers for flows-nav.spec.ts and retain all existing breadcrumb/nav assertions. Read docs/ux/redesign/MASTER-PLAN.md:28-36 and update its Status table/Decisions log in the same PR when changing navigation, as repository guidance requires, without adding a documentation story. Keep token-based styling; review CommandPalette consistency under web guidance without widening feature functionality.\n\nPolling and US-011: useVisiblePolling(task,15000) supplies non-overlapping tasks, visibility pause/resume and rejection resilience (apps/web/composables/useVisiblePolling.ts:26-66). Start only after the first successful flow load and only while isLiveFlow; overview failure alone does not count as a failed flow load. Stop on terminal state, initial flow failure or unmount, and prevent an in-flight first load from starting timers after unmount. Every live tick attempts both flow and overview; rejected polling reads retain prior displayed data and allow the next tick, rather than resetting to initial error screens. First terminal flow must never start the timer. Actions reload the same flow/overview state without duplicating timers or registering SSE. The flow engine emits no flow event for this feature; do not infer progress from fleet_job events.\n\nExecution-order seams: US-010 depends only on US-005, not US-006, so it must not require the detail page, its locale commit or its tests to exist; add the list/panel locale subkeys independently and preserve sibling keys when merging. US-007/008/011/012 all extend US-006's page or locales, while US-009 extends US-007; serialize or carefully merge edits to shared files rather than changing the binding dependency graph. Every contextFiles path is either an existing repository file or an output of a transitive upstream story; expectedFiles contains only that story's newly authored files.\n\nTesting and delivery risk: API unit tests use vi and lazy imports, not jest; database suites use canRunDbTests and real PostgreSQL, preserve NAX_SANDBOXED=1 skips without claiming verification, and run scoped integration/e2e specs outside sandbox with KODA_DB_TESTS=1. DB-mode setup resets the test database, so do not run two suites against one DB concurrently; a second worktree needs a private container. Web tests use the real SFC mount harness rather than source-grep: apps/web/tests/helpers/mount-sfc.ts:125-151 explicitly lists injected auto-imports and does not include useFleetFlows, so pages and panel must explicitly import { useFleetFlows } from '~/composables/useFleetFlows' and mock by module path. Keep test files and locales within each story's ownership, reusing upstream test files where specified. No-test routing is inappropriate because every story changes runtime behavior. Access-control stories US-003 (guarded route and project fence), US-007 (page-evaluated answer permission prop), US-008/009 (permission-gated mutations) and US-010 (permission-gated panel) use three-session-tdd. US-001 only adds a narrowing filter beneath unchanged guards and project scope, so it uses ordinary TDD. The read-only shell, polling lifecycle and remaining helpers/read models use ordinary TDD against existing harnesses; only US-003 requires complex classification because it adds guarded cross-module orchestration. Highest risks are accidentally stripping threadId, leaking cross-project overview data, changing constructors that tests instantiate, money rounding/counting the wrong job subset, misreading 202 as a saved flow, mismatched hand-written DTOs, stale/racing loads and polling after unmount, unsafe agent HTML, and breaking layout fixtures. The implementation is additive and can deploy API before web; no data migration or flow restart is necessary.\n\nRefine-pass audit against .nax/features/fleet-flow-page/spec.md: all 104 numbered spec criteria were enumerated and retained in their original story and original leading ordinal positions. The preservation ledger is: US-001 spec ACs [1,2,3,4,5,6,7,8,9] map respectively to PRD ACs [1,2,3,4,5,6,7,8,9]; US-002 [1,2,3,4,5,6,7,8,9] to [1,2,3,4,5,6,7,8,9]; US-003 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-004 [1,2,3,4,5,6,7,8,9,10,11,12] to [1,2,3,4,5,6,7,8,9,10,11,12]; US-005 [1,2,3,4,5,6,7] to [1,2,3,4,5,6,7]; US-006 [1,2,3,4,5,6,7,8,9,10,11] to [1,2,3,4,5,6,7,8,9,10,11]; US-007 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-008 [1,2,3,4,5,6,7] to [1,2,3,4,5,6,7]; US-009 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-010 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-011 [1,2,3,4,5,6] to [1,2,3,4,5,6]; US-012 [1,2,3] to [1,2,3]. No deprecated file-check tags occur. Qualifying assertions remain attached, notably no threadId key on the unfiltered service call, only the selected thread/flow's rows, newest-limit selection returned oldest first with queuedAt/id ordering, 4-place costs, null finishedAt when unset, empty entries for every feature, input/DTO/question order, raw text with no injected b/i elements, the project-specific approvals URLs, and the Flows link after Threads. Validation 'fails' is made observable as a maxLength validation error; the zero-cost exclusion is asserted as a count of 0. US-006's non-404 case explicitly distinguishes HTTP-like 404 from the existing equivalent 40004 envelope code, following schedules/[id].vue:61-62. US-008's success-path confirmation explicitly uses a done response, leaving pending/refusal outcomes governed by their separate preserved criteria.\n\nAll nine failure-table rows remain represented: cross-project overview and oversized query in US-003/001, initial not-found/other load errors in US-006 plus no polling in US-011, overview degradation in US-007, retained polling data/retry in US-011, mutation 403/404/409 and 202 outcomes in US-008/009, and quiet panel failure in US-010. Every story now has a negative-path acceptance assertion; US-005 adds propagation of the same rejected ApiError, and US-012 adds absence of project navigation when no project exists. Regression assertions were added for existing DTO ordering/pending approval, findReviewRepo's bigint projection, latestJob after bounded reads, the existing detail route after new module registration, retained header/read-only jobs, the thread transcript when the panel is empty/failed, and existing labels/thread breadcrumbs. These additions protect existing behavior rather than adding feature scope. They bring the acceptance total to 123; suggested hardening remains separately labeled. The invalid per-question answeredAt suggestion was corrected: questions carry only id/question, while answeredAt belongs to FleetFlowFeatureDto (apps/api/src/fleet/flows/dto/fleet-flow.dto.ts:55-76).\n\nContext alignment was rechecked against the spec's Context Files section: every explicitly recommended path is included, all stories stay within five context files, no story lists its own created output as context, and transitive upstream outputs are valid inputs. All 12 story IDs, workdirs and binding dependency arrays are unchanged, with no unknown dependency IDs. The exact ten feature-level exclusions remain verbatim in the top-level array; the US-009-only actor-check restriction really is an item in that feature-level section, not a hoisted story-local block, and is echoed on US-009. Nearby stories also echo the relevant exclusions in their Scope Out text. Standard page/form/list/poller integrations were reduced to medium and the thin composable to simple; guarded overview orchestration remains complex, and stories that actually add permission checks keep the mandatory strict strategy. This is a source/spec audit using file tools, not a claim that implementation tests or a runtime JSON validator were executed.",
