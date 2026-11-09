@@ -44,7 +44,7 @@ const submit = handleSubmit(async (answers) => {
   <form novalidate class="space-y-3 border-t border-border pt-3" @submit.prevent="submit">
     <div v-for="item in fields" :key="item.question.id" class="space-y-1">
       <label class="text-sm font-medium">{{ item.question.question }}
-        <input :value="item.field[0].value" type="text" class="w-full rounded-md border border-input bg-background px-3 py-2" @input="item.field[0].value = ($event.target as HTMLInputElement).value" />
+        <input :value="item.field[0].value" type="text" required class="w-full rounded-md border border-input bg-background px-3 py-2" @input="item.field[0].value = ($event.target as HTMLInputElement).value" />
       </label>
       <p v-if="errors[item.question.id]" role="alert" class="text-sm text-status-rejected">{{ errors[item.question.id] }}</p>
     </div>
