@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T13:22:49.570Z",
+  "updatedAt": "2026-11-09T13:27:53.568Z",
   "userStories": [
     {
       "id": "US-001",
@@ -469,14 +469,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard permission-watch/read pattern, but gates both visibility and permission-scoped reads; access-control override applies."
+        "reasoning": "Standard permission-watch/read pattern, but gates both visibility and permission-scoped reads; access-control override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/ThreadFlowsPanel.vue",
@@ -503,7 +506,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c676524754e3c714ffbf25334cac244310606081"
     },
     {
       "id": "US-009",
