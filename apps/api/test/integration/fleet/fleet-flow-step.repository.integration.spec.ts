@@ -50,10 +50,11 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
   }
 
   /** A job of the flow's first feature, unless the test names the feature it belongs to. */
-  async function createJob(flowId: string, values: { flowStep?: string; queuedAt?: Date; costSpentUsd?: string; costCarriedUsd?: string; flowFeatureId?: string } = {}) {
+  async function createJob(flowId: string, values: { id?: string; flowStep?: string; queuedAt?: Date; costSpentUsd?: string; costCarriedUsd?: string; flowFeatureId?: string } = {}) {
     const flowFeatureId = values.flowFeatureId
       ?? (await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId }, orderBy: { position: 'asc' } })).id;
     return prisma.fleetJob.create({ data: {
+      ...(values.id ? { id: values.id } : {}),
       projectId, repoId, ref: 'main', command: 'PLAN', feature: `job-${crypto.randomUUID()}`, profiles: [], maxCostUsd: 5,
       selectorLabels: [], requestedById: creatorId, flowId, flowStep: values.flowStep ?? null, flowFeatureId,
       queuedAt: values.queuedAt ?? new Date(), costSpentUsd: values.costSpentUsd ?? '0', costCarriedUsd: values.costCarriedUsd ?? '0',
@@ -101,6 +102,14 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect(bounded.jobs[0]).toMatchObject({ flowFeatureId: expect.any(String), flowStep: null, command: 'PLAN', state: 'QUEUED', costSpentUsd: '0.0000', costCarriedUsd: '0.0000', finishedAt: null });
     expect(bounded.jobs[0]?.queuedAt).toEqual(new Date('2026-01-02T00:00:00Z'));
     expect((await repo.latestJob(flow.id))?.id).toBe(third.id);
+
+    const tiedFlow = await createFlow('RUNNING');
+    const tiedAt = new Date('2026-02-01T00:00:00Z');
+    const lowerId = await createJob(tiedFlow.id, { id: 'job-tie-a', queuedAt: tiedAt });
+    const higherId = await createJob(tiedFlow.id, { id: 'job-tie-z', queuedAt: tiedAt });
+    const tiedJobs = await repo.listFlowJobs(tiedFlow.id, 2);
+    expect(tiedJobs.jobs.map(({ id }) => id)).toEqual([lowerId.id, higherId.id]);
+    expect((await repo.latestJob(tiedFlow.id))?.id).toBe(higherId.id);
   });
 
   it('AC-5/6 returns the newest queued job, or null when there are none', async () => {
