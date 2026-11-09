@@ -1,0 +1,784 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-page",
+  "branchName": "feat/fleet-flow-page",
+  "createdAt": "2026-11-09T00:00:00.000Z",
+  "updatedAt": "2026-11-09T08:14:56.746Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Expose flow stop detail, feature branches and thread filtering",
+      "description": "**Goal** — Extend the existing flow response and project list with the already-persisted stop detail, feature branches and optional thread filter.\n\n**Motivation** — A flow that stops or asks a question notifies the user, but the notification has nowhere to send them.\n\n**Approach** — The flow DTO gains only fields its record already carries: `stopDetail` on the flow and `branch` on each feature. `FleetFlowRecord` and the flow repository's include are unchanged.\n\nThe thread filter adds `threadId` to the `findPage` filters only when it is set (`{ projectId, ...(threadId ? { threadId } : {}) }`), so a list call without it passes the same filters as today.\n\n`FleetFlowDto` (`apps/api/src/fleet/flows/dto/fleet-flow.dto.ts`): Target: `stopDetail: string | null` (`@ApiPropertyOptional({ type: String, nullable: true })`), from `record.stopDetail ?? null`. `FleetFlowFeatureDto` (same file): Target: `branch: string | null`, from `feature.branch ?? null`. Follow the existing nullable Swagger annotation pattern for branch.\n\n`ProjectFlowsController.list`: Target: `list(rawQuery: ListFleetFlowsQuery, ctx)`; `ListFleetFlowsQuery extends KodaPageQuery` adds `threadId?: string` (`@IsOptional() @IsString() @MaxLength(64)`). It parses with `parseQuery(ListFleetFlowsQuery, rawQuery)` (which drops undeclared keys, so the class must be the new one) and calls `this.flows.list(ctx.project.id, { current, size }, { threadId })` with the parsed `threadId`. Add optional Swagger query metadata and retain default paging.\n\n`FleetFlowsService.list`: Target: `list(projectId, page, filters: { threadId?: string } = {})` calls `this.flows.findPage({ projectId, ...(filters.threadId ? { threadId: filters.threadId } : {}) }, page)`. `PrismaFleetFlowRepository.findPage` and `IFleetFlowRepository.findPage`: Target: `findPage(filters: { projectId: string; threadId?: string }, page)`; when `threadId` is set the `where` adds `threadId`. Existing project scope, newest-first order and feature ordering are preserved.\n\nExtend DTO exact-object expectations with only the new nullable keys; extend fleet-flow-read-stop.spec.ts for controller/service delegation, existing repository integration tests for thread isolation, and the endpoint e2e flows block using its `newThread` helper. Regenerate `openapi.json` from the root with `bun run api:export-spec`; do not hand-edit generated artifacts. Query validation must reject a 65-character threadId with HTTP 400.\n\n**Scope** — In: additive DTO serialization, optional query, repository interface/implementation filter and associated unit/DB/endpoint behavior. Out: overview readers/route (US-002/003), web DTOs and panel (US-004/010), changes to create/stop/answer routes. Changing any flow step, state transition or stop rule in the API.\n\n**Interface**\n```ts\nclass ListFleetFlowsQuery extends KodaPageQuery {\n  @IsOptional() @IsString() @MaxLength(64)\n  threadId?: string\n}\n// FleetFlowsService\nlist(projectId, page, filters: { threadId?: string } = {})\n// IFleetFlowRepository and PrismaFleetFlowRepository\nfindPage(filters: { projectId: string; threadId?: string }, page)\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowDto.from on a record with stopDetail: 'job j1 failed' returns stopDetail: 'job j1 failed'.",
+        "[unit] FleetFlowDto.from on a record whose stopDetail is undefined returns stopDetail: null.",
+        "[unit] FleetFlowFeatureDto.from on a feature with branch: 'feat/f14-clamp' returns branch: 'feat/f14-clamp'.",
+        "[unit] FleetFlowFeatureDto.from on a feature whose branch is undefined returns branch: null.",
+        "[unit] ProjectFlowsController.list with query { threadId: 't1' } calls FleetFlowsService.list with the project id, page { current: 1, size: 20 } and filters { threadId: 't1' }.",
+        "[unit] FleetFlowsService.list('p1', page, {}) calls findPage with filters { projectId: 'p1' } and no threadId key.",
+        "[unit] class-validator validation of a ListFleetFlowsQuery instance with a threadId of 65 characters returns a validation error for threadId's maxLength constraint.",
+        "[integration] Given flows of threads t1 and t2 in one project, findPage({ projectId, threadId: 't1' }, page) returns only the t1 flows.",
+        "[integration] Given a thread-linked flow seeded through newThread, GET /api/projects/:slug/flows?threadId=<id> answers 200 with only that thread's flows.",
+        "[integration] When GET /api/projects/:slug/flows receives a threadId query longer than 64 characters, it answers 400 from query validation.",
+        "[unit] FleetFlowDto.from returns feature names ['flow-a', 'flow-b'] for record features positioned 0 and 1 even when their input array order is reversed, preserving the existing position ordering.",
+        "[unit] FleetFlowDto.from for a PENDING record with approvalMode: null and approvalRequestId: 'request-1' still returns approval { mode: 'REQUEST', approverId: null, approvedAt: null, approvalRequestId: 'request-1' }, preserving the pending start-approval record."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "api",
+        "dto",
+        "pagination",
+        "project-scope"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive DTO fields and an optional narrowing filter follow existing pagination tests; the existing project scope, membership guard and permission checks are unchanged, so ordinary TDD is sufficient."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/dto/fleet-flow.dto.ts",
+        "apps/api/src/fleet/flows/project-flows.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/common/dto/koda-page.query.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/dto/list-fleet-flows.query.ts",
+        "apps/api/src/fleet/flows/dto/list-fleet-flows.query.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/dto/fleet-flow.dto.spec.ts",
+          "reason": "its closed-world \"toEqual\" on the flow DTO and on the feature DTO pins their keys; the target adds `stopDetail` (null when the record has none) to the flow and `branch` (null when unset) to every feature, so the expected objects gain those two keys and nothing else changes."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts",
+          "reason": "gains the list cases for the `threadId` filters (controller to service, service to `findPage`); its existing \"findPage\" assertion with `{ projectId }` stays green because the key is added only when set."
+        },
+        {
+          "path": "apps/api/test/integration/fleet-flow-repository.integration.spec.ts",
+          "reason": "the \"findPage\" block gains a case for the `threadId` filter; the existing cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the flows list block gains a case for the `threadId` query; existing flow cases stay as they are."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` to carry `stopDetail`, the features' `branch` and the `threadId` query on the flow list."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Add bounded overview reads and exact cost helpers",
+      "description": "**Goal** — Provide the repo identity, bounded flow job rows and pure cost calculations needed by the overview route.\n\n**Motivation** — F1-F5 built and verified the engine; live flows 13 and 14 were followed with SQL, `gh` and a polling script, because nothing in the web app shows a flow.\n\n**Approach** — Cross-module reads go through services (`.nax/rules/api-data.md`): the repo identity through a new `FleetReposService.findIdentity(id)`, the ticket ref through the existing `TicketsService.findRefsByIds` (`TicketsModule` is already imported by the flows module). The flow's jobs are read by the flow step repository, which already reads the flow's `FleetJob` rows (`latestJob`, `latestJobForStep`); the new `listFlowJobs(flowId, limit)` follows that precedent. `FleetJob.flowFeatureId` has no Prisma relation, so the feature name comes from the flow's own features (id to name map), not from a join. Ticket resolution and the feature name map themselves are composed in US-003.\n\nUnknown cost follows the design (\"`AGENT`, `PLAN`, `REVIEW` and `FIX` jobs may report no cost\"): a job whose `command` is `AGENT`, `PLAN`, `REVIEW` or `FIX`, whose state is in `TERMINAL_STATES`, and whose `costSpentUsd + costCarriedUsd` is zero. The page text is `cap excludes N jobs with unknown cost`. Use the existing TERMINAL_STATES from jobs/job-state.ts, not a divergent state list. Use Prisma.Decimal from the generated client for exact addition and zero comparison; never floating-point money.\n\nJobs are capped at the newest 500 (by `queuedAt` then `id`), returned oldest first, with `truncated: true` when the flow has more. The live flows have 12 jobs. The unknown-cost count covers the returned jobs. The reusable repository method takes a caller-supplied limit; US-003 passes 500. Select newest rows by queuedAt desc/id desc, detect overflow with a bounded extra row or equivalent bounded/count read, retain only limit rows, then return oldest-first including ascending id ties. Return only rows of the requested flow and both costs as 4-place strings. `findIdentity` is a narrow repo service projection returning null if absent, following `findReviewRepo`; do not alter existing methods or expose credentials.\n\nAdd listFlowJobs cases to `test/integration/fleet/fleet-flow-step.repository.integration.spec.ts`, findIdentity cases to `src/fleet/repos/fleet-repos.service.spec.ts`, and pure helper cases beside flow-overview.ts. Keep existing interface methods and tests unchanged.\n\n**Scope** — In: repo identity service method, step repository type/interface/read, pure decimal total and unknown-cost count. Out: overview DTO/controller/service composition and ticket lookups (US-003), web formatting/grouping (US-004/007), Paging the overview's jobs beyond the newest 500; the overview reports `truncated` instead. Changing any flow step, state transition or stop rule in the API.\n\n**Interface**\n```ts\n// apps/api/src/fleet/repos/fleet-repos.service.ts\nfindIdentity(id: string): Promise<{ provider: string; owner: string; name: string } | null>\n\n// apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts (IFleetFlowStepRepository) + Prisma implementation\nlistFlowJobs(flowId: string, limit: number): Promise<{ jobs: FlowJobRow[]; truncated: boolean }>\ninterface FlowJobRow {\n  id: string; flowFeatureId: string | null; flowStep: string | null; command: string; state: string;\n  costSpentUsd: string; costCarriedUsd: string; queuedAt: Date; finishedAt: Date | null;\n}\n\n// apps/api/src/fleet/flows/flow-overview.ts (pure)\nexport const UNKNOWN_COST_COMMANDS: readonly string[]   // AGENT PLAN REVIEW FIX\nexport function totalCostUsd(row: FlowJobRow): string    // costSpentUsd + costCarriedUsd, 4 decimals\nexport function countUnknownCost(rows: FlowJobRow[]): number\n```",
+      "acceptanceCriteria": [
+        "[unit] findIdentity for an existing repo returns { provider: 'github', owner: 'nathapp-io', name: 'sandbox' } for a repo with those values.",
+        "[unit] findIdentity for an unknown id returns null.",
+        "[integration] Given a flow with at most 500 jobs, listFlowJobs(flowId, 500) returns only the flow's jobs, ordered by queuedAt ascending then id ascending, and truncated: false.",
+        "[integration] listFlowJobs(flowId, 2) on a flow with 3 jobs returns its 2 newest jobs, oldest of the two first, and truncated: true.",
+        "[integration] A row from listFlowJobs carries the job's flowFeatureId, flowStep, command, state, queuedAt and finishedAt, and its costs as 4-decimal strings.",
+        "[unit] totalCostUsd of a row with costSpentUsd '0.1100' and costCarriedUsd '0.0020' returns '0.1120'.",
+        "[unit] countUnknownCost counts a COMPLETED AGENT job and a FAILED PLAN job, each at total cost zero, as 2.",
+        "[unit] countUnknownCost does not count a CANCELLED RUN job at total cost zero.",
+        "[unit] countUnknownCost returns 0 for rows consisting of a RUNNING REVIEW job at zero and a COMPLETED FIX job at '0.0500', counting neither row.",
+        "[unit] FleetReposService.findReviewRepo('fr1') still returns { id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: 77n, defaultBranch: 'trunk' } for a repo with those values, preserving its existing review projection and bigint value.",
+        "[integration] Given the same flow's jobs, latestJob(flowId) still returns the newest job by queuedAt then id after listFlowJobs(flowId, 2) is called, preserving the engine's existing latest-job read."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "api",
+        "repository",
+        "money",
+        "read-model"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard additive repository/service projections and pure Decimal rules with established PG fixtures; no auth policy, credential handling or new orchestration layer is introduced."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/jobs/job-state.ts",
+        "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-overview.ts",
+        "apps/api/src/fleet/flows/flow-overview.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "listFlowJobs(flowId, 2) returns truncated: false when the flow has exactly 2 jobs.",
+        "listFlowJobs returns { jobs: [], truncated: false } for a flow with no jobs.",
+        "totalCostUsd returns '1000000.0001' for costSpentUsd '999999.9999' and costCarriedUsd '0.0002'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+          "reason": "`IFleetFlowStepRepository` gains `listFlowJobs(flowId, limit)` and the `FlowJobRow` type; existing members are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+          "reason": "gains the \"listFlowJobs\" cases; existing cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "gains the \"findIdentity\" cases; existing cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.ts",
+          "reason": "gains `findIdentity(id)`; existing methods are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Serve the guarded project flow overview",
+      "description": "**Goal** — Add the project-scoped overview read route that composes repo identity, ticket ref, jobs and unknown-cost count.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G8 and \"Status page\") calls for a page that shows each feature's current step, its jobs, its PR and the cost against the cap.\n\n**Approach** — One new read route, `GET /api/projects/:slug/flows/:flowId/overview` (`fleet.flow.read`), answers what the record does not hold: the repo identity, the flow ticket's ref, the flow's jobs, and the unknown-cost count. It lives in a new `ProjectFlowOverviewController` (`@Controller('projects/:slug/flows')`) and a new `FleetFlowOverviewService`, so the constructors of `ProjectFlowsController` and `FleetFlowsService` do not change. Both are registered in `flows.module.ts`.\n\nCross-module reads go through services (`.nax/rules/api-data.md`): the repo identity through a new `FleetReposService.findIdentity(id)`, the ticket ref through the existing `TicketsService.findRefsByIds` (`TicketsModule` is already imported by the flows module). The flow's jobs are read by the flow step repository, which already reads the flow's `FleetJob` rows (`latestJob`, `latestJobForStep`); the new `listFlowJobs(flowId, limit)` follows that precedent. `FleetJob.flowFeatureId` has no Prisma relation, so the feature name comes from the flow's own features (id to name map), not from a join.\n\n`FleetFlowOverviewService.overview(projectId, flowId)` fences the flow with `FleetFlowsService.get`, then builds `FleetFlowOverviewDto` from `findIdentity`, `findRefsByIds` and `listFlowJobs(flowId, 500)`, naming each job's feature from the flow's features. Missing/cross-project flows throw 404 `fleet.flows.notFound` before downstream reads. Null ticketId skips findRefsByIds; absent ticket-map entries and missing repos become null. Convert dates to ISO, preserve null finishedAt, use totalCostUsd and countUnknownCost only over returned rows, and propagate truncated.\n\n`ProjectFlowOverviewController` carries the same class decorators as `ProjectFlowsController`: `@ApiTags('fleet')`, `@ApiBearerAuth()`, `@ApiParam({ name: 'slug' })`, `@UseGuards(ProjectMembershipGuard, RequiresGuard)`; the route has `@ApiOperation` and `@ApiResponse` for 200 (`FleetFlowOverviewDto`), 403 and 404. Every DTO field has `@ApiProperty`. Return `JsonResponse.Ok` of the service result.\n\nRegister the two new classes without replacing existing providers/controllers. Add no-DB service/controller tests in fleet-flow-overview.spec.ts; any module-compilation checks remain co-located unit tests. The endpoint e2e file gains the route's 200 and 404 paths, leaving existing cases as they are. Regenerate root `openapi.json` with `bun run api:export-spec`.\n\n**Scope** — In: overview DTOs, service orchestration, guarded controller, DI registration and generated API contract. Out: repository reads/cost helper implementation (US-002), web contracts and callers (US-004/005), modifications to existing controller/service constructors, Paging the overview's jobs beyond the newest 500; the overview reports `truncated` instead. Changing any flow step, state transition or stop rule in the API.\n\n**Interface**\n```ts\n// apps/api/src/fleet/flows/fleet-flow-overview.service.ts\nclass FleetFlowOverviewService {\n  overview(projectId: string, flowId: string): Promise<FleetFlowOverviewDto>\n}\n\n// apps/api/src/fleet/flows/project-flow-overview.controller.ts\n@Controller('projects/:slug/flows') class ProjectFlowOverviewController {\n  @Get(':flowId/overview') @Requires('fleet.flow.read') overview(flowId, ctx)\n}\n\n// apps/api/src/fleet/flows/dto/fleet-flow-overview.dto.ts\nclass FleetFlowOverviewDto {\n  repo: { provider: string; owner: string; name: string } | null;  // null when the repo row is gone\n  ticketRef: string | null;        // from TicketsService.findRefsByIds, null when the flow has no ticket\n  jobs: FleetFlowJobDto[];         // newest 500 by queuedAt then id, returned oldest first\n  truncated: boolean;\n  unknownCostCount: number;\n}\nclass FleetFlowJobDto {\n  id: string;\n  feature: string | null;          // the flow feature's name for flowFeatureId, null when flowFeatureId is null\n  step: string | null;             // flowStep\n  command: string;\n  state: string;\n  costUsd: string;                 // totalCostUsd\n  queuedAt: string;                // ISO\n  finishedAt: string | null;       // ISO\n}\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowOverviewService.overview('p2', flowId) for a flow in project p1 rejects with NotFoundAppException key fleet.flows.notFound and does not call listFlowJobs.",
+        "[unit] overview returns repo equal to what FleetReposService.findIdentity(flow.repoId) returns.",
+        "[unit] overview for a flow with ticketId: 'tk1' calls TicketsService.findRefsByIds(projectId, ['tk1']) and returns ticketRef: 'SB-7' when the map holds tk1 -> 'SB-7'.",
+        "[unit] overview for a flow with a null ticketId returns ticketRef: null and does not call findRefsByIds.",
+        "[unit] overview calls listFlowJobs(flowId, 500) and returns its truncated value.",
+        "[unit] A job whose flowFeatureId is the id of the feature named f14-min is returned with feature: 'f14-min', and a job with a null flowFeatureId with feature: null.",
+        "[unit] A returned job has costUsd equal to totalCostUsd(row), step equal to the row's flowStep, and queuedAt and finishedAt as ISO strings (finishedAt null when unset).",
+        "[unit] overview returns unknownCostCount equal to countUnknownCost of the rows.",
+        "[unit] ProjectFlowOverviewController.overview(flowId, ctx) returns JsonResponse.Ok of FleetFlowOverviewService.overview(ctx.project.id, flowId), and carries @Requires('fleet.flow.read').",
+        "[integration] GET /api/projects/:slug/flows/:flowId/overview answers 200 with repo, jobs and unknownCostCount for an existing flow, and 404 for an unknown flow id.",
+        "[integration] When GET /api/projects/:slug/flows/:flowId/overview names a flow in another project, it answers 404 fleet.flows.notFound through the get fence.",
+        "[integration] With the overview route registered, GET /api/projects/:slug/flows/:flowId still answers 200 with ret: 0 and data equal to FleetFlowDto.from(record, slug), including url '/<slug>/flows/<flowId>', preserving the existing project detail route."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "api",
+        "security",
+        "permissions",
+        "overview"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A new guarded HTTP route composes multiple modules and must enforce project isolation before any related-data read; access control requires strict three-session isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/project-flows.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/fleet/flows/flow-overview.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/dto/fleet-flow-overview.dto.ts",
+        "apps/api/src/fleet/flows/fleet-flow-overview.service.ts",
+        "apps/api/src/fleet/flows/project-flow-overview.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flow-overview.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "overview returns repo: null when findIdentity returns null.",
+        "overview returns ticketRef: null when findRefsByIds returns a map without the flow's ticket ID.",
+        "GET /api/projects/:slug/flows/:flowId/overview answers 403 when a project member lacks fleet.flow.read."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.ts",
+          "reason": "registers `FleetFlowOverviewService` as a provider and `ProjectFlowOverviewController` as a controller; existing providers and controllers are unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds the overview route's happy path (200) and a 404 for an unknown flow id; existing cases stay as they are."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` to carry the overview route and `FleetFlowOverviewDto`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Define web flow contracts and pure view helpers",
+      "description": "**Goal** — Add hand-written web flow DTO types and pure helpers shared by the composable, pages and sections.\n\n**Motivation** — The flow DTO already carries a `url` field that names this page (`fleet-flow.dto.ts`, \"the web path F6 renders\"), and the web app has no route for it.\n\n**Approach** — `lib/fleet-flows.ts` holds the DTO types and the pure helpers named in Design. Mirror the serialized FleetFlowDto, FleetFlowFeatureDto (including branch), FleetFlowQuestionDto, FleetFlowPage and overview/job/repo shapes, including approval, stopDetail, nullable questions/answers and ISO timestamps. Reuse ApprovalRequestSummary from lib/approval-requests.ts rather than redefining it. Do not introduce a generated web client or browser-side money aggregation.\n\nPR links are built in the web app from the overview's repo: `https://github.com/<owner>/<name>/pull/<n>` when `provider` is `github`; any other provider, or no overview, shows `#<n>` without a link.\n\nA feature's branch is `feature.branch` when set, else the flow's `branch` (feature 1 keeps the flow branch).\n\nFlow jobs. Jobs with no feature are shown in a \"Flow jobs\" section after the features, only when there are any. `jobsByFeature` returns an entry (possibly empty) for every feature. Group by feature name, preserving input order; null-feature rows go into flowJobs.\n\nStop and Answer go through the existing gated routes. Either may answer 202 with an approval request summary; the page tells the user an approval was requested and links to `/:project/approvals`. The pending check is the `useProviderCredentials` pattern (`'permissionKey' in data`). Make the helper safe for non-object/null input.\n\nStates and steps render through literal maps in `lib/fleet-flows.ts` from the code to an i18n key, with the raw code as the fallback for an unknown value: `flowStateKey` (`fleet.flows.state.<code>`: `PENDING`, `APPROVED`, `RUNNING`, `WAITING_MERGE`, `WAITING_ANSWER`, `COMPLETED`, `STOPPED`), `featureStateKey` (`fleet.flows.featureState.<code>`: `PENDING`, `RUNNING`, `WAITING_ANSWER`, `READY`, `MERGED`, `COMPLETED`, `STOPPED`) and `flowStepKey` (`fleet.flows.step.<code>`: `SPEC_REVIEW`, `PLAN`, `PRD_REVIEW`, `RUN`, `REVIEW`, `RULE`, `FIX`). The three groups are registered in the locale parity spec's `ENUMS`. Registration and locale strings are delivered by US-006; this story implements literal-map helpers with null for unknown/null codes. LIVE_FLOW_STATES contains only PENDING, APPROVED, RUNNING, WAITING_MERGE, WAITING_ANSWER. openQuestions returns questions only while answeredAt is null and questions exists. Add tests in tests/lib/fleet-flows.spec.ts.\n\n**Scope** — In: DTO mirrors, FlowRepo, pure liveness/label/branch/PR/grouping/questions/pending-discriminant helpers. Out: HTTP wrapper (US-005), locale registration and page rendering (US-006/007), action UI (US-008/009). PR links for providers other than GitHub; a non-GitHub repo shows the PR number without a link.\n\n**Interface**\n```ts\n// apps/web/lib/fleet-flows.ts\nexport const LIVE_FLOW_STATES: readonly string[]      // PENDING APPROVED RUNNING WAITING_MERGE WAITING_ANSWER\nexport function isLiveFlow(state: string): boolean\nexport function flowStateKey(state: string): string | null   // literal map to fleet.flows.state.<code>, null if unknown\nexport function featureBranch(flow: FleetFlowDto, feature: FleetFlowFeatureDto): string\nexport function prUrl(repo: FlowRepo | null, prNumber: number | null): string | null\nexport function jobsByFeature(jobs: FleetFlowJobDto[], features: FleetFlowFeatureDto[]): { byFeature: Map<string, FleetFlowJobDto[]>; flowJobs: FleetFlowJobDto[] }\nexport function openQuestions(feature: FleetFlowFeatureDto): FleetFlowQuestionDto[]\nexport function isPendingFlowAnswer(data: unknown): data is ApprovalRequestSummary\n```\nAlso export featureStateKey(state: string): string | null and flowStepKey(step: string | null): string | null, as required by the literal-map design and criteria.",
+      "acceptanceCriteria": [
+        "[unit] isLiveFlow returns true for PENDING, APPROVED, RUNNING, WAITING_MERGE and WAITING_ANSWER.",
+        "[unit] isLiveFlow returns false for COMPLETED and STOPPED.",
+        "[unit] flowStateKey('RUNNING') returns 'fleet.flows.state.RUNNING', and flowStateKey('BOGUS') returns null.",
+        "[unit] featureBranch(flow, feature) returns feature.branch when it is set, and flow.branch when it is null.",
+        "[unit] prUrl({ provider: 'github', owner: 'o', name: 'r' }, 33) returns 'https://github.com/o/r/pull/33'.",
+        "[unit] prUrl returns null for a gitlab repo, for a null repo, and for a null PR number.",
+        "[unit] jobsByFeature(jobs, features) puts each job under its feature name in input order, and gives every feature an entry, empty when it has no jobs.",
+        "[unit] jobsByFeature returns the jobs whose feature is null in flowJobs.",
+        "[unit] openQuestions(feature) returns the questions when answeredAt is null, and [] when answeredAt is set or questions is null.",
+        "[unit] isPendingFlowAnswer returns true for an object with a permissionKey field and false for a flow DTO.",
+        "[unit] featureStateKey('MERGED') returns 'fleet.flows.featureState.MERGED', and featureStateKey('BOGUS') returns null.",
+        "[unit] flowStepKey('PRD_REVIEW') returns 'fleet.flows.step.PRD_REVIEW', and flowStepKey(null) returns null."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "types",
+        "helpers"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure typed transformations and literal maps in one source module with ordinary Jest tests; the pending marker classifies responses and does not authorize actions."
+      },
+      "contextFiles": [
+        "apps/web/composables/useProviderCredentials.ts",
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/api/src/fleet/flows/dto/fleet-flow.dto.ts",
+        "apps/api/src/fleet/flows/dto/fleet-flow-overview.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-flows.ts",
+        "apps/web/tests/lib/fleet-flows.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "isPendingFlowAnswer returns false for null, undefined and primitive values without throwing.",
+        "isLiveFlow returns false for an unknown state code."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Wrap project flow reads and gated writes in useFleetFlows",
+      "description": "**Goal** — Add the thin Nuxt API composable used by all flow screens and actions.\n\n**Motivation** — A flow that stops or asks a question notifies the user, but the notification has nowhere to send them.\n\n**Approach** — `composables/useFleetFlows.ts` wraps the five calls through `useApi()`: `list` (`?current=&size=20`, plus `threadId` when given), `get`, `overview`, `stop` and `answer`, the last two returning `FlowWrite`. Return typed API data unchanged for reads. Use /projects/<slug>/flows paths, because useApi already supplies the /api base, envelope unwrapping, locale, SSR cookie forwarding and auth handling. Encode path/query values without changing the concrete query order current, size, threadId. Do not swallow errors or add local business rules/state.\n\nStop and Answer go through the existing gated routes. Either may answer 202 with an approval request summary; the page tells the user an approval was requested and links to `/:project/approvals`. The pending check is the `useProviderCredentials` pattern (`'permissionKey' in data`). Delegate body discrimination to isPendingFlowAnswer from US-004, returning pending rather than treating an approval request as a saved flow. `stop` posts to /projects/:slug/flows/:flowId/stop. `answer` posts to /projects/:slug/flows/:flowId/answers with exactly { jobId, answers }. Unit tests mock useApi/$api in tests/composables/useFleetFlows.spec.ts.\n\n**Scope** — In: typed list/get/overview/stop/answer calls and FlowWrite mapping. Out: page loading/error presentation (US-006/010), permission decisions, Stop/Answer form/toasts (US-008/009), polling (US-011).\n\n**Interface**\n```ts\n// apps/web/composables/useFleetFlows.ts\nexport type FlowWrite = { kind: 'done'; flow: FleetFlowDto } | { kind: 'pending'; request: ApprovalRequestSummary }\nexport function useFleetFlows(slug: string): {\n  list(page: number, threadId?: string): Promise<FleetFlowPage>\n  get(flowId: string): Promise<FleetFlowDto>\n  overview(flowId: string): Promise<FleetFlowOverviewDto>\n  stop(flowId: string): Promise<FlowWrite>\n  answer(flowId: string, jobId: string, answers: { id: string; answer: string }[]): Promise<FlowWrite>\n}\n```",
+      "acceptanceCriteria": [
+        "[unit] useFleetFlows('web').list(2, 't1') calls $api.get with /projects/web/flows?current=2&size=20&threadId=t1.",
+        "[unit] list(1) calls $api.get with /projects/web/flows?current=1&size=20.",
+        "[unit] get('f1') calls $api.get with /projects/web/flows/f1, and overview('f1') with /projects/web/flows/f1/overview.",
+        "[unit] stop('f1') calls $api.post with /projects/web/flows/f1/stop and returns { kind: 'done', flow } when the API answers a flow DTO.",
+        "[unit] stop('f1') returns { kind: 'pending', request } when the API answers an approval request summary.",
+        "[unit] answer('f1', 'j9', [{ id: 'q1', answer: 'yes' }]) calls $api.post with /projects/web/flows/f1/answers and body { jobId: 'j9', answers: [{ id: 'q1', answer: 'yes' }] }.",
+        "[unit] answer returns { kind: 'pending', request } when the API answers an approval request summary.",
+        "[unit] Each of list, get, overview, stop and answer rejects with the same ApiError object when its corresponding $api call rejects, rather than returning a flow or an approval request."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "composable",
+        "api-client"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One thin composable forwards five established API calls and classifies their bodies using an upstream helper; it adds no client state, dependencies, auth logic or session handling."
+      },
+      "contextFiles": [
+        "apps/web/composables/useFleetSchedules.ts",
+        "apps/web/composables/useApi.ts",
+        "apps/web/lib/fleet-flows.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/tests/composables/useFleetFlows.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "answer returns { kind: 'done', flow } when the API answers a flow DTO."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Render the flow detail header, spend, approvals and stop context",
+      "description": "**Goal** — Create the flow detail page shell with independent flow/overview loading and complete header context.\n\n**Motivation** — The flow DTO already carries a `url` field that names this page (`fleet-flow.dto.ts`, \"the web path F6 renders\"), and the web app has no route for it.\n\n**Approach** — `pages/[project]/flows/[id].vue` loads the flow and its overview and renders the header: state, entry, branch, roles, created time, spend against cap with the unknown-cost line, the approval record, and the stop reason, stop detail and ticket link. It shows not-found and load-failed states. Strings come from `fleet.flows.*` keys in `en.json` and `zh.json`. Its tests live in `tests/pages/fleet-flow-detail.spec.ts`.\n\nAgent-written text (questions, `stopDetail`, `stopReason`) renders through interpolation only, never `v-html` (`.nax/mono/apps/web/context.md`).\n\nStates and steps render through literal maps in `lib/fleet-flows.ts` from the code to an i18n key, with the raw code as the fallback for an unknown value: `flowStateKey` (`fleet.flows.state.<code>`: `PENDING`, `APPROVED`, `RUNNING`, `WAITING_MERGE`, `WAITING_ANSWER`, `COMPLETED`, `STOPPED`), `featureStateKey` (`fleet.flows.featureState.<code>`: `PENDING`, `RUNNING`, `WAITING_ANSWER`, `READY`, `MERGED`, `COMPLETED`, `STOPPED`) and `flowStepKey` (`fleet.flows.step.<code>`: `SPEC_REVIEW`, `PLAN`, `PRD_REVIEW`, `RUN`, `REVIEW`, `RULE`, `FIX`). The three groups are registered in the locale parity spec's `ENUMS`. Add all three translated groups now, even though the feature sections use the latter two in US-007. Existing locale keys and ENUMS entries stay unchanged.\n\nWeb test harness: pages and the panel import `useFleetFlows` explicitly (`import { useFleetFlows } from '~/composables/useFleetFlows'`), as `schedules/[id].vue` imports its composables, because `tests/helpers/mount-sfc.ts` injects only the Nuxt auto-imports it lists. Tests mock the composable by module path. `window.confirm` is stubbed on `globalThis.window`, as in the admin roles page tests. Confirmation belongs to US-008; retain this import seam from page creation.\n\nOn mount call get(flowId) and overview(flowId) once each; do not let overview rejection hide a successful flow. A first flow GET answering 404 shows fleet.flows.detail.notFound; other initial failures show fleet.flows.detail.loadFailed. Recognize ApiError.code 404 and the envelope 40004 convention. Overview is optional for the header; a failure keeps the flow and supports the jobsFailed fallback integrated in US-007. Use formatUsd(spentUsd) and formatUsd(costCapUsd); the positive unknownCostCount line reads `cap excludes N jobs with unknown cost` and is absent at zero. PENDING with approvalRequestId links to /:project/approvals; approved flows show approval mode, approver and recorded time. Load useProjectMemberNames(slug); name lookup failures are cosmetic and fall back to approverId itself. STOPPED displays literal stopReason/stopDetail and a ticket link /:project/tickets/<ticketRef> when overview supplies one. Preserve a reload function/event seam for dependent action stories. No polling is started in this story; US-011 owns its lifecycle.\n\n**Scope** — In: page shell/loading/error/header/approval/stop-ticket rendering, initial shared locales and enum parity registration. Out: feature and job sections (US-007), Stop controls (US-008), answer forms and reload wiring (US-009), polling (US-011), breadcrumb/navigation changes (US-012). Approving or rejecting the flow's start request on the flow page; the page links to the existing approvals page.\n\n**Interface** — Consume useFleetFlows(slug).get(flowId): Promise<FleetFlowDto> and overview(flowId): Promise<FleetFlowOverviewDto> from US-005, including overview repo, ticketRef, jobs, truncated and unknownCostCount. Use useProjectMemberNames(slug)'s { members, load, nameOf } and formatUsd(decimal) without recomputing money.",
+      "acceptanceCriteria": [
+        "[unit] Mounting the flow page calls useFleetFlows.get(flowId) and overview(flowId) once each and renders the flow's state label and branch.",
+        "[unit] The page renders formatUsd(spentUsd) and formatUsd(costCapUsd), and the fleet.flows.detail.unknownCost text with count 2 when unknownCostCount is 2.",
+        "[unit] When unknownCostCount is 0, the unknown-cost text is not rendered.",
+        "[unit] A PENDING flow with approval.approvalRequestId renders the pending-approval text and a link to /:project/approvals.",
+        "[unit] An approved flow renders the approval mode and the approver's name from useProjectMemberNames.",
+        "[unit] A STOPPED flow renders stopReason and stopDetail, and a link to /:project/tickets/SB-7 when ticketRef is 'SB-7'.",
+        "[unit] A stopDetail of <b>x</b> renders as that literal text, with no b element in the page.",
+        "[unit] When get rejects with a 404 ApiError, the page renders fleet.flows.detail.notFound text.",
+        "[unit] When the first get rejects with a non-404 error, such as ApiError code 500 rather than either 404 or the equivalent 40004 not-found envelope, the page renders fleet.flows.detail.loadFailed text.",
+        "[unit] The page renders the flow's entry, its reviewer and supervisor role models, and its createdAt.",
+        "[unit] An approved flow whose approverId has no member name renders the approverId itself."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "page",
+        "i18n",
+        "detail"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A read-only Nuxt page follows the existing schedule detail and SFC harness patterns for two requests, optional member names and locale labels; polling and permission-gated controls are separate stories."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/schedules/[id].vue",
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/composables/useProjectMemberNames.ts",
+        "apps/web/tests/i18n/fleet-locale-parity.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/tests/pages/fleet-flow-detail.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The page renders the raw flow state code when flowStateKey returns null.",
+        "A stopReason of <script>x</script> renders as literal text without creating a script element.",
+        "When get rejects with ApiError code 40004, the page renders fleet.flows.detail.notFound."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds the `fleet.flows` key group (detail, state, step, toast); no existing key changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds the `fleet.flows` key group in Chinese; no existing key changes."
+        },
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "its \"ENUMS\" map gains `fleet.flows.state` (seven flow states), `fleet.flows.featureState` (seven feature states) and `fleet.flows.step` (seven steps); existing entries are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Show ordered feature progress, PRs and linked jobs",
+      "description": "**Goal** — Add ordered feature sections and feature/flow job lists to the detail page.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G8 and \"Status page\") calls for a page that shows each feature's current step, its jobs, its PR and the cost against the cap.\n\n**Approach** — `components/fleet/flows/FlowFeatureSection.vue`, rendered by the flow page once per feature in position order, shows the feature's name, state, current step, `dependsOn`, branch, PR link and its jobs. The page renders a \"Flow jobs\" section for jobs with no feature, when there are any. Section tests live in `tests/components/flow-feature-section.spec.ts`; page-level tests (ACs 1, 8, 9, 10) are added to `tests/pages/fleet-flow-detail.spec.ts`, created by US-006. The DTO is already position-ordered; keep its order rather than sorting alphabetically.\n\nPR links are built in the web app from the overview's repo: `https://github.com/<owner>/<name>/pull/<n>` when `provider` is `github`; any other provider, or no overview, shows `#<n>` without a link.\n\nA feature's branch is `feature.branch` when set, else the flow's `branch` (feature 1 keeps the flow branch).\n\nFlow jobs. Jobs with no feature are shown in a \"Flow jobs\" section after the features, only when there are any. `jobsByFeature` returns an entry (possibly empty) for every feature.\n\n`FlowFeatureSection` props: `slug`, `flow` (the flow DTO), `feature`, `repo` (the overview repo or null), `jobs` (that feature's jobs), `canAnswer` (the page's `permissions.value.has('fleet.flow.answer')`); it emits `answered`, re-emitted by its `FlowAnswerForm`. The page evaluates permissions; the section does not call `useProjectPermissions`. Establish the prop/event contract now; the actual form and answered behavior arrive in US-009. Use the existing permission composable shape at page level, not a role-name check.\n\nUse flowStateKey/featureStateKey/flowStepKey literal maps for labels with raw-code fallback. Each job shows step, command, state and formatUsd(costUsd), linking /:project/fleet/jobs/<id>. Preserve returned job order and keep timestamps available from the shared DTO. Surface overview.truncated as a translated bounded-results notice; no further paging. When overview GET fails while flow GET succeeds, show the flow and all feature sections with PR numbers without links plus fleet.flows.detail.jobsFailed. Agent-written feature/context text remains interpolation-only. Add section and flow-jobs keys to both locales without changing existing keys.\n\n**Scope** — In: feature section component, detail-page grouping/rendering, jobs/PR links, truncated/degraded overview presentation and locales. Out: implementing answer form and its reload behavior (US-009), Stop (US-008), polling (US-011), PR links for providers other than GitHub; a non-GitHub repo shows the PR number without a link. Paging the overview's jobs beyond the newest 500; the overview reports `truncated` instead.\n\n**Interface** — FlowFeatureSection accepts { slug: string; flow: FleetFlowDto; feature: FleetFlowFeatureDto; repo: FlowRepo | null; jobs: FleetFlowJobDto[]; canAnswer: boolean } and emits answered. Consume jobsByFeature(jobs,features): { byFeature: Map<string,FleetFlowJobDto[]>; flowJobs: FleetFlowJobDto[] }, featureBranch(flow,feature), prUrl(repo,prNumber) and formatUsd(costUsd).",
+      "acceptanceCriteria": [
+        "[unit] The flow page renders one FlowFeatureSection per feature in the DTO's order.",
+        "[unit] A feature section renders the feature's name, state label, current step and dependsOn names.",
+        "[unit] A feature section renders featureBranch(flow, feature).",
+        "[unit] A feature with PR 33 on a github repo renders a link to https://github.com/<owner>/<name>/pull/33.",
+        "[unit] A feature with PR 33 and a null overview renders #33 with no link.",
+        "[unit] A feature section lists that feature's jobs, each with step, command, state and formatUsd(costUsd).",
+        "[unit] Each listed job links to /:project/fleet/jobs/<id>.",
+        "[unit] The page renders a Flow jobs section listing the jobs whose feature is null.",
+        "[unit] The page renders no Flow jobs section when every job has a feature.",
+        "[unit] When overview rejects and get succeeds, the page renders the feature sections and fleet.flows.detail.jobsFailed text.",
+        "[unit] After feature and job sections are added, the detail page still renders the flow's branch and formatUsd(spentUsd) against formatUsd(costCapUsd) in the header, preserving the shell from US-006 rather than replacing full-flow spend with the bounded job subtotal."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "component",
+        "jobs",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard component integration and grouping, but this story establishes the page-evaluated fleet.flow.answer permission prop and thus involves access-control checks."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/lib/fleet-flows.ts",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/tests/pages/fleet-flow-detail.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/flows/FlowFeatureSection.vue",
+        "apps/web/tests/components/flow-feature-section.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A feature section renders an unknown feature state or step as its raw code instead of an untranslated i18n key.",
+        "When overview.truncated is true, the detail page shows a bounded-results notice.",
+        "A feature with PR 33 on a gitlab repo renders #33 without a link."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds feature-section and flow-jobs keys under `fleet.flows`; no existing key changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds the same keys in Chinese; no existing key changes."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Stop live flows through the existing approval gate",
+      "description": "**Goal** — Add a permission-gated, confirmed Stop action that reports immediate or pending outcomes and reloads the page.\n\n**Motivation** — A flow that stops or asks a question notifies the user, but the notification has nowhere to send them.\n\n**Approach** — The flow page gains a Stop button, shown when the viewer has `fleet.flow.stop` and the flow is live, with a `window.confirm` first. It calls `useFleetFlows.stop`, toasts the outcome and reloads the flow. Its tests live in `tests/pages/fleet-flow-stop.spec.ts`.\n\nStop and Answer go through the existing gated routes. Either may answer 202 with an approval request summary; the page tells the user an approval was requested and links to `/:project/approvals`. The pending check is the `useProviderCredentials` pattern (`'permissionKey' in data`). The composable already turns this into FlowWrite; consume kind, do not inspect HTTP status or duplicate gate logic.\n\nPermissions are read as `const { permissions } = useProjectPermissions(slug)` and checked with `permissions.value.has(key)`: `fleet.flow.stop` for Stop, `fleet.flow.answer` for the answer form, `fleet.flow.read` for the thread panel. The project nav's Flows link is not gated (the Threads link is not), and the layout gets no new setup bindings. This story changes only the Stop control. Show it for isLiveFlow(state), including pending/approved/wait states, never COMPLETED/STOPPED or without the key.\n\nFailure behavior: Stop refused (403, 404, 409) shows error toast `extractApiError(err)`, then reloads the flow. Stop answering 202 shows toast `fleet.flows.toast.approvalRequested` with a link to `/:project/approvals`, then reloads the flow. An immediate done response shows a success toast and reloads. A denied confirm sends no mutation. Keep the write pending state local so repeated clicks do not submit concurrently. Follow useFleetScheduleActions conventions without changing it. Add stop keys in both en.json and zh.json, changing no existing key. Tests explicitly import/mock useFleetFlows by module path and stub `window.confirm` on `globalThis.window`, as in the admin roles page tests.\n\n**Scope** — In: Stop button, confirmation, permission/liveness gate, done/pending/refusal notices, approvals link and reload integration. Out: answer form (US-009), polling (US-011), list/nav (US-010/012), API stop/state-transition changes, Cloning a stopped flow into a new pending flow is not built here. Approving or rejecting the flow's start request on the flow page; the page links to the existing approvals page.\n\n**Interface**\n```ts\n// From apps/web/composables/useFleetFlows.ts\nexport type FlowWrite = { kind: 'done'; flow: FleetFlowDto } | { kind: 'pending'; request: ApprovalRequestSummary }\n// useFleetFlows(slug)\nstop(flowId: string): Promise<FlowWrite>\n```",
+      "acceptanceCriteria": [
+        "[unit] The Stop button is shown for a RUNNING flow when permissions.value.has('fleet.flow.stop') is true.",
+        "[unit] The Stop button is not shown when has('fleet.flow.stop') is false.",
+        "[unit] The Stop button is not shown for a COMPLETED flow.",
+        "[unit] Clicking Stop with window.confirm returning false does not call useFleetFlows.stop.",
+        "[unit] Clicking Stop with window.confirm returning true calls stop(flowId) and, when stop resolves with { kind: 'done', flow }, shows a success toast and calls get again.",
+        "[unit] When stop returns { kind: 'pending' }, the page shows fleet.flows.toast.approvalRequested toast and renders a link to /web/approvals for project web.",
+        "[unit] When stop rejects with an ApiError 409, the page shows extractApiError(err) as an error toast and calls get again.",
+        "[unit] When stop rejects with an ApiError 403 or 404, the page shows extractApiError(err) as an error toast and reloads the flow.",
+        "[unit] When stop returns { kind: 'pending' }, the page reloads the flow after reporting the approval request.",
+        "[unit] For a viewer without fleet.flow.stop, the detail page still renders the loaded flow's branch and spend/cap header, preserving read-only flow visibility while hiding the Stop control."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "security",
+        "permissions",
+        "approval",
+        "stop"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A standard mutation UI with confirmation and reload; permission-gated destructive actions and approval outcomes require the security override."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/composables/useFleetScheduleActions.ts",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/composables/useFleetFlows.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-flow-stop.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The Stop button is hidden for a STOPPED flow even when fleet.flow.stop is present.",
+        "When a Stop request is still pending, a second click does not issue a second stop call."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds stop keys under `fleet.flows`; no existing key changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds the same stop keys in Chinese; no existing key changes."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Answer open flow questions with validation and approval feedback",
+      "description": "**Goal** — Add the permission-gated question answer form and propagate every submission outcome back to a page reload.\n\n**Motivation** — A flow that stops or asks a question notifies the user, but the notification has nowhere to send them.\n\n**Approach** — `components/fleet/flows/FlowAnswerForm.vue`, rendered inside a feature section with open questions when the viewer has `fleet.flow.answer` and the flow is `WAITING_ANSWER`, has one required text field per question (`vee-validate` + `zod`). Submitting calls `useFleetFlows.answer` with the feature's `questionsJobId`, toasts the outcome and asks the page to reload the flow. Form tests live in `tests/components/flow-answer-form.spec.ts`; the section-level ACs 1-3 are added to `tests/components/flow-feature-section.spec.ts` (created by US-007) and AC 10 to `tests/pages/fleet-flow-detail.spec.ts` (created by US-006).\n\n`FlowFeatureSection` props: `slug`, `flow` (the flow DTO), `feature`, `repo` (the overview repo or null), `jobs` (that feature's jobs), `canAnswer` (the page's `permissions.value.has('fleet.flow.answer')`); it emits `answered`, re-emitted by its `FlowAnswerForm`. The page evaluates permissions; the section does not call `useProjectPermissions`. Filter through openQuestions(feature), and only mount the form when flow.state is WAITING_ANSWER and canAnswer is true. Read questions from the feature without converting their IDs; submit one required answer per question in the original question order for feature.questionsJobId.\n\nStop and Answer go through the existing gated routes. Either may answer 202 with an approval request summary; the page tells the user an approval was requested and links to `/:project/approvals`. The pending check is the `useProviderCredentials` pattern (`'permissionKey' in data`). Consume FlowWrite from useFleetFlows, not a duplicate gate. On done, toast success and emit answered. On pending, toast fleet.flows.toast.approvalRequested, show an approvals link and emit answered. On any refused 403/404/409, toast extractApiError(err) and emit answered so the page reloads. Re-emit through the section and bind page reload to answered; do not retry a stale answer submission. Keep the form's link visible for the pending outcome while the component remains present.\n\nAgent-written text (questions, `stopDetail`, `stopReason`) renders through interpolation only, never `v-html` (`.nax/mono/apps/web/context.md`). A question containing markup is a literal label, not HTML. An empty required answer shows fleet.flows.answer.required and sends no call. Add both locales' keys under fleet.flows.answer, preserving existing keys. Pages and the panel import useFleetFlows explicitly; use the same explicit import in the form so tests mock its module seam.\n\n**Scope** — In: validated form, section gating on the page-supplied boolean, exact answer payload/order, done/pending/error notices and answered propagation to reload. Out: Stop action (US-008), polling (US-011), API human checks and answer transition rules. US-009 only: the human-only rule for answers is enforced by the API (`fleet.flows.answerHumanOnly`); the form adds no client-side actor check.\n\n**Interface**\n```ts\n// useFleetFlows(slug)\nanswer(flowId: string, jobId: string, answers: { id: string; answer: string }[]): Promise<FlowWrite>\n```\nFlowAnswerForm emits answered; FlowFeatureSection re-emits answered; the detail page's handler re-reads the flow (and its overview through its existing reload seam).",
+      "acceptanceCriteria": [
+        "[unit] For a WAITING_ANSWER flow whose feature has two open questions, the feature section renders FlowAnswerForm with one text field per question, labelled with the question text.",
+        "[unit] The answer form is not rendered when permissions.value.has('fleet.flow.answer') is false.",
+        "[unit] The answer form is not rendered for a RUNNING flow.",
+        "[unit] A question text of <i>q</i> renders as that literal text, with no i element.",
+        "[unit] Submitting with one field empty shows fleet.flows.answer.required message and does not call answer.",
+        "[unit] Submitting both fields calls answer(flowId, feature.questionsJobId, [{ id: 'q1', answer: 'A' }, { id: 'q2', answer: 'B' }]) in question order.",
+        "[unit] When answer returns { kind: 'done' }, the form shows a success toast and emits answered.",
+        "[unit] When answer returns { kind: 'pending' }, the form shows fleet.flows.toast.approvalRequested toast, renders a link to /web/approvals for project web, and emits answered.",
+        "[unit] When answer rejects with an ApiError 409, the form shows extractApiError(err) as an error toast and emits answered.",
+        "[unit] The flow page calls get again when a feature section's answer form emits answered.",
+        "[unit] When answer rejects with an ApiError 403 or 404, the form shows extractApiError(err) as an error toast and emits answered to reload the flow.",
+        "[unit] A feature section with slug 'web' and canAnswer: false still renders its existing job link to /web/fleet/jobs/j1 when its jobs contain j1, preserving the feature's read-only job list while suppressing the form."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "security",
+        "permissions",
+        "approval",
+        "forms"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The form uses existing vee-validate/zod, toast and Vue emit patterns with no new abstraction; its permission-controlled submission and approval outcomes still require the strict security strategy."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/flows/FlowFeatureSection.vue",
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/tests/components/flow-feature-section.spec.ts",
+        "apps/web/tests/pages/fleet-flow-detail.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/flows/FlowAnswerForm.vue",
+        "apps/web/tests/components/flow-answer-form.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The feature section renders no answer form when feature.answeredAt is set, even if feature.questions still contains the previous review's questions.",
+        "While answer is in flight, submitting the form again does not issue a second answer call."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds answer-form keys under `fleet.flows.answer`; no existing key changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds the same answer-form keys in Chinese; no existing key changes."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "List project flows and link thread flows to their pages",
+      "description": "**Goal** — Add the paginated project flows list and a quiet, permission-gated thread flows panel.\n\n**Motivation** — A flow that stops or asks a question notifies the user, but the notification has nowhere to send them.\n\n**Approach** — `pages/[project]/flows/index.vue` lists the project's flows (newest first, 20 per page, previous and next) with state, feature names, spend against cap and created time, each linking to its flow page. `components/fleet/threads/ThreadFlowsPanel.vue`, mounted on `pages/[project]/threads/[id].vue` and gated on `fleet.flow.read`, lists the thread's flows from `list(1, threadId)`.\n\nPermissions are read as `const { permissions } = useProjectPermissions(slug)` and checked with `permissions.value.has(key)`: `fleet.flow.stop` for Stop, `fleet.flow.answer` for the answer form, `fleet.flow.read` for the thread panel. The project nav's Flows link is not gated (the Threads link is not), and the layout gets no new setup bindings. This story owns only the panel's permission check; the nav link is US-012. The panel must issue no list call without fleet.flow.read; account for the permission value becoming available after initial mount. With the key, call list(1,threadId), never the unfiltered list. Empty results or any list failure (403 or other) render nothing and show no toast.\n\nWeb test harness: pages and the panel import `useFleetFlows` explicitly (`import { useFleetFlows } from '~/composables/useFleetFlows'`), as `schedules/[id].vue` imports its composables, because `tests/helpers/mount-sfc.ts` injects only the Nuxt auto-imports it lists. Tests mock the composable by module path.\n\nThe list page calls list(1) on mounting, preserves the API's newest-first ordering, uses flowStateKey with raw-code fallback and formatUsd for spend/cap, and disables Previous when hasPrev is false. Next uses the next page; an empty list shows fleet.flows.list.empty. A list failure toasts extractApiError(err) and displays no rows. Mount ThreadFlowsPanel below the existing thread header with slug and threadId, leaving all existing thread logic/template behavior unchanged. Add list and panel keys under fleet.flows in en.json and zh.json; add page and panel specs and extend tests/pages/threads-detail-page.spec.ts for the mounted props.\n\n**Scope** — In: project list/pagination/empty/error states, panel fetch/permission/quiet failure behavior, thread-page mounting and locale keys. Out: breadcrumbs and ungated nav link (US-012), detail page and actions (US-006/008/009), polling (US-011), The thread's Start flow form and the per-thread auto-approve tickbox (design G2 thread entry and G4) are a separate feature; this feature adds no flow-creating UI. An admin (cross-project) flows page.\n\n**Interface** — useFleetFlows(slug).list(page: number, threadId?: string): Promise<FleetFlowPage>; FleetFlowPage carries records, total, current, size, hasNext and hasPrev. ThreadFlowsPanel accepts slug and threadId and links every returned record to /:project/flows/<id>.",
+      "acceptanceCriteria": [
+        "[unit] Mounting the flows list page calls useFleetFlows.list(1) and renders one row per flow with its state label, feature names and a link to /:project/flows/<id>.",
+        "[unit] A list row renders formatUsd(spentUsd) and formatUsd(costCapUsd).",
+        "[unit] With hasNext: true, clicking Next calls list(2); with hasPrev: false, the Previous control is disabled.",
+        "[unit] With no flows, the list page renders fleet.flows.list.empty text.",
+        "[unit] When list rejects, the list page shows extractApiError(err) as an error toast and renders no rows.",
+        "[unit] ThreadFlowsPanel with slug web and threadId t1 and fleet.flow.read calls list(1, 't1') and renders each flow's state label with a link to /web/flows/<id>.",
+        "[unit] ThreadFlowsPanel renders nothing when list returns no records.",
+        "[unit] ThreadFlowsPanel without fleet.flow.read renders nothing and does not call list.",
+        "[unit] ThreadFlowsPanel renders nothing and shows no toast when list rejects.",
+        "[unit] The thread page renders ThreadFlowsPanel with the page's slug and thread id.",
+        "[unit] When the flows panel has no rows or its list request fails, the thread page still renders its existing ThreadHeader and ThreadTimeline with the loaded controller.thread and controller.messages, preserving the thread's transcript view."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "security",
+        "permissions",
+        "threads",
+        "list"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The page and small panel reuse existing list, permission and mount patterns, with one additive thread-page mount; the panel's explicit no-permission/no-fetch gate requires strict security isolation."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/schedules/index.vue",
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/pages/[project]/threads/[id].vue",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/tests/pages/threads-detail-page.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/[project]/flows/index.vue",
+        "apps/web/components/fleet/threads/ThreadFlowsPanel.vue",
+        "apps/web/tests/pages/fleet-flows-list.spec.ts",
+        "apps/web/tests/components/thread-flows-panel.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A list row displays the flow's createdAt time.",
+        "When hasNext is false, the list's Next control is disabled.",
+        "When fleet.flow.read becomes available after mount, ThreadFlowsPanel loads list(1, threadId) and renders the returned flows.",
+        "When fleet.flow.read is removed after a successful load, ThreadFlowsPanel renders nothing."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "mounts the thread flows panel below the thread header; the rest of the page is unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "gains a case that the thread page renders the flows panel with its slug and thread id; existing cases are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds the list and panel keys under `fleet.flows`; no existing key changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds the same keys in Chinese; no existing key changes."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Poll live flow details with visibility-aware lifecycle control",
+      "description": "**Goal** — Keep a live flow's page current with bounded visibility-aware polling while retaining data on transient failures.\n\n**Motivation** — F1-F5 built and verified the engine; live flows 13 and 14 were followed with SQL, `gh` and a polling script, because nothing in the web app shows a flow.\n\n**Approach** — Live updates by polling use the existing `useVisiblePolling(task, 15_000)` (`composables/useVisiblePolling.ts`: one run at a time, a rejected run does not stop it, it pauses while the tab is hidden). The page starts it after the first successful load and calls `stop()` when the flow is no longer live or the page unmounts. The page re-reads the flow and its overview every 15 s while the flow is live (`PENDING`, `APPROVED`, `RUNNING`, `WAITING_MERGE`, `WAITING_ANSWER`), and stops polling once it is `COMPLETED` or `STOPPED`, when the first load fails, or when the page unmounts. No flow event exists on the project event stream, and adding one is out of scope.\n\nA poll fails: the page keeps the data it shows and polls again at the next tick. Do not reset a successful flow view to the initial load-failed/not-found state on a polling rejection, including a rejected flow GET. Preserve the last successful overview when its polling read fails as well; continue trying both reads at subsequent ticks. A first flow GET failure, whether 404 or other, does not start a timer; a successful flow with only an overview failure remains live and may poll. Terminal state from a successful read stops the poll even if the overview read failed. Use the existing poller, not a second interval or SSE; do not modify its generic semantics. Guard asynchronous initial completion so leaving during the first load cannot start polling after unmount. US-008/009 reloads must not multiply timer registrations. Tests use fake timers in tests/pages/fleet-flow-polling.spec.ts.\n\n**Scope** — In: detail-page poll setup/first-success start/live-state stop/cleanup, retained-data failure semantics and timer behavior. Out: initial header layout (US-006), job/feature rendering (US-007), mutation UI (US-008/009), thread/list polling, A flow event on the project event stream (SSE); the flow page polls every 15 s instead.\n\n**Interface** — Consume useVisiblePolling(task: () => Promise<void>, ms: number), which returns { start, stop, runNow, isActive }; consume isLiveFlow(state: string): boolean and useFleetFlows(slug).get/overview for every refresh.",
+      "acceptanceCriteria": [
+        "[unit] For a RUNNING flow, advancing fake timers by 15 s calls get and overview a second time.",
+        "[unit] When a poll's get returns the flow as COMPLETED, advancing fake timers by another 15 s calls get no further time.",
+        "[unit] For a flow that is COMPLETED at the first load, advancing fake timers by 15 s calls get no second time.",
+        "[unit] After a failed first get, advancing fake timers by 15 s calls get no second time.",
+        "[unit] After the page unmounts, advancing fake timers by 15 s calls get no second time.",
+        "[unit] When a poll's get rejects, the page still renders the flow's branch, and the next 15 s tick calls get again.",
+        "[unit] When a poll's overview rejects, the page keeps the previously displayed overview data and calls overview again at the next 15 s tick."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "polling",
+        "lifecycle"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Only the detail page's start/stop and retained-data lifecycle is new; useVisiblePolling already owns visibility, rejection resilience and non-overlap, so ordinary fake-timer TDD fits without a new concurrency abstraction."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/composables/useVisiblePolling.ts",
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/lib/fleet-flows.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-flow-polling.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "For a live flow in a hidden tab, a 15-second timer tick sends no get or overview request.",
+        "When a poll is unresolved, advancing another interval does not start an overlapping poll.",
+        "When the page unmounts before the initial get resolves, resolving it as RUNNING does not start subsequent requests.",
+        "When the first successful flow state is STOPPED, advancing timers by 15 s sends no additional request.",
+        "When an overview fails on first load but get succeeds as RUNNING, advancing timers by 15 s retries get and overview."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Add Flows project navigation and detail breadcrumbs",
+      "description": "**Goal** — Make flow pages discoverable through the existing project sidebar and consistent breadcrumbs.\n\n**Motivation** — The flow DTO already carries a `url` field that names this page (`fleet-flow.dto.ts`, \"the web path F6 renders\"), and the web app has no route for it.\n\n**Approach** — The default layout's breadcrumbs gain the flows list (`Flows`) and the flow page (`Flows`, then the `fleet.flows.detail.title` label), and the project nav gains an ungated Flows link after Threads, with no new setup bindings. Its tests live in `tests/layouts/flows-nav.spec.ts`, following `renderProjectLayout` and `breadcrumbItemsFor` in `tests/layouts/threads-nav.spec.ts`.\n\nPermissions are read as `const { permissions } = useProjectPermissions(slug)` and checked with `permissions.value.has(key)`: `fleet.flow.stop` for Stop, `fleet.flow.answer` for the answer form, `fleet.flow.read` for the thread panel. The project nav's Flows link is not gated (the Threads link is not), and the layout gets no new setup bindings. This story does not add permission reads to the layout. Keep the link inline in the template, directly after Threads; do not introduce a nav data array or disturb SLO/project/KB/Timeline/Settings source order and order-first layout conventions.\n\nFor /web/flows breadcrumbs are Koda linked /, web linked /web, then nav.flows without a link. For /web/flows/f1 they are Koda linked /, web linked /web, nav.flows linked /web/flows, then fleet.flows.detail.title without a link. Existing crumbs and links stay as they are. Add nav.flows in English and Chinese with no changes to existing keys; the detail title key is supplied by US-006. Read docs/ux/redesign/MASTER-PLAN.md and follow its status/decision-log update requirement in the same PR. This remains a navigation code story, not a documentation-only story. Preserve the fixed-binding SSR layout harness and test the real breadcrumb computed and rendered link ordering.\n\n**Scope** — In: default layout breadcrumb branches and inline ungated project Flows link, nav.flows translations and layout behavior tests. Out: project list/thread panel implementation (US-010), detail content and actions (US-006/007/008/009), permission-policy changes, An admin (cross-project) flows page.\n\n**Interface** — routes /:project/flows and /:project/flows/:flowId; translation keys nav.flows and fleet.flows.detail.title; existing breadcrumbItems computed returns { label: string; to?: string }[] with no additional layout setup bindings.",
+      "acceptanceCriteria": [
+        "[unit] The default layout's breadcrumbs for /web/flows are Koda, web, and nav.flows.",
+        "[unit] The default layout's breadcrumbs for /web/flows/f1 are Koda, web, nav.flows linking /web/flows, and fleet.flows.detail.title.",
+        "[unit] The default layout renders a link to /web/flows labelled with nav.flows in the project nav of project web, after the Threads link.",
+        "[unit] When route.params.project is absent, the default layout renders no project Flows navigation link.",
+        "[unit] The default layout's breadcrumbs for /web/labels remain [{ label: 'Koda', to: '/' }, { label: 'web', to: '/web' }, { label: 'nav.labels' }], preserving the existing non-flow breadcrumb branch.",
+        "[unit] The default layout's breadcrumbs for /web/threads/th1 remain Koda, web, nav.threads linking /web/threads, and fleet.threads.detail.title, preserving existing thread navigation."
+      ],
+      "tags": [
+        "fleet-flow-page",
+        "web",
+        "navigation",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small additive breadcrumb/template/locale edits following an established SSR harness; the link is deliberately ungated and introduces no access-control logic."
+      },
+      "contextFiles": [
+        "apps/web/layouts/default.vue",
+        "apps/web/tests/layouts/threads-nav.spec.ts",
+        "docs/ux/redesign/MASTER-PLAN.md"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/layouts/flows-nav.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/layouts/default.vue",
+          "reason": "the breadcrumb builder gains crumbs for the project flows list and a flow page, and the project nav gains an ungated Flows link after the Threads link with no new setup bindings; existing crumbs and links stay as they are."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `nav.flows`; no existing key changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `nav.flows` in Chinese; no existing key changes."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository discovery: codebase-memory MCP tools are not exposed in this session, so exploration used direct Read, Grep and Glob tools against the supplied repository root. This is an enhancement of an existing engine, not a greenfield application. The supplied automated stack detection is misleading: apps/api is NestJS with Fastify, Prisma 7 and Vitest, and apps/web is Nuxt 4/Vue with Jest, vee-validate and zod, not an Express/Next.js implementation (.nax/mono/apps/api/context.md:23-35; .nax/mono/apps/web/context.md:22-32). Read those app contexts before implementation. API agents must also read the nathapp-nestjs-patterns skill before writing NestJS code; a repository glob found no skill file with that name, so obtain it through the implementation host's skill mechanism rather than inventing a local replacement. Only the PRD is authored by this planning task; no code, tests, generated contracts or schema have been changed or executed.\n\nProduct goal and completion: expose existing flows at /:project/flows/:flowId, with ordered feature progress, branches, PRs, jobs, spend versus cap and unknown-cost notice, approvals, stop context and ticket, open questions and existing Stop/Answer actions. Project list, thread panel and ungated project navigation make the page discoverable. Completion means the additive read contract and thread filter are wired through the existing API layers, all page/action/error/polling behaviors below are observable, both web locales cover the new literals, and existing endpoints/engine/navigation behaviors remain unchanged. No flow creation, approval decisions, workflow changes, CLI command, new event stream or schema redesign belongs here. Preserve the exact 12-story decomposition, workdirs and dependency edges.\n\nAPI baseline and US-001 impact: apps/api/src/fleet/flows/dto/fleet-flow.dto.ts:65-87 currently maps features without branch; :94-139 maps flows without stopDetail, already sorts features by position and builds url as /<slug>/flows/<id>. Its approvalOf helper at :17-27 deliberately exposes REQUEST for a PENDING flow carrying an approvalRequestId even without approvalMode. Retain this behavior so the web can link pending approval. The existing record already contains optional feature.branch and flow.stopDetail/ticketId (apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:12-62); no new record fields or relation include are needed. Modify the DTO plus its exact-object assertions in apps/api/src/fleet/flows/dto/fleet-flow.dto.spec.ts:47-77 and :123-137, adding only stopDetail:null to flow expectations and branch:null to feature expectations where unset. ProjectFlowsController.list currently parses KodaPageQuery and calls list with two arguments (apps/api/src/fleet/flows/project-flows.controller.ts:21-38). Introduce ListFleetFlowsQuery extending KodaPageQuery, with an emitted instance field discoverable by parseQuery (not a type-only declaration that disappears at runtime), Swagger optional query metadata and IsOptional/IsString/MaxLength(64). parseQuery strips undeclared fields rather than performing validation itself (apps/api/src/common/dto/koda-page.query.ts:9-29, :33-66), so both the new class argument and actual ValidationPipe behavior matter. Keep current=1,size=20 defaults; test validation directly and HTTP 400 for 65 characters. FleetFlowsService.list currently sends exactly {projectId} and get enforces the same notFound on missing/cross-project flow (apps/api/src/fleet/flows/fleet-flows.service.ts:73-98). Extend list with a default third filters argument and conditionally spread threadId only when truthy; this preserves existing findPage assertions for unfiltered callers. Update IFleetFlowRepository.findPage at apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:88-93 and Prisma implementation at apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:49-53, keeping the current createdAt desc/id desc pagination and position-ordered features. Existing service/controller coverage is apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts:49-87; it directly instantiates controllers/services, so do not change their constructor signatures. Extend the findPage cases in apps/api/test/integration/fleet-flow-repository.integration.spec.ts. The endpoint flow block is apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:4971-5050; its enclosing newThread helper is at :4653. Use that helper for thread-linked endpoint fixtures rather than dangling thread IDs.\n\nAPI overview design and US-002/003: the flow module already imports FleetReposModule and TicketsModule and binds both flow repository tokens through useExisting (apps/api/src/fleet/flows/flows.module.ts:36-62). Add a separate FleetFlowOverviewService provider and ProjectFlowOverviewController controller without altering FleetFlowsService or ProjectFlowsController constructors, imports/exports or existing providers. The public controller depends only on that service. Mirror the project controller's ApiTags('fleet'), ApiBearerAuth, ApiParam slug and ProjectMembershipGuard then RequiresGuard decorators (apps/api/src/fleet/flows/project-flows.controller.ts:21-25); enforce Requires('fleet.flow.read') on GET :flowId/overview and document 200/403/404. FleetFlowsService.get(projectId,flowId) is the first awaited fence, before any repo, ticket or job lookup, so another project's flow produces fleet.flows.notFound without disclosing associated data. Reads across modules use services, not their repositories or Prisma (.nax/rules/api-data.md:21-67). Add FleetReposService.findIdentity(id) as a narrow provider/owner/name projection via its existing repository, following findReviewRepo (apps/api/src/fleet/repos/fleet-repos.service.ts:177-182). It must return null when missing and never expose installation identifiers, tokens or unrelated settings. Existing repo service tests start at apps/api/src/fleet/repos/fleet-repos.service.spec.ts:7 and the findReviewRepo projection cases are :26-35. Resolve ticket ref with TicketsService.findRefsByIds(projectId,[ticketId]); this existing method omits soft-deleted and cross-project IDs (apps/api/src/tickets/tickets.service.ts:234-243), so a missing map entry is null, and no-ticket flows skip the call entirely.\n\nThe step repository already reads fleetJob for latestJob and latestJobForStep and sums costs using Prisma.Decimal (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:76-79, :111-118, :169-174). Extend its interface in apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:36-67 with FlowJobRow and listFlowJobs; this is a module-internal read, not a new cross-module repository export. Fetch only this flow's newest limit jobs using queuedAt desc then id desc, determine truncation with a bounded extra row or equivalent bounded/count read, remove the extra row before reversing, and return the retained rows oldest first with the same id tie ordering. Both cost columns must be 4-decimal strings. The existing flow-job indexes support this read; flowFeatureId deliberately has no Prisma relation (apps/api/prisma/schema.prisma:1120-1131, :1160-1161). Map feature IDs to names using the fenced flow's own features, never job.feature or a made-up join. Schema already stores stopDetail, ticketId and feature.branch and has project/creation and thread/state indexes (apps/api/prisma/schema.prisma:1226-1290). Thus no migration/backfill is required. Repo deletion currently cascades flows in schema, but the API's null-repo projection must still tolerate a disappearing or mocked repo; do not change deletion semantics.\n\nPure flow-overview.ts must add money with Prisma.Decimal, not JS floating point, and emit 4 places. Unknown-cost jobs are only AGENT, PLAN, REVIEW, FIX in the existing TERMINAL_STATES and with exact zero summed cost; terminal is COMPLETED/FAILED/ESCALATED/CRASHED/CANCELLED (apps/api/src/fleet/jobs/job-state.ts:8-11). RUN is excluded. Count only retained overview jobs, never discarded older rows; flow.spentUsd remains the engine's full recorded flow spend and must not be recomputed from the capped list. Overview DTO has repo, ticketRef, jobs, truncated and unknownCostCount; job DTO has id, feature, step, command, state, costUsd, queuedAt and finishedAt. Dates become ISO strings and null stays null. Every new DTO field needs ApiProperty with appropriate nested/nullable metadata. The service delegates to listFlowJobs(flowId,500), formats rows with pure helpers and copies truncated. Modify the existing step repository integration suite (apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts:13-67) for isolation, ordering, truncation, fields and costs. The new fleet-flow-overview.spec.ts owns no-DB service/controller tests, including project fence and decorator checks. If module compilation coverage needs expansion, use the existing apps/api/src/fleet/flows/flows.module.spec.ts or another co-located unit module test, not a DB integration test. Add happy/missing overview endpoints to the existing endpoint suite, preserving every prior case.\n\nContracts and compatibility: export root openapi.json after US-001 and again after US-003 with bun run api:export-spec from repository root; it is generated, not hand-maintained. The workdir remains apps/api as explicitly bound despite that root artifact. Fields and query are additive; unfiltered list ordering, pagination envelope and existing stop/answer responses stay compatible. Root guidance requires bun run generate for contract changes affecting CLI; no flows CLI command is requested, but if generation is required by the existing CLI consumer, use the generator only and never hand-edit apps/cli/src/generated. There is intentionally no generated web client. Adding interface members may affect typed mocks: IFleetFlowStepRepository is consumed by FleetFlowAdvanceService, ticker, feature-pass helpers and stop-ticket subscriber, while IFleetFlowRepository is consumed by start, read/stop, publish and advance code (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:65-66; fleet-flow.ticker.ts:21; fleet-flow-stop-ticket.subscriber.ts:25-26; fleet-flow-start.command.ts:18). Add only additive mock stubs if necessary; do not change advancement or stop rules.\n\nWeb foundation and US-004/005: author DTO mirrors and pure helpers in apps/web/lib/fleet-flows.ts, reflecting the actual serialized API rather than persistence records (features expose names, not record IDs/position; position order is already applied server-side). Keep costs as server strings. Reuse formatUsd from apps/web/lib/fleet-jobs.ts:59-66 for presentation. FlowRepo and the overview types must be shared through the helper module so the service/composable/page seam is exact. Define literal maps for all seven flow states, seven feature states and seven steps; unknown codes return null from key helpers and render raw, never generate unknown translation keys. isLiveFlow has precisely five states. jobsByFeature creates an empty Map entry per feature, preserves input job order and separates only null-feature jobs into flowJobs. openQuestions returns stored questions only when unanswered. ApprovalRequestSummary already exists in apps/web/lib/approval-requests.ts:44-66; the permissionKey discriminant is established in apps/web/composables/useProviderCredentials.ts:56-59. Check non-null object before using 'permissionKey' in data. useFleetFlows uses the existing useApi $api methods; useApi already supplies /api, auth cookies, locale, SSR-safe forwarding, JSON-envelope unwrapping and ApiError handling (apps/web/composables/useApi.ts:39-62, :162-194, :241-253). Composable paths therefore start /projects, not /api/projects. Serialize list current and size=20 in the exact specified query order, URL-encoding supplied identifiers/query values; do not swallow errors in this layer. stop and answer return a done/pending discriminated union based on body shape, not status inspection; an HTTP 202 is a successful envelope.\n\nDetail shell and US-006: follow the schedule detail page for Nuxt setup, explicit imports, member-name loading and error conventions (apps/web/pages/[project]/fleet/schedules/[id].vue:1-36, :65-87, :116-132). Do not copy its always-start polling or error-clearing behavior, which conflicts with this feature's first-success/retained-poll design. ApiError.code may be envelope 40004 or HTTP-like 404 (same page :61-62), so not-found handling must recognize both; distinguish generic first-load failure from overview-only failure. Load flow and overview independently so a rejected overview never prevents the header/features from rendering. Member names are cosmetic: useProjectMemberNames.load/nameOf returns null for unresolved IDs (apps/web/composables/useProjectMemberNames.ts:6-21); fall back to approverId on absence or name-load failure. Render flow entry, branch, reviewer/supervisor, createdAt, spend/cap, approval mode/approver/time/request link and stopped context with overview ticketRef. The literal unknown-cost text is 'cap excludes N jobs with unknown cost' and appears only for positive count. Use ordinary interpolation for stopReason, stopDetail and question text. Add both locales' fleet.flows groups and the three exact enum sets to apps/web/tests/i18n/fleet-locale-parity.spec.ts:21-94, retaining existing entries and keys.\n\nFeatures and US-007: iterate the server DTO features in their existing order, pass slug, flow, feature, overview repo or null, that feature's jobs and a page-evaluated canAnswer boolean. The section must not call useProjectPermissions. Its branch uses feature.branch ?? flow.branch; GitHub repo identity yields https://github.com/<owner>/<name>/pull/<n>; missing overview, null repo and other providers show #<n> without links. Render dependencies and all required job row fields with links /:project/fleet/jobs/<id>. Render Flow jobs only for null-feature jobs and preserve their returned order. Overview failure shows fleet.flows.detail.jobsFailed while features stay visible and PRs fall back to numbers. Surface truncated as a bounded-data notice; no jobs paging. Extend US-006's page tests for section order, unfeatured jobs and overview failure, alongside the new section spec.\n\nActions and US-008/009: existing stop/answer project endpoints are membership/permission guarded and approval-gated; they already fence the flow and enforce human-only answers before the gate (apps/api/src/fleet/flows/project-flows.controller.ts:51-111). Do not create endpoints, bypass gates or implement a client actor rule. Read const { permissions } = useProjectPermissions(slug) and permissions.value.has(key), never roles or an alternate return shape. This composable fails closed while unresolved/refreshing/failed (apps/web/composables/usePermissions.ts:1-16, :68-91). Stop is only a live-flow control for fleet.flow.stop; window.confirm cancellation sends no request. Reuse the existing mutation error/reload convention (apps/web/composables/useFleetScheduleActions.ts:16-44), with success versus approval-requested notices and approvals link. Every refused 403/404/409 mutation must toast extractApiError and trigger reload, not retry the write. The form receives open questions inside the section only for WAITING_ANSWER plus canAnswer; require one vee-validate/zod text answer per question and preserve question order/IDs when posting feature.questionsJobId. Emit answered on done, pending and error so the section re-emits and the page reloads. Pending responses are not completed writes: show fleet.flows.toast.approvalRequested and a link to /:project/approvals, then reload. Tests must stub window.confirm on globalThis.window, not an unrelated global confirm.\n\nDiscovery and US-010/012: create project list with 20-item API pagination, existing server newest-first order, state labels, feature names, spend/cap and createdAt; use errors as toasts and empty rows. The thread panel self-checks fleet.flow.read, never calls list without it, calls list(1,threadId), and is entirely absent without data or after failure with no toast. Mount it immediately below the thread header in apps/web/pages/[project]/threads/[id].vue:107-112 and extend apps/web/tests/pages/threads-detail-page.spec.ts without altering existing thread controller, streams, handoff or composer behavior. US-010 does not own navigation changes: US-012 adds nav.flows, flow list/detail breadcrumbs and an inline ungated Flows link after Threads. Current breadcrumb logic is apps/web/layouts/default.vue:106-150 and project Threads link is :282-290. Do not add any setup binding for Flows, refactor nav to arrays or gate the link. Tests in apps/web/tests/layouts/threads-nav.spec.ts:28-66 and :118-151 evaluate real layout setup and SSR a fixed binding set; mirror their helpers for flows-nav.spec.ts and retain all existing breadcrumb/nav assertions. Read docs/ux/redesign/MASTER-PLAN.md:28-36 and update its Status table/Decisions log in the same PR when changing navigation, as repository guidance requires, without adding a documentation story. Keep token-based styling; review CommandPalette consistency under web guidance without widening feature functionality.\n\nPolling and US-011: useVisiblePolling(task,15000) supplies non-overlapping tasks, visibility pause/resume and rejection resilience (apps/web/composables/useVisiblePolling.ts:26-66). Start only after the first successful flow load and only while isLiveFlow; overview failure alone does not count as a failed flow load. Stop on terminal state, initial flow failure or unmount, and prevent an in-flight first load from starting timers after unmount. Every live tick attempts both flow and overview; rejected polling reads retain prior displayed data and allow the next tick, rather than resetting to initial error screens. First terminal flow must never start the timer. Actions reload the same flow/overview state without duplicating timers or registering SSE. The flow engine emits no flow event for this feature; do not infer progress from fleet_job events.\n\nExecution-order seams: US-010 depends only on US-005, not US-006, so it must not require the detail page, its locale commit or its tests to exist; add the list/panel locale subkeys independently and preserve sibling keys when merging. US-007/008/011/012 all extend US-006's page or locales, while US-009 extends US-007; serialize or carefully merge edits to shared files rather than changing the binding dependency graph. Every contextFiles path is either an existing repository file or an output of a transitive upstream story; expectedFiles contains only that story's newly authored files.\n\nTesting and delivery risk: API unit tests use vi and lazy imports, not jest; database suites use canRunDbTests and real PostgreSQL, preserve NAX_SANDBOXED=1 skips without claiming verification, and run scoped integration/e2e specs outside sandbox with KODA_DB_TESTS=1. DB-mode setup resets the test database, so do not run two suites against one DB concurrently; a second worktree needs a private container. Web tests use the real SFC mount harness rather than source-grep: apps/web/tests/helpers/mount-sfc.ts:125-151 explicitly lists injected auto-imports and does not include useFleetFlows, so pages and panel must explicitly import { useFleetFlows } from '~/composables/useFleetFlows' and mock by module path. Keep test files and locales within each story's ownership, reusing upstream test files where specified. No-test routing is inappropriate because every story changes runtime behavior. Access-control stories US-003 (guarded route and project fence), US-007 (page-evaluated answer permission prop), US-008/009 (permission-gated mutations) and US-010 (permission-gated panel) use three-session-tdd. US-001 only adds a narrowing filter beneath unchanged guards and project scope, so it uses ordinary TDD. The read-only shell, polling lifecycle and remaining helpers/read models use ordinary TDD against existing harnesses; only US-003 requires complex classification because it adds guarded cross-module orchestration. Highest risks are accidentally stripping threadId, leaking cross-project overview data, changing constructors that tests instantiate, money rounding/counting the wrong job subset, misreading 202 as a saved flow, mismatched hand-written DTOs, stale/racing loads and polling after unmount, unsafe agent HTML, and breaking layout fixtures. The implementation is additive and can deploy API before web; no data migration or flow restart is necessary.\n\nRefine-pass audit against .nax/features/fleet-flow-page/spec.md: all 104 numbered spec criteria were enumerated and retained in their original story and original leading ordinal positions. The preservation ledger is: US-001 spec ACs [1,2,3,4,5,6,7,8,9] map respectively to PRD ACs [1,2,3,4,5,6,7,8,9]; US-002 [1,2,3,4,5,6,7,8,9] to [1,2,3,4,5,6,7,8,9]; US-003 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-004 [1,2,3,4,5,6,7,8,9,10,11,12] to [1,2,3,4,5,6,7,8,9,10,11,12]; US-005 [1,2,3,4,5,6,7] to [1,2,3,4,5,6,7]; US-006 [1,2,3,4,5,6,7,8,9,10,11] to [1,2,3,4,5,6,7,8,9,10,11]; US-007 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-008 [1,2,3,4,5,6,7] to [1,2,3,4,5,6,7]; US-009 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-010 [1,2,3,4,5,6,7,8,9,10] to [1,2,3,4,5,6,7,8,9,10]; US-011 [1,2,3,4,5,6] to [1,2,3,4,5,6]; US-012 [1,2,3] to [1,2,3]. No deprecated file-check tags occur. Qualifying assertions remain attached, notably no threadId key on the unfiltered service call, only the selected thread/flow's rows, newest-limit selection returned oldest first with queuedAt/id ordering, 4-place costs, null finishedAt when unset, empty entries for every feature, input/DTO/question order, raw text with no injected b/i elements, the project-specific approvals URLs, and the Flows link after Threads. Validation 'fails' is made observable as a maxLength validation error; the zero-cost exclusion is asserted as a count of 0. US-006's non-404 case explicitly distinguishes HTTP-like 404 from the existing equivalent 40004 envelope code, following schedules/[id].vue:61-62. US-008's success-path confirmation explicitly uses a done response, leaving pending/refusal outcomes governed by their separate preserved criteria.\n\nAll nine failure-table rows remain represented: cross-project overview and oversized query in US-003/001, initial not-found/other load errors in US-006 plus no polling in US-011, overview degradation in US-007, retained polling data/retry in US-011, mutation 403/404/409 and 202 outcomes in US-008/009, and quiet panel failure in US-010. Every story now has a negative-path acceptance assertion; US-005 adds propagation of the same rejected ApiError, and US-012 adds absence of project navigation when no project exists. Regression assertions were added for existing DTO ordering/pending approval, findReviewRepo's bigint projection, latestJob after bounded reads, the existing detail route after new module registration, retained header/read-only jobs, the thread transcript when the panel is empty/failed, and existing labels/thread breadcrumbs. These additions protect existing behavior rather than adding feature scope. They bring the acceptance total to 123; suggested hardening remains separately labeled. The invalid per-question answeredAt suggestion was corrected: questions carry only id/question, while answeredAt belongs to FleetFlowFeatureDto (apps/api/src/fleet/flows/dto/fleet-flow.dto.ts:55-76).\n\nContext alignment was rechecked against the spec's Context Files section: every explicitly recommended path is included, all stories stay within five context files, no story lists its own created output as context, and transitive upstream outputs are valid inputs. All 12 story IDs, workdirs and binding dependency arrays are unchanged, with no unknown dependency IDs. The exact ten feature-level exclusions remain verbatim in the top-level array; the US-009-only actor-check restriction really is an item in that feature-level section, not a hoisted story-local block, and is echoed on US-009. Nearby stories also echo the relevant exclusions in their Scope Out text. Standard page/form/list/poller integrations were reduced to medium and the thin composable to simple; guarded overview orchestration remains complex, and stories that actually add permission checks keep the mandatory strict strategy. This is a source/spec audit using file tools, not a claim that implementation tests or a runtime JSON validator were executed.",
+  "outOfScope": [
+    "The thread's Start flow form and the per-thread auto-approve tickbox (design G2 thread entry and G4) are a separate feature; this feature adds no flow-creating UI.",
+    "Cloning a stopped flow into a new pending flow is not built here.",
+    "A flow event on the project event stream (SSE); the flow page polls every 15 s instead.",
+    "Approving or rejecting the flow's start request on the flow page; the page links to the existing approvals page.",
+    "PR links for providers other than GitHub; a non-GitHub repo shows the PR number without a link.",
+    "Paging the overview's jobs beyond the newest 500; the overview reports `truncated` instead.",
+    "CLI commands for flows.",
+    "Changing any flow step, state transition or stop rule in the API.",
+    "An admin (cross-project) flows page.",
+    "US-009 only: the human-only rule for answers is enforced by the API (`fleet.flows.answerHumanOnly`); the form adds no client-side actor check."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}
