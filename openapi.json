@@ -14460,6 +14460,15 @@
             }
           },
           {
+            "name": "threadId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
             "name": "slug",
             "required": true,
             "in": "path",
@@ -25779,6 +25788,10 @@
           "specPath": {
             "type": "string"
           },
+          "branch": {
+            "type": "string",
+            "nullable": true
+          },
           "dependsOn": {
             "type": "array",
             "items": {
@@ -25895,6 +25908,10 @@
             ]
           },
           "stopReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "stopDetail": {
             "type": "string",
             "nullable": true
           },

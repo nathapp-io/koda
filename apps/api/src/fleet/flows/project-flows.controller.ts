@@ -1,12 +1,12 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { KodaPageQuery, parseQuery, remapPage, toPageResult } from '../../common/dto/koda-page.query';
+import { parseQuery, remapPage, toPageResult } from '../../common/dto/koda-page.query';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
@@ -14,6 +14,7 @@ import type { ProjectContext } from '../../projects/project-context';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import type { FleetFlowRecord } from './domain/fleet-flow.domain';
 import { FleetFlowDto, FleetFlowPageDto } from './dto/fleet-flow.dto';
+import { ListFleetFlowsQuery } from './dto/list-fleet-flows.query';
 import { FleetFlowsService } from './fleet-flows.service';
 import { FLOW_ANSWER_VARIANT, FLOW_STOP_VARIANT } from './flow-route.commands';
 
@@ -29,10 +30,11 @@ export class ProjectFlowsController {
   @Requires('fleet.flow.read')
   @ApiOperation({ summary: 'List project flows newest first (fleet.flow.read)' })
   @ApiResponse({ status: 200, type: FleetFlowPageDto })
+  @ApiQuery({ name: 'threadId', required: false, type: String, maxLength: 64 })
   @ApiResponse({ status: 403, description: 'fleet.flow.read is missing' })
-  async list(@Query() rawQuery: KodaPageQuery, @CurrentProject() ctx: ProjectContext) {
-    const { current, size } = parseQuery(KodaPageQuery, rawQuery);
-    const page = await this.flows.list(ctx.project.id, { current, size });
+  async list(@Query() rawQuery: ListFleetFlowsQuery, @CurrentProject() ctx: ProjectContext) {
+    const { current, size, threadId } = parseQuery(ListFleetFlowsQuery, rawQuery);
+    const page = await this.flows.list(ctx.project.id, { current, size }, { threadId });
     return JsonResponse.Ok(toPageResult(remapPage(page, (flow) => FleetFlowDto.from(flow, ctx.project.slug))));
   }
 
