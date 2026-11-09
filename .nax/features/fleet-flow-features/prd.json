@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T05:14:54.199Z",
+  "updatedAt": "2026-11-09T05:27:18.689Z",
   "userStories": [
     {
       "id": "US-001",
@@ -627,14 +627,17 @@
         "US-005",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Creator access, write-token scope, external branch side effects and locked approval-generation recording require strict security TDD."
+        "reasoning": "Creator access, write-token scope, external branch side effects and locked approval-generation recording require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -653,7 +656,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7f63a6a5b8cb66fdd32cb2822bbaf2436827b93c"
     },
     {
       "id": "US-012",
