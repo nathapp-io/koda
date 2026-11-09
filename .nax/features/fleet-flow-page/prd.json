@@ -3,7 +3,7 @@
   "feature": "fleet-flow-page",
   "branchName": "feat/fleet-flow-page",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T08:54:05.903Z",
+  "updatedAt": "2026-11-09T09:05:43.932Z",
   "userStories": [
     {
       "id": "US-001",
@@ -110,14 +110,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard additive repository/service projections and pure Decimal rules with established PG fixtures; no auth policy, credential handling or new orchestration layer is introduced."
+        "reasoning": "Standard additive repository/service projections and pure Decimal rules with established PG fixtures; no auth policy, credential handling or new orchestration layer is introduced.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
@@ -157,7 +160,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "62b10d8118c66544a922e134debb8221222f3529"
     },
     {
       "id": "US-003",
