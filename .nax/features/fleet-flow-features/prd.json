@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-08T17:52:14.634Z",
+  "updatedAt": "2026-11-09T03:23:40.311Z",
   "userStories": [
     {
       "id": "US-001",
@@ -30,14 +30,17 @@
         "migration"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module schema/backfill and positional interface changes must preserve job snapshot, adoption and single-feature recovery behavior."
+        "reasoning": "Cross-module schema/backfill and positional interface changes must preserve job snapshot, adoption and single-feature recovery behavior.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -93,7 +96,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f8a0359adf492c161550db00ddde851eaa6a2109"
     },
     {
       "id": "US-002",
@@ -136,7 +143,10 @@
         "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -166,7 +176,10 @@
         "apps/api/src/fleet/flows/flow-input.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -208,7 +221,10 @@
         "apps/api/src/fleet/flows/flow-features.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -257,7 +273,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -306,7 +325,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -364,7 +386,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -437,7 +462,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -478,7 +506,10 @@
         "apps/api/src/fleet/flows/fleet-flow-advance-completion.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -523,7 +554,10 @@
         "apps/api/src/fleet/flows/fleet-flow-advance-set-calls.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -580,7 +614,10 @@
         "When approvedAt changes before the start record transaction's locked re-read, advance writes no feature branch/state or flow.feature_started activity."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -642,7 +679,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-013",
@@ -689,7 +729,10 @@
         "apps/api/test/integration/fleet/fleet-flow-features.integration.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Repository-backed enhancement, not greenfield. Navigation used direct Read/Grep/Glob because codebase-memory MCP was unavailable in this session; all citations below refer to the execution checkout. The supplied framework detection is inaccurate: apps/api is NestJS 12 on Fastify with Nathapp platform modules, Prisma 7 and Vitest, not an Express application; see apps/api/package.json:41 and .nax/mono/apps/api/context.md:22. Web is Nuxt, not Next.js, and has no work in this feature. All 13 binding stories remain scoped to apps/api, with their exact dependency lists. Before implementation, follow .nax/mono/apps/api/context.md and the nathapp-nestjs-patterns skill; do not edit generated AGENTS.md, generated Prisma code, generated CLI clients or acceptance files.\n\nCurrent architecture and blockers: FleetFlowTicker is the sole bounded, in-process single-flight trigger; it pages listAdvanceable and calls advance under runAsSystem on behalf of each creator (apps/api/src/fleet/flows/fleet-flow.ticker.ts:13, :39, :49). The default polling period is 30,000 ms (apps/api/src/config/fleet.config.ts:180). The repository restricts eligibility to APPROVED/RUNNING and exactly one feature (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:44). decideFlowStep skips featureCount !== 1 and otherwise starts SPEC_REVIEW (apps/api/src/fleet/flows/flow-step-decision.ts:91). The advance service additionally returns for multiple features and hardcodes features[0] throughout (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:348, :382). Removing just one guard is insufficient: all feature job reads, dispatch links, progress markers, question/ruling targets, notifications, recovery and branch choices must agree.\n\nPersistence and migration (US-001/002): FleetJob currently stores nullable flowId/flowStep and has a [flowId, queuedAt] index (apps/api/prisma/schema.prisma:1120, :1159). FleetFlow has specSha but no stable setSha; FleetFlowFeature has ordered positions, unique (flowId, position)/(flowId, feature), state, PR and review markers but no branch (apps/api/prisma/schema.prisma:1224, :1264). Add migration 20261203090000_fleet_flow_features with nullable FleetJob.flowFeatureId, index [flowId, flowFeatureId, queuedAt], nullable feature branch, and required flow setSha. Backfill flowFeatureId by joining each job's flow to its position-0 feature, leaving non-flow jobs null; backfill setSha from specSha before enforcing NOT NULL. Existing feature branches stay null. This preserves existing single-feature job visibility; do not infer identity from FleetJob.feature because REVIEW uses a canonical PR feature, decoded by prNumberOfReviewFeature (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:598). Extend FleetJobRecord, create data and repository adoption interface (apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:223, :254, :371). dispatch inserts flow links atomically with the job (apps/api/src/fleet/jobs/fleet-jobs.service.ts:135); add flowFeatureId only with flowId. adoptForFlow is one conditional update where flowId is null, not a read-then-write (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:128), and service forwarding is at apps/api/src/fleet/jobs/fleet-jobs.service.ts:193. Preserve its false-on-already-owned behavior.\n\nFeature-scoped reads must keep latest job plus that job's own lease ingest settlement in ONE statement, retaining queuedAt/id descending tie-breaks (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:63). Separating those reads can pair an old RUN with a new settled flag and falsely stop it. latestJobWithIngest, latestJobForStep and countJobsForStepSince gain featureId as second argument (apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:44). latestJob(flowId) and sumCost(flowId) remain flow-wide; the latter sums spent plus carried cost with Decimal (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:142). complete currently rewrites all feature states and must preserve MERGED instead (same file:39). recordCalls currently always moves specSha (same file:110); add null-as-no-sha-update and optional setSha promotion. Flow mapping spreads database rows and sorts positions (apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:20), so the new columns flow through after domain updates. create, reask and updateSha must write setSha with specSha (same file:30, :90, :93). US-001 introduces required setSha while US-002 finishes repository creation/update semantics: treat these as a coordinated rollout, not independently deployable schema/runtime releases. Update all direct Prisma create fixtures with setSha and newly scoped jobs with flowFeatureId; do not use an empty fake setSha default to hide missing writes. Regenerate the local Prisma client; never hand-edit it.\n\nInput and pure scheduling (US-003/004/006): parseFlowInput already enforces 1..20 unique features, normalizes spec paths and rejects self/later/duplicate dependencies using previously seen names plus the explicit self check (apps/api/src/fleet/flows/flow-input.ts:39, :42, :49). Add the NAX-only later-feature branch collision check after branch validation (same file:62), using fail('features.<index>.feature') and ValidationAppException, not a generic exception. Do not reject feature 0 using its own feat branch. flow-states.ts already permits RUNNING -> WAITING_MERGE and WAITING_MERGE -> RUNNING (apps/api/src/fleet/flows/flow-states.ts:13). Feature states are persisted strings, not Prisma enums. New pure flow-features.ts sorts copies by position, gives RUNNING/WAITING_ANSWER precedence, treats the initial PENDING position-0 feature as active, starts only the first subsequent PENDING feature, and waits on only its unmerged named dependencies. Missing/unknown finding feature names fall back to position 0, never error or warn in US-010. Replace featureCount with firstFeature in the step input; retain existing failure, ingest, PR timeout, RULE, answer and FIX-ready logic. APPROVED-generation special handling is first-feature-only. Existing FIX already-ready behavior also completes (apps/api/src/fleet/flows/flow-step-decision.ts:220), and must not regress.\n\nReview and forge seams (US-005/007): buildStepDispatch currently uses flow.branch for PLAN and flow.specSha for SPEC_REVIEW; PLAN/RUN/PRD_REVIEW reuse the PLAN result for subsequent steps (apps/api/src/fleet/flows/flow-step-dispatch.ts:15, :43, :57). Add feature.branch ?? flow.branch and setSpecPaths forwarding. buildReviewTask preserves a whole instruction suffix under AGENT_TASK_MAX_LENGTH (apps/api/src/fleet/flows/flow-steps.ts:31); set wording must not truncate the verdict instruction or change single-spec output. parseFlowVerdict validates classes and drops non-actionable notes and malformed optional values (apps/api/src/fleet/flows/flow-verdict.ts:27, :48); preserve these rules while retaining an optional string finding.feature. Calls and PRD-edit services currently hardcode the first feature/flow branch (apps/api/src/fleet/flows/fleet-flow-calls.service.ts:40, :92). Require an explicit target for both, preserving pinned-head reads, bounded text, single-file already-applied recovery and ForgeFile.sha as a BLOB sha. PRD files derive from target.feature, not from an arbitrary spec basename. They perform no flow mutations.\n\nGitHubAppClient already provides mintInstallationToken (write), mintReadOnlyToken (contents/metadata only), and mintThreadReadToken (contents/pull_requests/metadata read), at apps/api/src/fleet/git-broker/github-app-client.ts:96, :104, :119. Do not use mintReadOnlyToken for private PR polling. getPullRequest returns null on 404 and uses existing VcsPrStatus (same file:246); getBranchHead encodes branch segments and reports missing refs via repo_not_found (same file:311); getFile returns the file's blob sha/content at a pinned ref (same file:385). Add createBranch through FleetHttpClient and the existing auth headers/repoPath, using POST git/refs and {ref:'refs/heads/<branch>',sha}. On 422, probe the branch: only a missing-ref repo_not_found becomes refused; an existing branch returns exists with its sha. Map 403 to app_permissions_insufficient, 404 to repo_not_found, and other unsuccessful responses to provider_error. The narrow findReviewRepo projection currently omits defaultBranch (apps/api/src/fleet/repos/fleet-repos.service.ts:177); widen only by defaultBranch, not by spreading credential-bearing repo data. Calls' typed reviewRepo fixture and projection equality tests must change. Tokens stay method-local, never in activity, outbox or persistence.\n\nAdvance orchestration (US-008..012): the service is currently 713 lines; retain its constructor and keep it below 800 lines by extracting new passes as collaborator-taking functions into fleet-flow-feature-passes.ts. Its established phases are unlocked snapshot/preflight, parent-then-flow locked decision, external dispatch/forge work, and locked record (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:49, :105, :348). lockLive currently accepts APPROVED/RUNNING and checks branch, specSha, approvedAt (same file:333); merge watch needs its own WAITING_MERGE guard and identical approval-generation fencing, not permission to write any live state. Parent locks must remain thread or repo first, then flow (same file:498), matching stop, re-publish and create. Forge calls and token minting NEVER run inside txManager.run, including refused starts, merge watch and set calls. Transient forge failures return without even spent-bookkeeping writes. Re-read feature id/state and approval generation before recording any external result; do not apply a pass to a different active feature or approval.\n\nCarry FleetFlowFeatureRecord on DispatchPass through dispatch, adoption, recordStep, calls, rulings, PRD edits, wait payloads and stopped outbox payloads. decisionInput currently reads featureCount and all markers from feature 0 (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:542); replace with the selected feature and its scoped counts/jobs. Creator access must remain checked for every work-producing path using creatorAccess + effectiveKeys + mayDispatch, including start BEFORE any forge call (same file:412). REVIEW's head claim/adoption crash recovery must retain the selected flowFeatureId (same file:230, :271). The readSpecHead preflight (same file:509) and SPEC_REVIEW/PLAN approval-head comparison (same file:446) apply only while position 0 is active: after its execution the flow branch carries PLAN/RUN/FIX commits and must not re-ask later features. The existing first-feature PLAN output branch adoption can remain; later-feature PLAN output mismatches stop dispatch_refused ('PLAN pushed <x>, expected <y>') without setBranch. Later PRD calls/edits target the feature branch, use that feature's latest PLAN result sha and move neither flow sha. Stale later calls/edits stop spec_changed instead of reaskLocked. reaskLocked itself is unchanged; its publication/preflight callers remain first-feature-only (apps/api/src/fleet/flows/fleet-flows.service.ts:172, :198). The answer path already finds WAITING_ANSWER by state (same file:112), so do not introduce a competing answer lookup.\n\nCompletion is two-level: mark the finished feature READY and emit flow.feature_ready, then evaluate a view with the updated state in the SAME transaction. If next is independent start, leave RUNNING; if dependencies are unmerged, set WAITING_MERGE and emit flow.waiting_merge with awaited ids; if no feature remains active/pending, complete flow and all non-MERGED features with flow.completed. Completion does not wait for every PR to merge. Awaited READY features become MERGED only when polled. For SPEC_REVIEW set calls, group in position order while preserving within-group verdict order, commit outside transactions on the flow branch with expectedHead chained from flow.specSha, then atomically record all markers after the final commit. Promote both specSha and setSha only on that final SPEC_REVIEW commit; ensure position 0 gets callsJobId even if all findings target b. Retry means no progress record; existing one-commit recovery is intentionally the limit. setSha must NOT absorb feature 0's PRD commits, otherwise independent b branches from a PRD-bearing commit instead of the approved set.\n\nStart pass resolves spec base from setSha or dependency base from current repo defaultBranch head, compares target spec blob shas at that base and setSha, creates feat/<feature>, then records branch/RUNNING and flow.feature_started with {feature,base,sha,branch} under locks only if still PENDING. A same-sha existing branch is idempotent; another sha or refused creation is dispatch_refused. Thread entry is refused before forge I/O at second-feature start. Merge watch polls only awaited PRs with mintThreadReadToken, records partial merges, stops closed/missing PRs through flows.stop, resumes with flow.resumed only once nextFlowFeature returns start, and never dispatches in that pass. Reuse callsOutcomeForForgeError's exact permanent set (apps/api/src/fleet/flows/flow-calls.ts:13): app_not_installed/app_permissions_insufficient/repo_not_found -> dispatch_refused with reason detail; every other reason quietly retries next tick. Missing installation, missing awaited prNumber, blob differences/missing files, branch conflicts, lost creator access and stale later edits have the exact stop reasons/details preserved in story ACs. Activity/audit/outbox writes remain in the mutation transaction; writeDecision currently owns stopped/question payloads (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:620). Sanitize and bound existing untrusted text as before, and never log tokens.\n\nConsumers and test blast radius: update all old positional calls and exact/negated assertions, not just production signatures. US-001 touches prisma-fleet-flow-step.repository.spec.ts; integration/fleet/fleet-flow-step.repository.integration.spec.ts, fleet-flow-verdicts-migration.integration.spec.ts and fleet-job-flow-fields.integration.spec.ts; and fleet-flow-advance.service.spec.ts, -review.spec.ts, -calls.spec.ts, -answers.spec.ts, -rulings.spec.ts, -prd-edits.spec.ts. Doubles previously reading (_flowId, step) need (_flowId, _featureId, step); negated old-signature assertions would otherwise pass vacuously. Exact dispatch opts must include flowFeatureId; adopted REVIEW assertions gain featureId. US-005 updates fleet-repos.service.spec.ts and fleet-flow-calls.service.spec.ts reviewRepo defaultBranch fixtures. US-006 updates featureCount fixtures and decision-input assertions. US-007 updates all three-argument calls/applyPrdEdits assertions to explicit targets. US-008 updates the private dispatchStep pass fixture in -prd-edits.spec.ts to include feature, replaces 'leaves multi-feature flows alone' in the unit suite, and replaces the no-dispatch two-feature integration assertion in fleet-flow-advance.integration.spec.ts. listAdvanceable integration eligibility expectations change first for any feature count, then for WAITING_MERGE; preserve paging/excluded states. Existing coverage also includes flow-input.spec.ts, flow-step-decision.spec.ts, flow-steps.spec.ts, flow-step-dispatch.spec.ts, flow-verdict.spec.ts, fleet-flow-calls.service.spec.ts, github-app-client.spec.ts and fleet-flow.ticker.spec.ts. New source files belong to US-004 (flow-features.ts) and US-011 (fleet-flow-feature-passes.ts); new suites are listed per story. US-011/012 share fleet-flow-feature-passes.ts, but their binding dependencies are parallel siblings. Coordinate shared-file edits without changing the required graph or replacing the sibling's pass; US-012 must not list that not-yet-guaranteed sibling output in contextFiles or claim ownership of US-011's new file in expectedFiles. It may add its merge-watch export to the same module while preserving the start export when present.\n\nVerification and rollout: normal DB tests use prisma db push, not committed migrations, so explicitly exercise pre-migration seeded rows via scratchSchemaBefore/applyMigration (apps/api/test/helpers/migration-schema.ts:1, :30, :42), not only the final schema. Its SQL splitter does not support literal semicolons within statements, so prefer simple migration statements. Mirror fleet-flow-verdicts-migration.integration.spec.ts:25 for scratch-schema setup. Integration fixtures for the new feature should mirror fleet-flow-verdicts.integration.spec.ts:27: disable automatic sweep/outbox relay, seed permissions and repo/runner, run explicit FleetFlowTicker.tick, and spy on every forge operation's transaction probe (same file:79). Use the actual ITransactionManager.isInTransaction() method to implement the spec's inTransaction() probe. US-013 is intentionally its own integration-only story as explicitly bound by the spec; drive persisted jobs and ticker through both full scenarios, including setSha vs mutated flow-branch head and no forge I/O in transactions. Test fixtures grant real roles via seedFleetBase (apps/api/test/helpers/fleet-fixtures.ts:22); do not bypass production permission logic. Unit tests are co-located src/**/*.spec.ts; no-DB unit/DI tests stay there. DB suites live test/integration/** and use canRunDbTests; KODA_DB_TESTS=1 is required outside NAX_SANDBOXED=1. bun run test:scoped <files> enables DB mode for integration paths, using the private test PG mechanism; missing PG is a failure outside the sandbox, and skipped tests are not verification. Never run DB-reset suites concurrently against one test database; use KODA_TEST_DB_CONTAINER=1 for another worktree. scripts and exclusions are in apps/api/package.json:12. Run generated acceptance only through vitest.nax.config.ts with story AC filters, never copy/edit it. No tests or commands were executed during PRD drafting.\n\nCompatibility boundaries: no runner or fleet-protocol runtime import changes. Flow PLAN already sends expectBranch:job.ref (apps/api/src/fleet/jobs/assign-payload.ts:67), and runner checkPlanPrd refuses branch mismatch (apps/runner/src/verdict/plan-verdict.ts:14); creating the branch API-side is therefore mandatory. Existing first-feature/single-feature flows, global cost cap, human answers, review head claims, already-ready FIX and replay-safe notifications must remain intact. No web/CLI display work or webhook merge detection. Do not widen DTOs as an incidental convenience; if an actual controller/DTO API contract changes, regenerate root openapi.json and the CLI through the repository generation flow rather than hand-edit generated outputs. Done means ordered feature execution, ready-versus-merge lifecycle persistence, set-wide reviews, safe branch bases and every bound failure behavior demonstrated through advance and real database ticker scenarios, with all forge I/O outside transactions.\n\nSecond-pass adversarial audit (manual, no executable validator available): enumerated all 122 numbered spec ACs and retained them at the same story and ordinal prefix: US-001 AC-1,2,3,4,5,6,7,8,9,10,11,12; US-002 AC-1,2,3,4,5,6,7,8,9; US-003 AC-1,2; US-004 AC-1,2,3,4,5,6,7,8,9,10,11; US-005 AC-1,2,3,4,5,6,7; US-006 AC-1,2,3,4,5,6; US-007 AC-1,2,3,4,5,6,7,8,9,10,11,12; US-008 AC-1,2,3,4,5,6,7,8,9,10,11,12,13,14; US-009 AC-1,2,3,4,5,6; US-010 AC-1,2,3,4,5,6,7; US-011 AC-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15; US-012 AC-1,2,3,4,5,6,7,8,9,10,11,12,13,14; US-013 AC-1,2,3,4,5,6,7. The original assertion and regression qualifiers survive each clarification: pre-migration/existing/null flow data, already-owned adoption unchanged, unrelated feature/flow state unchanged, null-until-set branches, original single-spec task wording and whole verdict suffix, first-feature own branch allowance, no later preflight/reask/setBranch, single-feature completion, first marker even when only b has findings, stopped-meanwhile fencing, no job during merge watch even when all PRs merge, and the divergent flow-head/transaction-probe integration anchors. Four failure-table generalizations from the initial draft remain appended in US-011/012; six additional failure/regression checks were appended in US-002/006/009/010/011/012 rather than replacing any spec AC. Final AC counts are 12,10,2,11,7,7,12,14,7,8,18,17,7 (132 total).\n\nAudit fixes: US-008's setSpecPaths assertion now names the actual buildStepDispatch input seam and resulting agent.task instead of suggesting setSpecPaths is a dispatch DTO property (flow-step-dispatch.ts:15, :52). US-006/009 FIX completion probes specify a completed, already-recorded job where needed, consistent with the existing recovery pass before the decision (fleet-flow-advance.service.ts:388). US-011's same-base exists outcome now names the observable branch/state/activity record instead of only saying treated as created. US-012's locked-stop criterion now explicitly assumes an observed merged PR plus a closed PR, preventing the erroneous interpretation that an open PR must stop the flow; stopped-meanwhile and same-approvedAt guards remain. US-010's marker criterion distinguishes advancing past the applied review job from skipping the remaining SPEC_REVIEW round; flow-step-decision.ts:169 still selects another review when the round count is below two. The missing PLAN result and CI-held FIX guards are anchored to existing errors at flow-step-decision.ts:185 and :230. The missing-flow completion regression follows the update-before-updateMany order in prisma-fleet-flow-step.repository.ts:39, without inventing a new helper or error class.\n\nEvery story now has a directly observable negative-path anchor: US-001 owned-job adoption false; US-002 missing-flow completion rejects; US-003 branch collision exception; US-004 unresolved dependency waits and unknown finding fallback; US-005 HTTP/refusal errors; US-006 incomplete PLAN stops; US-007 malformed optional feature is dropped; US-008 branch mismatch/stale edits stop; US-009 CI-held FIX stops without READY/completion; US-010 failed/retry calls do not advance records; US-011 access/spec/forge/race refusals; US-012 missing/closed PRs, disconnected repo and stale record guards; US-013 persisted closed-PR stop. Regression anchors cover all changed signatures or old no-op paths, including single-feature calls/first-feature entry and existing eligible-flow pagination. Failure-table rows map respectively to US-011 AC-11/17 and US-012 AC-8/16 (transient); US-012 AC-6/7 (closed/missing); US-011 AC-3/4/5 (spec blobs); US-011 AC-9 (refused ref); US-011 AC-7 (same base); US-011 AC-8 (different base); US-011 AC-10 (thread); US-008 AC-11 (PLAN branch); US-008 AC-12/13 (stale); US-011 AC-14 (access); US-011 AC-16 and US-012 AC-15 (permanent reasons); US-011 AC-13 and US-012 AC-10 (installation); US-012 AC-11 (no PR).\n\nThe binding ids, workdirs and dependency arrays are unchanged, contain only existing ids and are acyclic. All readable spec-recommended context files remain included within the five-file limit. The one deliberate context exception is US-012's planned fleet-flow-feature-passes.ts: it does not exist on disk and its US-011 owner is a sibling, not an upstream dependency, so the readable-context rule prevents listing it as an available input; its exact path, shared-module extension and coordination constraint remain explicit in US-012's description instead. US-011 owns that output; US-012 must preserve whichever sibling export has landed. No dependency was added to hide that binding-spec scheduling constraint. Routing was reduced to complex (not expert) for US-008 because this extends existing phases, and to medium/tdd-simple for US-009 because it reuses existing locks, selector and writers in one production service. Strict strategies remain only where the story actually involves token-bearing forge operations, permission-backed orchestration or the binding integration scenario; other complex stories retain lite isolation.\n\nAll 12 feature-level exclusions remain verbatim in top-level outOfScope, in original order: concurrent features; stacked PRs; rebasing/merging/updating branches; webhook merge detection; restarting/cloning stopped flows; multi-feature thread execution; web/CLI display; runner changes; per-feature cost caps; default-head crash recovery; unrecorded multi-commit set recovery; unknown-feature reporting for US-010. There is no separate story-local Out of Scope block under an AC to hoist. Nearby US-010/011 descriptions now echo the exact multi-commit recovery, unknown-feature fallback, stacked/thread and default-head crash boundaries. Description scope also explicitly includes the added single-feature and CI/missing-flow regressions. No acceptance assertion was replaced with a quality gate, file-existence check or test-count target; no source, generated file or runtime API was modified by this audit.",
