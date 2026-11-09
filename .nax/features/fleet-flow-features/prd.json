@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T04:55:28.836Z",
+  "updatedAt": "2026-11-09T05:04:58.561Z",
   "userStories": [
     {
       "id": "US-001",
@@ -516,14 +516,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Completion changes are localized to the existing locked advance path and one new unit suite, reusing the upstream pure selector and repository writers without new I/O or security logic."
+        "reasoning": "Completion changes are localized to the existing locked advance path and one new unit suite, reusing the upstream pure selector and repository writers without new I/O or security logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -537,7 +540,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1d9c186fca7ca17f02ea08b4c74045442ea3ba92"
     },
     {
       "id": "US-010",
