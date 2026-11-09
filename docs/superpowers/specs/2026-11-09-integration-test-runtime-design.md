@@ -93,3 +93,46 @@ Read from `wc-store-erp/repos/store-erp`:
 - No new skips, no weakened assertions, no lowered production bcrypt cost.
 - Real `/api/auth/register` and `/api/auth/login` paths remain exercised by the auth
   and seed suites.
+
+## Verification record (local, 2026-11-10)
+
+Runner: macOS, 10 CPUs, 25.7 GB RAM, Node 22, Bun 1.4.4, compose Postgres 16 on
+port 5433.
+
+### Fixture cohort (adoption evidence)
+
+Two world-seeded files (`assistant-thread-direct`, `fleet-approvals-api`), three
+alternating runs each:
+
+| Variant | Command duration | Tests bucket |
+| --- | ---: | ---: |
+| Control (before direct seeding) | 12.52s / 10.68s / 10.07s | 6.61s / 5.71s / 5.83s |
+| Candidate (after direct seeding) | 7.93s / 7.56s / 7.81s | 2.79s / 3.39s / 2.72s |
+
+The two-file cohort loses ~2.7–3.0s of `beforeAll` work per run (~1.4–1.5s per
+world-seeded file), with identical 28 test identities. The whole fleet directory
+(217 matched files, 1841 tests) passed in 442.56s after the change; the API unit
+suite passed 854 files / 11,389 tests.
+
+### Full-file identity across fresh processes
+
+The single-process full command (`bun run test:integration`) is **not a valid gate
+on this workstation**: late in the run, ten files hit Vitest's 10s `beforeAll` hook
+timeout, `app` stayed undefined, and the worker exited unexpectedly
+(`[vitest-pool]: Worker forks emitted error`) after 358–372 of 571 files. The
+failures are late-run hook timeouts and derived `close()` TypeErrors, not assertion
+failures; the same files pass in a fresh process. This is the long-lived-worker
+degradation that bounded shards address.
+
+Coverage was therefore verified by running every directory (and the 17 root-level
+specs) in fresh processes: **571/571 files passed**, including the four auth files
+run unchanged in Task 3. One transient `407 Proxy Authentication Required` in
+`permissions/membership-agent-roster.integration.spec.ts` passed when the file ran
+alone; it is the known proxy-flake documented in `test/helpers/no-env-proxy.ts`, and
+that file does not use the changed fixture.
+
+### Consequence for shard width
+
+Four shards put ~143 files in each worker, well below the ~360-file point where the
+single process degraded locally. The CI run remains the authoritative identity
+check (sum of per-shard `Test Files` must be 571).
