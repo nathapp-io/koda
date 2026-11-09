@@ -896,6 +896,7 @@
         "supervisor": "Supervisor model",
         "costCap": "Cost cap (USD)",
         "submit": "Start flow",
+        "openApprovals": "Open approvals",
         "tick": { "none": "No pre-approval is set; this flow will request approval.", "notYours": "This pre-approval does not belong to you or the thread creator; approval may be requested.", "exceeded": "This flow exceeds the pre-approved cost cap; approval may be requested.", "covers": "This pre-approval covers this flow; it can start without asking." },
         "validation": {
           "feature": "Enter a valid feature name.",

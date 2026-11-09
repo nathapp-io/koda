@@ -896,6 +896,7 @@
         "supervisor": "监督模型",
         "costCap": "费用上限（美元）",
         "submit": "启动流程",
+        "openApprovals": "查看审批",
         "tick": { "none": "未设置预批准；此流程将请求审批。", "notYours": "此预批准不属于你或线程创建者；可能需要请求审批。", "exceeded": "此流程超出预批准费用上限；可能需要请求审批。", "covers": "此预批准涵盖此流程，可直接启动。" },
         "validation": {
           "feature": "请输入有效的功能名称。",

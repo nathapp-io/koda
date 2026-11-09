@@ -2,15 +2,15 @@ import { describe, expect, test, jest } from '@jest/globals'
 import * as Vue from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder } from '../helpers/fleet-harness'
-import type { ThreadDto } from '~/lib/thread-types'
+import type { ThreadDetailDto } from '~/lib/thread-types'
 import type { FleetFlowDto, FleetFlowPage } from '~/lib/fleet-flows'
 
-const thread = (overrides: Partial<ThreadDto> = {}): ThreadDto => ({
+const thread = (overrides: Partial<ThreadDetailDto> = {}): ThreadDetailDto => ({
   id: 't1', kind: 'REPO', repoId: 'r1', baseRef: 'main', feature: 'f-min', title: 'Thread', createdById: 'u1',
   runnerId: null, backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: '5',
   costUsd: '0', tokens: null, specPath: '.nax/features/f-min/spec.md', pendingQuestion: null, session: null,
-  lastActivityAt: '', createdAt: '', activeJob: null, writtenPaths: [], publishedSha: 'sha', specPublished: true,
-  lastWrite: null, preApproval: null, ...overrides,
+  lastActivityAt: '', createdAt: '', activeJob: null, sendRefusal: null, writtenPaths: [], publishedSha: 'sha', specPublished: true,
+  lastWrite: null, handoff: { plan: null, run: null }, preApproval: null, ...overrides,
 })
 const flow = (state: string): FleetFlowDto => ({
   id: `f-${state}`, projectId: 'p1', repoId: 'r1', threadId: 't1', entry: 'THREAD', createdBy: { type: 'USER', id: 'u1' },
@@ -30,8 +30,13 @@ async function mountStart(records: FleetFlowDto[] = [], heldKeys = ['fleet.flow.
   const mounted = mountSfc(webFile('components', 'fleet', 'threads', 'ThreadStartFlow.vue'), {
     props: { slug: 'web', thread: thread() },
     globals: { watch: Vue.watch, onMounted: Vue.onMounted, useI18n: () => enI18n(), useProjectPermissions: () => ({ permissions }), useAppToast: () => toast },
-    alias: { '~/composables/useFleetFlows': { useFleetFlows: () => ({ list }) } },
-    components: { Button: { props: ['disabled'], template: '<button :disabled="disabled"><slot /></button>' } },
+    alias: {
+      '~/composables/useFleetFlows': { useFleetFlows: () => ({ list }) },
+      '~/composables/useAuth': { useAuth: () => ({ user: Vue.ref({ id: 'u1' }) }) },
+      '~/composables/useAppToast': { useAppToast: () => toast },
+      '~/composables/useApi': { extractApiError: (error: unknown) => error instanceof Error ? error.message : 'API error' },
+    },
+    components: { FleetThreadsThreadStartFlowDialog: { props: ['open', 'thread', 'viewerId'], emits: ['submit', 'update:open'], template: '<div />' }, Button: { props: ['disabled'], template: '<button :disabled="disabled"><slot /></button>' } },
   })
   await Vue.nextTick()
   await new Promise(resolve => setImmediate(resolve))

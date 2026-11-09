@@ -133,6 +133,7 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
       ...uiStubs,
       ThreadHeader: inertThreadStub,
       FleetThreadsThreadHeader: inertThreadStub,
+      FleetThreadsThreadStartFlow: { props: ['slug', 'thread'], template: '<aside data-testid="thread-start-flow" />' },
       ThreadTimeline: inertThreadStub,
       FleetThreadsThreadTimeline: inertThreadStub,
       ThreadMessage: inertThreadStub,
