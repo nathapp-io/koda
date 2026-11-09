@@ -38,8 +38,7 @@ export function buildFlowStartSchema(t: Translate) {
     features: z.array(rowSchema).min(1, t(`${validation}featuresCount`)).max(FLOW_MAX_FEATURES, t(`${validation}featuresCount`))
       .superRefine((features, ctx) => {
         const names = new Set<string>()
-        for (let index = 0; index < features.length; index++) {
-          const feature = features[index]!
+        for (const [index, feature] of features.entries()) {
           if (names.has(feature.feature)) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, 'feature'], message: t(`${validation}featureDuplicate`) })
           }
