@@ -345,7 +345,9 @@ describe('GitHubAppClient', () => {
     it.each([[403, 'app_permissions_insufficient'], [404, 'repo_not_found'], [500, 'provider_error']] as const)(
       'AC status mapping: maps HTTP %s to %s', async (status, reason) => {
         forge.routes.set(`POST ${refsPath}`, () => ({ status, body: {} }));
-        await expect(client.createBranch('tok', 'o', 'r', 'feat/b', 'sha1')).rejects.toMatchObject({ reason });
+        const error = await client.createBranch('tok', 'o', 'r', 'feat/b', 'sha1').catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(RepoCheckException);
+        expect(error).toMatchObject({ reason });
       },
     );
 
