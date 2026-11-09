@@ -34,6 +34,8 @@ describe('FlowAnswerForm', () => {
   })
   test('AC-5 validates required fields and never submits an empty answer', async () => {
     const answer = jest.fn(); const { mounted } = await setup(answer)
+    const form = mounted.one('form')
+    expect(form?.props.novalidate).toBe('')
     await enterAnswers(mounted, ['', 'B'])
     expect(mounted.text()).toContain('fleet.flows.answer.required'); expect(answer).not.toHaveBeenCalled()
     mounted.unmount()
