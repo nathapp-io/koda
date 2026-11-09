@@ -882,6 +882,11 @@
       "panel": { "title": "Flows" },
       "start": {
         "title": "Start flow",
+        "button": "Start flow",
+        "blocked": {
+          "notPublished": "This thread has no published spec to start a flow from.",
+          "flowLive": "A flow is already active for this thread."
+        },
         "feature": "Feature",
         "specPath": "Spec path",
         "dependsOn": "Depends on",

@@ -882,6 +882,11 @@
       "panel": { "title": "流程" },
       "start": {
         "title": "启动流程",
+        "button": "启动流程",
+        "blocked": {
+          "notPublished": "此线程尚未发布可用于启动流程的规格。",
+          "flowLive": "此线程已有正在进行的流程。"
+        },
         "feature": "功能",
         "specPath": "规格路径",
         "dependsOn": "依赖于",
