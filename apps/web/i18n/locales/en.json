@@ -876,6 +876,60 @@
     }
   },
   "fleet": {
+    "flows": {
+      "detail": {
+        "title": "Flow",
+        "overview": "Flow details",
+        "entry": "Entry",
+        "entryValue": { "THREAD": "Thread", "NAX": "Nax" },
+        "branch": "Branch",
+        "reviewer": "Reviewer role",
+        "supervisor": "Supervisor role",
+        "createdAt": "Created",
+        "spend": "Spend / cap",
+        "unknownCost": "Cap excludes {count} jobs with unknown cost",
+        "approval": "Approval",
+        "pendingApproval": "Start approval is pending",
+        "openApprovals": "Open approvals",
+        "approvalMode": "Approval mode",
+        "approvalModeValue": { "REQUEST": "Requested", "PRE_APPROVED": "Pre-approved" },
+        "approver": "Approver",
+        "approvedAt": "Recorded",
+        "stop": "Stop context",
+        "stopReason": "Stop reason",
+        "stopDetail": "Details",
+        "ticket": "Ticket {ref}",
+        "notFound": "Flow not found",
+        "loadFailed": "Could not load flow"
+      },
+      "state": {
+        "PENDING": "Pending approval",
+        "APPROVED": "Approved",
+        "RUNNING": "Running",
+        "WAITING_MERGE": "Waiting for merge",
+        "WAITING_ANSWER": "Waiting for answers",
+        "COMPLETED": "Completed",
+        "STOPPED": "Stopped"
+      },
+      "featureState": {
+        "PENDING": "Pending",
+        "RUNNING": "Running",
+        "WAITING_ANSWER": "Waiting for answers",
+        "READY": "Ready",
+        "MERGED": "Merged",
+        "COMPLETED": "Completed",
+        "STOPPED": "Stopped"
+      },
+      "step": {
+        "SPEC_REVIEW": "Spec review",
+        "PLAN": "Plan",
+        "PRD_REVIEW": "PRD review",
+        "RUN": "Run",
+        "REVIEW": "Review",
+        "RULE": "Rule",
+        "FIX": "Fix"
+      }
+    },
     "threads": {
       "kind": {
         "project": "Project thread",

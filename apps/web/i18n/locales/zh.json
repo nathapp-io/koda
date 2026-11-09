@@ -876,6 +876,60 @@
     }
   },
   "fleet": {
+    "flows": {
+      "detail": {
+        "title": "流程",
+        "overview": "流程详情",
+        "entry": "入口",
+        "entryValue": { "THREAD": "线程", "NAX": "Nax" },
+        "branch": "分支",
+        "reviewer": "评审角色",
+        "supervisor": "监督角色",
+        "createdAt": "创建时间",
+        "spend": "已花费 / 上限",
+        "unknownCost": "上限未计入 {count} 个费用未知的任务",
+        "approval": "审批",
+        "pendingApproval": "启动审批待处理",
+        "openApprovals": "查看审批",
+        "approvalMode": "审批方式",
+        "approvalModeValue": { "REQUEST": "请求审批", "PRE_APPROVED": "预先批准" },
+        "approver": "批准人",
+        "approvedAt": "记录时间",
+        "stop": "停止信息",
+        "stopReason": "停止原因",
+        "stopDetail": "详情",
+        "ticket": "工单 {ref}",
+        "notFound": "未找到流程",
+        "loadFailed": "无法加载流程"
+      },
+      "state": {
+        "PENDING": "待审批",
+        "APPROVED": "已批准",
+        "RUNNING": "运行中",
+        "WAITING_MERGE": "等待合并",
+        "WAITING_ANSWER": "等待回答",
+        "COMPLETED": "已完成",
+        "STOPPED": "已停止"
+      },
+      "featureState": {
+        "PENDING": "待处理",
+        "RUNNING": "运行中",
+        "WAITING_ANSWER": "等待回答",
+        "READY": "就绪",
+        "MERGED": "已合并",
+        "COMPLETED": "已完成",
+        "STOPPED": "已停止"
+      },
+      "step": {
+        "SPEC_REVIEW": "规格评审",
+        "PLAN": "计划",
+        "PRD_REVIEW": "PRD 评审",
+        "RUN": "运行",
+        "REVIEW": "评审",
+        "RULE": "规则",
+        "FIX": "修复"
+      }
+    },
     "threads": {
       "kind": {
         "project": "项目线程",
