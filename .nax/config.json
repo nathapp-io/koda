@@ -6,9 +6,7 @@
             "test": "npx turbo test",
             "testScoped": "npx turbo test --filter=[HEAD^1]",
             "typecheck": "bunx turbo type-check",
-            "lint": "bunx turbo lint",
-            "lintFix": "bunx turbo lint:fix",
-            "formatFix": "bunx turbo lint:fix"
+            "lint": "bunx turbo lint"
         }
     },
     "review": {
@@ -17,8 +15,7 @@
         "commands": {
             "build": "bun run build",
             "typecheck": "bunx turbo type-check",
-            "lint": "bunx turbo lint",
-            "lintFix": "bunx turbo lint:fix"
+            "lint": "bunx turbo lint"
         }
     },
     "precheck": {

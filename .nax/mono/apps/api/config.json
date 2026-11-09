@@ -9,9 +9,7 @@
       "test": "bun run test",
       "testScoped": "bun run test:scoped {{files}}",
       "typecheck": "bun run type-check",
-      "lint": "bun run lint:report",
-      "lintFix": "bun run lint:fix",
-      "formatFix": "bun run lint:fix"
+      "lint": "bun run lint:report"
     }
   },
   "execution": {
@@ -39,9 +37,5 @@
         "**/*.test.tsx"
       ]
     }
-  },
-  "acceptance": {
-    "testFramework": "vitest",
-    "command": "env KODA_DB_TESTS=1 npx vitest run --config vitest.nax.config.ts {{FILE}}"
   }
 }
