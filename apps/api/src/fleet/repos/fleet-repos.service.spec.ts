@@ -23,6 +23,13 @@ describe('FleetReposService', () => {
     repo.findProject.mockResolvedValue({ id: 'p1', slug: 'p' });
   });
 
+  it('findIdentity returns the narrow repository identity or null', async () => {
+    repo.findById.mockResolvedValue(created({ provider: 'github', owner: 'nathapp-io', name: 'sandbox' }));
+    await expect(make().findIdentity('fr1')).resolves.toEqual({ provider: 'github', owner: 'nathapp-io', name: 'sandbox' });
+    repo.findById.mockResolvedValue(null);
+    await expect(make().findIdentity('missing')).resolves.toBeNull();
+  });
+
   it('findReviewRepo returns null for an unknown id', async () => {
     repo.findById.mockResolvedValue(null);
     expect(await make().findReviewRepo('unknown')).toBeNull();

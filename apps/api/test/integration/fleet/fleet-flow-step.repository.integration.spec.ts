@@ -83,6 +83,26 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect(await repo.listAdvanceable(1, ids[0] ?? null)).toEqual([{ id: ids[1], createdByType: 'USER', createdById: creatorId }]);
   });
 
+  it('US-002 lists bounded jobs newest-first selected, then oldest-first returned', async () => {
+    const flow = await createFlow('RUNNING');
+    const other = await createFlow('RUNNING');
+    const first = await createJob(flow.id, { queuedAt: new Date('2026-01-01T00:00:00Z'), costSpentUsd: '0.11', flowStep: 'PLAN' });
+    const second = await createJob(flow.id, { queuedAt: new Date('2026-01-02T00:00:00Z') });
+    const third = await createJob(flow.id, { queuedAt: new Date('2026-01-03T00:00:00Z') });
+    await createJob(other.id);
+
+    const all = await repo.listFlowJobs(flow.id, 500);
+    expect(all.truncated).toBe(false);
+    expect(all.jobs.map(({ id }) => id)).toEqual([first.id, second.id, third.id]);
+    expect(all.jobs[0]).toMatchObject({ id: first.id, flowStep: 'PLAN', command: 'PLAN', state: 'QUEUED', costSpentUsd: '0.1100', costCarriedUsd: '0.0000', finishedAt: null });
+    const bounded = await repo.listFlowJobs(flow.id, 2);
+    expect(bounded.truncated).toBe(true);
+    expect(bounded.jobs.map(({ id }) => id)).toEqual([second.id, third.id]);
+    expect(bounded.jobs[0]).toMatchObject({ flowFeatureId: expect.any(String), flowStep: null, command: 'PLAN', state: 'QUEUED', costSpentUsd: '0.0000', costCarriedUsd: '0.0000', finishedAt: null });
+    expect(bounded.jobs[0]?.queuedAt).toEqual(new Date('2026-01-02T00:00:00Z'));
+    expect((await repo.latestJob(flow.id))?.id).toBe(third.id);
+  });
+
   it('AC-5/6 returns the newest queued job, or null when there are none', async () => {
     const flow = await createFlow('APPROVED');
     const early = await createJob(flow.id, { queuedAt: new Date('2026-01-01T00:00:00Z') });

@@ -174,6 +174,11 @@ export class FleetReposService {
     return this.repo.lockById(id);
   }
 
+  async findIdentity(id: string): Promise<Pick<FleetRepoRecord, 'provider' | 'owner' | 'name'> | null> {
+    const row = await this.repo.findById(id);
+    return row ? { provider: row.provider, owner: row.owner, name: row.name } : null;
+  }
+
   async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId' | 'defaultBranch'> | null> {
     const row = await this.repo.findById(id);
     if (!row) return null;

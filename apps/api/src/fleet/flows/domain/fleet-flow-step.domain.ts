@@ -28,6 +28,18 @@ export interface LatestFlowJob {
   ingestSettled: boolean;
 }
 
+export interface FlowJobRow {
+  id: string;
+  flowFeatureId: string | null;
+  flowStep: string | null;
+  command: string;
+  state: string;
+  costSpentUsd: string;
+  costCarriedUsd: string;
+  queuedAt: Date;
+  finishedAt: Date | null;
+}
+
 export interface MarkFlowStepData {
   flowState: string;
   prNumber?: number;
@@ -43,6 +55,7 @@ export interface IFleetFlowStepRepository {
   setFlowState(flowId: string, state: string): Promise<void>;
   listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]>;
   latestJob(flowId: string): Promise<FleetJobRecord | null>;
+  listFlowJobs(flowId: string, limit: number): Promise<{ jobs: FlowJobRow[]; truncated: boolean }>;
   /**
    * The flow's latest job of one feature and the ingest status of its own lease, from one statement
    * (see `LatestFlowJob`). US-001: a job of another feature never answers for this one.
