@@ -27,9 +27,49 @@ Report a finding only when the spec itself must change or only the user can deci
 
 type ReviewStep = Extract<FlowStep, 'SPEC_REVIEW' | 'PRD_REVIEW'>;
 
-export function buildReviewTask(step: ReviewStep, specPath: string, feature: string, options?: { prdEdits?: boolean }): string {
+/**
+ * The set review is one job over every spec of the flow: the task names each spec, asks for the
+ * consistency a single spec cannot show (a rule fixed in one spec but used differently in another, an
+ * undeclared dependency) and asks every finding to name the feature it belongs to, so a later pass can
+ * route it to that feature. Only a set of two or more specs gets this wording: a one-spec review keeps
+ * its exact previous task.
+ */
+export const FLOW_SET_REVIEW_INSTRUCTION = `This flow reviews a set of specs in one job. Review every spec of the set:
+{specs}
+Also check cross-spec consistency: a rule fixed in one spec but used differently in another, or an undeclared dependency between the specs.
+Put "feature":"<feature>" on every finding, naming the feature it belongs to. The features of this set: {features}.`;
+
+/**
+ * The feature a spec path belongs to: `.nax/features/<feature>/spec.md` names `<feature>`. The spec
+ * path is the only name the set carries, so the parent directory is the feature.
+ */
+function featureOfSpecPath(specPath: string): string {
+  const parts = specPath.split('/').filter((part) => part.length > 0);
+  return parts.length >= 2 ? parts[parts.length - 2] : specPath;
+}
+
+/** The set wording for the given spec paths, or null when the set is not a set. */
+function setReviewInstruction(specPath: string, feature: string, setSpecPaths: readonly string[]): string | null {
+  if (setSpecPaths.length < 2) return null;
+  const specs = setSpecPaths.map((path) => `- ${path}`).join('\n');
+  // The caller's own name wins for the spec it names: the feature names are what a finding is routed by.
+  const features = [...new Set(setSpecPaths.map((path) => (path === specPath ? feature : featureOfSpecPath(path))))].join(', ');
+  return FLOW_SET_REVIEW_INSTRUCTION
+    .replace('{specs}', () => specs)
+    .replace('{features}', () => features);
+}
+
+export function buildReviewTask(
+  step: ReviewStep,
+  specPath: string,
+  feature: string,
+  options?: { prdEdits?: boolean; setSpecPaths?: string[] },
+): string {
+  const setInstruction = step === 'SPEC_REVIEW'
+    ? setReviewInstruction(specPath, feature, options?.setSpecPaths ?? [])
+    : null;
   const prompt = step === 'SPEC_REVIEW'
-    ? `/spec-review ${specPath}`
+    ? `/spec-review ${specPath}${setInstruction === null ? '' : `\n\n${setInstruction}`}`
     : `/spec-review --spec ${specPath} --prd .nax/features/${feature}/prd.json --phase 9`;
   const suffix = `\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}${step === 'PRD_REVIEW' && options?.prdEdits === true ? `\n\n${FLOW_PRD_EDITS_INSTRUCTION}` : ''}`;
   const promptLimit = Math.max(0, AGENT_TASK_MAX_LENGTH - suffix.length);

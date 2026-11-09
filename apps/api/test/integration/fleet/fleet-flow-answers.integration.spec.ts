@@ -91,15 +91,17 @@ integration('answered fleet flows through tick and outbox (PG)', () => {
     } });
     await db.fleetFlowFeature.updateMany({ where: { flowId: flow.id }, data: { state: 'RUNNING', currentStep: 'SPEC_REVIEW' } });
     const job = await db.fleetJob.create({ data: {
-      ...jobData(flow.id), command: 'AGENT', flowStep: 'SPEC_REVIEW',
+      ...(await jobData(flow.id)), command: 'AGENT', flowStep: 'SPEC_REVIEW',
       queuedAt: new Date(now.getTime() - 30_000), finishedAt: new Date(now.getTime() - 10_000),
       agentResult: { status: 'completed', output: JSON.stringify({ findings }), truncated: false, deniedAsks: [], deniedAsksTruncated: false },
     } });
     return { flow, job };
   }
 
-  function jobData(flowId: string): Prisma.FleetJobUncheckedCreateInput {
-    return { projectId, repoId, flowId, ref: SHA, command: 'PLAN', feature: FEATURE, profiles: [], maxCostUsd: '10',
+  /** A flow job belongs to the flow's feature (US-001), so the engine's per-feature reads find it. */
+  async function jobData(flowId: string): Promise<Prisma.FleetJobUncheckedCreateInput> {
+    const flowFeature = await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId }, orderBy: { position: 'asc' } });
+    return { projectId, repoId, flowId, flowFeatureId: flowFeature.id, ref: SHA, command: 'PLAN', feature: FEATURE, profiles: [], maxCostUsd: '10',
       selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId, state: 'COMPLETED' };
   }
 

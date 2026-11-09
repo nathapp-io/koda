@@ -44,26 +44,37 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
   async function createFlow(state: string, featureCount = 1) {
     return prisma.fleetFlow.create({ data: {
       projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: creatorId, branch: `branch-${crypto.randomUUID()}`,
-      specSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10, state,
+      specSha: 'sha', setSha: 'sha', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: 10, state,
       features: { create: Array.from({ length: featureCount }, (_, position) => ({ position, feature: `feature-${crypto.randomUUID()}-${position}`, specPath: 'spec.md', dependsOn: [] })) },
-    } });
+    }, include: { features: { orderBy: { position: 'asc' } } } });
   }
 
-  async function createJob(flowId: string, values: { flowStep?: string; queuedAt?: Date; costSpentUsd?: string; costCarriedUsd?: string } = {}) {
+  /** A job of the flow's first feature, unless the test names the feature it belongs to. */
+  async function createJob(flowId: string, values: { flowStep?: string; queuedAt?: Date; costSpentUsd?: string; costCarriedUsd?: string; flowFeatureId?: string } = {}) {
+    const flowFeatureId = values.flowFeatureId
+      ?? (await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId }, orderBy: { position: 'asc' } })).id;
     return prisma.fleetJob.create({ data: {
       projectId, repoId, ref: 'main', command: 'PLAN', feature: `job-${crypto.randomUUID()}`, profiles: [], maxCostUsd: 5,
-      selectorLabels: [], requestedById: creatorId, flowId, flowStep: values.flowStep ?? null,
+      selectorLabels: [], requestedById: creatorId, flowId, flowStep: values.flowStep ?? null, flowFeatureId,
       queuedAt: values.queuedAt ?? new Date(), costSpentUsd: values.costSpentUsd ?? '0', costCarriedUsd: values.costCarriedUsd ?? '0',
     } });
   }
 
-  it('AC-1/2/3 returns only APPROVED/RUNNING flows with exactly one feature, ordered by id', async () => {
+  it('AC-1/2/3 returns only APPROVED/RUNNING/WAITING_MERGE flows, whatever their feature count, ordered by id', async () => {
     const approved = await createFlow('APPROVED');
     const running = await createFlow('RUNNING');
-    await createFlow('APPROVED', 2);
-    for (const state of ['PENDING', 'WAITING_MERGE', 'WAITING_ANSWER', 'COMPLETED', 'STOPPED']) await createFlow(state);
+    // US-008: a flow of a set is advanced too, one feature at a time.
+    const approvedSet = await createFlow('APPROVED', 2);
+    // US-012: a flow that waits for a merge is advanced too, so its awaited PRs are polled.
+    const waitingMerge = await createFlow('WAITING_MERGE');
+    for (const state of ['PENDING', 'WAITING_ANSWER', 'COMPLETED', 'STOPPED']) await createFlow(state);
     const rows = await repo.listAdvanceable(50, null);
-    expect(rows).toEqual([{ id: approved.id, createdByType: 'USER', createdById: creatorId }, { id: running.id, createdByType: 'USER', createdById: creatorId }].sort((a, b) => a.id.localeCompare(b.id)));
+    expect(rows).toEqual([
+      { id: approved.id, createdByType: 'USER', createdById: creatorId },
+      { id: approvedSet.id, createdByType: 'USER', createdById: creatorId },
+      { id: running.id, createdByType: 'USER', createdById: creatorId },
+      { id: waitingMerge.id, createdByType: 'USER', createdById: creatorId },
+    ].sort((a, b) => a.id.localeCompare(b.id)));
   });
 
   it('AC-4 pages eligible flows by id after the cursor', async () => {
@@ -86,8 +97,43 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     const plan = await createJob(flow.id, { flowStep: 'PLAN', queuedAt: new Date('2026-01-01T00:00:00Z') });
     await createJob(flow.id, { flowStep: 'RUN', queuedAt: new Date('2026-01-03T00:00:00Z') });
     const newestPlan = await createJob(flow.id, { flowStep: 'PLAN', queuedAt: new Date('2026-01-02T00:00:00Z') });
-    expect(await repo.latestJobForStep(flow.id, 'PLAN')).toMatchObject({ id: newestPlan.id });
+    expect(await repo.latestJobForStep(flow.id, flow.features[0].id, 'PLAN')).toMatchObject({ id: newestPlan.id });
     expect(plan.id).not.toBe(newestPlan.id);
+  });
+
+  it('US-001 AC-8: latestJobWithIngest answers for the feature, not for the flow', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    const mine = await createJob(flow.id, { flowFeatureId: first.id, queuedAt: new Date('2026-01-01T00:00:00Z') });
+    const newer = await createJob(flow.id, { flowFeatureId: second.id, queuedAt: new Date('2026-01-02T00:00:00Z') });
+
+    const latest = await repo.latestJobWithIngest(flow.id, first.id);
+
+    expect(latest?.job.id).toBe(mine.id);
+    expect(latest?.job.flowFeatureId).toBe(first.id);
+    expect(newer.id).not.toBe(mine.id);
+  });
+
+  it('US-001 AC-9: latestJobForStep answers for the feature, not for the flow', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    const plan = await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2026-01-02T00:00:00Z') });
+    const otherPlan = await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: first.id, queuedAt: new Date('2026-01-03T00:00:00Z') });
+
+    expect(await repo.latestJobForStep(flow.id, second.id, 'PLAN')).toMatchObject({ id: plan.id });
+    expect(otherPlan.id).not.toBe(plan.id);
+  });
+
+  it('US-001 AC-10: countJobsForStepSince counts the jobs of the feature only', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    const since = new Date('2026-01-01T00:00:00Z');
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2026-01-02T00:00:00Z') });
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2026-01-03T00:00:00Z') });
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: first.id, queuedAt: new Date('2026-01-04T00:00:00Z') });
+    await createJob(flow.id, { flowStep: 'PLAN', flowFeatureId: second.id, queuedAt: new Date('2025-12-31T00:00:00Z') });
+
+    expect(await repo.countJobsForStepSince(flow.id, second.id, 'PLAN', since)).toBe(2);
   });
 
   it('AC-8/9/10 sums spent and carried cost only for this flow, formatting four places', async () => {
@@ -104,6 +150,71 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     const artifact = await prisma.fleetJobArtifact.create({ data: { jobId: job.id, leaseEpoch: 3, kind: 'bundle', storageKey: `key-${job.id}`, sizeBytes: 0n, sha256: 'sha' } });
     await prisma.fleetBundleIngest.create({ data: { artifactId: artifact.id, jobId: job.id, leaseEpoch: 3, status, parserVersion: 1 } });
     expect(await repo.ingestSettled(job.id, 3)).toBe(status === 'done' || status === 'failed');
+  });
+
+  it('US-002 persists feature branches and isolated feature and flow states', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    expect((await flowRepo.findById(flow.id))?.features.map(({ branch }) => branch)).toEqual([null, null]);
+
+    await repo.setFeatureBranch(first.id, 'feat/b');
+    await repo.markFeatureState(first.id, 'READY');
+    await repo.setFlowState(flow.id, 'WAITING_MERGE');
+    const updated = await flowRepo.findById(flow.id);
+    expect(updated?.features.map(({ branch, state }) => ({ branch, state }))).toEqual([
+      { branch: 'feat/b', state: 'READY' }, { branch: null, state: 'PENDING' },
+    ]);
+    expect(updated?.state).toBe('WAITING_MERGE');
+    expect(second.state).toBe('PENDING');
+  });
+
+  it('US-002 completion preserves merged features and records calls sha promotion semantics', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [merged, ready] = flow.features;
+    await prisma.fleetFlowFeature.update({ where: { id: merged.id }, data: { state: 'MERGED' } });
+    await prisma.fleetFlowFeature.update({ where: { id: ready.id }, data: { state: 'READY' } });
+    const now = new Date('2026-11-04T12:34:56.000Z');
+    await repo.complete(flow.id, now);
+    expect((await flowRepo.findById(flow.id))?.features.map(({ state }) => state)).toEqual(['MERGED', 'COMPLETED']);
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'COMPLETED', endedAt: now });
+
+    const callsFlow = await createFlow('RUNNING');
+    const feature = callsFlow.features[0];
+    await repo.recordCalls(callsFlow.id, feature.id, 'job-null', null);
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: callsFlow.id } })).toMatchObject({ specSha: 'sha', setSha: 'sha' });
+    await repo.recordCalls(callsFlow.id, feature.id, 'job-two', 'sha2');
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: callsFlow.id } })).toMatchObject({ specSha: 'sha2', setSha: 'sha' });
+    await repo.recordCalls(callsFlow.id, feature.id, 'job-three', 'sha3', { setSha: true });
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: callsFlow.id } })).toMatchObject({ specSha: 'sha3', setSha: 'sha3' });
+    expect((await flowRepo.findById(callsFlow.id))?.features[0]?.callsJobId).toBe('job-three');
+  });
+
+  it('US-002 keeps created, re-asked and updated spec sha aligned with set sha', async () => {
+    const created = await flowRepo.create({
+      projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: creatorId,
+      branch: `branch-${crypto.randomUUID()}`, specSha: 'sha-create', reviewerRole: 'reviewer',
+      supervisorRole: 'supervisor', costCapUsd: '10', features: [{ feature: 'f', specPath: 'spec.md', dependsOn: [] }],
+    });
+    expect(created.setSha).toBe(created.specSha);
+    await flowRepo.updateSha(created.id, 'sha4');
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ specSha: 'sha4', setSha: 'sha4' });
+    await flowRepo.reask(created.id, { specSha: 'sha4', approvalRequestId: 'request' });
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ specSha: 'sha4', setSha: 'sha4' });
+  });
+
+  it('US-002 recordCalls rolls back the feature marker when the flow SHA write fails', async () => {
+    const flow = await createFlow('RUNNING');
+    const feature = flow.features[0];
+    await expect(repo.recordCalls('missing-flow', feature.id, 'job-rollback', 'sha-failure')).rejects.toThrow();
+    expect(await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).toMatchObject({ callsJobId: null });
+  });
+
+  it('US-002 missing-flow completion rejects before changing unrelated rows', async () => {
+    const flow = await createFlow('RUNNING');
+    const before = await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } });
+    await expect(repo.complete('missing-flow', new Date())).rejects.toThrow();
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'RUNNING' });
+    expect(await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toEqual(before);
   });
 
   it('AC-15 stores the flow spend total', async () => {

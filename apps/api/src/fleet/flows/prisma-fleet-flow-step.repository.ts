@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, type FleetJob as FleetJobRow } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { agentInputOf, agentResultOf, fixOutcomeOf, type FleetJobRecord } from '../jobs/domain/fleet-job.domain';
@@ -9,7 +10,10 @@ import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, LatestFl
 
 @Injectable()
 export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    @Inject(TRANSACTION_MANAGER) private readonly transactionManager: ITransactionManager,
+    private readonly prisma: PrismaService<PrismaClient>,
+  ) {}
 
   private get db() {
     return this.prisma.client;
@@ -38,16 +42,32 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
 
   async complete(flowId: string, now: Date): Promise<void> {
     await this.db.fleetFlow.update({ where: { id: flowId }, data: { state: 'COMPLETED', endedAt: now } });
-    await this.db.fleetFlowFeature.updateMany({ where: { flowId }, data: { state: 'COMPLETED' } });
+    await this.db.fleetFlowFeature.updateMany({ where: { flowId, state: { not: 'MERGED' } }, data: { state: 'COMPLETED' } });
   }
 
+  async setFeatureBranch(featureId: string, branch: string): Promise<void> {
+    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { branch } });
+  }
+
+  async markFeatureState(featureId: string, state: string): Promise<void> {
+    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { state } });
+  }
+
+  async setFlowState(flowId: string, state: string): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { state } });
+  }
+
+  /**
+   * Every live flow is advanceable, whatever the number of its features: the advance service picks
+   * the feature the flow has active (US-008), so a flow of a set is no longer left alone. US-012: a
+   * flow that waits for a merge is advanced too, so its awaited PRs are polled.
+   */
   async listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]> {
     const rows = await this.db.$queryRaw<Array<{ id: string; createdByType: string; createdById: string }>>(Prisma.sql`
       SELECT flow."id", flow."createdByType", flow."createdById"
         FROM "FleetFlow" AS flow
-       WHERE flow."state" IN ('APPROVED', 'RUNNING')
+       WHERE flow."state" IN ('APPROVED', 'RUNNING', 'WAITING_MERGE')
          AND (${afterId}::text IS NULL OR flow."id" > ${afterId})
-         AND (SELECT COUNT(*) FROM "FleetFlowFeature" AS feature WHERE feature."flowId" = flow."id") = 1
        ORDER BY flow."id" ASC
        LIMIT ${limit}
     `);
@@ -63,8 +83,11 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
    * One statement, so the row and the status belong to the same snapshot: an ingest that fills a RUN's
    * `resultPrUrl` also marks its attempt settled, in one transaction, and reading the two apart could
    * pair a row from before that commit with a status from after it.
+   *
+   * US-001: the row is the flow's job of one feature, so a job of a later feature never answers for the
+   * feature that is running.
    */
-  async latestJobWithIngest(flowId: string): Promise<LatestFlowJob | null> {
+  async latestJobWithIngest(flowId: string, featureId: string): Promise<LatestFlowJob | null> {
     const rows = await this.db.$queryRaw<Array<FleetJobRow & { ingestSettled: boolean }>>(Prisma.sql`
       SELECT job.*, EXISTS (
                SELECT 1
@@ -75,6 +98,7 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
              ) AS "ingestSettled"
         FROM "FleetJob" AS job
        WHERE job."flowId" = ${flowId}
+         AND job."flowFeatureId" = ${featureId}
        ORDER BY job."queuedAt" DESC, job."id" DESC
        LIMIT 1
     `);
@@ -84,13 +108,13 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     return { job: this.toJob(job), ingestSettled };
   }
 
-  async latestJobForStep(flowId: string, step: FlowStep): Promise<FleetJobRecord | null> {
-    const row = await this.db.fleetJob.findFirst({ where: { flowId, flowStep: step }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
+  async latestJobForStep(flowId: string, featureId: string, step: FlowStep): Promise<FleetJobRecord | null> {
+    const row = await this.db.fleetJob.findFirst({ where: { flowId, flowFeatureId: featureId, flowStep: step }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
     return row ? this.toJob(row) : null;
   }
 
-  async countJobsForStepSince(flowId: string, step: FlowStep, since: Date): Promise<number> {
-    return this.db.fleetJob.count({ where: { flowId, flowStep: step, queuedAt: { gte: since } } });
+  async countJobsForStepSince(flowId: string, featureId: string, step: FlowStep, since: Date): Promise<number> {
+    return this.db.fleetJob.count({ where: { flowId, flowFeatureId: featureId, flowStep: step, queuedAt: { gte: since } } });
   }
 
   async projectSlug(projectId: string): Promise<string | null> {
@@ -102,9 +126,13 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     await this.db.fleetFlow.update({ where: { id: flowId }, data: { branch } });
   }
 
-  async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void> {
-    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
-    await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha } });
+  async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string | null, options: { setSha?: boolean } = {}): Promise<void> {
+    await this.transactionManager.run(async () => {
+      await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
+      if (specSha !== null) {
+        await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha, ...(options.setSha ? { setSha: specSha } : {}) } });
+      }
+    });
   }
 
   async recordRulings(flowId: string, featureId: string, jobId: string): Promise<void> {

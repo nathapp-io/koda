@@ -13,6 +13,7 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
   let prisma: MockPrisma;
   let repo: PrismaFleetFlowStepRepository;
   let queryRaw: ReturnType<typeof vi.fn>;
+  let transactionManager: { run: ReturnType<typeof vi.fn> };
 
   const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'feat/f', command: 'RUN', feature: 'f',
@@ -29,7 +30,8 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
     prisma = createMockPrismaService({ fn: vi.fn });
     queryRaw = vi.fn().mockResolvedValue([]);
     prisma.client.$queryRaw = queryRaw as never;
-    repo = new PrismaFleetFlowStepRepository(prisma as PrismaService<never>);
+    transactionManager = { run: vi.fn((work: () => Promise<unknown>) => work()) };
+    repo = new PrismaFleetFlowStepRepository(transactionManager as never, prisma as PrismaService<never>);
   });
 
   /** The `Prisma.Sql` a call carried; `values` are the parameters, `strings` the literal SQL halves. */
@@ -37,6 +39,19 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
     const sql = queryRaw.mock.calls[call][0] as unknown as { strings: string[]; values: unknown[] };
     return { text: sql.strings.join('?'), values: sql.values };
   };
+
+  it('records calls and applicable SHAs inside the transaction manager', async () => {
+    const featureUpdate = vi.fn().mockResolvedValue({});
+    const flowUpdate = vi.fn().mockResolvedValue({});
+    (prisma.client as unknown as Record<string, unknown>).fleetFlowFeature = { update: featureUpdate };
+    (prisma.client as unknown as Record<string, unknown>).fleetFlow = { update: flowUpdate };
+
+    await repo.recordCalls('flow-1', 'feature-1', 'job-1', 'sha-1', { setSha: true });
+
+    expect(transactionManager.run).toHaveBeenCalledTimes(1);
+    expect(featureUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'feature-1' }, data: { callsJobId: 'job-1' } });
+    expect(flowUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'flow-1' }, data: { specSha: 'sha-1', setSha: 'sha-1' } });
+  });
 
   it('B2: persists the PLAN output branch without approving a new sha', async () => {
     const update = vi.fn().mockResolvedValue({});
@@ -46,15 +61,15 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
   });
 
   it('returns null when the flow has no job', async () => {
-    await expect(repo.latestJobWithIngest('flow-1')).resolves.toBeNull();
+    await expect(repo.latestJobWithIngest('flow-1', 'feature-1')).resolves.toBeNull();
     expect(queryRaw).toHaveBeenCalledTimes(1);
-    expect(sqlOf().values).toEqual(['flow-1']);
+    expect(sqlOf().values).toEqual(['flow-1', 'feature-1']);
   });
 
   it('pairs the job row with the settled mark of its own lease in one statement', async () => {
     queryRaw.mockResolvedValue([row()]);
 
-    const latest = await repo.latestJobWithIngest('flow-1');
+    const latest = await repo.latestJobWithIngest('flow-1', 'feature-1');
 
     expect(latest?.ingestSettled).toBe(true);
     expect(latest?.job).toMatchObject({
@@ -68,20 +83,53 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
   it('answers unsettled for a job whose lease has no settled ingest', async () => {
     queryRaw.mockResolvedValue([row({ ingestSettled: false })]);
 
-    await expect(repo.latestJobWithIngest('flow-1')).resolves.toMatchObject({ ingestSettled: false });
+    await expect(repo.latestJobWithIngest('flow-1', 'feature-1')).resolves.toMatchObject({ ingestSettled: false });
   });
 
   it('scopes the status to the job and its own lease, counting done, partial and failed as settled', async () => {
-    await repo.latestJobWithIngest('flow-1');
+    await repo.latestJobWithIngest('flow-1', 'feature-1');
 
     const { text } = sqlOf();
     expect(text).toContain('FROM "FleetBundleIngest" AS ingest');
     expect(text).toContain('ingest."jobId" = job."id"');
     expect(text).toContain('ingest."leaseEpoch" = job."leaseEpoch"');
     expect(text).toContain("ingest.\"status\" IN ('done', 'partial', 'failed')");
-    // The latest job of the flow, by the same order the plain read uses.
+    // The latest job of the flow's feature, by the same order the plain read uses.
     expect(text).toContain('WHERE job."flowId" = ?');
+    expect(text).toContain('AND job."flowFeatureId" = ?');
     expect(text).toContain('ORDER BY job."queuedAt" DESC, job."id" DESC');
     expect(text).toContain('LIMIT 1');
+  });
+});
+
+/**
+ * US-008: a flow of a set is advanced too, one feature at a time, so the eligible flows are not
+ * filtered by the number of their features any more.
+ */
+describe('PrismaFleetFlowStepRepository — the advanceable flows', () => {
+  type MockPrisma = ReturnType<typeof createMockPrismaService>;
+
+  let prisma: MockPrisma;
+  let repo: PrismaFleetFlowStepRepository;
+  let queryRaw: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    prisma = createMockPrismaService({ fn: vi.fn });
+    queryRaw = vi.fn().mockResolvedValue([]);
+    prisma.client.$queryRaw = queryRaw as never;
+    const transactionManager = { run: vi.fn((work: () => Promise<unknown>) => work()) };
+    repo = new PrismaFleetFlowStepRepository(transactionManager as never, prisma as PrismaService<never>);
+  });
+
+  it('lists every live flow, whatever the number of its features', async () => {
+    await repo.listAdvanceable(50, null);
+
+    const sql = queryRaw.mock.calls[0][0] as unknown as { strings: string[]; values: unknown[] };
+    const text = sql.strings.join('?');
+    // US-012: a flow that waits for a merge is advanced too, so its awaited PRs are polled.
+    expect(text).toContain("flow.\"state\" IN ('APPROVED', 'RUNNING', 'WAITING_MERGE')");
+    // No feature count: a flow of a set is advanced by its active feature.
+    expect(text).not.toContain('COUNT(*)');
+    expect(text).not.toContain('"FleetFlowFeature"');
   });
 });

@@ -45,5 +45,17 @@ describe('parseFlowInput', () => {
   it('AC-12 accepts boundary caps', () => { expect(parseFlowInput(threadBody({ costCapUsd: 1000 }), 'THREAD').costCapUsd).toBe('1000'); expect(parseFlowInput(threadBody({ costCapUsd: 0.0001 }), 'THREAD').costCapUsd).toBe('0.0001'); });
   it('AC-13 rejects malformed spec sha', () => expect(reason(() => parseFlowInput(naxBody({ specSha: 'a'.repeat(39) }), 'NAX'))).toBe('specSha'));
   it('AC-14 rejects malformed branch', () => expect(reason(() => parseFlowInput(naxBody({ branch: 'feat/..x' }), 'NAX'))).toBe('branch'));
+  it('AC-1 rejects a later feature that collides with the NAX flow branch', () => {
+    expect(reason(() => parseFlowInput(naxBody({
+      branch: 'feat/b',
+      features: [{ feature: 'a', specPath: 'a.md' }, { feature: 'b', specPath: 'b.md' }],
+    }), 'NAX'))).toBe('features.1.feature');
+  });
+  it('AC-2 accepts the first feature as the NAX flow branch', () => {
+    expect(parseFlowInput(naxBody({
+      branch: 'feat/a',
+      features: [{ feature: 'a', specPath: 'a.md' }, { feature: 'b', specPath: 'b.md' }],
+    }), 'NAX').branch).toBe('feat/a');
+  });
   it('AC-15 maps unsupported remote URL to its property', () => expect(reason(() => parseFlowInput(naxBody({ remoteUrl: 'git@github.com:org/repo.git' }), 'NAX'))).toBe('remoteUrl'));
 });

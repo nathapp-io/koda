@@ -15,6 +15,7 @@ export interface FleetFlowFeatureRecord {
   position: number;
   feature: string;
   specPath: string;
+  branch?: string | null;
   dependsOn: string[];
   state: string;
   currentStep: string | null;
@@ -40,6 +41,7 @@ export interface FleetFlowRecord {
   createdById: string;
   branch: string;
   specSha: string;
+  setSha: string;
   pinnedRunnerId: string | null;
   reviewerRole: string;
   supervisorRole: string;

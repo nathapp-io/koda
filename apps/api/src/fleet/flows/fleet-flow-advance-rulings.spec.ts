@@ -126,7 +126,7 @@ function build(opts: Options = {}) {
     recordCalls: vi.fn(async () => { assertTx(); }),
     recordRulings: vi.fn(async () => { assertTx(); }),
     setWaiting: vi.fn(async () => { assertTx(); }),
-    latestJobForStep: vi.fn(async (_flowId: string, step: string) => (step === 'RUN' ? run : null)),
+    latestJobForStep: vi.fn(async (_flowId: string, _featureId: string, step: string) => (step === 'RUN' ? run : null)),
     projectSlug: vi.fn(async () => (opts.slug === undefined ? 'web' : opts.slug)),
   };
   const repos = {
@@ -462,7 +462,7 @@ describe('FleetFlowAdvanceService.advance, the RULE verdict', () => {
 
     expect(h.calls.apply).toHaveBeenCalledExactlyOnceWith(h.row, {
       kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: RULE_JOB, findings: [FINDING],
-    }, 's1');
+    }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
     expect(h.rulings.createForFlow).not.toHaveBeenCalled();
   });
 });

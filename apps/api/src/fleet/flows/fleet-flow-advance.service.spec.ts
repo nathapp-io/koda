@@ -114,6 +114,8 @@ function build(opts: HarnessOptions = {}) {
     sumCost: vi.fn(async () => opts.sum ?? record.spentUsd),
     setSpent: vi.fn(async () => undefined),
     complete: vi.fn(async () => undefined),
+    markFeatureState: vi.fn(async () => undefined),
+    setFlowState: vi.fn(async () => undefined),
     markStep: vi.fn<IFleetFlowStepRepository['markStep']>(async () => undefined),
     creatorAccess: vi.fn(async () => opts.creatorAccess ?? { exists: true, disabled: false }),
     listAdvanceable: vi.fn(async () => []),
@@ -467,13 +469,85 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     expect(h.flows.stop).not.toHaveBeenCalled();
   });
 
+  it('US-009 AC-1: marks a ready feature READY before completing its flow', async () => {
+    const h = build({
+      flow: { state: 'RUNNING' },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.steps.markFeatureState).toHaveBeenCalledWith('feature-1', 'READY');
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.feature_ready', payload: expect.objectContaining({ feature: 'f' }),
+    }));
+    expect(h.steps.complete).toHaveBeenCalledWith('flow-1', NOW);
+  });
+
+  it('US-009 AC-1: marks a ready position-1 feature READY and records its feature-ready activity', async () => {
+    const prior = feature({ state: 'READY' });
+    const active = feature({ id: 'feature-2', position: 1, feature: 'g', dependsOn: [], state: 'RUNNING', currentStep: 'FIX' });
+    const h = build({
+      flow: { state: 'RUNNING', features: [prior, active] },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.markFeatureState).toHaveBeenCalledWith('feature-2', 'READY');
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.feature_ready', payload: expect.objectContaining({ feature: 'g', featureId: 'feature-2' }),
+    }));
+  });
+
+  it('US-009 AC-7: a CI-held FIX stops without marking the feature ready', async () => {
+    const h = build({
+      flow: { state: 'RUNNING' },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: false, readyHeld: 'CI checks failing' } }), ingestSettled: false },
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'pr_not_ready', NOW, 'CI checks failing');
+    expect(h.steps.markFeatureState).not.toHaveBeenCalled();
+    expect(h.steps.complete).not.toHaveBeenCalled();
+  });
+
+  it('US-009 AC-2/3: an independent successor remains RUNNING; a dependent successor waits for merge', async () => {
+    const first = feature({ state: 'RUNNING', currentStep: 'FIX', prNumber: 12 });
+    const independent = feature({ id: 'feature-2', position: 1, feature: 'g', dependsOn: [], state: 'PENDING' });
+    const independentHarness = build({
+      flow: { state: 'RUNNING', features: [first, independent] },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+    await independentHarness.service.advance('flow-1', NOW);
+    expect(independentHarness.steps.markFeatureState).toHaveBeenCalledWith('feature-1', 'READY');
+    expect(independentHarness.steps.complete).not.toHaveBeenCalled();
+    expect(independentHarness.steps.setFlowState).not.toHaveBeenCalled();
+
+    const dependent = { ...independent, dependsOn: ['f'] };
+    const waitingHarness = build({
+      flow: { state: 'RUNNING', features: [first, dependent] },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+    await waitingHarness.service.advance('flow-1', NOW);
+    expect(waitingHarness.steps.setFlowState).toHaveBeenCalledWith('flow-1', 'WAITING_MERGE');
+    expect(waitingHarness.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.waiting_merge', payload: { featureIds: ['feature-1'] },
+    }));
+  });
+
+  it('US-009 AC-6: completes a live flow with no active or pending features', async () => {
+    const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'READY' })] } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.complete).toHaveBeenCalledWith('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
   it('AC-14: a wait decision writes no step, stop or audit entry', async () => {
     const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: job({ state: 'RUNNING' }), ingestSettled: false } });
 
     await h.service.advance('flow-1', NOW);
 
     expect(h.wrote()).toBe(false);
-    expect(decisions.inputs.at(-1)).toMatchObject({ state: 'RUNNING', featureCount: 1 });
+    expect(decisions.inputs.at(-1)).toMatchObject({ state: 'RUNNING', firstFeature: true });
+    expect(decisions.inputs.at(-1)).not.toHaveProperty('featureCount');
   });
 
   it('AC-15: writes nothing when the nax-entry repo row is gone at lock time', async () => {
@@ -520,14 +594,14 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     await h.service.advance('flow-1', NOW);
 
     expect(decisions.inputs.at(-1)).toMatchObject({
-      state: 'RUNNING', featureCount: 1, approvedAt: APPROVED_AT, now: NOW, featurePrNumber: 7, ingestSettled: true,
+      state: 'RUNNING', firstFeature: true, approvedAt: APPROVED_AT, now: NOW, featurePrNumber: 7, ingestSettled: true,
       latestJob: {
         id: 'job-1', step: 'RUN', state: 'COMPLETED', prNumber: 12, resultSha: 'c'.repeat(40),
         stateReason: null, agentOutput: null, fixReady: null,
       },
     });
     expect(decisions.inputs.at(-1)?.prWaitMs).toBeGreaterThan(0);
-    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1', 'feature-1');
   });
 });
 
@@ -618,7 +692,7 @@ describe('FleetFlowAdvanceService pre-push spec guard (US-015)', () => {
   ] as const)('%s: does not read forge head for a post-push or active job', async (_ac, latest) => {
     const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: latest, ingestSettled: false } });
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1', 'feature-1');
     expect(h.github.getBranchHead).not.toHaveBeenCalled();
     expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
@@ -836,11 +910,11 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.wrote()).toBe(false);
   });
 
-  it('leaves multi-feature flows alone', async () => {
+  it('advances the first feature of a multi-feature flow', async () => {
     const h = build({ flow: { features: [feature(), feature({ id: 'feature-2', position: 1 })] } });
     await h.service.advance('flow-1', NOW);
-    expect(h.jobs.dispatch).not.toHaveBeenCalled();
-    expect(h.wrote()).toBe(false);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'AGENT' }),
+      expect.objectContaining({ flowId: 'flow-1', flowFeatureId: 'feature-1', flowStep: 'SPEC_REVIEW' }));
   });
 
   it('dispatch AC-1: sends exactly buildStepDispatch output on behalf of the creator outside a transaction', async () => {
@@ -857,8 +931,23 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const h = build();
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch.mock.calls[0]?.[3]).toEqual({
-      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', auditKey: 'system.flow.advance',
+      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', flowFeatureId: 'feature-1', auditKey: 'system.flow.advance',
     });
+  });
+
+  it('US-001 AC-11: dispatches SPEC_REVIEW with the feature of a single-feature flow', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.jobs.dispatch.mock.calls[0]?.[3]).toMatchObject({
+      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', flowFeatureId: 'feature-1',
+    });
+  });
+
+  it('US-001 AC-12: reads the latest job of the feature of a single-feature flow', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1', 'feature-1');
   });
 
   it('dispatch AC-3: marks SPEC_REVIEW RUNNING inside the record transaction', async () => {
@@ -901,7 +990,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
       flow: h.record, feature: h.record.features[0], step: 'PLAN', remainingCapUsd: '10.0000', reviewAgent: 'Explore',
-    }), { flowId: 'flow-1', flowStep: 'PLAN', auditKey: 'system.flow.advance' });
+    }), { flowId: 'flow-1', flowStep: 'PLAN', flowFeatureId: 'feature-1', auditKey: 'system.flow.advance' });
     expect(h.outbox.record).not.toHaveBeenCalled();
     expect(h.activity.record.mock.calls.map(([entry]) => entry.action)).toEqual(['flow.step']);
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: { step: 'PLAN', jobId: 'j1' } }));
@@ -1018,7 +1107,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
       flow: h.record, feature: h.record.features[0], step, remainingCapUsd: '10.0000', reviewAgent: 'Explore',
       plan, ...(step === 'PRD_REVIEW' ? { prdEdits: true } : {}), ...(step === 'FIX' ? { pr: { number: 12 } } : {}),
-    }), { flowId: 'flow-1', flowStep: step, auditKey: 'system.flow.advance' });
+    }), { flowId: 'flow-1', flowStep: step, flowFeatureId: 'feature-1', auditKey: 'system.flow.advance' });
     if (step === 'FIX') expect(h.rulings.ruledItemIds).not.toHaveBeenCalled();
     expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', step,
       { flowState: 'RUNNING', ...(step === 'FIX' ? { prNumber: 12 } : {}) });
@@ -1028,14 +1117,14 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const review = job({ flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), state: 'COMPLETED',
       agentResult: { status: 'completed', output: JSON.stringify({ findings: [SPEC_FINDING] }) } });
     const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW', callsJobId: 'job-1' })] }, snapshot: { job: review, ingestSettled: true } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'SPEC_REVIEW', APPROVED_AT);
+    expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', APPROVED_AT);
     expect(decisions.inputs.at(-1)).toMatchObject({ specReviewCount: 1 });
 
     const plan = build({ flow: { state: 'RUNNING' }, snapshot: { job: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED' }), ingestSettled: true } });
     await plan.service.advance('flow-1', NOW);
-    expect(plan.steps.countJobsForStepSince).not.toHaveBeenCalledWith('flow-1', 'SPEC_REVIEW', expect.any(Date));
+    expect(plan.steps.countJobsForStepSince).not.toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', expect.any(Date));
     expect(decisions.inputs.at(-1)).not.toHaveProperty('specReviewCount');
   });
 
@@ -1044,7 +1133,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
       state: 'RUNNING', currentStep: 'SPEC_REVIEW', callsJobId: 'review-1',
     })] }, snapshot: { job: job({ id: 'review-1', flowStep: 'SPEC_REVIEW', ref: 's1', state: 'COMPLETED', queuedAt: new Date(APPROVED_AT.getTime() + 1),
       agentResult: { status: 'completed', output: JSON.stringify({ findings: [SPEC_FINDING] }) } }), ingestSettled: true } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 1 : 0);
     h.github.getBranchHead.mockResolvedValue('calls-sha');
     await h.service.advance('flow-1', NOW);
     expect(decisions.inputs.at(-1)).toMatchObject({ latestJob: { id: 'review-1', step: 'SPEC_REVIEW' }, specReviewCount: 1, callsJobId: 'review-1' });
@@ -1056,7 +1145,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW', callsJobId: 'review-1' })] },
       snapshot: { job: job({ id: 'review-1', flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), state: 'COMPLETED',
         agentResult: { status: 'completed', output: JSON.stringify({ findings: [SPEC_FINDING] }) } }), ingestSettled: true } });
-    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, _featureId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }),
       expect.objectContaining({ flowStep: 'PLAN' }));

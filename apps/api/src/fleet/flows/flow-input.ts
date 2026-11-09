@@ -64,6 +64,8 @@ export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowI
     if (typeof body.remoteUrl !== 'string') fail('remoteUrl');
     try { parseGitHubUrl(body.remoteUrl); } catch { fail('remoteUrl'); }
     if (typeof body.branch !== 'string' || !GIT_REF_RE.test(body.branch)) fail('branch');
+    const collisionIndex = features.findIndex((feature, index) => index > 0 && body.branch === `feat/${feature.feature}`);
+    if (collisionIndex !== -1) fail(`features.${collisionIndex}.feature`);
     if (typeof body.specSha !== 'string' || !SPEC_SHA_RE.test(body.specSha)) fail('specSha');
     normalized.remoteUrl = body.remoteUrl;
     normalized.branch = body.branch;

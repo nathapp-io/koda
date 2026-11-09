@@ -124,11 +124,12 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   /**
    * US-004: the adoption is one UPDATE whose WHERE clause decides the race — a job another flow already owns (or a
    * dispatch that wrote its flow fields first) does not match, so nothing is written and the caller sees `false`.
+   * US-001: the flow feature is written in the same UPDATE, so an adopted job is scoped like a dispatched one.
    */
-  async adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean> {
+  async adoptForFlow(jobId: string, flowId: string, flowFeatureId: string, step: FlowStep): Promise<boolean> {
     const result = await this.db.fleetJob.updateMany({
       where: { id: jobId, flowId: null },
-      data: { flowId, flowStep: step },
+      data: { flowId, flowStep: step, flowFeatureId },
     });
     return result.count > 0;
   }

@@ -60,7 +60,7 @@ function build(opts: Options = {}) {
     countJobsForStepSince: vi.fn<IFleetFlowStepRepository['countJobsForStepSince']>(async () => 0),
     setBranch: vi.fn(async () => undefined), recordCalls: vi.fn(async () => { assertTx(); }),
     setWaiting: vi.fn(async () => { assertTx(); }),
-    latestJobForStep: vi.fn(async (flowId: string, step: string) => step === 'RUN'
+    latestJobForStep: vi.fn(async (flowId: string, _featureId: string, step: string) => step === 'RUN'
       ? job({ id: 'run-1', command: 'RUN', flowStep: 'RUN', resultBranch: 'pr/head', workflow: { outcome: 'draft', openItems: [
         { id: 'D-1', kind: 'advisor', issue: 'Protected' }, { id: 'F-1', kind: 'finding', issue: 'Finding' },
         { id: 'C-1', kind: 'ci', issue: 'CI' }, { id: 'D-2', kind: 'advisor', issue: 'Eligible' },
@@ -113,7 +113,7 @@ describe('FleetFlowAdvanceService answer lifecycle', () => {
       agentResult: { status: 'completed', output: '{"findings":[]}' } });
     const h = build({ latest: review, flow: { features: [feature({ prNumber: 12 })] } });
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.latestJobForStep).toHaveBeenCalledWith('flow-1', 'RUN');
+    expect(h.steps.latestJobForStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'RUN');
     expect(h.rulings.ruledItemIds).toHaveBeenCalledExactlyOnceWith('run-1');
   });
   it('AC-3/6: guided FIX answer dispatches RULE against the RUN branch and eligible workflow items', async () => {
@@ -156,7 +156,7 @@ describe('FleetFlowAdvanceService answer lifecycle', () => {
     const plan = job({ id: 'plan-1', flowStep: 'PLAN', command: 'PLAN' });
     const h = build({ latest: plan });
     await h.service.advance('flow-1', NOW);
-    expect(h.steps.latestJobForStep).not.toHaveBeenCalledWith('flow-1', 'RUN');
+    expect(h.steps.latestJobForStep).not.toHaveBeenCalledWith('flow-1', 'feature-1', 'RUN');
     expect(h.rulings.ruledItemIds).not.toHaveBeenCalled();
   });
   it('AC-7: FIX wait persists FIX and emits a FIX questions event', async () => {
@@ -183,7 +183,7 @@ describe('FleetFlowAdvanceService answer lifecycle', () => {
   it('AC-9: passes stored answers on matching review to calls.apply', async () => {
     const h = build({ flow: { features: [feature({ questionsJobId: 'j1', answers: ANSWERS })] } });
     await h.service.advance('flow-1', NOW);
-    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [FINDINGS[0], { ...FINDINGS[1], answer: 'A1' }] }, 's1');
+    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [FINDINGS[0], { ...FINDINGS[1], answer: 'A1' }] }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
   });
   it('AC-10: stale calls re-ask with the new head and do not record calls', async () => {
     const h = build({ flow: { features: [feature({ questionsJobId: 'j1', answers: ANSWERS })] }, outcome: { kind: 'stale', head: 'h2' } });
@@ -195,6 +195,6 @@ describe('FleetFlowAdvanceService answer lifecycle', () => {
     const minor = { id: 'F1', class: 'minor', summary: 'Missing AC', fix: 'add it' };
     const h = build({ latest: { agentResult: { status: 'completed', output: JSON.stringify({ findings: [minor] }) } } });
     await h.service.advance('flow-1', NOW);
-    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [minor] }, 's1');
+    expect(h.calls.apply).toHaveBeenCalledWith(h.row, { kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [minor] }, 's1', { feature: 'f', specPath: '.nax/features/f/spec.md', branch: 'feat/f', replay: expect.anything() });
   });
 });

@@ -310,6 +310,33 @@ export class GitHubAppClient {
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   }
 
+  /** Create a Git ref, distinguishing an existing branch from a rejected ref. */
+  async createBranch(
+    token: string,
+    owner: string,
+    name: string,
+    branch: string,
+    sha: string,
+  ): Promise<{ kind: 'created' } | { kind: 'exists'; sha: string } | { kind: 'refused' }> {
+    const res = await this.http.request('POST', `${this.api}${this.repoPath(owner, name)}/git/refs`, this.headers(token), {
+      ref: `refs/heads/${branch}`,
+      sha,
+    });
+    if (res.status === 201) return { kind: 'created' };
+    if (res.status === 422) {
+      try {
+        const head = await this.getBranchHead(token, owner, name, branch);
+        return { kind: 'exists', sha: head };
+      } catch (error) {
+        if (error instanceof RepoCheckException && error.reason === 'repo_not_found') return { kind: 'refused' };
+        throw error;
+      }
+    }
+    if (res.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    throw new RepoCheckException('provider_error');
+  }
+
   /** Fleet S3 §4.1: the commit a branch points at. */
   async getBranchHead(token: string, owner: string, name: string, branch: string): Promise<string> {
     const ref = branch.split('/').map(encodeURIComponent).join('/');
@@ -341,6 +368,37 @@ export class GitHubAppClient {
     const parents = obj(commits[0]).parents;
     return Array.isArray(parents) && parents.length === 1 && obj(parents[0]).sha === base
       && obj(files[0]).filename === path && obj(files[0]).status === 'modified';
+  }
+
+  /**
+   * True when `base...head` is a linear run of commits that only modify the given paths and whose
+   * messages all carry `marker`: the flow's own earlier commits of one calls pass, never an outside edit.
+   */
+  async isOwnCallsRun(
+    token: string, owner: string, name: string, base: string, head: string,
+    own: { paths: readonly string[]; marker: string },
+  ): Promise<boolean> {
+    const url = `${this.api}${this.repoPath(owner, name)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const res = await this.http.request('GET', url, this.headers(token));
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const body = obj(res.body);
+    const commits = body.commits;
+    const files = body.files;
+    if (body.status !== 'ahead' || obj(body.merge_base_commit).sha !== base
+      || !Array.isArray(commits) || commits.length === 0 || body.total_commits !== commits.length
+      || obj(commits.at(-1)).sha !== head || !Array.isArray(files) || files.length === 0) return false;
+    let parent = base;
+    for (const raw of commits) {
+      const commit = obj(raw);
+      const parents = commit.parents;
+      if (!Array.isArray(parents) || parents.length !== 1 || obj(parents[0]).sha !== parent
+        || typeof obj(commit.commit).message !== 'string'
+        || !(obj(commit.commit).message as string).includes(own.marker)) return false;
+      parent = String(commit.sha);
+    }
+    return files.every((file) => own.paths.includes(String(obj(file).filename)) && obj(file).status === 'modified');
   }
 
   /** Fleet S3 §4.1: a tree by commit or tree SHA. Entries other than blob/tree (submodules) are dropped. */

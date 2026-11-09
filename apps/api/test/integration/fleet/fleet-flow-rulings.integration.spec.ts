@@ -95,9 +95,11 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
 
   const at = (offsetMs: number): Date => new Date(now.getTime() + offsetMs);
 
-  function jobBase(flowId: string, feature: string): Prisma.FleetJobUncheckedCreateInput {
+  /** A flow job belongs to the flow's feature (US-001), so the engine's per-feature reads find it. */
+  async function jobBase(flowId: string, feature: string): Promise<Prisma.FleetJobUncheckedCreateInput> {
+    const flowFeature = await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId }, orderBy: { position: 'asc' } });
     return {
-      projectId, repoId, flowId, ref: SHA, command: 'AGENT', feature, profiles: [],
+      projectId, repoId, flowId, flowFeatureId: flowFeature.id, ref: SHA, command: 'AGENT', feature, profiles: [],
       maxCostUsd: '10', selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId, state: 'COMPLETED',
     };
   }
@@ -119,13 +121,13 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
       state: 'RUNNING', currentStep: 'REVIEW', prNumber: PR,
     } });
     const run = await db.fleetJob.create({ data: {
-      ...jobBase(flow.id, feature), command: 'RUN', flowStep: 'RUN', feature, ref: BRANCH,
+      ...(await jobBase(flow.id, feature)), command: 'RUN', flowStep: 'RUN', feature, ref: BRANCH,
       resultPrUrl: prUrl, resultBranch: RUN_BRANCH, resultSha: 'run-sha',
       workflow: { runId: 'nax-run-1', outcome: 'draft', workflowPassed: false, reasons: [], openItems: OPEN_ITEMS },
       queuedAt: at(-120_000), finishedAt: at(-90_000),
     } });
     await db.fleetJob.create({ data: {
-      ...jobBase(flow.id, feature), command: 'REVIEW', flowStep: 'REVIEW', feature: `review-pr-${PR}`, ref: 'main',
+      ...(await jobBase(flow.id, feature)), command: 'REVIEW', flowStep: 'REVIEW', feature: `review-pr-${PR}`, ref: 'main',
       queuedAt: at(-60_000), finishedAt: at(-30_000),
       agentResult: { status: 'completed', output: '{"findings":[]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
     } });

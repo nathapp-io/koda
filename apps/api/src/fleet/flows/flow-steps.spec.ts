@@ -15,6 +15,43 @@ describe('flow steps', () => {
     );
   });
 
+  it('US-007 AC-3: a set review names every spec path of the set', () => {
+    const task = buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a', {
+      setSpecPaths: ['.nax/features/a/spec.md', '.nax/features/b/spec.md'],
+    });
+    expect(task.startsWith('/spec-review .nax/features/a/spec.md')).toBe(true);
+    expect(task).toContain('.nax/features/b/spec.md');
+  });
+
+  it('US-007 AC-4: a set review asks for cross-spec consistency and names the feature on every finding', () => {
+    const task = buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a', {
+      setSpecPaths: ['.nax/features/a/spec.md', '.nax/features/b/spec.md'],
+    });
+    expect(task).toContain('cross-spec consistency');
+    expect(task).toContain('"feature":"<feature>"');
+    // The features of the set are named, so a finding can be routed to one of them.
+    expect(task).toContain('a, b');
+  });
+
+  it('US-007 AC-5: a single-spec review keeps its exact previous task', () => {
+    const task = buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a');
+    expect(task).toBe(
+      `/spec-review .nax/features/a/spec.md\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`,
+    );
+    expect(task).not.toContain('cross-spec');
+    expect(task).not.toContain('"feature":"<feature>"');
+  });
+
+  it('US-007 AC-6: an oversized set review keeps the verdict instruction whole', () => {
+    const setSpecPaths = Array.from({ length: 40 }, (_, index) => `.nax/features/f${index}/${'p'.repeat(500)}/spec.md`);
+    const task = buildReviewTask('SPEC_REVIEW', setSpecPaths[0], 'f0', { setSpecPaths });
+    expect(task.length).toBeLessThanOrEqual(AGENT_TASK_MAX_LENGTH);
+    // The set prompt filled the whole budget, so the task really was cut.
+    expect(task.length).toBe(AGENT_TASK_MAX_LENGTH);
+    expect(task.startsWith('/spec-review ')).toBe(true);
+    expect(task.endsWith(`\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`)).toBe(true);
+  });
+
   it('builds a PRD_REVIEW task with both spec and PRD paths', () => {
     expect(buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a')).toBe(
       `/spec-review --spec .nax/features/a/spec.md --prd .nax/features/a/prd.json --phase 9\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`,

@@ -161,7 +161,7 @@ describe('FleetFlowAdvanceService.advance, REVIEW through the head claim', () =>
     await h.service.advance('flow-1', NOW);
 
     expect(h.dispatch).toHaveBeenCalledWith('u1', 'p1', h.reviewBody(), {
-      flowId: 'flow-1', flowStep: 'REVIEW', auditKey: 'system.flow.advance',
+      flowId: 'flow-1', flowStep: 'REVIEW', flowFeatureId: 'feature-1', auditKey: 'system.flow.advance',
     });
     expect(h.reviews.claimHead.mock.invocationCallOrder[0])
       .toBeLessThan(h.dispatch.mock.invocationCallOrder[0]);
@@ -196,7 +196,7 @@ describe('FleetFlowAdvanceService.advance, REVIEW through the head claim', () =>
 
     await h.service.advance('flow-1', NOW);
 
-    expect(h.adoptForFlow).toHaveBeenCalledWith('j9', 'flow-1', 'REVIEW');
+    expect(h.adoptForFlow).toHaveBeenCalledWith('j9', 'flow-1', 'feature-1', 'REVIEW');
     expect(h.dispatch).not.toHaveBeenCalled();
     expect(h.reviews.markDispatched).not.toHaveBeenCalled();
   });

@@ -326,6 +326,37 @@ describe('GitHubAppClient', () => {
     expect(forge.requests[1].query).toBe('');
   });
 
+  describe('createBranch (US-005)', () => {
+    const refsPath = '/repos/o/r/git/refs';
+
+    it('AC-1: creates a branch with the requested ref and sha', async () => {
+      forge.routes.set(`POST ${refsPath}`, () => ({ status: 201, body: {} }));
+      await expect(client.createBranch('tok', 'o', 'r', 'feat/b', 'sha1')).resolves.toEqual({ kind: 'created' });
+      expect(forge.requests[0]).toMatchObject({ method: 'POST', path: refsPath, headers: { authorization: 'Bearer tok' }, body: { ref: 'refs/heads/feat/b', sha: 'sha1' } });
+    });
+
+    it('AC-2: probes the head after a conflict and returns the observed sha', async () => {
+      forge.routes.set(`POST ${refsPath}`, () => ({ status: 422, body: {} }));
+      forge.routes.set('GET /repos/o/r/git/ref/heads/feat/b', () => ({ status: 200, body: { object: { sha: 'observed' } } }));
+      await expect(client.createBranch('tok', 'o', 'r', 'feat/b', 'sha1')).resolves.toEqual({ kind: 'exists', sha: 'observed' });
+      expect(forge.requests.map((request) => request.path)).toEqual([refsPath, '/repos/o/r/git/ref/heads/feat/b']);
+    });
+
+    it.each([[403, 'app_permissions_insufficient'], [404, 'repo_not_found'], [500, 'provider_error']] as const)(
+      'AC status mapping: maps HTTP %s to %s', async (status, reason) => {
+        forge.routes.set(`POST ${refsPath}`, () => ({ status, body: {} }));
+        const error = await client.createBranch('tok', 'o', 'r', 'feat/b', 'sha1').catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(RepoCheckException);
+        expect(error).toMatchObject({ reason });
+      },
+    );
+
+    it('AC-7: treats a missing ref after 422 as refused', async () => {
+      forge.routes.set(`POST ${refsPath}`, () => ({ status: 422, body: {} }));
+      await expect(client.createBranch('tok', 'o', 'r', 'feat/b', 'sha1')).resolves.toEqual({ kind: 'refused' });
+    });
+  });
+
   describe('putFile (US-004)', () => {
     const route = 'PUT /repos/o/r/contents/.nax/features/a/spec.md';
     const content = Buffer.from('spec contents');

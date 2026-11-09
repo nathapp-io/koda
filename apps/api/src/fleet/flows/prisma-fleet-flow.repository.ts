@@ -31,6 +31,8 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
     return this.toDomain(await this.prisma.client.fleetFlow.create({ data: {
       projectId: data.projectId, repoId: data.repoId, threadId: data.threadId ?? null, entry: data.entry,
       createdByType: data.createdByType, createdById: data.createdById, branch: data.branch, specSha: data.specSha,
+      // US-001: a new flow's set sha is the sha it was approved with.
+      setSha: data.specSha,
       pinnedRunnerId: data.pinnedRunnerId ?? null, reviewerRole: data.reviewerRole, supervisorRole: data.supervisorRole,
       costCapUsd: data.costCapUsd, approvalMode: data.approvalMode ?? null,
       features: { create: data.features.map(({ feature, specPath, dependsOn }, position) => ({ position, feature, specPath: posix.normalize(specPath), dependsOn, state: 'PENDING' })) },
@@ -87,13 +89,13 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
     return result;
   }
   reask(id: string, data: { specSha: string; approvalRequestId: string }): Promise<FleetFlowRecord> {
-    return this.transition(id, FleetFlowState.PENDING, { state: FleetFlowState.PENDING, specSha: data.specSha, approvalRequestId: data.approvalRequestId, approvalMode: null, approverId: null, approvedAt: null });
+    return this.transition(id, FleetFlowState.PENDING, { state: FleetFlowState.PENDING, specSha: data.specSha, setSha: data.specSha, approvalRequestId: data.approvalRequestId, approvalMode: null, approverId: null, approvedAt: null });
   }
   async updateSha(id: string, specSha: string): Promise<FleetFlowRecord> {
     const result = await this.transactionManager.run(async () => {
       const current = await this.lockById(id);
       if (!current) throw new FlowTransitionError(id, 'missing', 'same-state');
-      await this.prisma.client.fleetFlow.update({ where: { id }, data: { specSha } });
+      await this.prisma.client.fleetFlow.update({ where: { id }, data: { specSha, setSha: specSha } });
       return this.findById(id);
     });
     if (!result) throw new FlowTransitionError(id, 'missing', 'same-state');

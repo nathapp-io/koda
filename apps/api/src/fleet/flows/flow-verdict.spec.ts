@@ -20,6 +20,20 @@ describe('classified flow verdicts', () => {
       .toEqual({ ok: true, findings: [], prdEdits: [{ story: 'US-001', op: 'add_ac', new: 'n' }] });
   });
 
+  it('US-007 AC-1: keeps the feature a finding names', () => {
+    expect(parseFlowVerdict('{"findings":[{"class":"minor","summary":"s","fix":"f","feature":"b"}]}')).toEqual({
+      ok: true, findings: [{ class: 'minor', summary: 's', fix: 'f', feature: 'b' }], prdEdits: [],
+    });
+  });
+
+  it('US-007 AC-2: drops a non-string feature and keeps the finding', () => {
+    for (const feature of [12, null, {}, []]) {
+      expect(parseFlowVerdict(JSON.stringify({ findings: [{ class: 'minor', summary: 's', fix: 'f', feature }] }))).toEqual({
+        ok: true, findings: [{ class: 'minor', summary: 's', fix: 'f' }], prdEdits: [],
+      });
+    }
+  });
+
   it('#415 drops an answered or minor finding with no fix as a note and counts it', () => {
     const output = JSON.stringify({ findings: [
       { id: 'F1', class: 'minor', summary: 's1', fix: 'f1' },

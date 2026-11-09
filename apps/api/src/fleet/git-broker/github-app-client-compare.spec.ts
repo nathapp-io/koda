@@ -46,3 +46,41 @@ describe('GitHubAppClient.isSingleFileCommit', () => {
     },
   );
 });
+
+describe('GitHubAppClient.isOwnCallsRun', () => {
+  const own = { paths: ['a.md', 'b.md'], marker: 'flow calls from SPEC_REVIEW job j1' };
+  const run = () => ({
+    status: 'ahead', total_commits: 2, merge_base_commit: { sha: 'base' },
+    commits: [
+      { sha: 'c1', parents: [{ sha: 'base' }], commit: { message: 'docs(a): flow calls from SPEC_REVIEW job j1' } },
+      { sha: 'head', parents: [{ sha: 'c1' }], commit: { message: 'docs(b): flow calls from SPEC_REVIEW job j1' } },
+    ],
+    files: [{ filename: 'a.md', status: 'modified' }, { filename: 'b.md', status: 'modified' }],
+  });
+
+  it('accepts a linear run of the job own commits on its spec paths', async () => {
+    const { client } = build(run());
+    await expect(client.isOwnCallsRun('t', 'o', 'r', 'base', 'head', own)).resolves.toBe(true);
+  });
+
+  it.each([
+    { status: 'diverged' },
+    { total_commits: 3 },
+    { merge_base_commit: { sha: 'other' } },
+    { commits: [] },
+    { files: [{ filename: 'c.md', status: 'modified' }] },
+    { files: [{ filename: 'a.md', status: 'added' }] },
+    { files: [] },
+    { commits: [{ sha: 'c1', parents: [{ sha: 'base' }], commit: { message: 'fix: outside edit' } }, { sha: 'head', parents: [{ sha: 'c1' }], commit: { message: 'flow calls from SPEC_REVIEW job j1' } }] },
+    { commits: [{ sha: 'c1', parents: [{ sha: 'x' }], commit: { message: 'flow calls from SPEC_REVIEW job j1' } }, { sha: 'head', parents: [{ sha: 'c1' }], commit: { message: 'flow calls from SPEC_REVIEW job j1' } }] },
+    { commits: [{ sha: 'c1', parents: [{ sha: 'base' }], commit: { message: 'flow calls from SPEC_REVIEW job j1' } }, { sha: 'other', parents: [{ sha: 'c1' }], commit: { message: 'flow calls from SPEC_REVIEW job j1' } }] },
+  ])('fails closed for anything else: %j', async (patch) => {
+    const { client } = build({ ...run(), ...patch });
+    await expect(client.isOwnCallsRun('t', 'o', 'r', 'base', 'head', own)).resolves.toBe(false);
+  });
+
+  it('maps a forge error to a reason', async () => {
+    const { client } = build({}, 500);
+    await expect(client.isOwnCallsRun('t', 'o', 'r', 'base', 'head', own)).rejects.toMatchObject({ reason: 'provider_error' });
+  });
+});

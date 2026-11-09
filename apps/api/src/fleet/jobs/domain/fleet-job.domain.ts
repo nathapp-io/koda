@@ -222,6 +222,11 @@ export interface FleetJobRecord {
    */
   flowId?: string | null;
   flowStep?: string | null;
+  /**
+   * US-001: the flow feature this job belongs to. A flow's jobs are read per feature, so a job of a
+   * later feature never answers for the feature that is running.
+   */
+  flowFeatureId?: string | null;
   threadId: string | null;
   eventSeq: number;
   ackedRunnerSeq: number;
@@ -253,6 +258,8 @@ export interface NewFleetJob {
   /** US-004: a flow step's job carries the flow and its step from the insert, so a tick after a crash still sees it. */
   flowId?: string | null;
   flowStep?: string | null;
+  /** US-001: the flow feature the job belongs to, written with the flow link. */
+  flowFeatureId?: string | null;
 }
 
 type Mutable =
@@ -367,8 +374,9 @@ export interface IFleetJobRepository {
   /**
    * US-004: links an existing job to a flow step — one conditional UPDATE that only matches a job whose `flowId`
    * is still null, so a job another flow already owns is left untouched. True when this call set the fields.
+   * US-001: the flow feature is written in the same update, so an adopted job is scoped like a dispatched one.
    */
-  adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean>;
+  adoptForFlow(jobId: string, flowId: string, flowFeatureId: string, step: FlowStep): Promise<boolean>;
   /** SELECT … FOR UPDATE (inside txManager.run). With skipLocked, null when another transaction holds the row. */
   lockById(id: string, opts?: { skipLocked?: boolean }): Promise<FleetJobRecord | null>;
   findPage(filters: FleetJobFilters, page: IPageOption): Promise<IPageResult<FleetJobRecord>>;
