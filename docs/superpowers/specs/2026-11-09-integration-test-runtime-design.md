@@ -136,3 +136,22 @@ that file does not use the changed fixture.
 Four shards put ~143 files in each worker, well below the ~360-file point where the
 single process degraded locally. The CI run remains the authoritative identity
 check (sum of per-shard `Test Files` must be 571).
+
+## CI verification (run 42669519537, PR #420)
+
+All jobs succeeded. The four shards ran in parallel; the `integration` aggregator
+passed in 4s.
+
+| Shard | Job wall time | Vitest duration | Files | Tests |
+| --- | ---: | ---: | ---: | ---: |
+| 1/4 | 3m17s | 128.84s | 143 | 1510 passed |
+| 2/4 | **5m16s** | 240.46s | 143 | 1629 passed |
+| 3/4 | 3m51s | 164.21s | 143 (1 skipped) | 1363 passed, 9 skipped |
+| 4/4 | 4m04s | 167.17s | 142 | 1762 passed, 11 skipped |
+| **Total** | — | — | **571** | **6264 passed, 20 skipped** |
+
+- Integration job: **19m19s → 5m16s (−73%)**, against a ≤7m target.
+- The slowest shard (5m16s) sits between the 4m and 7m tuning bounds, so four
+  shards is retained.
+- The new pipeline critical path is the web `e2e` job at 7m15s; it is outside this
+  plan's integration scope.
