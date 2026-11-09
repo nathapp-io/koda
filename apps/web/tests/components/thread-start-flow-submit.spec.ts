@@ -6,6 +6,7 @@ import { enI18n, toastRecorder } from '../helpers/fleet-harness'
 import type { ThreadDetailDto } from '~/lib/thread-types'
 import type { FlowStartBody } from '~/lib/fleet-flow-start-body'
 import { projectPermissionsStub } from '../helpers/permission-nav'
+import { ApiError, extractApiError } from '../../composables/useApi'
 
 const thread: ThreadDetailDto = {
   id: 't1', kind: 'REPO', repoId: 'r1', baseRef: 'main', feature: 'f-min', title: 'Thread', createdById: 'u1',
@@ -40,7 +41,7 @@ async function mountStart(result: Promise<unknown> = Promise.resolve({ kind: 'pe
       '~/composables/useAuth': { useAuth: () => auth },
       '~/composables/useAppToast': { useAppToast: () => toast },
       '~/composables/useFleetFlows': { useFleetFlows: () => ({ list: async () => ({ records: [] }), createFromThread }) },
-      '~/composables/useApi': { extractApiError: (error: unknown) => error instanceof Error ? error.message : 'API error' },
+      '~/composables/useApi': { extractApiError },
     },
   })
   const button = mounted.one('[data-testid="start-flow-button"]')
@@ -83,15 +84,23 @@ describe('US-009 ThreadStartFlow submit', () => {
     expect(m.mounted.one('a')?.props.href).toBe('/web/approvals')
     m.mounted.unmount()
   })
-  test('AC-12..13 rejected create reports extracted error and leaves dialog open', async () => {
-    const error = new Error('invalid input')
+  test.each([
+    ['400 invalid input', new ApiError(400, 'Invalid input', { feature: ['Invalid input'] })],
+    ['403 forbidden', new ApiError(403, 'Forbidden')],
+    ['404 missing thread', new ApiError(404, 'Thread not found')],
+    ['409 threadBusy', new ApiError(409, 'Conflict', { code: ['threadBusy'] })],
+    ['409 notPublished', new ApiError(409, 'Conflict', { code: ['notPublished'] })],
+    ['409 runnerMissing', new ApiError(409, 'Conflict', { code: ['runnerMissing'] })],
+    ['409 disabled', new ApiError(409, 'Conflict', { code: ['disabled'] })],
+    ['409 archived', new ApiError(409, 'Conflict', { code: ['archived'] })],
+  ])('AC-12..13 rejected create (%s) reports extracted error and keeps dialog open', async (_caseName, error) => {
     let reject!: (error: Error) => void
     const failed = new Promise<unknown>((_resolve, rejectPromise) => { reject = rejectPromise })
     const m = await mountStart(failed)
     m.submit()
     reject(error)
-    m.submit(); await settle()
-    expect(m.toast.errors).toEqual(['invalid input'])
+    await settle()
+    expect(m.toast.errors).toEqual([extractApiError(error)])
     expect(m.dialogProps?.open).toBe(true)
     m.mounted.unmount()
   })
