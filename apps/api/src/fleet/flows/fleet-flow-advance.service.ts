@@ -425,7 +425,17 @@ export class FleetFlowAdvanceService {
       // The feature the flow runs now. A flow with no active feature waits for the next-feature
       // transitions: a feature start, a merge wait or the flow's completion.
       const feature = this.activeFeature(current);
-      if (!feature) return;
+      if (!feature) {
+        const next = nextFlowFeature(current.features);
+        if (next.kind === 'complete') {
+          await this.steps.complete(current.id, now);
+          await this.record(current, 'flow completed', 'flow.completed', { flowId: current.id, step: null, jobId: null });
+        } else if (next.kind === 'wait_merge') {
+          await this.steps.setFlowState(current.id, 'WAITING_MERGE');
+          await this.record(current, 'flow waiting merge', 'flow.waiting_merge', { featureIds: next.featureIds });
+        }
+        return;
+      }
 
       const spentUsd = await this.refreshSpent(current);
       // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
@@ -742,10 +752,23 @@ export class FleetFlowAdvanceService {
       return;
     }
     if (action.kind === 'complete') {
-      await this.steps.complete(flow.id, now);
-      await this.record(flow, 'flow completed', 'flow.completed', {
-        flowId: flow.id, step: job?.flowStep ?? null, jobId: job?.id ?? null,
+      // A ready FIX completes this feature, not necessarily the flow. Evaluate against the updated
+      // in-memory view so the just-finished feature cannot be selected again from the locked snapshot.
+      await this.steps.markFeatureState(feature.id, 'READY');
+      await this.record(flow, 'flow feature ready', 'flow.feature_ready', {
+        feature: feature.feature, featureId: feature.id, prNumber: feature.prNumber,
       });
+      const updated = flow.features.map((item) => item.id === feature.id ? { ...item, state: 'READY' } : item);
+      const next = nextFlowFeature(updated);
+      if (next.kind === 'complete') {
+        await this.steps.complete(flow.id, now);
+        await this.record(flow, 'flow completed', 'flow.completed', {
+          flowId: flow.id, step: job?.flowStep ?? null, jobId: job?.id ?? null,
+        });
+      } else if (next.kind === 'wait_merge') {
+        await this.steps.setFlowState(flow.id, 'WAITING_MERGE');
+        await this.record(flow, 'flow waiting merge', 'flow.waiting_merge', { featureIds: next.featureIds });
+      }
     }
   }
 

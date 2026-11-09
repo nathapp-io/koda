@@ -114,6 +114,8 @@ function build(opts: HarnessOptions = {}) {
     sumCost: vi.fn(async () => opts.sum ?? record.spentUsd),
     setSpent: vi.fn(async () => undefined),
     complete: vi.fn(async () => undefined),
+    markFeatureState: vi.fn(async () => undefined),
+    setFlowState: vi.fn(async () => undefined),
     markStep: vi.fn<IFleetFlowStepRepository['markStep']>(async () => undefined),
     creatorAccess: vi.fn(async () => opts.creatorAccess ?? { exists: true, disabled: false }),
     listAdvanceable: vi.fn(async () => []),
@@ -465,6 +467,52 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
       summary: expect.any(String),
     });
     expect(h.flows.stop).not.toHaveBeenCalled();
+  });
+
+  it('US-009 AC-1: marks a ready feature READY before completing its flow', async () => {
+    const h = build({
+      flow: { state: 'RUNNING' },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.steps.markFeatureState).toHaveBeenCalledWith('feature-1', 'READY');
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.feature_ready', payload: expect.objectContaining({ feature: 'f' }),
+    }));
+    expect(h.steps.complete).toHaveBeenCalledWith('flow-1', NOW);
+  });
+
+  it('US-009 AC-2/3: an independent successor remains RUNNING; a dependent successor waits for merge', async () => {
+    const first = feature({ state: 'RUNNING', currentStep: 'FIX', prNumber: 12 });
+    const independent = feature({ id: 'feature-2', position: 1, feature: 'g', dependsOn: [], state: 'PENDING' });
+    const independentHarness = build({
+      flow: { state: 'RUNNING', features: [first, independent] },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+    await independentHarness.service.advance('flow-1', NOW);
+    expect(independentHarness.steps.markFeatureState).toHaveBeenCalledWith('feature-1', 'READY');
+    expect(independentHarness.steps.complete).not.toHaveBeenCalled();
+    expect(independentHarness.steps.setFlowState).not.toHaveBeenCalled();
+
+    const dependent = { ...independent, dependsOn: ['f'] };
+    const waitingHarness = build({
+      flow: { state: 'RUNNING', features: [first, dependent] },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+    await waitingHarness.service.advance('flow-1', NOW);
+    expect(waitingHarness.steps.setFlowState).toHaveBeenCalledWith('flow-1', 'WAITING_MERGE');
+    expect(waitingHarness.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.waiting_merge', payload: { featureIds: ['feature-1'] },
+    }));
+  });
+
+  it('US-009 AC-6: completes a live flow with no active or pending features', async () => {
+    const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'READY' })] } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.complete).toHaveBeenCalledWith('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
   });
 
   it('AC-14: a wait decision writes no step, stop or audit entry', async () => {
