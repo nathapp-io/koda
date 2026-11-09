@@ -484,6 +484,31 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     expect(h.steps.complete).toHaveBeenCalledWith('flow-1', NOW);
   });
 
+  it('US-009 AC-1: marks a ready position-1 feature READY and records its feature-ready activity', async () => {
+    const prior = feature({ state: 'READY' });
+    const active = feature({ id: 'feature-2', position: 1, feature: 'g', dependsOn: [], state: 'RUNNING', currentStep: 'FIX' });
+    const h = build({
+      flow: { state: 'RUNNING', features: [prior, active] },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.markFeatureState).toHaveBeenCalledWith('feature-2', 'READY');
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.feature_ready', payload: expect.objectContaining({ feature: 'g', featureId: 'feature-2' }),
+    }));
+  });
+
+  it('US-009 AC-7: a CI-held FIX stops without marking the feature ready', async () => {
+    const h = build({
+      flow: { state: 'RUNNING' },
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: false, readyHeld: 'CI checks failing' } }), ingestSettled: false },
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'pr_not_ready', NOW, 'CI checks failing');
+    expect(h.steps.markFeatureState).not.toHaveBeenCalled();
+    expect(h.steps.complete).not.toHaveBeenCalled();
+  });
+
   it('US-009 AC-2/3: an independent successor remains RUNNING; a dependent successor waits for merge', async () => {
     const first = feature({ state: 'RUNNING', currentStep: 'FIX', prNumber: 12 });
     const independent = feature({ id: 'feature-2', position: 1, feature: 'g', dependsOn: [], state: 'PENDING' });
