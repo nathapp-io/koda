@@ -881,6 +881,12 @@
       "list": { "title": "Flows", "empty": "No flows yet", "state": "State", "features": "Features", "spend": "Spend / cap", "createdAt": "Created", "previous": "Previous", "next": "Next", "pagination": "Flow pages" },
       "panel": { "title": "Flows" },
       "start": {
+        "title": "Start flow",
+        "feature": "Feature",
+        "specPath": "Spec path",
+        "dependsOn": "Depends on",
+        "addRow": "Add feature",
+        "removeRow": "Remove feature",
         "validation": {
           "feature": "Enter a valid feature name.",
           "featureDuplicate": "Feature names must be unique.",

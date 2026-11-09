@@ -881,6 +881,12 @@
       "list": { "title": "流程", "empty": "暂无流程", "state": "状态", "features": "功能", "spend": "花费 / 上限", "createdAt": "创建时间", "previous": "上一页", "next": "下一页", "pagination": "流程分页" },
       "panel": { "title": "流程" },
       "start": {
+        "title": "启动流程",
+        "feature": "功能",
+        "specPath": "规格路径",
+        "dependsOn": "依赖于",
+        "addRow": "添加功能",
+        "removeRow": "移除功能",
         "validation": {
           "feature": "请输入有效的功能名称。",
           "featureDuplicate": "功能名称必须唯一。",
