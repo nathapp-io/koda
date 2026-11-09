@@ -3,7 +3,7 @@
   "feature": "fleet-flow-start-form",
   "branchName": "feat/fleet-flow-start-form",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T14:08:15.415Z",
+  "updatedAt": "2026-11-09T14:14:41.576Z",
   "userStories": [
     {
       "id": "US-001",
@@ -618,14 +618,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard presentational card plus locale additions, but permission-gated approval controls invoke the access-control security override."
+        "reasoning": "Standard presentational card plus locale additions, but permission-gated approval controls invoke the access-control security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/ThreadControls.vue",
@@ -652,7 +655,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1c5118af2c3f6630c21194d6fbbe785f0728ba14"
     },
     {
       "id": "US-011",
