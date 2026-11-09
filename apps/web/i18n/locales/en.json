@@ -880,6 +880,20 @@
     "flows": {
       "list": { "title": "Flows", "empty": "No flows yet", "state": "State", "features": "Features", "spend": "Spend / cap", "createdAt": "Created", "previous": "Previous", "next": "Next", "pagination": "Flow pages" },
       "panel": { "title": "Flows" },
+      "start": {
+        "validation": {
+          "feature": "Enter a valid feature name.",
+          "featureDuplicate": "Feature names must be unique.",
+          "specPath": "Enter a valid relative .md spec path.",
+          "dependsOn": "Dependencies must name an earlier feature.",
+          "featuresCount": "Add between 1 and 20 features.",
+          "role": "Enter a valid role model.",
+          "costCap": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places."
+        }
+      },
+      "preapproval": {
+        "validation": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places."
+      },
       "stop": {
         "button": "Stop flow",
         "confirm": "Stop this flow?"

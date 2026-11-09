@@ -880,6 +880,20 @@
     "flows": {
       "list": { "title": "流程", "empty": "暂无流程", "state": "状态", "features": "功能", "spend": "花费 / 上限", "createdAt": "创建时间", "previous": "上一页", "next": "下一页", "pagination": "流程分页" },
       "panel": { "title": "流程" },
+      "start": {
+        "validation": {
+          "feature": "请输入有效的功能名称。",
+          "featureDuplicate": "功能名称必须唯一。",
+          "specPath": "请输入有效的相对 .md 规格路径。",
+          "dependsOn": "依赖项必须是更早的功能。",
+          "featuresCount": "请添加 1 到 20 个功能。",
+          "role": "请输入有效的角色模型。",
+          "costCap": "请输入大于 0 且不超过 1000、最多 4 位小数的费用上限。"
+        }
+      },
+      "preapproval": {
+        "validation": "请输入大于 0 且不超过 1000、最多 4 位小数的费用上限。"
+      },
       "stop": {
         "button": "停止流程",
         "confirm": "确定要停止此流程吗？"
