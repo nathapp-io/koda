@@ -3,7 +3,7 @@
   "feature": "fleet-flow-page",
   "branchName": "feat/fleet-flow-page",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T10:41:44.732Z",
+  "updatedAt": "2026-11-09T10:48:52.951Z",
   "userStories": [
     {
       "id": "US-001",
@@ -753,14 +753,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Only the detail page's start/stop and retained-data lifecycle is new; useVisiblePolling already owns visibility, rejection resilience and non-overlap, so ordinary fake-timer TDD fits without a new concurrency abstraction."
+        "reasoning": "Only the detail page's start/stop and retained-data lifecycle is new; useVisiblePolling already owns visibility, rejection resilience and non-overlap, so ordinary fake-timer TDD fits without a new concurrency abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/flows/[id].vue",
@@ -782,7 +785,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0d7725c0624d64dd337cb53b9f252d442f808f63"
     },
     {
       "id": "US-012",
