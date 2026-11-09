@@ -38,6 +38,9 @@ export interface IFleetFlowStepRepository {
   creatorAccess(ref: PrincipalRef): Promise<CreatorAccess>;
   markStep(flowId: string, featureId: string, step: FlowStep, data: MarkFlowStepData): Promise<void>;
   complete(flowId: string, now: Date): Promise<void>;
+  setFeatureBranch(featureId: string, branch: string): Promise<void>;
+  markFeatureState(featureId: string, state: string): Promise<void>;
+  setFlowState(flowId: string, state: string): Promise<void>;
   listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]>;
   latestJob(flowId: string): Promise<FleetJobRecord | null>;
   /**
@@ -50,7 +53,7 @@ export interface IFleetFlowStepRepository {
   projectSlug(projectId: string): Promise<string | null>;
   /** Adopt the PLAN output branch before applying PRD calls or re-asking that branch's head. */
   setBranch(flowId: string, branch: string): Promise<void>;
-  recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void>;
+  recordCalls(flowId: string, featureId: string, jobId: string, specSha: string | null, options?: { setSha?: boolean }): Promise<void>;
   recordRulings(flowId: string, featureId: string, jobId: string): Promise<void>;
   recordPrdEdits(flowId: string, featureId: string, jobId: string): Promise<void>;
   /**

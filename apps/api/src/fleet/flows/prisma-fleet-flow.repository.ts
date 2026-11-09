@@ -89,13 +89,13 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
     return result;
   }
   reask(id: string, data: { specSha: string; approvalRequestId: string }): Promise<FleetFlowRecord> {
-    return this.transition(id, FleetFlowState.PENDING, { state: FleetFlowState.PENDING, specSha: data.specSha, approvalRequestId: data.approvalRequestId, approvalMode: null, approverId: null, approvedAt: null });
+    return this.transition(id, FleetFlowState.PENDING, { state: FleetFlowState.PENDING, specSha: data.specSha, setSha: data.specSha, approvalRequestId: data.approvalRequestId, approvalMode: null, approverId: null, approvedAt: null });
   }
   async updateSha(id: string, specSha: string): Promise<FleetFlowRecord> {
     const result = await this.transactionManager.run(async () => {
       const current = await this.lockById(id);
       if (!current) throw new FlowTransitionError(id, 'missing', 'same-state');
-      await this.prisma.client.fleetFlow.update({ where: { id }, data: { specSha } });
+      await this.prisma.client.fleetFlow.update({ where: { id }, data: { specSha, setSha: specSha } });
       return this.findById(id);
     });
     if (!result) throw new FlowTransitionError(id, 'missing', 'same-state');

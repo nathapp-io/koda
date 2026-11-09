@@ -144,6 +144,64 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect(await repo.ingestSettled(job.id, 3)).toBe(status === 'done' || status === 'failed');
   });
 
+  it('US-002 persists feature branches and isolated feature and flow states', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [first, second] = flow.features;
+    expect((await flowRepo.findById(flow.id))?.features.map(({ branch }) => branch)).toEqual([null, null]);
+
+    await repo.setFeatureBranch(first.id, 'feat/b');
+    await repo.markFeatureState(first.id, 'READY');
+    await repo.setFlowState(flow.id, 'WAITING_MERGE');
+    const updated = await flowRepo.findById(flow.id);
+    expect(updated?.features.map(({ branch, state }) => ({ branch, state }))).toEqual([
+      { branch: 'feat/b', state: 'READY' }, { branch: null, state: 'PENDING' },
+    ]);
+    expect(updated?.state).toBe('WAITING_MERGE');
+    expect(second.state).toBe('PENDING');
+  });
+
+  it('US-002 completion preserves merged features and records calls sha promotion semantics', async () => {
+    const flow = await createFlow('RUNNING', 2);
+    const [merged, ready] = flow.features;
+    await prisma.fleetFlowFeature.update({ where: { id: merged.id }, data: { state: 'MERGED' } });
+    await prisma.fleetFlowFeature.update({ where: { id: ready.id }, data: { state: 'READY' } });
+    const now = new Date('2026-11-04T12:34:56.000Z');
+    await repo.complete(flow.id, now);
+    expect((await flowRepo.findById(flow.id))?.features.map(({ state }) => state)).toEqual(['MERGED', 'COMPLETED']);
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'COMPLETED', endedAt: now });
+
+    const callsFlow = await createFlow('RUNNING');
+    const feature = callsFlow.features[0];
+    await repo.recordCalls(callsFlow.id, feature.id, 'job-null', null);
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: callsFlow.id } })).toMatchObject({ specSha: 'sha', setSha: 'sha' });
+    await repo.recordCalls(callsFlow.id, feature.id, 'job-two', 'sha2');
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: callsFlow.id } })).toMatchObject({ specSha: 'sha2', setSha: 'sha' });
+    await repo.recordCalls(callsFlow.id, feature.id, 'job-three', 'sha3', { setSha: true });
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: callsFlow.id } })).toMatchObject({ specSha: 'sha3', setSha: 'sha3' });
+    expect((await flowRepo.findById(callsFlow.id))?.features[0]?.callsJobId).toBe('job-three');
+  });
+
+  it('US-002 keeps created, re-asked and updated spec sha aligned with set sha', async () => {
+    const created = await flowRepo.create({
+      projectId, repoId, entry: 'NAX', createdByType: 'USER', createdById: creatorId,
+      branch: `branch-${crypto.randomUUID()}`, specSha: 'sha-create', reviewerRole: 'reviewer',
+      supervisorRole: 'supervisor', costCapUsd: '10', features: [{ feature: 'f', specPath: 'spec.md', dependsOn: [] }],
+    });
+    expect(created.setSha).toBe(created.specSha);
+    await flowRepo.updateSha(created.id, 'sha4');
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ specSha: 'sha4', setSha: 'sha4' });
+    await flowRepo.reask(created.id, { specSha: 'sha4', approvalRequestId: 'request' });
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ specSha: 'sha4', setSha: 'sha4' });
+  });
+
+  it('US-002 missing-flow completion rejects before changing unrelated rows', async () => {
+    const flow = await createFlow('RUNNING');
+    const before = await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } });
+    await expect(repo.complete('missing-flow', new Date())).rejects.toThrow();
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'RUNNING' });
+    expect(await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toEqual(before);
+  });
+
   it('AC-15 stores the flow spend total', async () => {
     const flow = await createFlow('RUNNING');
     await repo.setSpent(flow.id, '3.7500');

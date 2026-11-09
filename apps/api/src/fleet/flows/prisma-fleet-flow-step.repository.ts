@@ -38,7 +38,19 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
 
   async complete(flowId: string, now: Date): Promise<void> {
     await this.db.fleetFlow.update({ where: { id: flowId }, data: { state: 'COMPLETED', endedAt: now } });
-    await this.db.fleetFlowFeature.updateMany({ where: { flowId }, data: { state: 'COMPLETED' } });
+    await this.db.fleetFlowFeature.updateMany({ where: { flowId, state: { not: 'MERGED' } }, data: { state: 'COMPLETED' } });
+  }
+
+  async setFeatureBranch(featureId: string, branch: string): Promise<void> {
+    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { branch } });
+  }
+
+  async markFeatureState(featureId: string, state: string): Promise<void> {
+    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { state } });
+  }
+
+  async setFlowState(flowId: string, state: string): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { state } });
   }
 
   async listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]> {
@@ -106,9 +118,11 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     await this.db.fleetFlow.update({ where: { id: flowId }, data: { branch } });
   }
 
-  async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void> {
+  async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string | null, options: { setSha?: boolean } = {}): Promise<void> {
     await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
-    await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha } });
+    if (specSha !== null) {
+      await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha, ...(options.setSha ? { setSha: specSha } : {}) } });
+    }
   }
 
   async recordRulings(flowId: string, featureId: string, jobId: string): Promise<void> {
