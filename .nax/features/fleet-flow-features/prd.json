@@ -3,7 +3,7 @@
   "feature": "fleet-flow-features",
   "branchName": "feat/fleet-flow-features",
   "createdAt": "2026-12-03T00:00:00.000Z",
-  "updatedAt": "2026-11-09T04:19:36.504Z",
+  "updatedAt": "2026-11-09T04:55:28.836Z",
   "userStories": [
     {
       "id": "US-001",
@@ -447,14 +447,17 @@
         "US-006",
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The existing orchestration is extended rather than re-architected, but feature identity spans job reads, crash recovery and events; access-checked dispatch and forge targets retain the security override."
+        "reasoning": "The existing orchestration is extended rather than re-architected, but feature identity spans job reads, crash recovery and events; access-checked dispatch and forge targets retain the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -489,7 +492,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2fb3329ceafb74c6db757e69b6df2412acde7922"
     },
     {
       "id": "US-009",
