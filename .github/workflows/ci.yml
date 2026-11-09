@@ -241,13 +241,25 @@ jobs:
       - name: Test
         run: bunx turbo run test -- --bail=1
 
-  # ─── Integration + e2e (Postgres) ───────────────────────────────────────────
-  integration:
-    name: integration
+  # ─── Integration + e2e (Postgres, sharded) ─────────────────────────────────
+  # 571 DB suites run one file at a time (they share one Postgres schema and
+  # resetDb() truncates it), so a single job spends ~18m in Vitest. The files are
+  # independent once each shard has its own database, so split them across
+  # runners with Vitest's --shard. Each shard keeps its own Postgres service, so
+  # the run lock/schema reset semantics are unchanged.
+  integration-shards:
+    name: integration shard ${{ matrix.shard }}/${{ matrix.shards }}
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      # One failing shard must not cancel the others: the aggregator below needs
+      # the complete picture, and a partial run hides which suites are broken.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        shards: [4]
     services:
       postgres:
         image: postgres:16
@@ -297,11 +309,28 @@ jobs:
       - name: Build API
         run: bunx turbo run build --filter=@nathapp/koda-api
 
-      - name: Integration + e2e (Postgres)
-        run: cd apps/api && bun run test:integration
+      - name: Integration + e2e (Postgres, shard ${{ matrix.shard }}/${{ matrix.shards }})
+        # Bun strips the first `--`; `bun run test:integration` forwards the shard flag to Vitest.
+        run: cd apps/api && bun run test:integration -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
         env:
           # Explicit, so a broken service fails the job instead of falling back to Testcontainers.
           KODA_TEST_DATABASE_URL: postgresql://koda:koda@localhost:5433/koda_test
+
+  # ─── Integration gate (required-check name) ────────────────────────────────
+  # Branch protection on main requires a check named exactly `integration`. A
+  # matrix publishes `integration shard 1/4`, ... instead, so this cheap job
+  # keeps the old name and fails when any shard failed or was cancelled.
+  integration:
+    name: integration
+    needs: [changes, integration-shards]
+    if: always() && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check shard results
+        run: |
+          echo "integration shards: ${{ needs.integration-shards.result }}"
+          test "${{ needs.integration-shards.result }}" = "success"
 
   # ─── Runner integration (Postgres, built API) ───────────────────────────────
   # Runs in parallel with `integration`: the runner suite uses its own database
