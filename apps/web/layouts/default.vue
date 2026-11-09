@@ -136,6 +136,17 @@ const breadcrumbItems = computed(() => {
       { label: t('fleet.threads.detail.title') },
     ]
   }
+  if (path === `/${project}/flows`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.flows') }]
+  }
+  if (path.startsWith(`/${project}/flows/`)) {
+    return [
+      { label: 'Koda', to: '/' },
+      projectBase,
+      { label: t('nav.flows'), to: `/${project}/flows` },
+      { label: t('fleet.flows.detail.title') },
+    ]
+  }
   if (path === `/${project}/labels`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.labels') }]
   }
@@ -286,6 +297,14 @@ const backTo = computed(() => {
             >
               <MessagesSquare class="h-4 w-4 shrink-0" />
               {{ t('nav.threads') }}
+            </NuxtLink>
+            <NuxtLink
+              :to="`/${projectSlug}/flows`"
+              :class="navLinkClass"
+              :active-class="activeClass"
+            >
+              <Rocket class="h-4 w-4 shrink-0" />
+              {{ t('nav.flows') }}
             </NuxtLink>
             <!-- P3b US-006: the engine links read this project's own keys, so the slug is the key. -->
             <ApprovalsProjectApprovalNavLinks :key="projectSlug" :slug="projectSlug" />
