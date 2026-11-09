@@ -3,7 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { ApiError } from '~/composables/useApi'
 import { useFleetFlows } from '~/composables/useFleetFlows'
 import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
-import { flowStateKey } from '~/lib/fleet-flows'
+import { flowStateKey, flowStepKey, jobsByFeature } from '~/lib/fleet-flows'
+import { useProjectPermissions } from '~/composables/usePermissions'
 import { formatUsd } from '~/lib/fleet-jobs'
 import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
 
@@ -15,6 +16,8 @@ const flowId = route.params.id as string
 const { t } = useI18n()
 const flows = useFleetFlows(slug)
 const people = useProjectMemberNames(slug)
+const { permissions } = useProjectPermissions(slug)
+const canAnswer = computed(() => permissions.value.has('fleet.flow.answer'))
 const flow = ref<FleetFlowDto | null>(null)
 const overview = ref<FleetFlowOverviewDto | null>(null)
 const pending = ref(true)
@@ -34,6 +37,12 @@ const unknownCostText = computed(() => {
   const count = overview.value?.unknownCostCount ?? 0
   return count > 0 ? t('fleet.flows.detail.unknownCost', { count }) : ''
 })
+const groupedJobs = computed(() => jobsByFeature(overview.value?.jobs ?? [], flow.value?.features ?? []))
+const flowJobStep = (step: string | null): string => {
+  if (step === null) return '—'
+  const key = flowStepKey(step)
+  return key ? t(key) : step
+}
 
 function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && (error.code === 404 || error.code === 40004)
@@ -99,6 +108,29 @@ onMounted(() => {
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approver') }}</dt><dd>{{ approverName }}</dd></div>
           <div v-if="flow.approval.approvedAt"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvedAt') }}</dt><dd>{{ flow.approval.approvedAt }}</dd></div>
         </dl>
+      </section>
+
+      <p v-if="overview?.truncated" class="text-sm text-muted-foreground">{{ t('fleet.flows.detail.truncated') }}</p>
+      <p v-if="flow && !overview" role="status" class="text-sm text-muted-foreground">{{ t('fleet.flows.detail.jobsFailed') }}</p>
+
+      <FlowFeatureSection
+        v-for="feature in flow.features"
+        :key="feature.feature"
+        :slug="slug"
+        :flow="flow"
+        :feature="feature"
+        :repo="overview?.repo ?? null"
+        :jobs="groupedJobs.byFeature.get(feature.feature) ?? []"
+        :can-answer="canAnswer"
+      />
+
+      <section v-if="groupedJobs.flowJobs.length" class="space-y-3">
+        <h2 class="text-sm font-medium">{{ t('fleet.flows.detail.flowJobs') }}</h2>
+        <ul class="space-y-2">
+          <li v-for="job in groupedJobs.flowJobs" :key="job.id" class="text-sm">
+            <NuxtLink class="underline" :to="`/${slug}/fleet/jobs/${job.id}`">{{ flowJobStep(job.step) }} · {{ job.command }} · {{ job.state }} · {{ formatUsd(job.costUsd) }}</NuxtLink>
+          </li>
+        </ul>
       </section>
 
       <section v-if="flow.state === 'STOPPED'" class="space-y-2">

@@ -900,7 +900,10 @@
         "stopDetail": "详情",
         "ticket": "工单 {ref}",
         "notFound": "未找到流程",
-        "loadFailed": "无法加载流程"
+        "loadFailed": "无法加载流程",
+        "jobsFailed": "无法加载流程任务；仍可查看功能详情。",
+        "truncated": "仅显示最新的 500 个任务；更早的任务未包含。",
+        "flowJobs": "流程任务"
       },
       "state": {
         "PENDING": "待审批",
@@ -911,6 +914,7 @@
         "COMPLETED": "已完成",
         "STOPPED": "已停止"
       },
+      "feature": { "branch": "分支", "dependsOn": "依赖于", "pullRequest": "拉取请求" },
       "featureState": {
         "PENDING": "待处理",
         "RUNNING": "运行中",

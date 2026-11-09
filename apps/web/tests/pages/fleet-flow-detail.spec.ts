@@ -31,14 +31,17 @@ async function mountPage(options: {
       useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${Object.values(params).join(' ')}` : key }),
       useFleetFlows: () => ({ get, overview: getOverview }),
       useProjectMemberNames: () => ({ members: [], load, nameOf }),
+      useProjectPermissions: () => ({ permissions: { value: { has: () => false } } }),
     },
     alias: {
       '~/composables/useFleetFlows': { useFleetFlows: () => ({ get, overview: getOverview }) },
       '~/composables/useApi': { ApiError },
       '~/composables/useProjectMemberNames': { useProjectMemberNames: () => ({ members: [], load, nameOf }) },
+      '~/composables/usePermissions': { useProjectPermissions: () => ({ permissions: { value: { has: () => false } } }) },
     },
     components: {
       LoadingState: { template: '<div>loading</div>' },
+      FlowFeatureSection: { props: ['feature'], template: '<article :data-feature="feature.feature">{{ feature.feature }}</article>' },
       PageHeader: { props: ['title', 'subtitle'], template: '<header>{{ title }} {{ subtitle }}<slot name="actions" /><slot /></header>' },
       NuxtLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
     },
@@ -142,6 +145,35 @@ describe('fleet flow detail page (US-006)', () => {
     expect(mounted.text()).toContain('supervisor-model')
     expect(mounted.text()).toContain('2026-01-02T03:04:05.000Z')
     mounted.unmount()
+  })
+
+  test('AC-1 renders feature sections in DTO order and AC-8 lists featureless jobs', async () => {
+    const features = [
+      { feature: 'z-feature', specPath: 'z', branch: null, dependsOn: [], state: 'RUNNING', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null },
+      { feature: 'a-feature', specPath: 'a', branch: null, dependsOn: [], state: 'PENDING', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null },
+    ]
+    const jobs = [
+      { id: 'flow-job', feature: null, step: 'RUN', command: 'RUN', state: 'QUEUED', costUsd: '0.5', queuedAt: 'now', finishedAt: null },
+    ]
+    const { mounted } = await mountPage({ flow: flow({ features }), overview: overview({ jobs, truncated: true }) })
+    expect(mounted.find('article').map(node => node.props['data-feature'])).toEqual(['z-feature', 'a-feature'])
+    expect(mounted.text()).toContain('fleet.flows.detail.flowJobs')
+    expect(mounted.text()).toContain('RUN · RUN · QUEUED · $0.50')
+    expect(mounted.find('a').some(node => node.props.href === '/acme/fleet/jobs/flow-job')).toBe(true)
+    expect(mounted.text()).toContain('fleet.flows.detail.truncated')
+    mounted.unmount()
+  })
+
+  test('AC-9 omits Flow jobs when jobs are associated with features; AC-10 keeps features if overview fails', async () => {
+    const features = [{ feature: 'US-1', specPath: 'a', branch: null, dependsOn: [], state: 'RUNNING', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null }]
+    const associated = { id: 'j1', feature: 'US-1', step: null, command: 'RUN', state: 'QUEUED', costUsd: '0.5', queuedAt: 'now', finishedAt: null }
+    const successful = await mountPage({ flow: flow({ features }), overview: overview({ jobs: [associated] }) })
+    expect(successful.mounted.text()).not.toContain('fleet.flows.detail.flowJobs')
+    successful.mounted.unmount()
+    const failed = await mountPage({ flow: flow({ features }), overviewError: new Error('offline') })
+    expect(failed.mounted.text()).toContain('US-1')
+    expect(failed.mounted.text()).toContain('fleet.flows.detail.jobsFailed')
+    failed.mounted.unmount()
   })
 
   test('AC-11 falls back to approver id when member name is unavailable', async () => {

@@ -900,7 +900,10 @@
         "stopDetail": "Details",
         "ticket": "Ticket {ref}",
         "notFound": "Flow not found",
-        "loadFailed": "Could not load flow"
+        "loadFailed": "Could not load flow",
+        "jobsFailed": "Could not load flow jobs; feature details are still available.",
+        "truncated": "Showing the newest 500 jobs; older jobs are not included.",
+        "flowJobs": "Flow jobs"
       },
       "state": {
         "PENDING": "Pending approval",
@@ -911,6 +914,7 @@
         "COMPLETED": "Completed",
         "STOPPED": "Stopped"
       },
+      "feature": { "branch": "Branch", "dependsOn": "Depends on", "pullRequest": "Pull request" },
       "featureState": {
         "PENDING": "Pending",
         "RUNNING": "Running",
