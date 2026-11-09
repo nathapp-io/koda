@@ -14737,6 +14737,56 @@
         ]
       }
     },
+    "/api/projects/{slug}/flows/{flowId}/overview": {
+      "get": {
+        "operationId": "ProjectFlowOverviewController_overview",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowOverviewDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read the overview of a project flow (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/audit": {
       "get": {
         "operationId": "AuditController_list",
@@ -25982,6 +26032,100 @@
           "size",
           "hasNext",
           "hasPrev"
+        ]
+      },
+      "FleetFlowRepoDto": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "owner",
+          "name"
+        ]
+      },
+      "FleetFlowJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "string",
+            "nullable": true
+          },
+          "step": {
+            "type": "string",
+            "nullable": true
+          },
+          "command": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "state",
+          "costUsd",
+          "queuedAt"
+        ]
+      },
+      "FleetFlowOverviewDto": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FleetFlowRepoDto"
+              }
+            ]
+          },
+          "ticketRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowJobDto"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unknownCostCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "jobs",
+          "truncated",
+          "unknownCostCount"
         ]
       },
       "HomeActivityDto": {

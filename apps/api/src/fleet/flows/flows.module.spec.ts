@@ -33,6 +33,8 @@ import { ProjectsService } from '../../projects/projects.service';
 import { FleetFlowsController } from './fleet-flows.controller';
 import { FLOW_STOP_VARIANT, NAX_FLOW_CREATE_VARIANT } from './flow-route.commands';
 import { ProjectFlowsController } from './project-flows.controller';
+import { FleetFlowOverviewService } from './fleet-flow-overview.service';
+import { ProjectFlowOverviewController } from './project-flow-overview.controller';
 import { FLEET_CFG } from '../../config/fleet.config';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
@@ -188,6 +190,8 @@ describe('FlowsModule', () => {
     expect(testingModule.get(FleetFlowsController, { strict: false })).toBeInstanceOf(FleetFlowsController);
     expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.create', NAX_FLOW_CREATE_VARIANT)).toBeDefined();
     expect(testingModule.get(ProjectFlowsController)).toBeInstanceOf(ProjectFlowsController);
+    expect(testingModule.get(FleetFlowOverviewService)).toBeInstanceOf(FleetFlowOverviewService);
+    expect(testingModule.get(ProjectFlowOverviewController)).toBeInstanceOf(ProjectFlowOverviewController);
     expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.stop', FLOW_STOP_VARIANT)).toBeDefined();
     expect(testingModule.get(FleetFlowTicker)).toBeInstanceOf(FleetFlowTicker);
     expect(testingModule.get(FleetFlowAdvanceService)).toBeInstanceOf(FleetFlowAdvanceService);
