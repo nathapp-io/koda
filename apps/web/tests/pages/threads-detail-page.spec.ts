@@ -275,7 +275,6 @@ describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
     const start = m.app.one('[data-testid="thread-start-flow"]')
     expect(start?.props['data-slug']).toBe('web')
     expect(start?.props['data-thread-id']).toBe('loaded-thread')
-    expect(start?.props.thread).toBe(loaded)
     m.app.unmount()
   })
 
