@@ -877,6 +877,8 @@
   },
   "fleet": {
     "flows": {
+      "list": { "title": "Flows", "empty": "No flows yet", "state": "State", "features": "Features", "spend": "Spend / cap", "createdAt": "Created", "previous": "Previous", "next": "Next", "pagination": "Flow pages" },
+      "panel": { "title": "Flows" },
       "stop": {
         "button": "Stop flow",
         "confirm": "Stop this flow?"
