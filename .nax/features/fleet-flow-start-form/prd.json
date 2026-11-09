@@ -1,0 +1,753 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-start-form",
+  "branchName": "feat/fleet-flow-start-form",
+  "createdAt": "2026-11-09T00:00:00.000Z",
+  "updatedAt": "2026-11-09T14:27:38.567Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Flow start rows and availability",
+      "description": "**Goal** — Add the web pre-approval wire type and pure helpers for published feature rows and Start flow availability.\n\n**Motivation** — Without them the flow is not usable from koda's web app, which is where a brainstorm thread publishes its spec set.\n\n**Approach** — `ThreadDto` gains `preApproval: ThreadPreApproval | null`. New pure module `lib/fleet-flow-start.ts` with `FLOW_SPEC_PATH_RE`, `FlowStartRow`, `flowStartRows`, `FlowStartBlock` and `flowStartState`, as in Design. Tests in `tests/lib/fleet-flow-start.spec.ts`.\n\n**Feature prefill.** `writtenPaths` is cleared by every publish (`thread-write-fold.ts`), so it cannot list the published specs. The rows come from the thread's own feature (`feature` + `specPath`) first, then each `.nax/features/<name>/spec.md` path in `lastWrite.paths` (only when `lastWrite.kind === 'published'`) whose `<name>` is not already a row, in path order. Specs published by an earlier publish are not listed; the user adds them as rows by hand. The API stays the authority on whether a spec path is real.\n\n**Dependency prefill.** The design says to prefill dependencies from the design doc when it declares them; the web cannot read the doc's content, so each prefilled row after the first depends on the row before it (the safe default: no later feature starts before the earlier PR merges). The user edits them in the dialog.\n\nAvailability is visible only for a REPO thread with archivedAt null and canCreate true; when visible, notPublished (specPublished false or publishedSha null) precedes flowLive. Keep this module pure with no Vue imports. Add the required nullable web field without changing existing fields; update affected typed fixture constructors to preApproval: null if needed, preserving existing assertions.\n\n**Scope** — In: web type mirror, row extraction/chaining/deduplication, ordered availability and unit tests. Out: role defaults and tickHint (US-002), form validation (US-003), dialog UI (US-006/007), permission reads and flow listing (US-008). API contract exclusions (not the required hand-written web ThreadDto mirror): Any API, DTO, OpenAPI or migration change; the thread entry and pre-approval routes are used as they are. Reading the design doc to prefill feature dependencies; prefilled rows depend on the row before them and the user edits them. Listing specs from publishes before the thread's last publish; the user adds those rows by hand.\n\n**Interface** —\n```typescript\ninterface ThreadPreApproval { userId: string; at: string; costCapUsd: string }\n// ThreadDto gains: preApproval: ThreadPreApproval | null\nconst FLOW_SPEC_PATH_RE = /^\\.nax\\/features\\/([^/]+)\\/spec\\.md$/\ninterface FlowStartRow { feature: string; specPath: string; dependsOn: string[] }\nfunction flowStartRows(thread: ThreadDto): FlowStartRow[]\ntype FlowStartBlock = 'notPublished' | 'flowLive'\nfunction flowStartState(thread: ThreadDto, opts: { canCreate: boolean; liveFlow: boolean }): { visible: boolean; enabled: boolean; reason: FlowStartBlock | null }\n```\nExport these declarations from their specified web modules.",
+      "acceptanceCriteria": [
+        "[unit] flowStartRows on a thread with feature: 'f-min', specPath: '.nax/features/f-min/spec.md' and lastWrite: null returns [{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }].",
+        "[unit] flowStartRows on that thread with lastWrite of kind 'published' and paths ['.nax/features/f-min/spec.md', 'docs/design.md', '.nax/features/f-clamp/spec.md'] returns two rows, the second { feature: 'f-clamp', specPath: '.nax/features/f-clamp/spec.md', dependsOn: ['f-min'] }.",
+        "[unit] flowStartRows on a thread with own feature 'a' and published paths ['.nax/features/b/spec.md', '.nax/features/c/spec.md'] returns three rows whose third row is { feature: 'c', specPath: '.nax/features/c/spec.md', dependsOn: ['b'] }.",
+        "[unit] flowStartRows on a thread with own feature 'f-min' whose lastWrite.kind is 'discarded' returns only the thread's own row.",
+        "[unit] flowStartRows on a thread with feature: null and published paths ['.nax/features/x/spec.md'] returns [{ feature: 'x', specPath: '.nax/features/x/spec.md', dependsOn: [] }].",
+        "[unit] flowStartState on a REPO thread with archivedAt: null, specPublished: true, publishedSha: 'abc' and { canCreate: true, liveFlow: false } returns { visible: true, enabled: true, reason: null }.",
+        "[unit] flowStartState on a PROJECT thread returns visible: false.",
+        "[unit] flowStartState on a REPO thread with archivedAt set returns visible: false.",
+        "[unit] flowStartState with canCreate: false returns visible: false.",
+        "[unit] flowStartState on a visible thread with specPublished: false and liveFlow: true returns { visible: true, enabled: false, reason: 'notPublished' }.",
+        "[unit] flowStartState on a visible thread with specPublished: true and publishedSha: null returns { visible: true, enabled: false, reason: 'notPublished' }.",
+        "[unit] flowStartState on a visible published thread with liveFlow: true returns { visible: true, enabled: false, reason: 'flowLive' }.",
+        "[unit] flowStartRows on a thread with own feature 'f-min' whose lastWrite.kind is 'publish_failed' returns only the thread's own row.",
+        "[unit] flowStartRows on a thread with own feature 'a' and published paths ['.nax/features/b/spec.md', '.nax/features/b/spec.md'] returns two rows."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "pure-logic",
+        "permissions"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small additive type/helper change, but availability includes an access-control permission check and requires the security isolation override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-types.ts",
+        "apps/web/lib/thread-handoff.ts",
+        "apps/web/tests/lib/thread-handoff.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-flow-start.ts",
+        "apps/web/tests/lib/fleet-flow-start.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/thread-types.ts",
+          "reason": "`ThreadDto` gains `preApproval: ThreadPreApproval | null` and the file exports the new `ThreadPreApproval` interface; existing fields are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "83aa34aeed1989b0e2a084add248d3007584c2a1"
+    },
+    {
+      "id": "US-002",
+      "title": "Flow start defaults and tick hint",
+      "description": "**Goal** — Add pure role defaults and the advisory one-flow pre-approval coverage hint.\n\n**Motivation** — Every fleet flow so far (flows 6 to 14) was started by hand with `curl` against the API, with a hand-written JSON body, and approved through a second API call.\n\n**Approach** — New pure module `lib/fleet-flow-start-defaults.ts` with `defaultFlowRoles`, `TickHint` and `tickHint`, as in Design (outcomes checked in the order `none`, `notYours`, `exceeded`, `covers`). `tickHint` takes the `ThreadPreApproval` type US-001 adds. Tests in `tests/lib/fleet-flow-start-defaults.spec.ts`.\n\n**Role defaults.** Both roles default to the thread's `backend.model` when the backend is `native` and has a model, else empty (the user types a model id). Role inputs are free text checked against the API's role pattern.\n\n**Tick hint.** The dialog tells the user whether this flow will start without asking: the API's rule (`coversFlow`) is that the flow's creator is the tick's user or the thread's creator, and the tick's cap is at least the flow's cap. `tickHint` returns one of four outcomes, checked in this order: `none` (no tick), `notYours` (the viewer is neither the tick's user nor the thread's creator, whatever the cap), `exceeded` (the cap is above the tick's cap), `covers`. The hint is advisory; the API decides. When `useAuth().user` is null the viewer id is `''`, which no tick or thread creator matches.\n\n`tickHint` compares caps as integers of ten-thousandths (`Math.round(x * 10000)`), never as raw floats. No Vue imports. The dialog computes isThreadCreator; this helper takes it as input and does not fetch auth or mutate a tick.\n\n**Scope** — In: model fallback, ordered identity/cap hint, unit tests. Out: schema/role validation (US-003), hint translations/rendering and auth wiring (US-007/009), pre-approval mutations (US-005/011) and backend authorization changes. A model picker sourced from runner-advertised models for the role inputs; roles are free text.\n\n**Interface** —\n```typescript\nfunction defaultFlowRoles(thread: ThreadDto): { reviewer: string; supervisor: string }\ntype TickHint = 'none' | 'notYours' | 'exceeded' | 'covers'\nfunction tickHint(tick: ThreadPreApproval | null, costCapUsd: number, viewer: { userId: string; isThreadCreator: boolean }): TickHint\n```",
+      "acceptanceCriteria": [
+        "[unit] defaultFlowRoles on a thread whose backend is { kind: 'native', model: 'opencode-go/deepseek-v4.1-flash' } returns { reviewer: 'opencode-go/deepseek-v4.1-flash', supervisor: 'opencode-go/deepseek-v4.1-flash' }.",
+        "[unit] defaultFlowRoles on a thread whose backend is { kind: 'native' } returns { reviewer: '', supervisor: '' }.",
+        "[unit] defaultFlowRoles on a thread whose backend kind is 'acp' with a model returns { reviewer: '', supervisor: '' }.",
+        "[unit] tickHint with a null tick, cap 3 and viewer { userId: 'u1', isThreadCreator: true } returns 'none'.",
+        "[unit] tickHint with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }, cap 3 and viewer { userId: 'u1', isThreadCreator: false } returns 'covers'.",
+        "[unit] tickHint with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }, cap 3.0001 and viewer { userId: 'u1', isThreadCreator: false } returns 'exceeded'.",
+        "[unit] tickHint with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '0.3000' }, cap 0.1 + 0.2 and viewer { userId: 'u1', isThreadCreator: false } returns 'covers'.",
+        "[unit] tickHint with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }, cap 3 and viewer { userId: 'u2', isThreadCreator: true } returns 'covers'.",
+        "[unit] tickHint with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }, cap 3 and viewer { userId: 'u2', isThreadCreator: false } returns 'notYours'.",
+        "[unit] tickHint with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' }, cap 9 and viewer { userId: 'u2', isThreadCreator: false } returns 'notYours' (the viewer check comes before the cap)."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "pure-logic",
+        "preapproval"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One small pure helper module and its test need no new abstraction; the identity-sensitive coverage check still requires the security strategy override.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-types.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-flow-start-defaults.ts",
+        "apps/web/tests/lib/fleet-flow-start-defaults.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "693e1d38810fddc8a9978fd1527e4712763456d6"
+    },
+    {
+      "id": "US-003",
+      "title": "Flow start form schema",
+      "description": "**Goal** — Add translation-aware zod schemas for the editable flow form and the pre-approval cap.\n\n**Motivation** — Every fleet flow so far (flows 6 to 14) was started by hand with `curl` against the API, with a hand-written JSON body, and approved through a second API call.\n\n**Approach** — New module `lib/fleet-flow-start-form.ts` with `FLOW_MAX_FEATURES`, `FLOW_COST_CAP_MAX_USD`, `FLOW_ROLE_RE`, `FLOW_SPEC_PATH_MAX`, `buildFlowStartSchema(t)`, `FlowStartFormValues` and `buildPreApprovalSchema(t)` (a `{ costCapUsd }` object with the same cap rule and the message key `fleet.flows.preapproval.validation`), mirroring `lib/thread-handoff-form.ts`. Issues are reported in schema order: rows top to bottom, then reviewer, supervisor, cap. The schema trims strings and coerces the cap as in Design; the duplicate-name and `dependsOn` checks are refinements on the `features` array. Validation messages are i18n keys under `fleet.flows.start.validation` and `fleet.flows.preapproval.validation`. Tests in `tests/lib/fleet-flow-start-form.spec.ts`.\n\n**Feature names.** The schema also refuses a name containing `..` (as `fleet-dispatch.ts` does), although the API's `FEATURE_RE` alone would accept it: git refuses the branch `feat/<a..b>`.\n\n**Form errors.** The form shows the first zod issue only, in schema order: rows (top to bottom), then reviewer, supervisor, cap. The duplicate-name and `dependsOn` checks are refinements on the `features` array (not the root object), so an invalid role or cap never hides them.\n\n**Form values.** `FlowStartFormValues = { features: FlowStartRow[]; roles: { reviewer: string; supervisor: string }; costCapUsd: number | string }`. The schema trims feature names, spec paths and roles (`z.string().trim()`) before every other check, so duplicate and `dependsOn` checks compare trimmed names; it coerces the cap with `Number()` and checks at most four decimals as `Math.round(x * 10000) / 10000 === x`. `toFlowStartBody` takes the schema's parsed output and does not trim again.\n\nAPI contract (unchanged): `POST /api/projects/:slug/threads/:id/flows` body `{ features: [{ feature, specPath, dependsOn?: string[] }] (1..20), roles: { reviewer, supervisor }, costCapUsd: number | string }`; features unique by name, `dependsOn` names only earlier features, `specPath` relative, ends `.md`, no `..`, at most 300 chars; roles match `/^[A-Za-z0-9._:/\\x5b\\x5d=,-]{1,200}$/`; `costCapUsd` > 0, <= 1000, at most 4 decimals. Mirror server-safe path constraints including rejecting NUL; the API remains authoritative.\n\nAdd fleet.flows.start.validation keys feature, featureDuplicate, specPath, dependsOn, featuresCount, role, costCap, and fleet.flows.preapproval.validation to both en.json and zh.json, preserving existing keys. Because this story has no dependency on US-001, keep its form row typing structural or otherwise avoid requiring a new unavailable runtime helper.\n\n**Scope** — In: schema builders/constants/form-values type, English/Chinese validation copy, unit tests. Out: request-body conversion (US-004), field UI/error rendering (US-006/007), card submission (US-011). Any API, DTO, OpenAPI or migration change; the thread entry and pre-approval routes are used as they are. US-003 only: no acceptance criterion pins the 300-character spec path limit or a zero or negative flow cap; the schema enforces both and the API refuses them.\n\n**Interface** —\n```typescript\nconst FLOW_MAX_FEATURES = 20\nconst FLOW_COST_CAP_MAX_USD = 1000\nconst FLOW_ROLE_RE = /^[A-Za-z0-9._:/\\x5b\\x5d=,-]{1,200}$/\nconst FLOW_SPEC_PATH_MAX = 300\ntype FlowStartFormValues = { features: FlowStartRow[]; roles: { reviewer: string; supervisor: string }; costCapUsd: number | string }\n// Translation-injected zod builders, matching the existing handoff pattern:\n// buildFlowStartSchema(t)\n// buildPreApprovalSchema(t)\n```",
+      "acceptanceCriteria": [
+        "[unit] buildFlowStartSchema(t).safeParse succeeds on one row { feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }, roles { reviewer: 'm', supervisor: 'm' } and cap 2.",
+        "[unit] On the feature name 'bad name', the parse's first issue message is fleet.flows.start.validation.feature.",
+        "[unit] On the feature name 'a..b', the parse's first issue message is fleet.flows.start.validation.feature.",
+        "[unit] On two rows both named 'f-min', the parse's first issue message is fleet.flows.start.validation.featureDuplicate.",
+        "[unit] On an empty row list, the parse's first issue message is fleet.flows.start.validation.featuresCount.",
+        "[unit] On 21 valid, distinct rows, the parse's first issue message is fleet.flows.start.validation.featuresCount.",
+        "[unit] On the spec path '/abs/spec.md', the parse's first issue message is fleet.flows.start.validation.specPath.",
+        "[unit] On the spec path 'docs/spec.txt', the parse's first issue message is fleet.flows.start.validation.specPath.",
+        "[unit] On the spec path 'docs/../spec.md', the parse's first issue message is fleet.flows.start.validation.specPath.",
+        "[unit] On a first row whose dependsOn is ['f-clamp'] while 'f-clamp' is the second row, the parse's first issue message is fleet.flows.start.validation.dependsOn.",
+        "[unit] On a row whose dependsOn is ['gone'] when no row is named 'gone', the parse's first issue message is fleet.flows.start.validation.dependsOn.",
+        "[unit] On the reviewer 'has space', the parse's first issue message is fleet.flows.start.validation.role.",
+        "[unit] On the cap 1000.0001, the parse's first issue message is fleet.flows.start.validation.costCap.",
+        "[unit] On the cap 1.23456, the parse's first issue message is fleet.flows.start.validation.costCap.",
+        "[unit] On the feature name ' f-min ', the parse succeeds and its output feature is 'f-min'."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "validation",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard zod input validation and two locale additions; role strings are model identifiers, not authentication roles or authorization checks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-handoff-form.ts",
+        "apps/web/lib/fleet-dispatch.ts",
+        "apps/web/tests/lib/thread-handoff-form.spec.ts",
+        "apps/api/src/fleet/flows/flow-input.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-flow-start-form.ts",
+        "apps/web/tests/lib/fleet-flow-start-form.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains the `fleet.flows.start.validation` keys (feature, featureDuplicate, specPath, dependsOn, featuresCount, role, costCap) and `fleet.flows.preapproval.validation`; existing keys are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same keys as the English locale file so the locale parity check stays green; existing keys are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ea1d9ef46e667a8ae19d6e5a59cbea43309fa40f"
+    },
+    {
+      "id": "US-004",
+      "title": "Flow start request body",
+      "description": "**Goal** — Convert parsed flow form values into an independent API request body.\n\n**Motivation** — Every fleet flow so far (flows 6 to 14) was started by hand with `curl` against the API, with a hand-written JSON body, and approved through a second API call.\n\n**Approach** — New module `lib/fleet-flow-start-body.ts` with `FlowStartBody` and `toFlowStartBody(values: FlowStartFormValues)` over the schema's parsed (already trimmed) output: it sends `costCapUsd` as a number and every row's `dependsOn` as a new array, without mutating its input. Tests in `tests/lib/fleet-flow-start-body.spec.ts`.\n\n**Form values.** `FlowStartFormValues = { features: FlowStartRow[]; roles: { reviewer: string; supervisor: string }; costCapUsd: number | string }`. The schema trims feature names, spec paths and roles (`z.string().trim()`) before every other check, so duplicate and `dependsOn` checks compare trimmed names; it coerces the cap with `Number()` and checks at most four decimals as `Math.round(x * 10000) / 10000 === x`. `toFlowStartBody` takes the schema's parsed output and does not trim again.\n\nMap features into a new array of request rows and copy each dependency array. Preserve parsed names, paths, roles and order; do not mutate source values or add transport fields. Accept the specified number|string form type, including number conversion for a string cap. Frozen valid parsed values must not trigger a mutation TypeError; this does not introduce validation or error semantics for malformed, unparsed inputs.\n\n**Scope** — In: exported request-body interface, pure conversion and unit tests. Out: schema rules (US-003), network requests (US-005), defaults and UI editing (US-001/002/006/007).\n\n**Interface** —\n```typescript\ninterface FlowStartBody { features: { feature: string; specPath: string; dependsOn: string[] }[]; roles: { reviewer: string; supervisor: string }; costCapUsd: number }\nfunction toFlowStartBody(values: FlowStartFormValues): FlowStartBody\n```",
+      "acceptanceCriteria": [
+        "[unit] toFlowStartBody on one row { feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }, roles { reviewer: 'm', supervisor: 'm' } and cap 2 returns { features: [{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 }.",
+        "[unit] toFlowStartBody on parsed values whose cap is the string '2.5' returns costCapUsd as the number 2.5.",
+        "[unit] toFlowStartBody on a row whose dependsOn is ['f-min'] returns that row's dependsOn as a new array equal to ['f-min'] (the input array is not shared).",
+        "[unit] toFlowStartBody returns a features array that is not the input features array, leaving the input unchanged.",
+        "[unit] toFlowStartBody does not throw a mutation TypeError when valid parsed form values, their roles object, feature rows, features array and dependency arrays are frozen."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "pure-logic"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single pure request mapper with a companion test, no new dependencies or stateful behavior.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-handoff-form.ts",
+        "apps/web/lib/fleet-flow-start-form.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-flow-start-body.ts",
+        "apps/web/tests/lib/fleet-flow-start-body.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "709d043dfe7912e8223ba92d7f4023474c07bf52"
+    },
+    {
+      "id": "US-005",
+      "title": "Flow start and pre-approval composables",
+      "description": "**Goal** — Expose the existing thread flow-create and pre-approval routes through thin web composables.\n\n**Motivation** — F1 (`fleet-flow-record`) built the thread entry route and the pre-approval routes, and F6 (`fleet-flow-page`) built the pages that read and act on an existing flow, but no screen creates a flow or sets the tick.\n\n**Approach** — `useFleetFlows(slug)` gains `createFromThread(threadId, body: FlowStartBody)` posting (path built with `apiPath`) to `/projects/:slug/threads/:threadId/flows` and mapping the answer with the existing `write` helper. New composable `composables/useThreadPreApproval.ts` with `set` (PUT) and `clear` (DELETE) on `/projects/:slug/threads/:threadId/preapproval`, mapping an answer that carries `permissionKey` (`isPendingFlowAnswer`) to `{ kind: 'pending', request }` and any other answer to `{ kind: 'done' }`. Tests in `tests/composables/useFleetFlows.spec.ts` and `tests/composables/useThreadPreApproval.spec.ts`.\n\n**Composable imports.** Components import `useFleetFlows` and `useThreadPreApproval` explicitly from `~/composables/...` (as `ThreadFlowsPanel.vue` does), because the Jest mount harness injects only its fixed auto-import list; tests supply them through the mount `alias`. Composable paths are built with `apiPath` (`lib/api-path.ts`), which the `api-path-guard` test enforces.\n\nAPI contract (unchanged): `POST /api/projects/:slug/threads/:id/flows` body `{ features: [{ feature, specPath, dependsOn?: string[] }] (1..20), roles: { reviewer, supervisor }, costCapUsd: number | string }`. Answers 201 with `FleetFlowDto`, or the approval request summary when the route itself is gated. `PUT .../preapproval` body `{ costCapUsd }` (same cap rules) answers the `{ userId, at, costCapUsd }` tick; `DELETE .../preapproval` answers `{ cleared: true }`; both may answer an approval request summary instead.\n\nUse useApi's existing base URL/envelope handling: pass /projects/... without adding /api. Do not catch/rewrite API errors in these composables. A FleetFlowDto in state PENDING maps to done, not pending; only a permissionKey summary maps to pending. Preserve list/get/overview/stop/answer and their existing tests unchanged except additive creation cases.\n\n**Scope** — In: additive create method, set/clear composable, encoded paths, answer discrimination and unit tests. Out: component visibility and hint decisions (US-002/008/010), toast/navigation/reload orchestration (US-009/011). Any API, DTO, OpenAPI or migration change; the thread entry and pre-approval routes are used as they are.\n\n**Interface** —\n```typescript\n// useFleetFlows(slug) also returns:\ncreateFromThread(threadId: string, body: FlowStartBody): Promise<FlowWrite>\ntype PreApprovalWrite = { kind: 'done' } | { kind: 'pending'; request: ApprovalRequestSummary }\n// useThreadPreApproval(slug) returns:\nset(threadId: string, costCapUsd: number): Promise<PreApprovalWrite>\nclear(threadId: string): Promise<PreApprovalWrite>\n```",
+      "acceptanceCriteria": [
+        "[unit] useFleetFlows('web').createFromThread('t1', body) calls $api.post with /projects/web/threads/t1/flows and exactly body.",
+        "[unit] createFromThread resolves { kind: 'done', flow } when the API answers a FleetFlowDto.",
+        "[unit] createFromThread resolves { kind: 'pending', request } when the API answers an object carrying permissionKey.",
+        "[unit] createFromThread rejects with the identical error object the API call rejected with.",
+        "[unit] createFromThread('a/b', body) calls $api.post with the path /projects/web/threads/a%2Fb/flows.",
+        "[unit] useThreadPreApproval('web').set('t1', 3) calls $api.put with /projects/web/threads/t1/preapproval and the body { costCapUsd: 3 }.",
+        "[unit] set resolves { kind: 'done' } when the API answers a tick { userId, at, costCapUsd }.",
+        "[unit] useThreadPreApproval('web').clear('t1') calls $api.delete with /projects/web/threads/t1/preapproval.",
+        "[unit] clear resolves { kind: 'done' } when the API answers { cleared: true }.",
+        "[unit] set resolves { kind: 'pending', request } when the API answers an object carrying permissionKey.",
+        "[unit] clear resolves { kind: 'pending', request } when the API answers an object carrying permissionKey.",
+        "[unit] set rejects with the identical error object the API call rejected with.",
+        "[unit] clear rejects with the identical error object the API call rejected with."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "composables",
+        "preapproval"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Thin standard HTTP wrappers, but they write approval authority and distinguish approval-gated responses; use strict security-path isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/lib/api-path.ts",
+        "apps/web/lib/fleet-flows.ts",
+        "apps/web/lib/fleet-flow-start-body.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useThreadPreApproval.ts",
+        "apps/web/tests/composables/useThreadPreApproval.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useFleetFlows.ts",
+          "reason": "the returned object gains `createFromThread`; `list`, `get`, `overview`, `stop` and `answer` are unchanged."
+        },
+        {
+          "path": "apps/web/tests/composables/useFleetFlows.spec.ts",
+          "reason": "gains the \"createFromThread\" cases; existing cases are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "69a402a7d5b08154d7882d53674dee16c64be9b7"
+    },
+    {
+      "id": "US-006",
+      "title": "Start flow dialog rows",
+      "description": "**Goal** — Create the dialog's editable, dependency-aware published feature rows.\n\n**Motivation** — Without them the flow is not usable from koda's web app, which is where a brainstorm thread publishes its spec set.\n\n**Approach** — New `components/fleet/threads/ThreadStartFlowDialog.vue` (Shadcn `Dialog`, vee-validate + zod with `buildFlowStartSchema`). Props: `open`, `thread: ThreadDetailDto`, `viewerId: string`; emits `update:open` and `submit`. On each open it fills the rows from `flowStartRows(thread)`. Each row has feature and spec path inputs, one native checkbox per earlier row's feature for `dependsOn`, and a remove button; an add-row button appends an empty row with no dependencies. Renaming a row rewrites that name in later rows' `dependsOn`; removing a row drops it from them. This story builds the rows part of the dialog; US-007 adds the roles, cap, hint and submit to the same component. Tests in `tests/components/thread-start-flow-dialog.spec.ts`.\n\n**Dependencies follow renames.** Dependencies are stored by feature name, so renaming a row rewrites that name in every later row's `dependsOn`, and removing a row drops it from them.\n\n**Checkboxes.** `components/ui/` has no Shadcn checkbox; the dependency checkboxes are native `<input type=\"checkbox\">`, as `ApprovalPolicyDialog.vue` does.\n\n**Feature prefill.** `writtenPaths` is cleared by every publish (`thread-write-fold.ts`), so it cannot list the published specs. The rows come from the thread's own feature (`feature` + `specPath`) first, then each `.nax/features/<name>/spec.md` path in `lastWrite.paths` (only when `lastWrite.kind === 'published'`) whose `<name>` is not already a row, in path order. Specs published by an earlier publish are not listed; the user adds them as rows by hand. The API stays the authority on whether a spec path is real.\n\n**Dependency prefill.** The design says to prefill dependencies from the design doc when it declares them; the web cannot read the doc's content, so each prefilled row after the first depends on the row before it (the safe default: no later feature starts before the earlier PR merges). The user edits them in the dialog.\n\nConsume the helpers assigned to US-001 and US-003 rather than reimplementing them; the binding dependency table leaves this story's dependency list unspecified, recorded as empty, so see the shared analysis scheduling warning. Reset on each opening (including an initially open mount), not on every edit/prop update. Closing forwards update:open false. Add fleet.flows.start row keys title, feature, specPath, dependsOn, addRow, removeRow to both locales without changing existing keys.\n\n**Scope** — In: dialog shell, row initialization/editing, dependency checkboxes and reference maintenance, locale row labels and mount tests. Out: roles/cap/hint/submit implementation (US-007), networking and parent write state (US-009), helper/schema implementation (US-001/003). Reading the design doc to prefill feature dependencies; prefilled rows depend on the row before them and the user edits them. Listing specs from publishes before the thread's last publish; the user adds those rows by hand. Reordering feature rows by drag and drop; rows are added at the end and removed individually.\n\n**Interface** — Props: `open`, `thread: ThreadDetailDto`, `viewerId: string`; emits `update:open` and `submit`. Consume `flowStartRows(thread: ThreadDto): FlowStartRow[]` and `buildFlowStartSchema(t)`.",
+      "acceptanceCriteria": [
+        "[unit] Mounting ThreadStartFlowDialog open on a thread with own feature 'f-min' and a published .nax/features/f-clamp/spec.md renders two rows.",
+        "[unit] On that mount, row 2's feature input holds 'f-clamp'.",
+        "[unit] On that mount, row 2's spec path input holds '.nax/features/f-clamp/spec.md'.",
+        "[unit] On that mount, row 2's 'f-min' dependency checkbox is checked.",
+        "[unit] Row 1 renders no dependency checkboxes.",
+        "[unit] With three rows, row 3 renders exactly two dependency checkboxes.",
+        "[unit] With rows 'a', 'b', 'c', row 3's dependency checkboxes are labelled 'a' and 'b'.",
+        "[unit] Clicking the add-row button appends a row whose feature input is empty.",
+        "[unit] A row appended with the add-row button has no dependency checkbox checked.",
+        "[unit] Clicking row 2's remove button leaves one row.",
+        "[unit] With rows 'a', 'b', 'c' where 'c' depends on 'a', removing row 'a' leaves row 'c' with no dependency checked.",
+        "[unit] Renaming row 1 from 'f-min' to 'f-low' leaves row 2's dependency checkbox labelled 'f-low' checked.",
+        "[unit] Closing the dialog after adding a row and reopening it renders the two rows from the thread.",
+        "[unit] Closing the dialog emits update:open with false.",
+        "[unit] Mounting ThreadStartFlowDialog open on a thread with own feature 'f-min', specPath '.nax/features/f-min/spec.md' and lastWrite.kind 'publish_failed' renders only the thread's own row."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "dialog",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One dialog, its mount test and two locale additions reuse the existing handoff form pattern; row-array edits and rename/removal rewrites need no novel integration or authorization logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadHandoffDialog.vue",
+        "apps/web/components/approvals/ApprovalPolicyDialog.vue",
+        "apps/web/tests/components/thread-action-bar.spec.ts",
+        "apps/web/lib/fleet-flow-start.ts",
+        "apps/web/lib/fleet-flow-start-form.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/threads/ThreadStartFlowDialog.vue",
+        "apps/web/tests/components/thread-start-flow-dialog.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains the `fleet.flows.start` row keys (title, feature, specPath, dependsOn, addRow, removeRow); existing keys are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same `fleet.flows.start` row keys as the English locale file so the locale parity check stays green; existing keys are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "84c4e71e00960dc374e1d85a7ec1084de4a1ce4c"
+    },
+    {
+      "id": "US-007",
+      "title": "Start flow dialog defaults, hint and submit",
+      "description": "**Goal** — Complete the dialog with model roles, cap defaults, tick coverage hint and validated body emission.\n\n**Motivation** — Every fleet flow so far (flows 6 to 14) was started by hand with `curl` against the API, with a hand-written JSON body, and approved through a second API call.\n\n**Approach** — `ThreadStartFlowDialog.vue` (created by US-006) gains the reviewer and supervisor inputs filled from `defaultFlowRoles(thread)`, the cap input filled with the tick's cap or `5`, and a hint rendering the `fleet.flows.start.tick.<outcome>` text for `tickHint(thread.preApproval, cap, { userId: viewerId, isThreadCreator: thread.createdById === viewerId })`. Submit validates with `buildFlowStartSchema`, shows the first issue's message in an alert (cleared on the next edit), and on success emits `submit` with `toFlowStartBody(values)`. Tests in `tests/components/thread-start-flow-dialog-submit.spec.ts`.\n\n**Role defaults.** Both roles default to the thread's `backend.model` when the backend is `native` and has a model, else empty (the user types a model id). Role inputs are free text checked against the API's role pattern.\n\n**Cap default.** The tick's cap when the thread has a tick, else 5 (the thread handoff default).\n\n**Tick hint.** The dialog tells the user whether this flow will start without asking: the API's rule (`coversFlow`) is that the flow's creator is the tick's user or the thread's creator, and the tick's cap is at least the flow's cap. `tickHint` returns one of four outcomes, checked in this order: `none` (no tick), `notYours` (the viewer is neither the tick's user nor the thread's creator, whatever the cap), `exceeded` (the cap is above the tick's cap), `covers`. The hint is advisory; the API decides. When `useAuth().user` is null the viewer id is `''`, which no tick or thread creator matches.\n\n**Form errors.** The form shows the first zod issue only, in schema order: rows (top to bottom), then reviewer, supervisor, cap. The duplicate-name and `dependsOn` checks are refinements on the `features` array (not the root object), so an invalid role or cap never hides them.\n\n**Form values.** `FlowStartFormValues = { features: FlowStartRow[]; roles: { reviewer: string; supervisor: string }; costCapUsd: number | string }`. The schema trims feature names, spec paths and roles (`z.string().trim()`) before every other check, so duplicate and `dependsOn` checks compare trimmed names; it coerces the cap with `Number()` and checks at most four decimals as `Math.round(x * 10000) / 10000 === x`. `toFlowStartBody` takes the schema's parsed output and does not trim again.\n\nOn invalid feature/name duplication/spec path/dependency/role/cap, render the first issue under the form and emit nothing; HTTP orchestration belongs to the parent. Initialize roles and cap along with row reset on each open, displaying the numeric input as 3 for a '3.0000' tick. Add fleet.flows.start.reviewer, supervisor, costCap, submit, and tick.none/notYours/exceeded/covers in both locale files.\n\n**Scope** — In: complete dialog inputs/defaults/hint, first-issue alert, edit-clearing behavior, parsed body emission, locale copy and mount tests. Out: row editing algorithms (US-006), pure helper/schema/mapper changes (US-001/002/003/004), HTTP/toasts/navigation (US-009). A model picker sourced from runner-advertised models for the role inputs; roles are free text.\n\n**Interface** — Retain props `open`, `thread: ThreadDetailDto`, `viewerId: string` and emits `update:open` and `submit`; successful `submit` carries `FlowStartBody` returned by `toFlowStartBody(values: FlowStartFormValues): FlowStartBody` using parsed values.",
+      "acceptanceCriteria": [
+        "[unit] Mounting ThreadStartFlowDialog open on a thread whose backend is { kind: 'native', model: 'opencode-go/deepseek-v4.1-flash' } fills the reviewer input with that model.",
+        "[unit] On that mount the supervisor input holds the same model.",
+        "[unit] On a thread with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' } the cap input holds 3.",
+        "[unit] On a thread without a tick the cap input holds 5.",
+        "[unit] Submitting with two rows named 'f-min' renders the English text of fleet.flows.start.validation.featureDuplicate in the form's alert.",
+        "[unit] Submitting with two rows named 'f-min' emits no submit.",
+        "[unit] Editing any field after a failed submit clears the alert.",
+        "[unit] Submitting the prefilled form on a thread with own feature 'f-min', a published .nax/features/f-clamp/spec.md, no tick and both roles 'm' emits submit once with { features: [{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }, { feature: 'f-clamp', specPath: '.nax/features/f-clamp/spec.md', dependsOn: ['f-min'] }], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 5 }.",
+        "[unit] On a thread without a tick the hint renders the English text of fleet.flows.start.tick.none.",
+        "[unit] With a tick of cap '3.0000' whose userId equals viewerId and the cap input at 3, the hint renders the English text of fleet.flows.start.tick.covers.",
+        "[unit] With that tick and the cap input at 4, the hint renders the English text of fleet.flows.start.tick.exceeded.",
+        "[unit] With a tick whose userId is 'u1', viewerId 'u2' and a thread created by 'u3', the hint renders the English text of fleet.flows.start.tick.notYours.",
+        "[unit] With a tick whose userId is 'u1', viewerId 'u2', a thread created by 'u2' and the cap input at 3, the hint renders the English text of fleet.flows.start.tick.covers.",
+        "[unit] When submitting a form with an invalid feature name, duplicate name, spec path, dependency, role or cap, the form renders only the schema's first issue's translated message under the form.",
+        "[unit] When submitting a form with an invalid feature name, duplicate name, spec path, dependency, role or cap, ThreadStartFlowDialog emits no submit."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "dialog",
+        "preapproval",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-004",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends the existing dialog using supplied defaults/schema/body helpers and the established first-issue alert pattern; identity-sensitive pre-approval hints retain the strict security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadStartFlowDialog.vue",
+        "apps/web/lib/fleet-flow-start-defaults.ts",
+        "apps/web/lib/fleet-flow-start-body.ts",
+        "apps/web/lib/fleet-flow-start-form.ts",
+        "apps/web/tests/helpers/fleet-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/thread-start-flow-dialog-submit.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.flows.start.reviewer`, `supervisor`, `costCap`, `submit` and `fleet.flows.start.tick.none`, `tick.notYours`, `tick.exceeded`, `tick.covers`; existing keys are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same keys as the English locale file so the locale parity check stays green; existing keys are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fa9429231b8bc6ef9837da9e65c748fc12f4f1cd"
+    },
+    {
+      "id": "US-008",
+      "title": "Start flow button availability",
+      "description": "**Goal** — Add the permission-aware Start flow entry control with publication and known-live-flow blocked reasons.\n\n**Motivation** — F1 (`fleet-flow-record`) built the thread entry route and the pre-approval routes, and F6 (`fleet-flow-page`) built the pages that read and act on an existing flow, but no screen creates a flow or sets the tick.\n\n**Approach** — New `components/fleet/threads/ThreadStartFlow.vue` (props `slug`, `thread`): reads `fleet.flow.create` and `fleet.flow.read` from `useProjectPermissions(slug)`, lists the thread's flows with `useFleetFlows(slug).list(1, thread.id)` (imported explicitly from `~/composables/useFleetFlows`, as `ThreadFlowsPanel.vue` does) when `fleet.flow.read` is held (re-checked on a late grant, as `ThreadFlowsPanel` does; a failed list counts as no live flow, with no toast), and renders the Start flow button and its blocked reason from `flowStartState` (`liveFlow` is true when a listed flow's state passes `isLiveFlow`). Tests in `tests/components/thread-start-flow.spec.ts`.\n\n**Start flow availability.** Shown on a REPO thread that is not archived when the viewer holds `fleet.flow.create`. Disabled with a reason when the thread has no published spec (`specPublished` false or `publishedSha` null) or when the thread has a live flow (listed through `useFleetFlows().list(1, threadId)` when the viewer holds `fleet.flow.read`; without that key the check is skipped and the API's 409 is shown). Only the first page (20 flows, newest first) is read; the API's `fleet.flows.threadBusy` 409 is the backstop.\n\n**Composable imports.** Components import `useFleetFlows` and `useThreadPreApproval` explicitly from `~/composables/...` (as `ThreadFlowsPanel.vue` does), because the Jest mount harness injects only its fixed auto-import list; tests supply them through the mount `alias`. Composable paths are built with `apiPath` (`lib/api-path.ts`), which the `api-path-guard` test enforces.\n\nUse the existing useFleetFlows list method; this story does not yet need createFromThread. Publication blockage takes precedence over a live flow through flowStartState. Do not impose thread-creator-only or session state restrictions, fetch without fleet.flow.read, toast read failures, paginate further or create a new stream. Add fleet.flows.start.button and blocked.notPublished/flowLive to both locales, preserving existing keys.\n\n**Scope** — In: wrapper visibility/button/reason, bounded initial or late-permission read, quiet read failure, locale copy and mount tests. Out: dialog opening/submit/navigation/pending link (US-009), request composables (US-005), pure state implementation (US-001). Starting a flow from a PROJECT or WORKSPACE thread, or from the nax entry (`POST /api/fleet/flows`).\n\n**Interface** — `ThreadStartFlow.vue` props `slug`, `thread`; consume `useFleetFlows(slug).list(1, thread.id)`, `isLiveFlow(state)` and `flowStartState(thread: ThreadDto, opts: { canCreate: boolean; liveFlow: boolean }): { visible: boolean; enabled: boolean; reason: FlowStartBlock | null }`.",
+      "acceptanceCriteria": [
+        "[unit] ThreadStartFlow on a published REPO thread, with fleet.flow.create and fleet.flow.read held and no flow listed, renders an enabled Start flow button.",
+        "[unit] Without fleet.flow.create it renders nothing.",
+        "[unit] On a thread with specPublished: false the Start flow button is disabled.",
+        "[unit] On a thread with specPublished: false the English text of fleet.flows.start.blocked.notPublished renders.",
+        "[unit] When list(1, thread.id) returns a flow in state RUNNING the Start flow button is disabled.",
+        "[unit] When list(1, thread.id) returns a flow in state RUNNING the English text of fleet.flows.start.blocked.flowLive renders.",
+        "[unit] When list returns only COMPLETED and STOPPED flows the Start flow button is enabled.",
+        "[unit] Without fleet.flow.read the component does not call list.",
+        "[unit] Without fleet.flow.read the Start flow button on a published thread is enabled.",
+        "[unit] A grant of fleet.flow.read after mount calls list(1, thread.id) once.",
+        "[unit] When list rejects, the Start flow button is enabled.",
+        "[unit] When list rejects, no toast is shown."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "permissions",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard permission-watch/read pattern, but gates both visibility and permission-scoped reads; access-control override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadFlowsPanel.vue",
+        "apps/web/tests/components/thread-flows-panel.spec.ts",
+        "apps/web/lib/fleet-flows.ts",
+        "apps/web/lib/fleet-flow-start.ts",
+        "apps/web/composables/useFleetFlows.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/threads/ThreadStartFlow.vue",
+        "apps/web/tests/components/thread-start-flow.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.flows.start.button`, `fleet.flows.start.blocked.notPublished` and `fleet.flows.start.blocked.flowLive`; existing keys are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same three keys as the English locale file so the locale parity check stays green; existing keys are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c676524754e3c714ffbf25334cac244310606081"
+    },
+    {
+      "id": "US-009",
+      "title": "Start flow submit and page mount",
+      "description": "**Goal** — Wire the Start flow dialog to creation and mount the entry control on the thread page.\n\n**Motivation** — Without them the flow is not usable from koda's web app, which is where a brainstorm thread publishes its spec set.\n\n**Approach** — `ThreadStartFlow.vue` (created by US-008) opens `ThreadStartFlowDialog` on click with `thread`, `open` and `viewerId` (`useAuth().user.value?.id ?? ''`), and on `submit` calls `createFromThread(thread.id, body)` once per submit (a submit while one is in flight is ignored): done navigates with `navigateTo('/<slug>/flows/<id>')`; pending closes the dialog, toasts `fleet.flows.toast.approvalRequested` and renders a link to `/<slug>/approvals`; an error toasts `extractApiError(error)` and keeps the dialog open. The thread page mounts it after `FleetThreadsThreadFlowsPanel`. Tests in `tests/components/thread-start-flow-submit.spec.ts`; the thread page tests gain a stub for it.\n\n**After submit.** A created flow (state `PENDING` or `APPROVED`) navigates to `/:project/flows/:id`; the flow page already links pending flows to the approvals page. An approval-gated route answer (the `fleet.flow.create` route itself needs approval) shows the `fleet.flows.toast.approvalRequested` toast and a link to `/:project/approvals`.\n\n**Composable imports.** Components import `useFleetFlows` and `useThreadPreApproval` explicitly from `~/composables/...` (as `ThreadFlowsPanel.vue` does), because the Jest mount harness injects only its fixed auto-import list; tests supply them through the mount `alias`. Composable paths are built with `apiPath` (`lib/api-path.ts`), which the `api-path-guard` test enforces.\n\nFor create errors (400 invalid input, 403, 404, 409 threadBusy/notPublished/runnerMissing/disabled/archived), toast extractApiError(error); keep the dialog mounted/open so values are kept without reset. This does not add a field-retention acceptance pin. Distinguish a returned FleetFlowDto in state PENDING (done/navigation) from a permissionKey approval-summary pending write (close/toast/link, no navigation). Use an in-flight guard released after settlement so subsequent attempts are possible.\n\nModify pages/[project]/threads/[id].vue only to mount FleetThreadsThreadStartFlow with slug and the loaded thread after the flows panel. In both tests/pages/threads-detail-page.spec.ts and tests/pages/threads-detail-actions-page.spec.ts, add a FleetThreadsThreadStartFlow stub (props slug/thread) to their explicit component maps; append page prop assertions without replacing existing assertions. Add fleet.flows.start.openApprovals to en.json and zh.json.\n\n**Scope** — In: dialog open/props/submit seam, duplicate-submit guard, done/pending/error handling, pending approvals link, page mount and both page-test stubs, preserved composer action wiring, locale link label. Out: pure availability and list reads (US-001/008), dialog internals (US-006/007), HTTP method implementation (US-005), pre-approval card mounting/reload (US-011). Playwright end-to-end tests for the start form; component and page tests cover it. US-009 only: no acceptance criterion pins that the dialog keeps its field values after a failed create; it stays open and mounted, so its form state is not reset.\n\n**Interface** — Retain `ThreadStartFlow.vue` props `slug`, `thread`; dialog props `open`, `thread: ThreadDetailDto`, `viewerId: string`, emits `update:open` and `submit` with FlowStartBody. Call `createFromThread(threadId: string, body: FlowStartBody): Promise<FlowWrite>` and navigate on `{ kind: 'done'; flow }`.",
+      "acceptanceCriteria": [
+        "[unit] Clicking the Start flow button renders the ThreadStartFlowDialog stub with open true.",
+        "[unit] The dialog stub receives the component's thread prop as thread.",
+        "[unit] With useAuth().user holding { id: 'u1' } the dialog stub receives viewerId 'u1'.",
+        "[unit] With useAuth().user null the dialog stub receives viewerId ''.",
+        "[unit] The dialog stub emitting submit with a body calls createFromThread(thread.id, body) once.",
+        "[unit] A second submit before the first createFromThread settles does not call it again.",
+        "[unit] A { kind: 'done', flow: { id: 'f9' } } answer calls navigateTo('/web/flows/f9').",
+        "[unit] A { kind: 'pending' } answer shows a success toast with the English text of fleet.flows.toast.approvalRequested.",
+        "[unit] A { kind: 'pending' } answer does not call navigateTo.",
+        "[unit] A { kind: 'pending' } answer sets the dialog stub's open to false.",
+        "[unit] After a { kind: 'pending' } answer a link to /web/approvals renders.",
+        "[unit] A rejected createFromThread shows an error toast with extractApiError(error)'s text, including 400 invalid input, 403, 404 and 409 threadBusy, notPublished, runnerMissing, disabled or archived answers.",
+        "[unit] A rejected createFromThread leaves the dialog stub's open true.",
+        "[unit] Mounting pages/[project]/threads/[id].vue renders the FleetThreadsThreadStartFlow stub with the page's slug.",
+        "[unit] On that page the FleetThreadsThreadStartFlow stub receives the loaded thread."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "integration",
+        "preapproval",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-007",
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The supplied dialog/composable and existing FlowAnswerForm feedback pattern make this standard asynchronous UI wiring plus additive page stubs; auth identity and approval outcomes retain strict security-path isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadStartFlow.vue",
+        "apps/web/components/fleet/flows/FlowAnswerForm.vue",
+        "apps/web/composables/useFleetFlows.ts",
+        "apps/web/pages/[project]/threads/[id].vue",
+        "apps/web/tests/pages/threads-detail-page.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/thread-start-flow-submit.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "mounts `FleetThreadsThreadStartFlow` with `slug` and the thread after `FleetThreadsThreadFlowsPanel`; nothing else on the page changes."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "its explicit `components` stub map gains a `FleetThreadsThreadStartFlow` stub (props `slug`, `thread`) and cases asserting the stub's props; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "its explicit `components` stub map gains the same `FleetThreadsThreadStartFlow` stub; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.flows.start.openApprovals`; existing keys are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains `fleet.flows.start.openApprovals` so the locale parity check stays green; existing keys are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "19c55e1d3b400ea48fc7e32dfb211c41bd629aa7"
+    },
+    {
+      "id": "US-010",
+      "title": "Pre-approval card display",
+      "description": "**Goal** — Show the thread's permission-gated one-flow pre-approval card with exact cap and local set time.\n\n**Motivation** — F1 (`fleet-flow-record`) built the thread entry route and the pre-approval routes, and F6 (`fleet-flow-page`) built the pages that read and act on an existing flow, but no screen creates a flow or sets the tick.\n\n**Approach** — New `components/fleet/threads/ThreadPreApprovalCard.vue` (props `slug`, `thread`; emits `changed`): visible on a REPO thread that is not archived when the viewer holds `fleet.thread.preapprove`. With a tick it shows the cap with `usd(tick.costCapUsd)`, the set time as `new Date(tick.at).toLocaleString()` and a Clear button; without one, a cap input and a Set button. Tests in `tests/components/thread-preapproval-card.spec.ts`.\n\n**Money.** The pre-approval cap arrives as a 4-place string and is shown with `usd()` from `lib/fleet-analytics-format.ts`, never re-rounded (web context rule A7).\n\n**Pre-approval card.** Shown on a REPO thread that is not archived when the viewer holds `fleet.thread.preapprove`. With a tick it shows the cap and the local date-time the tick was set, and a Clear button; without one, a cap input and a Set button. A done write reloads the thread; a pending write shows the approval toast.\n\nThis story implements display only; US-011 implements the writes/reload/pending behavior. With a tick do not render Set. Without one render cap input and Set, not a setter lookup. Use permission keys from useProjectPermissions(slug), not user role names, and do not add a publication requirement. Add fleet.flows.preapproval card keys title, cap, setAt, set, clear, none in en.json and zh.json, preserving the validation key from US-003 if already present and all existing keys.\n\n**Scope** — In: card visibility/content/buttons, exact money and date display, English/Chinese card labels and mount tests. Out: set/clear validation/mutations/toasts (US-011), composable implementation (US-005), page mount/reload seam (US-011). Project-wide auto-approve; the tick is per thread (user ruling 4). Showing the tick setter's name instead of the cap and date; the card does not resolve user ids.\n\n**Interface** — `ThreadPreApprovalCard.vue` props `slug`, `thread`; emits `changed`. Consume `ThreadPreApproval { userId: string; at: string; costCapUsd: string }` through `thread.preApproval` and `usd(tick.costCapUsd)`.",
+      "acceptanceCriteria": [
+        "[unit] ThreadPreApprovalCard on a REPO thread without a tick, with fleet.thread.preapprove held, renders the Set button.",
+        "[unit] On that thread it renders the cap input.",
+        "[unit] Without fleet.thread.preapprove it renders nothing.",
+        "[unit] On an archived thread it renders nothing.",
+        "[unit] On a PROJECT thread it renders nothing.",
+        "[unit] On a thread with tick { userId: 'u1', at: '2026-11-09T06:36:35.837Z', costCapUsd: '3.0000' } it renders the cap as $3.0000 (usd() of the string, not re-rounded).",
+        "[unit] On that thread it renders the set time as new Date('2026-11-09T06:36:35.837Z').toLocaleString().",
+        "[unit] On that thread it renders a Clear button.",
+        "[unit] On that thread it renders no Set button."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "preapproval",
+        "permissions",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard presentational card plus locale additions, but permission-gated approval controls invoke the access-control security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadControls.vue",
+        "apps/web/lib/fleet-analytics-format.ts",
+        "apps/web/tests/helpers/fleet-harness.ts",
+        "apps/web/lib/thread-types.ts",
+        "apps/web/composables/usePermissions.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/threads/ThreadPreApprovalCard.vue",
+        "apps/web/tests/components/thread-preapproval-card.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains the `fleet.flows.preapproval` card keys (title, cap, setAt, set, clear, none); existing keys are unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same `fleet.flows.preapproval` card keys as the English locale file so the locale parity check stays green; existing keys are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1c5118af2c3f6630c21194d6fbbe785f0728ba14"
+    },
+    {
+      "id": "US-011",
+      "title": "Pre-approval card actions and page mount",
+      "description": "**Goal** — Implement validated pre-approval Set/Clear writes and wire completed mutations to thread reload on the page.\n\n**Motivation** — Every fleet flow so far (flows 6 to 14) was started by hand with `curl` against the API, with a hand-written JSON body, and approved through a second API call.\n\n**Approach** — `ThreadPreApprovalCard.vue` (created by US-010) validates the cap with `buildPreApprovalSchema` and calls (imported explicitly from `~/composables/useThreadPreApproval`) `useThreadPreApproval(slug).set(thread.id, cap)` on Set and `clear(thread.id)` on Clear, ignoring clicks while a write is in flight. A done write emits `changed`; pending toasts `fleet.flows.toast.approvalRequested`; an error toasts `extractApiError(error)`; neither emits `changed`. The thread page mounts it after `FleetThreadsThreadStartFlow` and calls `controller.reloadThread()` on `changed`. Tests in `tests/components/thread-preapproval-card-actions.spec.ts`; the thread page tests gain a stub for it.\n\n**Composable imports.** Components import `useFleetFlows` and `useThreadPreApproval` explicitly from `~/composables/...` (as `ThreadFlowsPanel.vue` does), because the Jest mount harness injects only its fixed auto-import list; tests supply them through the mount `alias`. Composable paths are built with `apiPath` (`lib/api-path.ts`), which the `api-path-guard` test enforces.\n\n**Pre-approval card.** Shown on a REPO thread that is not archived when the viewer holds `fleet.thread.preapprove`. With a tick it shows the cap and the local date-time the tick was set, and a Clear button; without one, a cap input and a Set button. A done write reloads the thread; a pending write shows the approval toast.\n\nPre-approval set/clear answers an error: Toast `extractApiError(error)`; the card keeps its state. Pre-approval set/clear answers an approval request summary: Toast `fleet.flows.toast.approvalRequested`; the thread is not reloaded. Validate Set through buildPreApprovalSchema(t), showing fleet.flows.preapproval.validation for invalid caps and sending nothing; Clear needs no cap validation. Emit changed only on done and let the page fetch persisted state, rather than editing the thread prop or treating approval requests as applied writes. A shared in-flight guard ignores both action buttons until settlement.\n\nMount FleetThreadsThreadPreApprovalCard with slug and the loaded thread immediately after FleetThreadsThreadStartFlow; wire changed to controller.reloadThread(). Add a stub with props slug/thread and changed emit to both tests/pages/threads-detail-page.spec.ts and tests/pages/threads-detail-actions-page.spec.ts; append page assertions for props and reload, preserving existing assertions. No further page behavior changes. Preserve the display and locale labels created by US-010.\n\n**Scope** — In: cap validation, set/clear calls, in-flight guard, done/pending/error feedback, changed emission, page mount/reload seam, preservation of the existing StartFlow page props, both page-test stubs and component tests. Out: card display/visibility redesign (US-010), schema implementation (US-003), HTTP/composable implementation (US-005), start-flow submission (US-009). Project-wide auto-approve; the tick is per thread (user ruling 4). Showing the tick setter's name instead of the cap and date; the card does not resolve user ids.\n\n**Interface** — Retain `ThreadPreApprovalCard.vue` props `slug`, `thread`; emits `changed`. Consume `buildPreApprovalSchema(t)` and `useThreadPreApproval(slug)` returning `set(threadId, costCapUsd: number): Promise<PreApprovalWrite>` and `clear(threadId): Promise<PreApprovalWrite>`, with `type PreApprovalWrite = { kind: 'done' } | { kind: 'pending'; request: ApprovalRequestSummary }`.",
+      "acceptanceCriteria": [
+        "[unit] Clicking Set with the cap input at 0 renders the English text of fleet.flows.preapproval.validation.",
+        "[unit] Clicking Set with the cap input at 0 does not call set.",
+        "[unit] Clicking Set with the cap input at 3 calls useThreadPreApproval('web').set(thread.id, 3) once.",
+        "[unit] A { kind: 'done' } answer to set emits changed once.",
+        "[unit] Clicking Clear calls clear(thread.id) once.",
+        "[unit] A { kind: 'done' } answer to clear emits changed once.",
+        "[unit] A { kind: 'pending' } answer to set shows a success toast with the English text of fleet.flows.toast.approvalRequested.",
+        "[unit] A { kind: 'pending' } answer to set does not emit changed.",
+        "[unit] A rejected clear shows an error toast with extractApiError(error)'s text.",
+        "[unit] A rejected clear does not emit changed.",
+        "[unit] While a set has not settled, a second click on Set does not call set again.",
+        "[unit] Mounting pages/[project]/threads/[id].vue renders the FleetThreadsThreadPreApprovalCard stub with the page's slug.",
+        "[unit] On that page the FleetThreadsThreadPreApprovalCard stub receives the loaded thread.",
+        "[unit] On that page the card stub emitting changed calls the thread controller's reloadThread once.",
+        "[unit] A { kind: 'pending' } answer to clear does not emit changed."
+      ],
+      "tags": [
+        "web",
+        "fleet-flow-start-form",
+        "preapproval",
+        "integration"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-005",
+        "US-009",
+        "US-010"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends a supplied card with an existing schema/composable, a shared write guard and a page event binding across five files; approval-authority mutation still requires strict security-path isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadPreApprovalCard.vue",
+        "apps/web/composables/useThreadPreApproval.ts",
+        "apps/web/lib/fleet-flow-start-form.ts",
+        "apps/web/pages/[project]/threads/[id].vue",
+        "apps/web/tests/pages/threads-detail-page.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/thread-preapproval-card-actions.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "mounts `FleetThreadsThreadPreApprovalCard` with `slug` and the thread after `FleetThreadsThreadStartFlow`, and its `changed` event calls `controller.reloadThread()`; nothing else on the page changes."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "its `components` stub map gains a `FleetThreadsThreadPreApprovalCard` stub that can emit `changed`, and cases assert its props and that the page reloads the thread on it; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "its `components` stub map gains the same `FleetThreadsThreadPreApprovalCard` stub; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "878dced5c07a2a9f71e6bd810d20d63daa39e2c2"
+    }
+  ],
+  "analysis": "Architecture and discovery: This is an additive enhancement to the existing human-facing web client, not greenfield work. Codebase-memory MCP tools are unavailable in this session, so discovery used direct source reads and text search at the supplied execution root. The automatically detected Next.js/Express labels in the prompt are inaccurate: apps/web/package.json:33 declares Nuxt 4.6.2 and apps/web/package.json:38 declares Vue 3; .nax/mono/apps/web/context.md:19 identifies Nuxt SSR with the existing root-level components/pages/composables layout. The API is the existing NestJS/Fastify system of record, not a new Express application. Implement only apps/web changes; do not change API DTOs, routes, Prisma, OpenAPI or generated clients. The phrase 'no DTO change' in feature exclusions refers to the API contract; the explicitly required hand-written web ThreadDto addition remains in scope. No database migration or client regeneration is needed.\n\nExisting wire types and impact: apps/web/lib/thread-types.ts:141 defines ThreadDto, :183 extends it as ThreadDetailDto, :27 defines native/acp backends, and :121 defines lastWrite's discriminated union. ThreadDto currently ends with writtenPaths, publishedSha, specPublished and lastWrite, without preApproval. Add the required exported ThreadPreApproval interface and required nullable preApproval property without changing existing fields. The API already exposes this nullable object at apps/api/src/fleet/threads/dto/thread.dto.ts:64. This corrects a web wire mirror rather than changing server behavior. ThreadDto/ThreadDetailDto are consumed by useThreads, useWorkspaceThreads, useThreadHandoffJobs, the thread controller, thread view/handoff/timeline helpers, and many thread components. apps/web/lib/thread-controller.ts:106 and :121 assign fetched ThreadDetailDto directly, so no new controller mapping is needed. Adding a required field can expose old typed fixtures: examples include apps/web/tests/pages/threads-detail-page.spec.ts:99, tests/pages/threads-detail-actions-page.spec.ts:30, tests/lib/thread-handoff.spec.ts:31, tests/lib/thread-controller.spec.ts:29, tests/composables/useThread.spec.ts:24, tests/composables/useWorkspaceThread.spec.ts:29, tests/composables/useThreads.spec.ts:4 and tests/composables/useWorkspaceThreads.spec.ts:9, plus component fixtures discovered by text search. If the required field exposes typing failures, add preApproval: null to affected existing fixture constructors without weakening their assertions or making the wire field optional. These are compatibility adjustments within US-001, not new stories. Legacy runtime fixtures may still omit the field; do not use that as a reason to change the specified nullable contract.\n\nPure logic: New fleet-flow-start.ts is Vue-free. Prefill the thread's feature/specPath first, then only matching .nax/features/<name>/spec.md paths from lastWrite.kind === 'published', de-duplicated by name in path order. Do not use writtenPaths, read documents, fetch historic publishes, or truncate into an invented pagination scheme. Chain each subsequent prefilled row to the immediately previous row. Existing handoff availability is pure and ordered at apps/web/lib/thread-handoff.ts:27 and :63, but start-flow availability has its own explicit REPO/not-archived/create-permission rule and publication-before-live-flow reason precedence; do not copy unrelated handoff/session/creator restrictions. fleet-flow-start-defaults.ts derives models only from native backends and computes an advisory tickHint in none/notYours/exceeded/covers order using ten-thousandth integers. The authoritative API coversFlow at apps/api/src/fleet/flows/fleet-flows.service.ts:358 checks actor ownership and Decimal caps; lockThreadEntry at :307 pins the thread and refuses a live flow, and consumeTick at :293 consumes the one-flow tick. The web hint is not authorization, does not consume the tick, and must not promise approval beyond the existing API. A null auth user maps to viewerId ''.\n\nValidation and request shape: apps/web/lib/thread-handoff-form.ts:18 demonstrates a translation-injected zod builder; apps/web/package.json:37-41 establishes vee-validate and zod 3.24. Keep the feature-specific specified cap test Math.round(x * 10000) / 10000 === x rather than copying the handoff schema's tolerance-based test. Reuse FEATURE_RE from apps/web/lib/fleet-dispatch.ts:8 and the additional name '..' exclusion already used at :49. The read-only server input parser apps/api/src/fleet/flows/flow-input.ts:23 defines the exact role regex, :40 limits features to 1..20, :47 bounds spec paths and rejects unsafe paths, :49 validates dependencies, and :56-59 validates roles/cap. The new web schema trims feature names/spec paths/roles before checks, compares trimmed names, allows dependencies only on earlier names, coerces cap with Number(), and validates >0, <=1000, at most four decimals. Reject absolute, non-.md and traversal paths and enforce the 300-character bound. Keep duplicate/dependency refinements on the features array so invalid roles/cap cannot suppress them. Error order is rows top-to-bottom, reviewer, supervisor, cap; render only the first issue. FlowStartFormValues deliberately accepts number|string cap; parsed output is passed to toFlowStartBody, which does not trim again, converts cap to number and copies arrays without mutating input. US-003 still implements the 300-character and positive-cap rules even though its explicit ACs intentionally do not pin those cases.\n\nAPI integration: apps/web/composables/useFleetFlows.ts:6 exports FlowWrite, :15 provides the thread-filtered 20-row list, :23 maps writes through isPendingFlowAnswer, and :32 returns the current five methods. Add createFromThread through that same write helper without changing existing methods. apps/web/lib/fleet-flows.ts:106 defines all live states (PENDING, APPROVED, RUNNING, WAITING_MERGE, WAITING_ANSWER), and :181 discriminates an approval summary by permissionKey. A saved flow whose state is PENDING is still a done write and navigates; it must not be confused with a pending approval-summary response. New useThreadPreApproval maps PUT/DELETE responses to done without replacing the thread locally; only the card's done event causes a thread reload. Approval summaries from all three writes mean the route itself was approval-gated, not that the mutation happened. Errors propagate unchanged from composables. apps/web/lib/api-path.ts:11 encodes dynamic path segments and refuses empty ones; use apiPath directly without manual double encoding. apps/web/tests/lib/api-path-guard.spec.ts:7-16 and :56 enforce this across composables/components/pages. useApi already unwraps Nathapp envelopes (apps/web/composables/useApi.ts:48), extracts API errors (:72), and selects server/browser base URLs (:156); callers supply /projects/... rather than adding another /api prefix. Existing composable coverage at apps/web/tests/composables/useFleetFlows.spec.ts:16-70 tests list/get/overview/stop/answer and identical rejection objects; append creation cases without replacing those anchors.\n\nComponents, permission hydration and form lifecycle: apps/web/components/fleet/threads/ThreadHandoffDialog.vue:1-37 is the Shadcn Dialog + toTypedSchema/useForm + explicit first-issue pattern. New ThreadStartFlowDialog receives open/thread/viewerId, resets from the current thread on every opening, edits features and dependency arrays, and gains roles/cap/hint/submit in US-007. Use native dependency checkboxes as apps/web/components/approvals/ApprovalPolicyDialog.vue:110 demonstrates, not a nonexistent Checkbox primitive. Feature rename/removal must update later references while preserving row order; appended rows have empty names/paths and no dependencies. Keep the dialog mounted on failed creation to retain values; do not reset on a rejected write or a normal prop refresh while it stays open. Reset only at the next open. Parent write guards ignore duplicate submits while unresolved. Start-flow availability reads permission keys rather than roles or creator status. apps/web/components/fleet/threads/ThreadFlowsPanel.vue:2-19 explicitly imports useFleetFlows and fetches after mount or a late fleet.flow.read grant; mirror its bounded permission-watch approach without duplicate mount reads or an unfiltered read. If read is absent or listing fails, assume no known live flow and leave the API's threadBusy 409 as the backstop. Read only list(1, thread.id), never poll or exhaust pagination for this feature. Existing tests/components/thread-flows-panel.spec.ts:8-21 shows alias-based mocking and quiet failure behavior. ThreadPreApprovalCard is REPO/not-archived/preapprove-key gated independently of publication and flow creation; with a tick display usd(string) and local date-time, with no tick show cap entry/Set. apps/web/lib/fleet-analytics-format.ts:4 preserves a four-place money string verbatim; no toFixed/re-rounding in card display. Do not resolve the setter's name. Actions validate before writing, ignore concurrent clicks, emit changed only on done, and keep state on errors.\n\nPage seam: apps/web/pages/[project]/threads/[id].vue:30 creates the controller; :105-106 mounts the header and existing flows panel. Insert FleetThreadsThreadStartFlow after that panel in US-009 and FleetThreadsThreadPreApprovalCard immediately after StartFlow in US-011, passing slug and controller.thread.value and wiring changed to controller.reloadThread(). Preserve all existing controls, event handlers, handoff jobs, streaming and approval rendering. The page tests have explicit component maps (apps/web/tests/pages/threads-detail-page.spec.ts:199-210 and the corresponding actions-page test); both need inert stubs for each new child or they may accidentally mount networking code or emit unresolved-component warnings. Pin props on the page and changed->reload on the card; do not assert only that a source tag exists.\n\nTesting and locale seams: Component tests run under Jest in node with the custom Vue renderer (apps/web/tests/helpers/mount-sfc.ts:1-13 and :122 onward), not a browser/Next testing stack. Nuxt auto-import injection is a fixed list, so explicitly import useFleetFlows and useThreadPreApproval in production components and supply module aliases in tests; do not modify the harness to paper over missing imports. uiStubs and toastRecorder/enI18n in apps/web/tests/helpers/fleet-harness.ts:80, :185 and :211 allow real English text and observable emitted events. Use reactive permission refs for the late-grant test, deferred promises for write concurrency, native input change events for checkboxes, and stub Dialog/open props rather than relying on DOM APIs. Add the exact per-story Jest files listed in expectedFiles; append page/composable assertions without deleting existing assertions. Update both locales incrementally under fleet.flows.start/preapproval; the current flow locale subtree begins at apps/web/i18n/locales/en.json:880 and already contains fleet.flows.toast.approvalRequested at :895. Locale parity and api-path guard remain regression checks, not acceptance criteria. No Playwright start-form suite is requested. Standard web test command is bun run test (Jest plus existing real-sanitizer harnesses, apps/web/package.json:14-15); targeted Jest files can be run with bunx jest. Generated acceptance material is separate under apps/web/.nax/features/fleet-flow-start-form and must not be edited or copied into tests; .nax/mono/apps/web/context.md:86 explains its bun test command. No tests were executed while drafting this PRD. Keep untrusted thread/model/path text in interpolation and existing semantic CSS tokens; no v-html or new navigation destination is needed. docs/ux/redesign/MASTER-PLAN.md:35-44 sets existing UI constraints; this feature adds page-local controls, not a shell/navigation/token redesign.\n\nOrdering and risks: Preserve exactly the binding story ids/workdirs/dependencies. The binding table intentionally says US-006 dependencies are not stated, despite the narrative listing US-001 and US-003. Its dependencies array is therefore empty; do not silently add edges. This is a scheduling hazard: US-006 consumes their helpers, so execute the numbered stories in a sequence that has those outputs available or coordinate their availability before running US-006. US-006 contextFiles now includes the two helper paths explicitly recommended by the spec, as required by the refinement audit; they are outputs of US-001/US-003, not US-006 outputs. Because the binding table does not declare those dependencies, these two paths will be missing if US-006 is scheduled before their owners complete. This is an unresolved input scheduling inconsistency, not permission to create duplicate helpers, silently change the binding dependencies, or pretend the paths exist today. The orchestrator must make the numbered prerequisite outputs available before executing this story. US-007 can read the dialog created by its declared US-006 dependency; US-009 can read the wrapper created by US-008; US-011 can read the card created by US-010. Shared locale files across many stories and page/stub maps across US-009/US-011 are merge hotspots: make additive edits and preserve preceding keys/components. No new abstraction, package or backend service is required. The main behavioral risks are stale/late permissions, advisory live-flow races, pending-flow versus pending-route confusion, error-triggered form resets, decimal float comparisons, validation issue precedence, and dangling dependencies after rename/removal. Security-related visibility/ownership/preapproval stories use three-session-tdd even where implementation complexity is otherwise medium. Every explicit spec AC is preserved in its assigned story. Failure Handling rows are mapped to US-007 invalid-form behavior, US-008 quiet read failure, US-009 create errors/pending outcomes and US-011 set/clear errors/pending outcomes. The initial extra criteria in those stories enumerate the specified failure rows. The second-turn refinement additionally requires negative-path and backward-compatibility assertions: US-004 now pins no mutation TypeError on frozen valid parsed input, US-006 pins publish_failed prefill behavior at the component seam, US-005 pins the existing five composable methods, US-009 pins existing composer dispatch, and US-011 pins the preceding StartFlow page props. These audit additions do not invent invalid-input semantics for the parsed-only mapper. The explicit exclusions on US-003 and US-009 remain unpinned as requested. Done means a permitted human can create a flow from a published REPO thread using an editable, validated spec set, navigate to a returned flow or follow an approval-request link, and set/clear a thread tick with correct done-versus-pending behavior, all without changing existing API contracts or thread-page behavior.\n\nSecond-turn preservation audit: All 134 explicit spec criteria were compared individually against the criteria in their original story; each spec ordinal maps to the same ordinal in that story's acceptanceCriteria, before appended failure/regression assertions. Enumeration of preserved spec ordinals: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-002 [1,2,3,4,5,6,7,8,9,10]; US-003 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-004 [1,2,3,4]; US-005 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-007 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-008 [1,2,3,4,5,6,7,8,9,10,11,12]; US-009 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-010 [1,2,3,4,5,6,7,8,9]; US-011 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]. Qualifiers preserved include US-002/10 viewer-before-cap precedence, US-004/3 non-shared dependency array, US-004/4 input unchanged and US-010/6 exact usd string without re-rounding. US-009/12 retains its rejection-to-extracted-error assertion while explicitly enumerating the specified error statuses. No deprecated file-check criteria occur in this spec. Every criterion observes returned data, errors, rendered content/props, calls or emitted events; none is a build gate or test-existence assertion. Negative-path coverage is present in every story: US-001/13 failed publish, US-002/9 unauthorized hint, US-003/2 invalid name, US-004/5 frozen input mutation-failure prevention, US-005/4 identical rejection, US-006/15 failed-publish dialog prefill, US-007/6 invalid form emits nothing, US-008/11-12 failed list, US-009/12-13 rejected create, US-010/3 denied card, US-011/9-10 failed clear. Existing-method regressions are pinned in US-005/14-18, existing composer wiring in US-009/16 and the earlier flow-start page seam in US-011/21. All 11 top-level exclusions are retained verbatim from the feature-level section, including its explicitly US-003-only and US-009-only items; there are no separate story-local exclusion blocks to hoist. All binding workdirs/dependency arrays are unchanged, and every referenced id exists. Context lists retain all spec-recommended paths subject to five entries; the US-006 missing-edge exception is explicitly recorded above. Complexity was reduced where existing dialog and write-feedback patterns suffice, while mandated security strategy overrides remain. This is a source/spec audit, not a claim that implementation tests or a JSON parser were executed.",
+  "outOfScope": [
+    "Any API, DTO, OpenAPI or migration change; the thread entry and pre-approval routes are used as they are.",
+    "Reading the design doc to prefill feature dependencies; prefilled rows depend on the row before them and the user edits them.",
+    "Listing specs from publishes before the thread's last publish; the user adds those rows by hand.",
+    "Starting a flow from a PROJECT or WORKSPACE thread, or from the nax entry (`POST /api/fleet/flows`).",
+    "A model picker sourced from runner-advertised models for the role inputs; roles are free text.",
+    "Project-wide auto-approve; the tick is per thread (user ruling 4).",
+    "Reordering feature rows by drag and drop; rows are added at the end and removed individually.",
+    "Playwright end-to-end tests for the start form; component and page tests cover it.",
+    "Showing the tick setter's name instead of the cap and date; the card does not resolve user ids.",
+    "US-003 only: no acceptance criterion pins the 300-character spec path limit or a zero or negative flow cap; the schema enforces both and the API refuses them.",
+    "US-009 only: no acceptance criterion pins that the dialog keeps its field values after a failed create; it stays open and mounted, so its form state is not reset."
+  ],
+  "routingProfile": "native-codex-ds"
+}

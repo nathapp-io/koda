@@ -880,6 +880,43 @@
     "flows": {
       "list": { "title": "Flows", "empty": "No flows yet", "state": "State", "features": "Features", "spend": "Spend / cap", "createdAt": "Created", "previous": "Previous", "next": "Next", "pagination": "Flow pages" },
       "panel": { "title": "Flows" },
+      "start": {
+        "title": "Start flow",
+        "button": "Start flow",
+        "blocked": {
+          "notPublished": "This thread has no published spec to start a flow from.",
+          "flowLive": "A flow is already active for this thread."
+        },
+        "feature": "Feature",
+        "specPath": "Spec path",
+        "dependsOn": "Depends on",
+        "addRow": "Add feature",
+        "removeRow": "Remove feature",
+        "reviewer": "Reviewer model",
+        "supervisor": "Supervisor model",
+        "costCap": "Cost cap (USD)",
+        "submit": "Start flow",
+        "openApprovals": "Open approvals",
+        "tick": { "none": "No pre-approval is set; this flow will request approval.", "notYours": "This pre-approval does not belong to you or the thread creator; approval may be requested.", "exceeded": "This flow exceeds the pre-approved cost cap; approval may be requested.", "covers": "This pre-approval covers this flow; it can start without asking." },
+        "validation": {
+          "feature": "Enter a valid feature name.",
+          "featureDuplicate": "Feature names must be unique.",
+          "specPath": "Enter a valid relative .md spec path.",
+          "dependsOn": "Dependencies must name an earlier feature.",
+          "featuresCount": "Add between 1 and 20 features.",
+          "role": "Enter a valid role model.",
+          "costCap": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places."
+        }
+      },
+      "preapproval": {
+        "title": "Thread pre-approval",
+        "cap": "Cost cap",
+        "setAt": "Set at",
+        "set": "Set",
+        "clear": "Clear",
+        "none": "No pre-approval is set.",
+        "validation": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places."
+      },
       "stop": {
         "button": "Stop flow",
         "confirm": "Stop this flow?"

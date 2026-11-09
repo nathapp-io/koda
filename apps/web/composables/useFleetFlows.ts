@@ -2,6 +2,7 @@ import { apiPath } from '~/lib/api-path'
 import { isPendingFlowAnswer } from '~/lib/fleet-flows'
 import type { FleetFlowDto, FleetFlowOverviewDto, FleetFlowPage } from '~/lib/fleet-flows'
 import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+import type { FlowStartBody } from '~/lib/fleet-flow-start-body'
 
 export type FlowWrite =
   | { kind: 'done'; flow: FleetFlowDto }
@@ -29,5 +30,8 @@ export function useFleetFlows(slug: string) {
   const answer = (flowId: string, jobId: string, answers: { id: string; answer: string }[]): Promise<FlowWrite> =>
     write($api.post<FleetFlowDto | ApprovalRequestSummary>(`${item(flowId)}/answers`, { jobId, answers }))
 
-  return { list, get, overview, stop, answer }
+  const createFromThread = (threadId: string, body: FlowStartBody): Promise<FlowWrite> =>
+    write($api.post<FleetFlowDto | ApprovalRequestSummary>(apiPath`/projects/${slug}/threads/${threadId}/flows`, { ...body }))
+
+  return { list, get, overview, stop, answer, createFromThread }
 }

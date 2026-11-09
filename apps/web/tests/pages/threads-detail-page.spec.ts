@@ -202,6 +202,8 @@ function mountPage(over: {
       ThreadHeader: header,
       FleetThreadsThreadHeader: header,
       FleetThreadsThreadFlowsPanel: { props: ['slug', 'threadId'], template: '<aside data-testid="thread-flows-panel" :data-slug="slug" :data-thread-id="threadId" />' },
+      FleetThreadsThreadStartFlow: { props: ['slug', 'thread'], template: '<aside data-testid="thread-start-flow" :data-slug="slug" :data-thread-id="thread.id" />' },
+      FleetThreadsThreadPreApprovalCard: { props: ['slug', 'thread'], emits: ['changed'], template: '<button data-testid="thread-preapproval-card" :data-slug="slug" :data-thread-id="thread.id" @click="$emit(\'changed\')" />' },
       ThreadTimeline: timeline,
       FleetThreadsThreadTimeline: timeline,
       ThreadMessage: threadMessage,
@@ -268,6 +270,27 @@ function headTitle(head: CapturedHead): unknown {
 }
 
 describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
+  test('US-009 AC-14..15: mounts Start flow with the project slug and loaded thread', async () => {
+    const loaded = threadDetail({ id: 'loaded-thread' })
+    const m = mountPage({ thread: loaded })
+    const start = m.app.one('[data-testid="thread-start-flow"]')
+    expect(start?.props['data-slug']).toBe('web')
+    expect(start?.props['data-thread-id']).toBe('loaded-thread')
+    m.app.unmount()
+  })
+
+  test('US-011 AC-12..14: mounts pre-approval card with loaded props and reloads on changed', async () => {
+    const loaded = threadDetail({ id: 'loaded-thread' })
+    const m = mountPage({ thread: loaded })
+    const card = m.app.one('[data-testid="thread-preapproval-card"]')
+    expect(card?.props['data-slug']).toBe('web')
+    expect(card?.props['data-thread-id']).toBe('loaded-thread')
+    expect(card?.props.onClick).toBeDefined()
+    if (card?.props.onClick) (card.props.onClick as () => void)()
+    expect(m.reloadThread).toHaveBeenCalledTimes(1)
+    m.app.unmount()
+  })
+
   test('US-010 AC-10: mounts the flow panel for the current project and thread', async () => {
     const m = mountPage()
     const panel = m.app.one('[data-testid="thread-flows-panel"]')

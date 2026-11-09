@@ -47,6 +47,45 @@ describe('useFleetFlows', () => {
     expect(await api.stop('f1')).toEqual({ kind: 'pending', request })
   })
 
+  test('createFromThread posts the exact body to the thread route', async () => {
+    const post = jest.fn(async () => flow)
+    withApi({ post })
+    const { useFleetFlows } = await import(composablePath)
+    const body = { features: [{ feature: 'f-min', specPath: '.nax/features/f-min/spec.md', dependsOn: [] }], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 }
+    await useFleetFlows('web').createFromThread('t1', body)
+    expect(post).toHaveBeenCalledWith('/projects/web/threads/t1/flows', body)
+  })
+
+  test('createFromThread maps a flow answer to done', async () => {
+    const post = jest.fn(async () => flow)
+    withApi({ post })
+    const { useFleetFlows } = await import(composablePath)
+    expect(await useFleetFlows('web').createFromThread('t1', { features: [], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 })).toEqual({ kind: 'done', flow })
+  })
+
+  test('createFromThread maps an approval answer to pending', async () => {
+    const post = jest.fn(async () => request)
+    withApi({ post })
+    const { useFleetFlows } = await import(composablePath)
+    expect(await useFleetFlows('web').createFromThread('t1', { features: [], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 })).toEqual({ kind: 'pending', request })
+  })
+
+  test('createFromThread preserves the API error object', async () => {
+    const error = new Error('create failed')
+    const post = jest.fn(async () => { throw error })
+    withApi({ post })
+    const { useFleetFlows } = await import(composablePath)
+    await expect(useFleetFlows('web').createFromThread('t1', { features: [], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 })).rejects.toBe(error)
+  })
+
+  test('createFromThread encodes thread ids as one path segment', async () => {
+    const post = jest.fn(async () => flow)
+    withApi({ post })
+    const { useFleetFlows } = await import(composablePath)
+    await useFleetFlows('web').createFromThread('a/b', { features: [], roles: { reviewer: 'm', supervisor: 'm' }, costCapUsd: 2 })
+    expect(post).toHaveBeenCalledWith('/projects/web/threads/a%2Fb/flows', expect.anything())
+  })
+
   test('answer posts exactly the answer body and maps pending response', async () => {
     const post = jest.fn(async () => request)
     withApi({ post })
