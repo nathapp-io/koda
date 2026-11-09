@@ -13,6 +13,7 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
   let prisma: MockPrisma;
   let repo: PrismaFleetFlowStepRepository;
   let queryRaw: ReturnType<typeof vi.fn>;
+  let transactionManager: { run: ReturnType<typeof vi.fn> };
 
   const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'feat/f', command: 'RUN', feature: 'f',
@@ -29,7 +30,8 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
     prisma = createMockPrismaService({ fn: vi.fn });
     queryRaw = vi.fn().mockResolvedValue([]);
     prisma.client.$queryRaw = queryRaw as never;
-    repo = new PrismaFleetFlowStepRepository(prisma as PrismaService<never>);
+    transactionManager = { run: vi.fn((work: () => Promise<unknown>) => work()) };
+    repo = new PrismaFleetFlowStepRepository(transactionManager as never, prisma as PrismaService<never>);
   });
 
   /** The `Prisma.Sql` a call carried; `values` are the parameters, `strings` the literal SQL halves. */
@@ -37,6 +39,19 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
     const sql = queryRaw.mock.calls[call][0] as unknown as { strings: string[]; values: unknown[] };
     return { text: sql.strings.join('?'), values: sql.values };
   };
+
+  it('records calls and applicable SHAs inside the transaction manager', async () => {
+    const featureUpdate = vi.fn().mockResolvedValue({});
+    const flowUpdate = vi.fn().mockResolvedValue({});
+    (prisma.client as unknown as Record<string, unknown>).fleetFlowFeature = { update: featureUpdate };
+    (prisma.client as unknown as Record<string, unknown>).fleetFlow = { update: flowUpdate };
+
+    await repo.recordCalls('flow-1', 'feature-1', 'job-1', 'sha-1', { setSha: true });
+
+    expect(transactionManager.run).toHaveBeenCalledTimes(1);
+    expect(featureUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'feature-1' }, data: { callsJobId: 'job-1' } });
+    expect(flowUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'flow-1' }, data: { specSha: 'sha-1', setSha: 'sha-1' } });
+  });
 
   it('B2: persists the PLAN output branch without approving a new sha', async () => {
     const update = vi.fn().mockResolvedValue({});
