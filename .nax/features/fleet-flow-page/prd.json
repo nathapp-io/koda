@@ -3,7 +3,7 @@
   "feature": "fleet-flow-page",
   "branchName": "feat/fleet-flow-page",
   "createdAt": "2026-11-09T00:00:00.000Z",
-  "updatedAt": "2026-11-09T09:21:15.337Z",
+  "updatedAt": "2026-11-09T09:29:49.270Z",
   "userStories": [
     {
       "id": "US-001",
@@ -269,14 +269,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Pure typed transformations and literal maps in one source module with ordinary Jest tests; the pending marker classifies responses and does not authorize actions."
+        "reasoning": "Pure typed transformations and literal maps in one source module with ordinary Jest tests; the pending marker classifies responses and does not authorize actions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useProviderCredentials.ts",
@@ -297,7 +300,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "005a6c6a1f1c430a5a9366a44c8f570b6c73b556"
     },
     {
       "id": "US-005",
