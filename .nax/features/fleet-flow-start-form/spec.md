@@ -225,7 +225,7 @@ New `components/fleet/threads/ThreadStartFlowDialog.vue` (Shadcn `Dialog`, vee-v
 `buildFlowStartSchema`). Props: `open`, `thread: ThreadDetailDto`, `viewerId: string`; emits `update:open` and
 `submit`. On each open it fills the rows from `flowStartRows(thread)`. Each row has feature and spec path inputs, one
 native checkbox per earlier row's feature for `dependsOn`, and a remove button; an add-row button appends an empty row
-with no dependencies. Renaming a row rewrites that name in later rows' `dependsOn`; removing a row drops it from them.
+with nothing checked. Renaming a row rewrites that name in later rows' `dependsOn`; removing a row drops it from them.
 This story builds the rows part of the dialog; US-007 adds the roles, cap, hint and submit to the same component.
 Tests in `tests/components/thread-start-flow-dialog.spec.ts`.
 
