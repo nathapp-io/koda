@@ -30,6 +30,12 @@ export interface Tuning {
   readonly naxCallTimeoutMs: number;
   /** D111: the timeout of one nax call in the post-checkout job check, which holds the per-repo mutex. */
   readonly jobCheckTimeoutMs: number;
+  /**
+   * #406: a job check that only timed out is asked again this many times, waiting `jobCheckRetryBackoffMs`, then
+   * double that. Worst case under the repo mutex: 3 checks of 10 s plus 2 s + 4 s.
+   */
+  readonly jobCheckRetries: number;
+  readonly jobCheckRetryBackoffMs: number;
   /** S2a §7: the largest log window one PUT carries. */
   readonly logChunkBytes: number;
   /** S2a R4: log PUTs in flight at once, across every job of the runner. */
@@ -88,6 +94,8 @@ export const TUNING: Tuning = Object.freeze({
   capabilityProbeMs: 600_000,
   naxCallTimeoutMs: 30_000,
   jobCheckTimeoutMs: 10_000,
+  jobCheckRetries: 2,
+  jobCheckRetryBackoffMs: 2_000,
   logChunkBytes: 1_048_576,
   logMaxInFlight: 2,
   logPutTimeoutMs: 30_000,

@@ -4,13 +4,18 @@ import { parseNaxJson, type NaxCli } from '../nax/nax-cli';
 import { checkTrust } from '../nax/trust';
 import { interactionReason, parseAuthList, parseInteraction, parseRequirements, unavailableCredential, type Requirements } from './nax-json';
 
+/** #406: lets a retrying check stop asking once the job is cancelled. */
+export interface JobCheckOptions {
+  readonly isCancelled?: () => boolean;
+}
+
 /** D104: can this machine run the job? Asked in the clone, after checkout, before nax spawns. */
 export interface JobCheck {
   /**
    * null: the machine meets the job's needs; otherwise the job's stateReason. The whole row, not just `assign`: C10
    * resolves a provider through this job epoch's provider-key socket, which is keyed by the job and its lease epoch.
    */
-  check(job: JobRow, repoDir: string): Promise<string | null>;
+  check(job: JobRow, repoDir: string, options?: JobCheckOptions): Promise<string | null>;
 }
 
 /** Static capabilities (D95) and unit specs: no post-checkout check. */
