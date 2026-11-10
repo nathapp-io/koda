@@ -126,13 +126,26 @@ integration('fleet flow advancement through the database', () => {
     expect(await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'PLAN' } })).toHaveLength(1);
   });
 
-  it('AC-10: a SPEC_REVIEW finding stops the flow', async () => {
+  it('AC-10: a minor SPEC_REVIEW finding passes the thread flow and dispatches PLAN', async () => {
     const flow = await createFlow();
     await seedTerminalStep(flow.id, 'SPEC_REVIEW', 'AGENT', {
       agentResult: { status: 'completed', output: '{"findings":[{"id":"F1","class":"minor","summary":"A finding","fix":"f"}]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
     });
     await ticker.tick(now);
-    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'STOPPED', stopReason: 'review_findings' });
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'RUNNING', stopReason: null });
+    expect(await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'PLAN' } })).toHaveLength(1);
+    const steps = await db.fleetActivity.findMany({ where: { entityType: 'flow', entityId: flow.id, action: 'flow.step' } });
+    const plan = steps.find((entry) => (entry.payload as { step?: string }).step === 'PLAN');
+    expect((plan?.payload as { accepted?: string[] } | undefined)?.accepted).toEqual(['A finding']);
+  });
+
+  it('AC-10: an ambiguous SPEC_REVIEW finding stops the flow', async () => {
+    const flow = await createFlow();
+    await seedTerminalStep(flow.id, 'SPEC_REVIEW', 'AGENT', {
+      agentResult: { status: 'completed', output: '{"findings":[{"id":"F1","class":"ambiguous","summary":"A question","question":"Which one?"}]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
+    });
+    await ticker.tick(now);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'STOPPED', stopReason: 'review_ambiguous' });
   });
 
   it('AC-11: RUN creates a review claim linked to its new REVIEW job', async () => {
