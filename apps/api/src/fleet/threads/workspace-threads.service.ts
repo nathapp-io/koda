@@ -16,6 +16,7 @@ import { isMaxCostUsd, validateCreateWorkspaceThread, type CreateWorkspaceThread
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { cancelUnstartedTurn } from './thread-stop';
 import { PlacementService } from '../jobs/placement.service';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 
@@ -151,7 +152,11 @@ export class WorkspaceThreadsService {
   async stop(principal: UserPrincipal | AgentPrincipal, threadId: string): Promise<void> {
     const thread = await this.requireOwnedThread(principal.id, threadId);
     await this.assertThreadKey(principal, 'thread.stop', thread);
-    return this.threads.command({ kind: 'workspace', userId: principal.id }, threadId, principal.id, FleetCommandType.THREAD_STOP_TURN, {});
+    // #428: a turn no runner has started is cancelled server-side; any other turn gets the runner's stop command.
+    const scope = { kind: 'workspace' as const, userId: principal.id };
+    const unstarted = await this.threads.unstartedTurnJob(scope, threadId, principal.id);
+    if (unstarted && await cancelUnstartedTurn(this.fleetJobs, principal.id, unstarted, { id: threadId, workspace: true })) return;
+    return this.threads.command(scope, threadId, principal.id, FleetCommandType.THREAD_STOP_TURN, {});
   }
 
   async endSession(principal: UserPrincipal | AgentPrincipal, threadId: string): Promise<void> {

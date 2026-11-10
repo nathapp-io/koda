@@ -7,6 +7,12 @@ import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { PrismaClient } from '../../../generated/prisma/client';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 
+/** #428: the thread's current SESSION turn while no runner has started it: its job and the job's project. */
+export interface UnstartedTurn {
+  jobId: string;
+  projectId: string;
+}
+
 export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
 
 /** One user's advance approval for the next flow created from this thread. */
@@ -183,5 +189,11 @@ export interface ChatThreadRepository {
   changeMode(projectId: string, threadId: string, actor: { id: string; type: 'USER' | 'AGENT' }, mode: ThreadMode, canOperate: boolean): Promise<ChatThreadRecord>;
   updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string, canOperate?: boolean): Promise<ChatThreadRecord>;
   command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object, canOperate?: boolean): Promise<void>;
+  /**
+   * #428: the thread's current job when it is a SESSION turn in QUEUED or ASSIGNED, else null (a PUBLISH or DISCARD
+   * job is never Stop's to cancel). Same scope (404) and creator (403) checks as `command`. Read-only: the cancel
+   * re-checks the state, and whether the ASSIGN was acked, under the job lock.
+   */
+  unstartedTurnJob(scope: ThreadScope, threadId: string, userId: string, canOperate?: boolean): Promise<UnstartedTurn | null>;
   archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;
 }

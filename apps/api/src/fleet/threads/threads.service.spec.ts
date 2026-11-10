@@ -559,7 +559,7 @@ describe('ThreadsService canOperate (US-002)', () => {
   const serviceFor = (threads: Partial<ChatThreadRepository>) => new ThreadsService(
     {
       updateCap: vi.fn(async (..._args: unknown[]) => record),
-      command: vi.fn(async () => undefined),
+      command: vi.fn(async () => undefined), unstartedTurnJob: vi.fn(async () => null),
       publish: vi.fn(async () => ({ jobId: null })),
       sendMessage: vi.fn(async () => ({ message, jobId: 'j1', deduplicated: false })),
       get: vi.fn(async () => record),
@@ -576,7 +576,7 @@ describe('ThreadsService canOperate (US-002)', () => {
   it('forwards canOperate to updateCap, stop, endSession, answer, publish and sendMessage', async () => {
     const threads = {
       updateCap: vi.fn(async () => record),
-      command: vi.fn(async () => undefined),
+      command: vi.fn(async () => undefined), unstartedTurnJob: vi.fn(async () => null),
       publish: vi.fn(async () => ({ jobId: null })),
       sendMessage: vi.fn(async () => ({ message, jobId: 'j1', deduplicated: false })),
       get: vi.fn(async () => record),
@@ -601,7 +601,7 @@ describe('ThreadsService canOperate (US-002)', () => {
   it('defaults canOperate to false, so a caller that passes nothing keeps the creator compare', async () => {
     const threads = {
       updateCap: vi.fn(async () => record),
-      command: vi.fn(async () => undefined),
+      command: vi.fn(async () => undefined), unstartedTurnJob: vi.fn(async () => null),
       publish: vi.fn(async () => ({ jobId: null })),
       sendMessage: vi.fn(async () => ({ message, jobId: 'j1', deduplicated: false })),
       get: vi.fn(async () => record),

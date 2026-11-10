@@ -5,7 +5,7 @@ import { ForbiddenAppException, NotFoundAppException, ValidationAppException } f
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
-import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { AuditRecorder, type AuditRecordInput } from '../../audit/audit-recorder.service';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
@@ -252,6 +252,33 @@ export class FleetJobsService {
     if (live) this.live.publish([live]);
     if (wake) this.notifier.notify(wake);
     return this.withDetail(job);
+  }
+
+  /**
+   * #428 thread Stop: cancel the job server-side only while no runner holds it (QUEUED, or ASSIGNED with the ASSIGN
+   * never acked), checked under the job lock, and record `alsoAudit` in the same transaction. Every other case
+   * answers false with nothing written. It never throws for a job state: a caller inside an approval execution's
+   * transaction then falls back without poisoning it (a nested `txManager.run` that throws poisons the outer one).
+   * The caller has already authorized the cancel (the thread's stop key and creator check).
+   */
+  async cancelBeforeRunner(actorId: string, projectId: string, jobId: string, alsoAudit: AuditRecordInput): Promise<boolean> {
+    const now = new Date();
+    const actor = { type: actorTypeFor(actorId), id: actorId };
+    const outcome = await this.txManager.run(async () => {
+      const current = await this.repo.lockById(jobId);
+      if (!current || current.projectId !== projectId) return null;
+      const unacked = current.state === FleetJobState.ASSIGNED
+        && await this.repo.findPendingCommand({ jobId, type: FleetCommandType.ASSIGN, leaseEpoch: current.leaseEpoch });
+      if (current.state !== FleetJobState.QUEUED && !unacked) return null;
+      const reason = current.state === FleetJobState.QUEUED ? 'cancelled before assignment' : 'cancelled before the runner took it';
+      const r = await this.transitions.apply({ job: current, to: 'CANCELLED', by: 'server', now, actor, reason });
+      await this.audit.record({ key: 'fleet.job.cancel', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `cancelled from ${current.state}` });
+      await this.audit.record(alsoAudit);
+      return { live: r.live };
+    });
+    if (!outcome) return false;
+    if (outcome.live) this.live.publish([outcome.live]);
+    return true;
   }
 
   /** S1.5 2a: one pending-approval count for the single job (plan D272). */
