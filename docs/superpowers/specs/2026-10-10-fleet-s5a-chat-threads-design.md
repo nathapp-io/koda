@@ -237,6 +237,12 @@ model ProjectSkill {
   `read_skill_file(name, relPath)` returns a UTF-8 text file inside the skill directory (≤ 256 KiB, realpath inside the
   directory, symlinks and binary refused).
 
+**Decision #375 (2026-11-10):** koda keeps `load_skill` and `read_skill_file`. The nax resource catalog and skills
+provider live in the `@nathapp/nax` CLI package at `packages/nax/src/resources/`, not in `@nathapp/nax-agent`, which
+exports only the `ToolProvider` and `ProviderTool` types. The runner depends on nax-agent alone, and koda's thread
+skills are an API snapshot delivered in the ASSIGN, not a disk scan. Revisit this decision if nax-agent exports the
+catalog.
+
 ## 2. Threads (phase B)
 
 ### 2.1 Data
