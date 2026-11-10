@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T08:01:02.760Z",
+  "updatedAt": "2026-11-10T08:27:56.556Z",
   "userStories": [
     {
       "id": "US-001",
@@ -375,14 +375,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A standard localized notice and the same bounded timer lifecycle on two existing Vue pages use existing reload methods; component mounts and fake timers cover the behavior without new abstractions."
+        "reasoning": "A standard localized notice and the same bounded timer lifecycle on two existing Vue pages use existing reload methods; component mounts and fake timers cover the behavior without new abstractions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-types.ts",
@@ -426,7 +429,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5fe30e82c27a8f520ddaae5ebd22349e386541a2"
     },
     {
       "id": "US-005",
