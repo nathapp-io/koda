@@ -98,7 +98,7 @@ describeIntegration('gated project thread routes', () => {
     const row = await make();
     const runner = await db.runner.create({ data: {
       name: `gate-runner-${++n}`, apiKeyHash: `gate-hash-${n}`, os: 'linux', arch: 'x64', labels: [], capacity: 2,
-      capabilities: { ...FLEET_CAPS, threadWrite: true }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `boot-${n}`,
+      capabilities: { ...FLEET_CAPS, threadWrite: true, threadBackends: { native: ['m1'], acp: [] } }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `boot-${n}`,
       enabled: true, lastSeenAt: new Date(), createdById: world.ids.root,
     } });
     await db.chatThread.update({ where: { id: row.id }, data: { runnerId: runner.id } });

@@ -12,6 +12,7 @@ import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
+import { assertBackendServed } from './thread-backend-served';
 import { ProjectBriefService } from './project-brief.service';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
@@ -19,7 +20,7 @@ import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
-import type { ThreadMode } from '../common/thread-jobs';
+import type { ThreadBackend, ThreadMode } from '../common/thread-jobs';
 
 @Injectable()
 export class ThreadsService {
@@ -43,6 +44,11 @@ export class ThreadsService {
     }
   }
 
+  /** #399: refuses (409) a backend no enabled thread-capable runner offers. The route asks before its approval gate. */
+  async assertBackendServed(backend: ThreadBackend): Promise<void> {
+    await assertBackendServed(this.threads, backend);
+  }
+
   async create(projectId: string, principal: KodaPrincipal, input: CreateThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     const normalized = validateCreateThread(input, input.baseRef ?? 'main');
@@ -52,11 +58,13 @@ export class ThreadsService {
     if (normalized.kind === 'PROJECT') {
       const anchor = await this.repos.findAnchor(projectId);
       if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      await this.assertBackendServed(normalized.backend);   // #399, again at execution: the fleet may have changed
       const skills = await this.skills.snapshotForProject(projectId);
       return this.threads.create({ kind: 'PROJECT', projectId, repoId: null, baseRef: null, feature: null, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
     }
     const repo = await this.repos.findById(normalized.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
+    await this.assertBackendServed(normalized.backend);   // #399, again at execution: the fleet may have changed
     // Today's two-pass flow: the repo's own default branch replaces the placeholder of the first pass.
     const resolved = validateCreateThread({ ...input, kind: 'REPO' }, repo.defaultBranch);
     const skills = await this.skills.snapshotForProject(projectId);

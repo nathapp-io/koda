@@ -27,7 +27,7 @@ describeIntegration('gated project thread handoff routes', () => {
   const prepare = async (threadId: string) => {
     const runner = await db.runner.create({ data: {
       name: `handoff-runner-${++n}`, apiKeyHash: `handoff-hash-${n}`, os: 'linux', arch: 'x64', labels: [], capacity: 2,
-      capabilities: { ...FLEET_CAPS, threadWrite: true }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `boot-${n}`,
+      capabilities: { ...FLEET_CAPS, threadWrite: true, threadBackends: { native: ['m1'], acp: [] } }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `boot-${n}`,
       enabled: true, lastSeenAt: new Date(), createdById: world.ids.root,
     } });
     await db.chatThread.update({ where: { id: threadId }, data: { runnerId: runner.id, specPublished: true } });

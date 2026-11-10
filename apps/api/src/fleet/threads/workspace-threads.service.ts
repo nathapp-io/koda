@@ -3,6 +3,8 @@ import { ConfigType } from '@nestjs/config';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { isUserPrincipal, type AgentPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { assertBackendServed } from './thread-backend-served';
+import type { ThreadBackend } from '../common/thread-jobs';
 import { FleetCommandType } from '../../common/enums';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { PermissionService } from '../../permissions/permission.service';
@@ -43,6 +45,11 @@ export class WorkspaceThreadsService {
 
   private readonly logger = new Logger(WorkspaceThreadsService.name);
 
+  /** #399: refuses (409) a backend no enabled thread-capable runner offers. The route asks before its approval gate. */
+  async assertBackendServed(backend: ThreadBackend): Promise<void> {
+    await assertBackendServed(this.threads, backend);
+  }
+
   async create(principal: UserPrincipal | AgentPrincipal, input: CreateWorkspaceThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     const normalized = validateCreateWorkspaceThread(input);
@@ -67,6 +74,7 @@ export class WorkspaceThreadsService {
       }
       if (!home) throw new ConflictAppException({}, 'threads.noFleetRepo');
     }
+    await this.assertBackendServed(normalized.backend);   // #399, again at execution: the fleet may have changed
     const skills = await this.skills.snapshotForProject(home.id);
     const thread = await this.threads.create({ kind: 'WORKSPACE', projectId: home.id, repoId: null, baseRef: null, feature: null, title: normalized.title, createdById: principal.id, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
     return { ...thread, homeProject: { slug: home.slug, name: home.name } };

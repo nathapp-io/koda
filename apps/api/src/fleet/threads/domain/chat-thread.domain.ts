@@ -140,6 +140,11 @@ export interface ChatThreadRepository {
   setPreApproval(projectId: string, threadId: string, preApproval: ThreadPreApproval): Promise<ChatThreadRecord>;
   clearPreApproval(projectId: string, threadId: string): Promise<boolean>;
   consumePreApproval(threadId: string): Promise<void>;
+  /**
+   * #399: could the fleet ever host `backend`? True when some enabled thread-capable runner (online or not) advertises
+   * it, by placement's own backend rule, and also when no thread-capable runner is enrolled at all.
+   */
+  anyRunnerServesBackend(backend: ThreadBackend): Promise<boolean>;
   create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
