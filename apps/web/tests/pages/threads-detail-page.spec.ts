@@ -191,10 +191,12 @@ function mountPage(over: {
   // US-012: the mode control and the approval cards are the page's own children, mounted for real.
   const modeControl = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadModeControl.vue'), { useI18n: () => enI18n() })
   const approvalCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue'), { useI18n: () => enI18n() })
+  const queuedNotice = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadQueuedNotice.vue'), { useI18n: () => i18nStub() })
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
       FleetThreadsThreadProjectCodeNotice: projectCodeNotice,
+      FleetThreadsThreadQueuedNotice: queuedNotice,
       ThreadModeControl: modeControl,
       FleetThreadsThreadModeControl: modeControl,
       ThreadApprovalCard: approvalCard,
@@ -261,13 +263,39 @@ function mountPage(over: {
       await Vue.nextTick()
     }
   }
-  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval }
+  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval, thread }
 }
 
 /** The resolved title useHead received: `title` may be a value or a function. */
 function headTitle(head: CapturedHead): unknown {
   return typeof head.title === 'function' ? (head.title as () => unknown)() : head.title
 }
+
+describe('US-004 queued-turn notice and refresh', () => {
+  test('AC-6: project thread page renders queued-turn notice', async () => {
+    const m = mountPage({ thread: threadDetail({ queuedTurn: { jobId: 'j', queuedAt: '', verdict: 'no_fit', reasons: [] } }) })
+    expect(m.app.one('[data-testid="thread-queued-notice"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('AC-8, AC-9, AC-11: polls queued detail, stops when queue ends, and cleans up on unmount', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] })
+    const m = mountPage({ thread: threadDetail({ activeJob: { id: 'j', state: 'QUEUED' } }) })
+    await m.settle()
+    m.reloadThread.mockImplementationOnce(async () => { m.thread.value = threadDetail({ activeJob: null }) })
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(m.reloadThread).toHaveBeenCalledTimes(1)
+    await Vue.nextTick()
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(m.reloadThread).toHaveBeenCalledTimes(1)
+    m.thread.value = threadDetail({ activeJob: { id: 'j', state: 'QUEUED' } })
+    await Vue.nextTick()
+    m.app.unmount()
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(m.reloadThread).toHaveBeenCalledTimes(1)
+    jest.useRealTimers()
+  })
+})
 
 describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
   test('US-009 AC-14..15: mounts Start flow with the project slug and loaded thread', async () => {

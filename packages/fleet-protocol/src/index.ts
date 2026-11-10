@@ -271,6 +271,21 @@ export interface ReviewDecision { id: string; statement: string; source?: string
 
 export interface CallerRuling { item: string; ruling: string; by: string; at: string }
 
+/**
+ * Fleet #370 (C11): the repo's rule override, read at assignment time and sent with the ASSIGN.
+ * `rules` are the rule files the job runs with instead of the ones in its checkout, `rulesMode` says
+ * whether they merge with the repo's own rules (`merge`) or replace them (`replace`), and `context` is
+ * the project context the job runs with (`append` merges it with the project's own, `replace` takes
+ * its place). `sha256` is the hash of the stored override, so the runner and the job record name the
+ * same override.
+ */
+export interface RuleOverrideAssign {
+  sha256: string;
+  rulesMode: 'merge' | 'replace';
+  rules: { path: string; content: string }[];
+  context?: { content: string; mode: 'append' | 'replace' };
+}
+
 export interface AssignPayload {
   jobId: string;
   command: FleetJobKindName;
@@ -300,6 +315,11 @@ export interface AssignPayload {
   };
   /** PLAN only: the branch the PRD must name (a thread PLAN). */
   expectBranch?: string;
+  /**
+   * Fleet #370: the repo's rule override, read when the job was assigned. Present only on the nax
+   * commands (RUN, PLAN, REVIEW, FIX, AGENT); a THREAD turn and a config job never carry one.
+   */
+  ruleOverride?: RuleOverrideAssign;
 }
 export interface ReadoptPayload { naxRunId: string | null }
 export interface AbandonPayload { reason: 'stale_lease' | 'job_terminal' }

@@ -9130,6 +9130,226 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/rule-override": {
+      "get": {
+        "operationId": "FleetReposController_getRuleOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleOverrideDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.rules.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read the rule override of a registered repo (fleet.repo.rules.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "put": {
+        "operationId": "FleetReposController_setRuleOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rules"
+                ],
+                "properties": {
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "path",
+                        "content"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "rulesMode": {
+                    "type": "string",
+                    "enum": [
+                      "merge",
+                      "replace"
+                    ]
+                  },
+                  "context": {
+                    "type": "object",
+                    "nullable": true,
+                    "required": [
+                      "content"
+                    ],
+                    "properties": {
+                      "content": {
+                        "type": "string"
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "append",
+                          "replace"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The rule override is not valid: { reason }"
+          },
+          "403": {
+            "description": "fleet.repo.rules.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the rule override of a registered repo (fleet.repo.rules.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "FleetReposController_clearRuleOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.rules.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Clear the rule override of a registered repo (fleet.repo.rules.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}": {
       "delete": {
         "operationId": "FleetReposController_remove",
@@ -11673,7 +11893,7 @@
             "description": "thread.workspace.create is missing, or thread.create is refused in the home project"
           },
           "409": {
-            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)"
+            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399); threads.workspaceThreadsUnavailable: no enabled thread-capable runner can host a WORKSPACE thread (#424)"
           }
         },
         "security": [
@@ -12289,7 +12509,7 @@
             "description": "thread.create is missing"
           },
           "409": {
-            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)"
+            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399); threads.projectThreadsUnavailable: no enabled thread-capable runner can host a PROJECT thread; threads.modeUnavailable: no enabled thread-capable runner can host the requested mode (#424)"
           }
         },
         "security": [
@@ -12527,7 +12747,7 @@
             "description": "Target mode key or creator/any-row thread.cap.update authority is missing"
           },
           "409": {
-            "description": "threads.turnRunning or threads.busy"
+            "description": "threads.turnRunning or threads.busy; threads.modeUnavailable: no enabled thread-capable runner can host the requested mode (#424)"
           }
         },
         "security": [
@@ -20390,6 +20610,37 @@
           "files"
         ]
       },
+      "JobRuleOverrideSummaryDto": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string"
+          },
+          "ruleFiles": {
+            "type": "number"
+          },
+          "rulesMode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string"
+          },
+          "contextMode": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "sha256",
+          "ruleFiles",
+          "rulesMode"
+        ]
+      },
       "FleetJobDto": {
         "type": "object",
         "properties": {
@@ -20674,6 +20925,16 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/FleetJobConfigEditDto"
+              }
+            ]
+          },
+          "ruleOverride": {
+            "nullable": true,
+            "description": "The summary of the repo rule override this job was assigned (US-008). Null when the job was assigned without one.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JobRuleOverrideSummaryDto"
               }
             ]
           }
@@ -21276,6 +21537,46 @@
           "name"
         ]
       },
+      "RuleOverrideSummaryDto": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the validated override"
+          },
+          "ruleFiles": {
+            "type": "number",
+            "description": "How many rule files the override carries"
+          },
+          "rulesMode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string",
+            "description": "Whether the rules merge with the repo rules or replace them"
+          },
+          "contextMode": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "type": "string",
+            "nullable": true,
+            "description": "Whether the context is appended to the project context or replaces it"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the override was last written (ISO 8601)"
+          }
+        },
+        "required": [
+          "sha256",
+          "ruleFiles",
+          "rulesMode",
+          "updatedAt"
+        ]
+      },
       "FleetRepoDto": {
         "type": "object",
         "properties": {
@@ -21344,6 +21645,16 @@
           "fixAllowUnprotected": {
             "type": "boolean",
             "description": "Allow FIX to push although the default branch is unprotected (override, default off)"
+          },
+          "ruleOverride": {
+            "nullable": true,
+            "description": "The repo rule override summary, when the repo has one",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RuleOverrideSummaryDto"
+              }
+            ]
           }
         },
         "required": [
@@ -21447,6 +21758,85 @@
         },
         "required": [
           "allowUnprotected"
+        ]
+      },
+      "RuleOverrideFileDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Rule file path, relative to the job rules directory"
+          },
+          "content": {
+            "type": "string",
+            "description": "The rule file body"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      },
+      "RuleOverrideContextDto": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The context body"
+          },
+          "mode": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "type": "string",
+            "description": "Whether the context is appended to the project context or replaces it"
+          }
+        },
+        "required": [
+          "content",
+          "mode"
+        ]
+      },
+      "RuleOverrideDto": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleOverrideFileDto"
+            }
+          },
+          "rulesMode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string"
+          },
+          "context": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RuleOverrideContextDto"
+              }
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the validated override"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the override was last written (ISO 8601)"
+          }
+        },
+        "required": [
+          "rules",
+          "rulesMode",
+          "sha256",
+          "updatedAt"
         ]
       },
       "NaxFileEntryDto": {
@@ -24192,6 +24582,85 @@
           "createdAt"
         ]
       },
+      "QueuedTurnReasonDto": {
+        "type": "object",
+        "properties": {
+          "runnerName": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "disabled",
+              "labels",
+              "capacity",
+              "protocol",
+              "sandbox",
+              "interaction",
+              "tools",
+              "offline",
+              "budget_paused",
+              "executor",
+              "provider_missing",
+              "provider_unavailable",
+              "approvals_relay",
+              "busy_repo",
+              "config_jobs",
+              "bot_review",
+              "bot_fix",
+              "bot_rulings",
+              "agents_run",
+              "trust_domain",
+              "thread_capacity",
+              "thread_backend",
+              "thread_modes",
+              "threads_disabled",
+              "thread_write",
+              "project_threads",
+              "workspace_threads"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "runnerName",
+          "reason"
+        ]
+      },
+      "QueuedTurnDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verdict": {
+            "enum": [
+              "never",
+              "budget_paused",
+              "runners_paused",
+              "waiting_capacity",
+              "no_fit",
+              "no_runners"
+            ],
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueuedTurnReasonDto"
+            }
+          }
+        },
+        "required": [
+          "jobId",
+          "queuedAt",
+          "verdict",
+          "reasons"
+        ]
+      },
       "WorkspaceThreadDetailDto": {
         "type": "object",
         "properties": {
@@ -24413,6 +24882,15 @@
               "$ref": "#/components/schemas/PendingActionDto"
             }
           },
+          "queuedTurn": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueuedTurnDto"
+              }
+            ]
+          },
           "homeProject": {
             "required": [
               "slug",
@@ -24461,7 +24939,8 @@
           "lastWrite",
           "sendRefusal",
           "handoff",
-          "pendingActions"
+          "pendingActions",
+          "queuedTurn"
         ]
       },
       "ChatMessageDto": {
@@ -25135,6 +25614,15 @@
             "items": {
               "$ref": "#/components/schemas/PendingActionDto"
             }
+          },
+          "queuedTurn": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueuedTurnDto"
+              }
+            ]
           }
         },
         "required": [
@@ -25169,7 +25657,8 @@
           "lastWrite",
           "sendRefusal",
           "handoff",
-          "pendingActions"
+          "pendingActions",
+          "queuedTurn"
         ]
       },
       "ChangeThreadModeDto": {

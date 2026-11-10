@@ -48,15 +48,15 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Create a chat thread (thread.create)' })
   @ApiResponse({ status: 201, type: ThreadDto })
   @ApiResponse({ status: 403, description: 'thread.create is missing' })
-  @ApiResponse({ status: 409, description: 'threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)' })
+  @ApiResponse({ status: 409, description: 'threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399); threads.projectThreadsUnavailable: no enabled thread-capable runner can host a PROJECT thread; threads.modeUnavailable: no enabled thread-capable runner can host the requested mode (#424)' })
   @ApprovalGated()
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     const normalized = validateCreateThread(dto, dto.baseRef ?? 'main');
     if (normalized.kind === 'REPO' && normalized.mode !== 'read') {
       await this.threads.assertModeAllowed(ctx.project.id, principal, normalized.mode);
     }
-    // #399: before the gate, so no approver is asked to approve a thread that could never run.
-    await this.threads.assertBackendServed(normalized.backend);
+    // #399, US-001: before the gate, so no approver is asked to approve a thread that could never run.
+    await this.threads.assertThreadServed({ backend: normalized.backend, kind: normalized.kind, mode: normalized.kind === 'REPO' ? normalized.mode : 'read' });
     const alsoKeys = normalized.kind === 'REPO' && normalized.mode !== 'read' ? [`thread.mode.${normalized.mode}`] : [];
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       ...(alsoKeys.length ? { alsoKeys } : {}),
@@ -123,10 +123,12 @@ export class ThreadsController {
   @ApiResponse({ status: 200, type: ThreadDto })
   @ApiResponse({ status: 400, description: 'Invalid mode; ask and full require a REPO thread' })
   @ApiResponse({ status: 403, description: 'Target mode key or creator/any-row thread.cap.update authority is missing' })
-  @ApiResponse({ status: 409, description: 'threads.turnRunning or threads.busy' })
+  @ApiResponse({ status: 409, description: 'threads.turnRunning or threads.busy; threads.modeUnavailable: no enabled thread-capable runner can host the requested mode (#424)' })
   @ApprovalGated()
   async changeMode(@Param('id') id: string, @Body() dto: ChangeThreadModeDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     const mode = validateThreadMode(dto.mode);
+    // US-001 (#424): before the gate, so no approver is asked to approve a mode no runner can host.
+    await this.threads.assertModeServed(ctx.project.id, id, mode);
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       key: threadModeKey(mode), variant: THREAD_ROUTE_VARIANTS.mode, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, id, mode },

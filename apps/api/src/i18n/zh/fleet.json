@@ -11,6 +11,7 @@
   "autoReview": { "422": "无法配置自动审查：{reason}。" },
   "fixChecks": { "422": "无法信任检测到的检查：{reason}。" },
   "fixUnprotected": { "422": "无法允许在未受保护的默认分支上运行 FIX：{reason}。" },
+  "ruleOverride": { "-2": "规则覆盖无效：{reason}", "400": "规则覆盖无效：{reason}" },
   "rulings": {
     "notDraft": { "409": "只能裁定具有 GitHub 拉取请求的草稿 RUN 作业" },
     "notLatest": { "409": "只能裁定此拉取请求的最新 RUN 作业" },

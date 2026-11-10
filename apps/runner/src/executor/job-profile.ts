@@ -27,15 +27,34 @@ export interface RelayOverlay {
   readonly endpoint: RelayEndpoint;
 }
 
+/**
+ * fleet #370 (US-009): the repo's rule override, materialized into the job directory and named here. nax reads
+ * the rules from `rules.overrideDir` (merged with the checkout's own rules, or replacing them) and the project
+ * context from `projectContext.file`.
+ */
+export interface JobProfileContext {
+  readonly rules: { readonly overrideDir: string; readonly overrideMode: 'merge' | 'replace' };
+  readonly projectContext?: { readonly file: string; readonly mode: 'append' | 'replace' };
+}
+
+/** The overlay the profile gains when a job carries a rule override; absent, the profile is unchanged. */
+const contextOverlay = (context?: JobProfileContext): Record<string, unknown> => context === undefined ? {} : {
+  context: {
+    rules: { overrideDir: context.rules.overrideDir, overrideMode: context.rules.overrideMode },
+    ...(context.projectContext === undefined ? {} : { projectContext: { file: context.projectContext.file, mode: context.projectContext.mode } }),
+  },
+};
+
 /** Spec §4.1 / plan D275. Profiles deep-merge after the repo config, so these keys win; callbackPort 0 overrides a pinned one. */
-export function jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>): Record<string, unknown> {
+export function jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>, context?: JobProfileContext): Record<string, unknown> {
   const bot = botCostLimitUsd === undefined ? {} : { bot: { costLimit: botCostLimitUsd } };
   // fleet-agent-job US-008: a flow passes `model: 'reviewer'` with `modelAliases: { reviewer: 'acp:claude' }`; nax
   // resolves the alias in this profile. An absent or empty map adds no key, so every other job's profile is unchanged.
   const agent = modelAliases === undefined || Object.keys(modelAliases).length === 0 ? {} : { agent: { modelAliases: { ...modelAliases } } };
-  if (!relay) return { outputDir, name: projectName, ...bot, ...agent };
+  const ctx = contextOverlay(context);
+  if (!relay) return { outputDir, name: projectName, ...bot, ...agent, ...ctx };
   return {
-    outputDir, name: projectName, ...bot, ...agent,
+    outputDir, name: projectName, ...bot, ...agent, ...ctx,
     execution: { bashApproval: relay.bashMode, approvalTimeout: relay.approvalTimeoutSec * 1000 },
     interaction: {
       plugin: 'webhook',
@@ -46,11 +65,11 @@ export function jobProfileContent(outputDir: string, projectName: string, relay?
 }
 
 /** A raw overlay is appended last to the chain; it must exist until nax exits (SP-1). Mode 0600: it may hold the relay secret. */
-export async function writeJobProfile(naxHome: string, jobId: string, outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>): Promise<string> {
+export async function writeJobProfile(naxHome: string, jobId: string, outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>, context?: JobProfileContext): Promise<string> {
   const path = jobProfilePath(naxHome, jobId);
   await mkdir(join(naxHome, 'profiles'), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(jobProfileContent(outputDir, projectName, relay, botCostLimitUsd, modelAliases), null, 2)}\n`, { mode: 0o600 });
+  await writeFile(tmp, `${JSON.stringify(jobProfileContent(outputDir, projectName, relay, botCostLimitUsd, modelAliases, context), null, 2)}\n`, { mode: 0o600 });
   await rename(tmp, path);
   return path;
 }

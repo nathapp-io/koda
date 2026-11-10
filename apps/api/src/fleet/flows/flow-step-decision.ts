@@ -63,7 +63,7 @@ export type FlowStepAction =
   | { kind: 'wait' }
   | { kind: 'complete' }
   | { kind: 'stop'; reason: FlowStopReason; detail: string }
-  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string }; rule?: { answeredJobId: string | null } }
+  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string }; rule?: { answeredJobId: string | null }; accepted?: FlowFinding[] }
   | { kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }
   | { kind: 'apply_rulings'; jobId: string; rulings: FlowRuling[] }
   | { kind: 'apply_prd_edits'; jobId: string; edits: FlowPrdEdit[]; accepted: FlowFinding[] }
@@ -138,7 +138,7 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
         };
       }
       if (verdict.findings.length === 0) {
-        if (latestJob.step === 'PRD_REVIEW' && input.canApplyCalls
+        if (latestJob.step === 'PRD_REVIEW'
           && verdict.prdEdits.length > 0 && input.prdEditsJobId !== latestJob.id) {
           return { kind: 'apply_prd_edits', jobId: latestJob.id, edits: verdict.prdEdits, accepted: [] };
         }
@@ -152,7 +152,14 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
         return { kind: 'stop', reason: 'review_ambiguous', detail: formatQuestions(ambiguous) };
       }
       if (verdict.findings.length > FLOW_CALLS_MAX_FINDINGS) return stopFindings();
-      if (!input.canApplyCalls) return stopFindings();
+      if (!input.canApplyCalls) {
+        if (latestJob.step === 'SPEC_REVIEW') return { kind: 'dispatch', step: 'PLAN', accepted: verdict.findings };
+        if (verdict.prdEdits.length > 0 && input.prdEditsJobId !== latestJob.id) {
+          return { kind: 'apply_prd_edits', jobId: latestJob.id, edits: verdict.prdEdits, accepted: verdict.findings };
+        }
+        if (input.prdEditsJobId === latestJob.id) return dispatch('RUN');
+        return { kind: 'dispatch', step: 'RUN', accepted: verdict.findings };
+      }
       const hasCurrentAnswers = input.questionsJobId === latestJob.id && input.answers !== null;
       if (ambiguous.length > 0 && !hasCurrentAnswers) {
         return { kind: 'wait_answer', step: latestJob.step, jobId: latestJob.id, questions: flowQuestions(verdict.findings) };

@@ -4074,7 +4074,7 @@ describeIntegration('API Integration Tests', () => {
       name: `thread-handoff-${threadId}`, apiKeyHash: `thread-handoff-${threadId}`, os: 'linux', arch: 'x64', labels: [],
       capacity: 2, capabilities: {
         nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
-        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] }, ...extraCapabilities,
+        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] }, ...extraCapabilities,
       }, daemonVersion: '0.1.0', protocolVersion: 4,
       bootId: `thread-handoff-${threadId}`, lastSeenAt: new Date(), createdById: world.ids.root,
     } });
@@ -4338,7 +4338,7 @@ describeIntegration('API Integration Tests', () => {
         name: `plan-${thread.id}`, apiKeyHash: `plan-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
         capabilities: {
           nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
-          profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] },
+          profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] },
         },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: `plan-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
       } });
@@ -4476,7 +4476,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = body<{ id: string; repoId: string; feature: string; specPath: string }>(await createThread(feature).expect(201));
       const runner = await db().runner.create({ data: {
         name: `run-${thread.id}`, apiKeyHash: `run-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] } },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: `run-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
@@ -4531,7 +4531,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = body<{ id: string }>(await createThread(feature).expect(201));
       const runner = await db().runner.create({ data: {
         name: `run-assign-${thread.id}`, apiKeyHash: `run-assign-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] } },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: `run-assign-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
@@ -4670,7 +4670,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = await newThread(feature, over);
       const runner = await db().runner.create({ data: {
         name: `session-${thread.id}`, apiKeyHash: `session-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: ['linux'],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'session-boot', lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
@@ -4720,7 +4720,7 @@ describeIntegration('API Integration Tests', () => {
     it('US-004 discard: refuses with threads.busy while a live session job is active', async () => {
       const { thread, runner } = await liveSession('discard-busy');
       // Discard needs threadWrite on the pinned runner; without it the runnerOutdated check answers first (brief order).
-      await db().runner.update({ where: { id: runner.id }, data: { capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true } } });
+      await db().runner.update({ where: { id: runner.id }, data: { capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true } } });
       const res = await discardThread(thread.id).expect(409);
       threadMessage(res, 'threads.busy.409');
       expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'THREAD', state: 'QUEUED' } })).toBe(0);
@@ -4785,7 +4785,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = await newThread('send-resume');
       const runner = await db().runner.create({ data: {
         name: `thread-runner-${thread.id}`, apiKeyHash: `thread-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: ['linux'],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'thread-boot', lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
@@ -4808,7 +4808,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = await newThread('send-live');
       const runner = await db().runner.create({ data: {
         name: `live-runner-${thread.id}`, apiKeyHash: `live-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: ['linux'],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'live-boot', lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
@@ -5304,7 +5304,7 @@ describeIntegration('API Integration Tests', () => {
     it('US-001 AC14: project runner summaries carry validated threadBackends', async () => {
       const runner = await db().runner.create({ data: {
         name: `facts-runner-${threadId}`, apiKeyHash: `facts-hash-${threadId}`, os: 'linux', arch: 'x64', labels: ['linux'],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, projectThreads: true, workspaceThreads: true, threadModes: true, threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'facts-boot', lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       const res = await request(httpServer).get(`/api/projects/${projectSlug}/fleet/runners`)

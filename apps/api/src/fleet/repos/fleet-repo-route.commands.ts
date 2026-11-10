@@ -11,6 +11,7 @@ import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
+import { validateRuleOverride } from './rule-override';
 
 export const FLEET_REPO_ROUTE_VARIANTS = {
   create: 'rest:fleet-repos.create',
@@ -19,6 +20,8 @@ export const FLEET_REPO_ROUTE_VARIANTS = {
   autoReview: 'rest:fleet-repos.auto-review',
   fixChecks: 'rest:fleet-repos.fix-checks',
   fixUnprotected: 'rest:fleet-repos.fix-unprotected',
+  ruleOverrideSet: 'rest:fleet-repos.rule-override.set',
+  ruleOverrideClear: 'rest:fleet-repos.rule-override.clear',
 } as const;
 
 /** The `{ id, patch }` input the auto-review route freezes: an id-addressed write with a body. */
@@ -37,6 +40,16 @@ interface FixChecksInput {
 interface FixUnprotectedInput {
   id: string;
   patch: UpdateFixUnprotectedDto;
+}
+
+/**
+ * The rule-override set route's frozen input (#370): the repo id and the raw body. The body is
+ * validated by the pure validator, both here (so a frozen input that cannot run is refused
+ * before it does) and again in the service when the approved request runs.
+ */
+interface RuleOverrideSetInput {
+  id: string;
+  body: unknown;
 }
 
 @Injectable()
@@ -95,6 +108,25 @@ export class FleetRepoRouteCommands implements OnModuleInit {
         return { id, patch: parseBody(UpdateFixUnprotectedDto, (input as { patch?: unknown }).patch) };
       },
       run: (principal, input) => this.repos.configureFixUnprotected(principal, input.id, input.patch),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<RuleOverrideSetInput, FleetRepoDto>({
+      key: 'fleet.repo.rules.configure', variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideSet,
+      parse: (input) => {
+        const { id } = parseRouteInput(input, ['id']);
+        const body = (input as { body?: unknown }).body;
+        // The frozen body must be one the validator accepts, so a request that cannot run is
+        // refused here rather than at execution.
+        validateRuleOverride(body);
+        return { id, body };
+      },
+      run: (principal, input) => this.repos.setRuleOverride(principal, input.id, input.body),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ id: string }, FleetRepoDto>({
+      key: 'fleet.repo.rules.configure', variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideClear,
+      parse: (input) => parseRouteInput(input, ['id']),
+      run: (principal, input) => this.repos.clearRuleOverride(principal, input.id),
       toResult: (result) => result,
     }, this.loader));
   }

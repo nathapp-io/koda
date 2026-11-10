@@ -18,19 +18,39 @@ describe('fleet admin handler gates', () => {
     { key: 'fleet.repo.delete', variant: 'rest:fleet-repos.delete', input: { id: 'r1' }, noBody: true, call: (repos: FleetReposController) => repos.remove('r1') },
     { key: 'fleet.repo.check', variant: 'rest:fleet-repos.check', input: { id: 'r1' }, noBody: false, call: (repos: FleetReposController) => repos.check('r1') },
     { key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.auto-review', input: { id: 'r1', patch: { enabled: false } }, noBody: false, call: (repos: FleetReposController) => repos.configureAutoReview('r1', { enabled: false }) },
+    {
+      key: 'fleet.repo.rules.configure', variant: 'rest:fleet-repos.rule-override.set',
+      input: { id: 'r1', body: { rules: [{ path: 'api.md', content: 'answer with the summary' }] } },
+      noBody: false, checksRepo: true, call: (repos: FleetReposController) => repos.setRuleOverride('r1', { rules: [{ path: 'api.md', content: 'answer with the summary' }] }),
+    },
+    {
+      key: 'fleet.repo.rules.configure', variant: 'rest:fleet-repos.rule-override.clear',
+      input: { id: 'r1' }, noBody: false, checksRepo: true, call: (repos: FleetReposController) => repos.clearRuleOverride('r1'),
+    },
   ];
   for (const c of cases) {
     it(`${c.key}: global gate, pending exception and executed response`, async () => {
       const service = { create: vi.fn(), remove: vi.fn(), check: vi.fn(), configureAutoReview: vi.fn() };
+      // The repo lookup the rule-override writes make before the gate: a repo that does not exist
+      // is a 404, so the handler answers it before it can open an approval request.
+      const lookup = { assertRepoExists: vi.fn() };
       const request = { id: 'q1' };
       const run = vi.fn().mockResolvedValue({ status: 'pending', request });
-      const controller = construct<FleetReposController>(FleetReposController, service as unknown as FleetReposService, { run });
+      const controller = construct<FleetReposController>(FleetReposController, { ...service, ...lookup } as unknown as FleetReposService, { run });
       await expect(c.call(controller)).rejects.toMatchObject({ name: 'ApprovalPending', request });
       expect(run).toHaveBeenCalledExactlyOnceWith({ key: c.key, variant: c.variant, projectId: null, input: c.input });
       const result = { id: 'r1' };
       run.mockResolvedValue({ status: 'executed', result });
       expect(await c.call(controller)).toEqual(c.noBody ? undefined : JsonResponse.Ok(result));
       for (const fn of Object.values(service)) expect(fn).not.toHaveBeenCalled();
+      // Only the rule-override writes look the repo up, and they look it up before the gate, so an
+      // unknown repo is a 404 and never a request.
+      if (c.checksRepo === true) {
+        expect(lookup.assertRepoExists).toHaveBeenCalledWith('r1');
+        expect(lookup.assertRepoExists.mock.invocationCallOrder[0]).toBeLessThan(run.mock.invocationCallOrder[0]);
+      } else {
+        expect(lookup.assertRepoExists).not.toHaveBeenCalled();
+      }
     });
   }
   for (const action of ['update', 'delete'] as const) {

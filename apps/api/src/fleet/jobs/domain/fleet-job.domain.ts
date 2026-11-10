@@ -3,7 +3,7 @@ import type { ChatThreadKind } from '../../common/thread-jobs';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
-import type { RunnerCapabilities, BashMode } from '../../common/protocol';
+import type { RunnerCapabilities, BashMode, RuleOverrideAssign } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
 import type { ThreadAssign } from '../../common/thread-jobs';
 import type { ConfigJobResult } from '../../common/config-jobs';
@@ -14,6 +14,29 @@ export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 
 /** S6 K3 (US-004): the outcome a FIX job's snapshot may report. */
 export type FixOutcome = 'pushed' | 'nothing';
+
+/**
+ * US-008 (#370): the summary of the repo rule override a job was assigned — the hash of the override,
+ * how many rule files it held and its two modes. The rule bodies stay in the repo's override row; a job
+ * records only what it was assigned, never the rules themselves.
+ */
+export interface JobRuleOverrideSummary {
+  sha256: string;
+  ruleFiles: number;
+  rulesMode: 'merge' | 'replace';
+  contextMode: 'append' | 'replace' | null;
+}
+
+/** The summary of an override, or null when there is none. */
+export function ruleOverrideSummaryOf(override: RuleOverrideAssign | null | undefined): JobRuleOverrideSummary | null {
+  if (!override) return null;
+  return {
+    sha256: override.sha256,
+    ruleFiles: override.rules.length,
+    rulesMode: override.rulesMode,
+    contextMode: override.context ? override.context.mode : null,
+  };
+}
 
 export type FleetJobPrRulings = { headSha: string; rulings: { rulingId: string; item: string; ruling: string; by: string; at: string }[] }
   | { notSent: 'head-unreadable' | 'pr-not-open' };
@@ -217,6 +240,11 @@ export interface FleetJobRecord {
   agentInput?: AgentJobInput | null;
   agentResult?: AgentJobResult | null;
   /**
+   * US-008 (#370): the summary of the repo rule override this job was assigned. Absent (or null) means the job
+   * was assigned without one: a repo with no override, or a command that never carries one.
+   */
+  ruleOverride?: JobRuleOverrideSummary | null;
+  /**
    * US-004: the flow this job runs and the step it is, written in the same insert that creates it (or, for a job
    * adopted afterwards, by `adoptForFlow`). Both are null for a job no flow owns.
    */
@@ -360,6 +388,17 @@ export interface QueuedCursor {
 
 export interface IFleetJobRepository {
   findRepo(repoId: string): Promise<FleetRepoRef | null>;
+  /**
+   * US-008 (#370): the repo's stored rule override, with its rule bodies, as the ASSIGN carries it. Null when
+   * the repo has no override. Read at assignment time, inside the placement transaction.
+   */
+  findRuleOverride(repoId: string): Promise<RuleOverrideAssign | null>;
+  /**
+   * US-008 (#370): records the summary of the rule override a job was assigned, or clears it (null) when the
+   * job was assigned without one. The summary is what the job page shows; the rules themselves stay in the
+   * repo's override row.
+   */
+  setRuleOverrideSummary(jobId: string, summary: JobRuleOverrideSummary | null): Promise<void>;
   /**
    * 1c-b-D7: the project's repositories in the anchor order (`createdAt` ascending, ties by `id` ascending), at most
    * 60 (`PROJECT_CODE_LIMITS.maxRepos + maxUnavailable`), for a PROJECT session's ASSIGN and the token fence.

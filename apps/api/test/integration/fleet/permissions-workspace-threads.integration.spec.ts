@@ -129,7 +129,8 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
   /** An online runner advertising threadWrite, as a live session requires. */
   const runner = () => prisma.runner.create({ data: {
     name: `ws-thread-runner-${(n += 1)}`, apiKeyHash: `ws-thread-runner-hash-${n}`, os: 'linux', arch: 'x64', labels: ['linux'],
-    capacity: 2, capabilities: { ...FLEET_CAPS, threadWrite: true, threadBackends: { native: ['m1'], acp: [] } },
+    // US-001: a workspace thread create is refused when no runner can host it, so this one hosts workspace threads.
+    capacity: 2, capabilities: { ...FLEET_CAPS, threadWrite: true, workspaceThreads: true, threadBackends: { native: ['m1'], acp: [] } },
     daemonVersion: '0.1.0', protocolVersion: 4, bootId: `ws-thread-boot-${n}`, enabled: true, lastSeenAt: new Date(),
     createdById: ids.root,
   } });

@@ -36,6 +36,7 @@ export type {
   ProviderKeyGrant,
   ProviderKeyRequest,
   ReadoptPayload,
+  RuleOverrideAssign,
   RunnerArch,
   RunnerCapabilities,
   RunnerCredential,

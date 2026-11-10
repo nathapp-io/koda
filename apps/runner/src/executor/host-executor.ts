@@ -33,6 +33,7 @@ import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type
 import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { releaseProviderSocket, serveProviderSocket } from './provider-socket';
+import { materializeRuleOverride } from './rule-override';
 import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { removeReviewToken, writeReviewToken } from './review-token';
@@ -132,7 +133,10 @@ export class HostExecutor implements JobExecutor {
       const botCostLimitUsd = assign.command === 'REVIEW' || assign.command === 'FIX' ? Number(assign.maxCostUsd) : undefined;
       // fleet-agent-job US-008: the flow's `model: 'reviewer'` resolves through this profile's agent.modelAliases.
       const modelAliases = assign.command === 'AGENT' ? assign.agent?.modelAliases : undefined;
-      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd, modelAliases);
+      // fleet #370 (US-009): the repo's rule override is materialized into the job directory and named in the
+      // profile, so every nax command this job runs (run, plan, bot review, bot fix, agents run) gets it.
+      const ruleContext = assign.ruleOverride === undefined ? undefined : await materializeRuleOverride(jobDir, assign.ruleOverride);
+      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd, modelAliases, ruleContext);
       return { ok: true, branch: checkout.branch };
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
@@ -224,7 +228,10 @@ export class HostExecutor implements JobExecutor {
     if (login === undefined) throw new Error('invalid review');
 
     const argv = buildFixArgv(this.deps.config.naxCommand, assign);
-    await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), undefined, remainder);
+    // fleet #370 (US-009): the fix step runs with the same rules as the review it follows, so its profile
+    // carries the override too.
+    const ruleContext = assign.ruleOverride === undefined ? undefined : await materializeRuleOverride(jobDir, assign.ruleOverride);
+    await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), undefined, remainder, undefined, ruleContext);
     const tokenPath = await writeReviewToken(jobDir, token);
     const inherited = process.env['PATH'] ?? '';
     const env: Record<string, string | undefined> = {

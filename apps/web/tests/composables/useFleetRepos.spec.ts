@@ -151,6 +151,25 @@ describe('useFleetRepos', () => {
     expect(fleet.repos.value[0]).toEqual(saved)
   })
 
+  test('rule overrides get, set and clear use their endpoints and distinguish approval responses', async () => {
+    const saved = { ...repo('a'), ruleOverride: { sha256: 'a'.repeat(64), ruleFiles: 1, rulesMode: 'merge', contextMode: null, updatedAt: '2026-01-01' } }
+    const override = { rules: [{ path: 'api.md', content: 'x' }], rulesMode: 'merge', context: null, sha256: 'a'.repeat(64), updatedAt: '2026-01-01' }
+    const get = jest.fn(async () => override)
+    const put = jest.fn().mockResolvedValueOnce({ id: 'ap1', permissionKey: 'fleet.repo.rules.configure' }).mockResolvedValueOnce(saved)
+    const del = jest.fn(async () => saved)
+    withApi({ get, put, delete: del })
+    const { useFleetRepos } = await import(composablePath)
+    const fleet = useFleetRepos()
+    expect(await fleet.getRuleOverride('r1')).toEqual(override)
+    const body = { rules: [{ path: 'api.md', content: 'x' }], rulesMode: 'merge' as const, context: null }
+    expect(await fleet.setRuleOverride('r1', body)).toEqual({ kind: 'pending', request: { id: 'ap1', permissionKey: 'fleet.repo.rules.configure' } })
+    expect(await fleet.setRuleOverride('r1', body)).toEqual({ kind: 'saved', repo: saved })
+    expect(await fleet.clearRuleOverride('r1')).toEqual({ kind: 'saved', repo: saved })
+    expect(get).toHaveBeenCalledWith('/fleet/repos/r1/rule-override')
+    expect(put).toHaveBeenCalledWith('/fleet/repos/r1/rule-override', body)
+    expect(del).toHaveBeenCalledWith('/fleet/repos/r1/rule-override')
+  })
+
   test('create posts the body and appends; remove deletes, drops the row and its check', async () => {
     const post = jest.fn()
       .mockImplementationOnce(async () => repo('b'))

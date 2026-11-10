@@ -105,6 +105,33 @@ describe('fleet OpenAPI contract', () => {
     expect(JSON.stringify(operation)).toContain('#/components/schemas/FleetRepoDto');
   });
 
+  it('exposes the rule-override routes, their body and the repo summary (US-007)', () => {
+    // #370: the three rule-override routes, the body they take and the summary a repo listing
+    // carries. The read is not gated, so it has no 202; the two writes have one.
+    const read = spec.paths['/api/fleet/repos/{id}/rule-override']?.['get'];
+    const set = spec.paths['/api/fleet/repos/{id}/rule-override']?.['put'];
+    const clear = spec.paths['/api/fleet/repos/{id}/rule-override']?.['delete'];
+    expect(read).toBeDefined();
+    expect(set).toBeDefined();
+    expect(clear).toBeDefined();
+    expect(JSON.stringify(read)).toContain('#/components/schemas/RuleOverrideDto');
+    expect(JSON.stringify(set)).toContain('#/components/schemas/FleetRepoDto');
+    expect(JSON.stringify(clear)).toContain('#/components/schemas/FleetRepoDto');
+    expect(Object.keys(spec.components.schemas['RuleOverrideDto']?.properties ?? {}).sort())
+      .toEqual(['context', 'rules', 'rulesMode', 'sha256', 'updatedAt']);
+    expect(Object.keys(spec.components.schemas['RuleOverrideSummaryDto']?.properties ?? {}).sort())
+      .toEqual(['contextMode', 'ruleFiles', 'rulesMode', 'sha256', 'updatedAt']);
+    expect(Object.keys(spec.components.schemas['FleetRepoDto']?.properties ?? {})).toContain('ruleOverride');
+  });
+
+  it('exposes the rule override a job was assigned (US-008)', () => {
+    // #370: the job page reads the summary of the repo rule override a job was assigned. The summary is
+    // a null-able object on the job, never the rule bodies.
+    expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toContain('ruleOverride');
+    expect(Object.keys(spec.components.schemas['JobRuleOverrideSummaryDto']?.properties ?? {}).sort())
+      .toEqual(['contextMode', 'ruleFiles', 'rulesMode', 'sha256']);
+  });
+
   it('exposes the thread run route and its body (US-007)', () => {
     expect(spec.paths['/api/projects/{slug}/threads/{id}/run']?.['post']).toBeDefined();
     const schemas = spec.components.schemas as Record<string, unknown>;
@@ -287,6 +314,9 @@ describe('fleet OpenAPI contract', () => {
       ['/api/fleet/repos/{id}/auto-review', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}/fix-checks', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}/fix-unprotected', 'patch', 'fleet.repo.fix.unprotected'],
+      ['/api/fleet/repos/{id}/rule-override', 'get', 'fleet.repo.rules.configure'],
+      ['/api/fleet/repos/{id}/rule-override', 'put', 'fleet.repo.rules.configure'],
+      ['/api/fleet/repos/{id}/rule-override', 'delete', 'fleet.repo.rules.configure'],
       ['/api/fleet/repos/{id}', 'delete', 'fleet.repo.delete'],
       ['/api/fleet/enrollments', 'get', 'fleet.enrollment.read'],
       ['/api/fleet/enrollments', 'post', 'fleet.enrollment.create'],

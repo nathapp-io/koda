@@ -11,10 +11,11 @@ import { cloneUrlFor } from '../git-broker/clone-url';
 import { BudgetGate } from '../budgets/budget-gate';
 import { budgetReason } from '../budgets/budget-rules';
 import { kodaToolDescriptorsFor } from '../assistant/koda-tool-descriptors';
-import { buildAssignPayload, gitIdentityFor } from './assign-payload';
+import { buildAssignPayload, carriesRuleOverride, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { addJobToLoad, EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob, withVaultProviders } from './placement-rules';
+import { judgeUnplaceable, type UnplaceableVerdict } from './unplaceable-verdict';
 import { isThreadKind, type ThreadAssign } from '../common/thread-jobs';
 import { withProjectRepos } from './project-repos-assign';
 import type { RunnerCapabilities } from '../common/protocol';
@@ -22,7 +23,7 @@ import { ProviderCredentialsService } from '../provider-credentials/provider-cre
 import { providerScopeLookupKey, type ProviderLookupScope } from '../provider-credentials/provider-credential.domain';
 import { RunnerNotifier } from './runner-notifier';
 import {
-  FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow, QueuedCursor, QueuedScanFilter,
+  FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow, QueuedCursor, QueuedScanFilter, ruleOverrideSummaryOf,
 } from './domain/fleet-job.domain';
 
 export interface PlacementOutcome {
@@ -34,6 +35,13 @@ export interface PlacementOutcome {
 
 /** C10 (branch review B3): one placement pass's vault availability answers, keyed by job scope. */
 type VaultMemo = Map<string, Promise<ReadonlySet<string>>>;
+
+export interface QueuedVerdict {
+  jobId: string;
+  queuedAt: Date;
+  verdict: Exclude<UnplaceableVerdict, 'fits_not_placed'>;
+  reasons: Array<{ runnerName: string; reason: MisfitReason }>;
+}
 
 /** The answer for a scope the vault can serve nothing for; shared, never mutated. */
 const NO_PROVIDERS: ReadonlySet<string> = new Set<string>();
@@ -79,6 +87,39 @@ export class PlacementService {
     const budgetPaused = (await this.budgets.snapshot(now)).runnerPaused(runner.id);
     const judged = await this.judgedJob(job, [runner], new Map());
     return firstMisfit(judged, { ...runner, budgetPaused }, loads.get(runner.id) ?? EMPTY_LOAD, now, this.fleetConfig.runnerOfflineSec);
+  }
+
+  /**
+   * Read-only explanation for a queued job that has waited beyond the configured warning window. This deliberately
+   * uses no transaction or row lock: it is a best-effort snapshot, judged by the same placement rules as dispatch.
+   */
+  async queuedVerdict(jobId: string, now: Date, minQueuedSec: number): Promise<QueuedVerdict | null> {
+    const job = await this.repo.findById(jobId);
+    if (!job || job.state !== FleetJobState.QUEUED || now.getTime() - job.queuedAt.getTime() <= minQueuedSec * 1_000) return null;
+
+    const repo = await this.repo.findRepo(job.repoId);
+    if (!repo) return null;
+    const pauses = await this.budgets.snapshot(now);
+    const paused = jobScopePause(job, (keys) => pauses.match(keys)) !== null;
+    const runners = await this.repo.findPlacementRunners(job.pinnedRunnerId ? [job.pinnedRunnerId] : undefined);
+    const loads = toLoads(await this.repo.findActiveLoads(runners.map((runner) => runner.id)));
+    const threadAssign = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : null;
+    if (isThreadKind(job.command) && !threadAssign) return null;
+    const placementJob = toPlacementJob(job, repo, threadAssign ? {
+      backend: threadAssign.backend, enabled: this.fleetConfig.threadsEnabled, action: threadAssign.action,
+      kind: threadAssign.kind, mode: threadAssign.mode,
+    } : undefined);
+    const judged = await this.judgedJob(placementJob, runners, new Map());
+    const judgement = judgeUnplaceable({
+      job: judged, scopePaused: paused, pool: runners, loads,
+      runnerPaused: (runnerId) => pauses.runnerPaused(runnerId), now, offlineSec: this.fleetConfig.runnerOfflineSec,
+    });
+    if (!judgement) return null;
+    return {
+      jobId: job.id, queuedAt: job.queuedAt,
+      verdict: judgement.verdict as Exclude<UnplaceableVerdict, 'fits_not_placed'>,
+      reasons: judgement.misfits.map(({ runnerName, reason }) => ({ runnerName, reason })),
+    };
   }
 
   /**
@@ -265,11 +306,19 @@ export class PlacementService {
     const thread = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : undefined;
     // The caller guarantees a thread job has its turn; a broken row is a no-op, never a 500.
     if (isThreadKind(job.command) && !thread) return null;
+    // US-008 (#370): the repo's rule override is read here, inside the placement transaction, so the job is
+    // assigned the override the repo holds at this moment. A THREAD turn and a config job read nothing and
+    // write nothing: they never carry an override (the designer's call, 2026-11-10).
+    const withOverride = carriesRuleOverride(job.command);
+    const ruleOverride = withOverride ? await this.repo.findRuleOverride(job.repoId) : null;
     const leaseEpoch = await this.repo.casAssign(job.id, runner.id, runner.bootId, now);
     if (leaseEpoch === null) return null; // another placement won (spec §6.1)
+    // The summary is written before the job is read back, so the record the ASSIGN and the transition use
+    // already carries it.
+    if (withOverride) await this.repo.setRuleOverrideSummary(job.id, ruleOverrideSummaryOf(ruleOverride));
     const after = await this.repo.findById(job.id);
     if (!after) return null;
-    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), await this.attachProjectRepos(withKodaTools(thread, runner.capabilities), job, runner.capabilities));
+    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), await this.attachProjectRepos(withKodaTools(thread, runner.capabilities), job, runner.capabilities), ruleOverride);
     if (thread) await this.repo.pinThreadRunner(thread.threadId, runner.id);
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
     const live = await this.transitions.record({ before: job, after, by: 'server', now, actor: SYSTEM_ACTOR, reason: `assigned to ${runner.name}` });

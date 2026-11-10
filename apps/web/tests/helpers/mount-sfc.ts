@@ -276,9 +276,11 @@ export function registerFleetComponents(app: { component: (name: string, c: Comp
     FleetRepoAutoReview: 'RepoAutoReview.vue',
     FleetRepoFixChecks: 'RepoFixChecks.vue',
     FleetRepoFixUnprotected: 'RepoFixUnprotected.vue',
+    FleetRepoRuleOverrideDialog: 'RepoRuleOverrideDialog.vue',
     FleetAge: 'Age.vue',
     FleetRunnerCapabilityChips: 'RunnerCapabilityChips.vue',
     FleetNativeSelect: 'NativeSelect.vue',
+    FleetThreadsThreadQueuedNotice: 'threads/ThreadQueuedNotice.vue',
   })) {
     app.component(name, instantiate(webFile('components', 'fleet', file), {}, {}).default as Component)
   }
@@ -296,7 +298,9 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetRepoAutoReview: 'RepoAutoReview.vue',
   FleetRepoFixChecks: 'RepoFixChecks.vue',
   FleetRepoFixUnprotected: 'RepoFixUnprotected.vue',
+  FleetRepoRuleOverrideDialog: 'RepoRuleOverrideDialog.vue',
   FleetNativeSelect: 'NativeSelect.vue',
+  FleetThreadsThreadQueuedNotice: 'threads/ThreadQueuedNotice.vue',
   FleetBudgetTable: 'BudgetTable.vue',
   FleetScheduleTable: 'ScheduleTable.vue',
   FleetScheduleHistory: 'ScheduleHistory.vue',
@@ -435,7 +439,7 @@ export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 
 /** The `components/fleet/*.vue` files, by the name Nuxt auto-imports them under. */
 export type FleetComponentName =
-  | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetRepoAutoReview' | 'FleetRepoFixChecks' | 'FleetRepoFixUnprotected' | 'FleetNativeSelect' | 'FleetBudgetTable'
+  | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetRepoAutoReview' | 'FleetRepoFixChecks' | 'FleetRepoFixUnprotected' | 'FleetRepoRuleOverrideDialog' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
   | 'FleetJobApprovals' | 'FleetJobWorkflow'
   | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'
@@ -443,4 +447,4 @@ export type FleetComponentName =
   | 'FleetAnalyticsIngestNotice' | 'FleetAnalyticsIngestTable'
   | 'FleetDashboardTiles' | 'FleetDashboardAttentionList' | 'FleetDashboardActiveRunsTable' | 'FleetDashboardRecentRunsList'
   | 'FleetDashboardRunnerHealthList' | 'FleetDashboardCredentialDigestChips' | 'FleetDashboardOverview'
-  | 'FleetCredentialsCredentialGrid' | 'FleetCredentialsProfileInventory'
+  | 'FleetCredentialsCredentialGrid' | 'FleetCredentialsProfileInventory' | 'FleetThreadsThreadQueuedNotice'

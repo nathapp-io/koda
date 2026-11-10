@@ -10,9 +10,9 @@ import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
-import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval } from './domain/chat-thread.domain';
+import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval, type ThreadServeNeed } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
-import { assertBackendServed } from './thread-backend-served';
+import { assertThreadServed } from './thread-backend-served';
 import { ProjectBriefService } from './project-brief.service';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
@@ -20,7 +20,8 @@ import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
-import type { ThreadBackend, ThreadMode } from '../common/thread-jobs';
+import { PlacementService } from '../jobs/placement.service';
+import type { ThreadMode } from '../common/thread-jobs';
 
 @Injectable()
 export class ThreadsService {
@@ -35,6 +36,7 @@ export class ThreadsService {
     private readonly projectBrief: ProjectBriefService,
     private readonly afterCommit: AfterCommitService,
     private readonly permissions: PermissionService,
+    private readonly placement: PlacementService,
   ) {}
 
   /** Check before opening approval and again at execution: approval never substitutes for possession of the mode key. */
@@ -44,9 +46,26 @@ export class ThreadsService {
     }
   }
 
-  /** #399: refuses (409) a backend no enabled thread-capable runner offers. The route asks before its approval gate. */
-  async assertBackendServed(backend: ThreadBackend): Promise<void> {
-    await assertBackendServed(this.threads, backend);
+  /**
+   * #399, US-001 (#424): refuses (409) a thread no enabled thread-capable runner can host — its backend, its kind's
+   * hosting capability or its mode's capability. The route asks before its approval gate.
+   */
+  async assertThreadServed(need: ThreadServeNeed): Promise<void> {
+    await assertThreadServed(this.threads, need);
+  }
+
+  /**
+   * US-001 (#424): a mode change to `ask`/`full` needs a runner that can host that mode. The thread's own runner is
+   * judged when it has one, because every later turn is pinned to it; a thread that has not run yet is judged
+   * against the fleet. `read` is never refused by this check.
+   */
+  async assertModeServed(projectId: string, threadId: string, mode: ThreadMode): Promise<void> {
+    if (mode === 'read') return;
+    const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    // A PROJECT thread has no ask/full mode: the existing 400 answers instead of this check.
+    if (thread.kind !== 'REPO') return;
+    await assertThreadServed(this.threads, { backend: thread.backend, kind: 'REPO', mode, runnerId: thread.runnerId, modesOnly: true });
   }
 
   async create(projectId: string, principal: KodaPrincipal, input: CreateThreadInput): Promise<ChatThreadRecord> {
@@ -58,13 +77,15 @@ export class ThreadsService {
     if (normalized.kind === 'PROJECT') {
       const anchor = await this.repos.findAnchor(projectId);
       if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
-      await this.assertBackendServed(normalized.backend);   // #399, again at execution: the fleet may have changed
+      // #399, US-001, again at execution: the fleet may have changed.
+      await this.assertThreadServed({ backend: normalized.backend, kind: 'PROJECT', mode: 'read' });
       const skills = await this.skills.snapshotForProject(projectId);
       return this.threads.create({ kind: 'PROJECT', projectId, repoId: null, baseRef: null, feature: null, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
     }
     const repo = await this.repos.findById(normalized.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    await this.assertBackendServed(normalized.backend);   // #399, again at execution: the fleet may have changed
+    // #399, US-001, again at execution: the fleet may have changed.
+    await this.assertThreadServed({ backend: normalized.backend, kind: 'REPO', mode: normalized.mode });
     // Today's two-pass flow: the repo's own default branch replaces the placeholder of the first pass.
     const resolved = validateCreateThread({ ...input, kind: 'REPO' }, repo.defaultBranch);
     const skills = await this.skills.snapshotForProject(projectId);
@@ -83,10 +104,13 @@ export class ThreadsService {
     const scope = { kind: 'project', projectId } as const;
     const result = await this.threads.get(scope, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
-    const [sendRefusal, handoff, pendingActions] = await Promise.all([
+    const [sendRefusal, handoff, pendingActions, queuedTurn] = await Promise.all([
       this.threads.sendRefusalOf(projectId, result), this.threads.handoff(result.id), this.threads.pendingActions(scope, result.id),
+      result.activeJob?.state === 'QUEUED'
+        ? this.placement.queuedVerdict(result.activeJob.id, new Date(), this.config.jobQueuedWarnSec)
+        : Promise.resolve(null),
     ]);
-    return { ...result, sendRefusal, handoff, pendingActions };
+    return { ...result, sendRefusal, handoff, pendingActions, queuedTurn };
   }
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
     const thread = await this.threads.get({ kind: 'project', projectId }, id);
@@ -144,6 +168,8 @@ export class ThreadsService {
       }),
     ]);
     if (!target.allowed) throw new ForbiddenAppException({}, 'permissions');
+    // US-001 (#424): a mode no runner can host is refused before the mode is stored.
+    await this.assertModeServed(projectId, threadId, mode);
     return this.threads.changeMode(projectId, threadId, { id: principal.id, type: principal.actorType === 'agent' ? 'AGENT' : 'USER' }, mode, anyRow.allowed);
   }
 

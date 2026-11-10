@@ -14,7 +14,7 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import { FleetCommandType } from '../../common/enums';
 import { actorTypeFor, type ActorType } from '../../action-context/action-context';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC, type RunnerCapabilities } from '../common/protocol';
-import { servesThreadBackend } from '../jobs/placement-rules';
+import { threadCapabilityMisfit, threadModeMisfit, THREAD_MISFIT_ORDER, type ThreadCapabilityMisfit } from '../jobs/placement-rules';
 import { isRunnerOnline } from '../common/runner-online';
 import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, type IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { ACTIVE_STATES } from '../jobs/job-state';
@@ -28,7 +28,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval, type ThreadScope, type ThreadServeNeed, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import { readPendingApprovals } from './domain/pending-approvals';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
@@ -49,6 +49,9 @@ const mapThreadKind = (kind: string | null | undefined): ChatThreadKind =>
 
 /** A budget refusal carries the paused policy so the 409 names its scope. */
 type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
+
+/** A runner row that stored no capabilities hosts nothing: every thread rule misfits on it. */
+const NO_CAPABILITIES = { threadBackends: undefined } as unknown as RunnerCapabilities;
 
 /** Shared visibility fence, applied before and after acquiring mutation locks. */
 const scopeWhere = (scope: ThreadScope): Prisma.ChatThreadWhereInput => scope.kind === 'project'
@@ -72,15 +75,37 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly threadEvents: ThreadEventBus,
   ) {}
 
-  async anyRunnerServesBackend(backend: ThreadBackend): Promise<boolean> {
+  /**
+   * US-001 (#424): the misfit of the runner that got furthest, by placement's own thread rules. Every enabled
+   * thread-capable runner is judged (online or not); a runner that fits answers null, so a thread is refused only
+   * when no runner can host it.
+   *
+   * A `runnerId` narrows the judgement to that runner alone (any `enabled` value — a thread's own runner is judged
+   * even when it is disabled, because every later turn is pinned to it), and `modesOnly` judges the mode rule alone,
+   * so a backend the runner no longer offers never refuses a mode change.
+   *
+   * #399: with no thread-capable runner enrolled, the fleet is not set up yet and there is nothing to judge against;
+   * the thread is accepted and queues as before. Stored capabilities were validated by parseCapabilities at enroll/sync.
+   */
+  async threadServeMisfit(need: ThreadServeNeed): Promise<ThreadCapabilityMisfit | null> {
     const runners = await this.prisma.client.runner.findMany({
-      where: { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } },
+      where: need.runnerId
+        ? { id: need.runnerId }
+        : { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } },
       select: { capabilities: true },
     });
-    // #399: with no thread-capable runner enrolled, the fleet is not set up yet and there is nothing to judge against;
-    // the thread is accepted and queues as before. Stored capabilities were validated by parseCapabilities at enroll/sync.
-    if (runners.length === 0) return true;
-    return runners.some((runner) => servesThreadBackend((runner.capabilities as unknown as RunnerCapabilities | null)?.threadBackends, backend));
+    if (runners.length === 0) return null;
+    let furthest: ThreadCapabilityMisfit | null = null;
+    for (const runner of runners) {
+      const capabilities = (runner.capabilities as unknown as RunnerCapabilities | null) ?? NO_CAPABILITIES;
+      const misfit = need.modesOnly
+        ? threadModeMisfit(need.mode, capabilities)
+        : threadCapabilityMisfit({ backend: need.backend, kind: need.kind, mode: need.mode, enabled: true, action: 'SESSION' }, capabilities);
+      // One runner that can host the thread is enough.
+      if (misfit === null) return null;
+      if (furthest === null || THREAD_MISFIT_ORDER[misfit] > THREAD_MISFIT_ORDER[furthest]) furthest = misfit;
+    }
+    return furthest;
   }
 
   async create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {

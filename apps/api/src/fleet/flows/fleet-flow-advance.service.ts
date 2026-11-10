@@ -26,6 +26,7 @@ import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidanc
 import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
+import type { FlowFinding } from './flow-verdict';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
 import { remainingCapUsd } from './flow-step-dispatch';
@@ -123,7 +124,7 @@ export class FleetFlowAdvanceService {
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return; // A stop/re-ask does not cancel the dispatched job.
-      await this.recordStep(current, feature.id, action.step, jobId, action.pr?.number);
+      await this.recordStep(current, feature.id, action.step, jobId, action.pr?.number, action.accepted);
     });
   }
 
@@ -460,7 +461,7 @@ export class FleetFlowAdvanceService {
       // The dispatch guard supplies the remaining cap; the API config selects the review agent.
       remainingCapUsd: pass.remainingCapUsd, reviewAgent: this.config.flowReviewAgent,
       ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}), ...(pass.rule ? { rule: pass.rule } : {}),
-      prdEdits: flow.entry === 'NAX',
+      prdEdits: true,
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
       // US-001: the job belongs to the flow's feature, so a later feature's jobs never answer for it.
@@ -522,6 +523,7 @@ export class FleetFlowAdvanceService {
   /** Called only with the parent and flow locked, including crash recovery in the decide transaction. */
   private async recordStep(
     flow: FleetFlowRecord, featureId: string, step: FlowStep, jobId: string, prNumber?: number,
+    accepted?: readonly FlowFinding[],
   ): Promise<void> {
     await this.steps.markStep(flow.id, featureId, step, {
       flowState: 'RUNNING', ...(prNumber !== undefined ? { prNumber } : {}),
@@ -531,7 +533,12 @@ export class FleetFlowAdvanceService {
         approvalMode: flow.approvalMode, approverId: flow.approverId,
       });
     }
-    await this.record(flow, `flow step ${step}`, 'flow.step', { step, jobId });
+    await this.record(flow, `flow step ${step}`, 'flow.step', {
+      step, jobId,
+      ...(accepted && accepted.length > 0 ? {
+        accepted: accepted.map((finding) => truncateFlowText(safeFlowJsonText(finding.summary), FLOW_CALL_TEXT_MAX)),
+      } : {}),
+    });
   }
 
   /**

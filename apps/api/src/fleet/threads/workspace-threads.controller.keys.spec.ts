@@ -68,15 +68,25 @@ describe('WorkspaceThreadsController route keys (US-003)', () => {
   it('#399: refuses a backend no runner serves before the approval gate opens', async () => {
     const run = vi.fn();
     const refusal = new Error('threads.backendUnavailable');
-    const controller = new WorkspaceThreadsController({ assertBackendServed: vi.fn(async () => { throw refusal; }) } as never, { run } as unknown as ApprovalRouteGate);
+    const controller = new WorkspaceThreadsController({ assertThreadServed: vi.fn(async () => { throw refusal; }) } as never, { run } as unknown as ApprovalRouteGate);
     await expect(controller.create({ title: 'thread', backend: { kind: 'native', model: 'nobody/offers' } } as never, { actorType: 'user', id: 'u', role: 'MEMBER' } as never)).rejects.toBe(refusal);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('US-001: judges the workspace thread by its own kind and mode', async () => {
+    const assertThreadServed = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ status: 'executed' as const, result: { id: 't1' } }));
+    const controller = new WorkspaceThreadsController({ assertThreadServed } as never, { run } as unknown as ApprovalRouteGate);
+
+    await controller.create({ title: 'thread', backend: { kind: 'native', model: 'm1' } } as never, { actorType: 'user', id: 'u', role: 'MEMBER' } as never);
+
+    expect(assertThreadServed).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'm1' }, kind: 'WORKSPACE', mode: 'read' });
   });
 
   it('AC-9: routes create through the global approval gate with the body unchanged', async () => {
     const body = { title: 'thread', backend: { kind: 'native', model: 'm1' } };
     const run = vi.fn(async () => ({ status: 'executed' as const, result: { id: 't1' } }));
-    const controller = new WorkspaceThreadsController({ assertBackendServed: vi.fn(async () => undefined) } as never, { run } as unknown as ApprovalRouteGate);
+    const controller = new WorkspaceThreadsController({ assertThreadServed: vi.fn(async () => undefined) } as never, { run } as unknown as ApprovalRouteGate);
 
     await controller.create(body as never, { actorType: 'user', id: 'u', role: 'MEMBER' } as never);
 

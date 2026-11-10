@@ -133,6 +133,9 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   // FIX on an unprotected default branch: its own key so grants and approval policies for the other
   // repo toggles never reach it.
   'fleet.repo.fix.unprotected': 'global',
+  // #370: the per-repo rule override. Its own key, so a grant for the other repo toggles never
+  // reaches the rules a repo's jobs run with.
+  'fleet.repo.rules.configure': 'global',
   'thread.mode.ask': 'project',
   'thread.mode.full': 'project',
   // C10 US-003: the GLOBAL provider key writes. Their surface arrives in two steps — the create route

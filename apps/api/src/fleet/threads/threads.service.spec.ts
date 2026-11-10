@@ -104,6 +104,38 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
     const thread = await service.get('p1', 't1');
 
     expect(thread.session).toEqual(session);
+    expect(thread.queuedTurn).toBeNull();
+    expect(thread.sendRefusal).toBeNull();
+    expect(thread.handoff).toEqual({ plan: null, run: null });
+    expect(thread.pendingActions).toEqual([]);
+  });
+});
+
+describe('ThreadsService.get queued turn', () => {
+  const make = (activeJob: { id: string; state: string } | null, verdict = { jobId: 'j1', queuedAt: new Date('2026-10-15T12:00:00.000Z'), verdict: 'no_fit' as const, reasons: [] }) => {
+    const threads = {
+      get: vi.fn().mockResolvedValue({ ...record, activeJob }),
+      sendRefusalOf: vi.fn().mockResolvedValue(null), handoff: vi.fn().mockResolvedValue({ plan: null, run: null }),
+      pendingActions: vi.fn().mockResolvedValue([]),
+    } as unknown as ChatThreadRepository;
+    const placement = { queuedVerdict: vi.fn().mockResolvedValue(verdict) };
+    const service = new ThreadsService(threads, {} as never, {} as never, { threadsEnabled: true, jobQueuedWarnSec: 60 } as never, {} as never,
+      briefStub(), new AfterCommitService(), permissionStub(), placement as never);
+    return { service, placement };
+  };
+
+  it('AC-6: running job returns null without querying placement', async () => {
+    const { service, placement } = make({ id: 'j1', state: 'RUNNING' });
+    expect((await service.get('p1', 't1')).queuedTurn).toBeNull();
+    expect(placement.queuedVerdict).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: queued job passes the warning threshold and exposes the computed verdict', async () => {
+    const verdict = { jobId: 'j1', queuedAt: new Date('2026-10-15T12:00:00.000Z'), verdict: 'no_fit' as const, reasons: [] };
+    const { service, placement } = make({ id: 'j1', state: 'QUEUED' }, verdict);
+    const result = await service.get('p1', 't1');
+    expect(placement.queuedVerdict).toHaveBeenCalledWith('j1', expect.any(Date), 60);
+    expect(result.queuedTurn).toBe(verdict);
   });
 });
 
@@ -296,19 +328,20 @@ describe('ThreadsService.create (US-003)', () => {
     repos?: Partial<IFleetRepoRepository>;
     threads?: Partial<ChatThreadRepository>;
     snapshot?: ReturnType<typeof vi.fn>;
+    permissions?: PermissionService;
   } = {}) => {
     const create = vi.fn().mockImplementation(async (input: Record<string, unknown>) => ({ ...record, ...input }));
     const findAnchor = vi.fn().mockResolvedValue({ id: 'r-anchor' });
     const findById = vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', defaultBranch: 'trunk' });
     const snapshotForProject = over.snapshot ?? vi.fn().mockResolvedValue([]);
     const service = new ThreadsService(
-      { create, anyRunnerServesBackend: vi.fn().mockResolvedValue(true), ...over.threads } as unknown as ChatThreadRepository,
+      { create, threadServeMisfit: vi.fn().mockResolvedValue(null), ...over.threads } as unknown as ChatThreadRepository,
       { findAnchor, findById, ...over.repos } as unknown as IFleetRepoRepository,
       { snapshotForProject } as unknown as SkillsService,
       { threadsEnabled: true, ...over.config } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(), permissionStub(),
+      new AfterCommitService(), over.permissions ?? permissionStub(),
     );
     return { service, create, findAnchor, findById, snapshotForProject };
   };
@@ -350,25 +383,43 @@ describe('ThreadsService.create (US-003)', () => {
   });
 
   it('#399: refuses a PROJECT thread whose native model no enabled runner offers, before any write', async () => {
-    const anyRunnerServesBackend = vi.fn().mockResolvedValue(false);
-    const { service, create, findAnchor } = createService({ threads: { anyRunnerServesBackend } });
+    const threadServeMisfit = vi.fn().mockResolvedValue('thread_backend');
+    const { service, create, findAnchor } = createService({ threads: { threadServeMisfit } });
     await expect(service.create('p1', principal, { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'deepseek/deepseek-v4.1-flash-1017' } }))
       .rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.model', value: 'deepseek/deepseek-v4.1-flash-1017' } });
-    expect(anyRunnerServesBackend).toHaveBeenCalledWith({ kind: 'native', model: 'deepseek/deepseek-v4.1-flash-1017' });
+    expect(threadServeMisfit).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'deepseek/deepseek-v4.1-flash-1017' }, kind: 'PROJECT', mode: 'read' });
     expect(findAnchor).toHaveBeenCalledWith('p1');   // the anchor check answers first (noFleetRepo before backendUnavailable)
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('US-001 AC-11: refuses a PROJECT thread no runner can host, naming the kind cause', async () => {
+    const threadServeMisfit = vi.fn().mockResolvedValue('project_threads');
+    const { service, create } = createService({ threads: { threadServeMisfit } });
+    await expect(service.create('p1', principal, { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'm1' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.projectThreadsUnavailable' });
+    expect(threadServeMisfit).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'm1' }, kind: 'PROJECT', mode: 'read' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC-11: judges a REPO thread with its own kind and mode', async () => {
+    const threadServeMisfit = vi.fn().mockResolvedValue('thread_modes');
+    const { service, create } = createService({ threads: { threadServeMisfit }, permissions: { can: vi.fn().mockResolvedValue({ allowed: true }) } as unknown as PermissionService });
+    await expect(service.create('p1', principal, { repoId: 'r1', feature: 'add-auth', title: 'Add auth', mode: 'ask', backend: { kind: 'native', model: 'm1' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.modeUnavailable', args: { mode: 'ask' } });
+    expect(threadServeMisfit).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'm1' }, kind: 'REPO', mode: 'ask' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('#399: an unknown REPO answers 404 before the backend is judged', async () => {
-    const anyRunnerServesBackend = vi.fn().mockResolvedValue(false);
-    const { service } = createService({ threads: { anyRunnerServesBackend }, repos: { findById: vi.fn().mockResolvedValue(null) } });
+    const threadServeMisfit = vi.fn().mockResolvedValue('thread_backend');
+    const { service } = createService({ threads: { threadServeMisfit }, repos: { findById: vi.fn().mockResolvedValue(null) } });
     await expect(service.create('p1', principal, { repoId: 'missing', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } }))
       .rejects.toMatchObject({ code: 404, prefix: 'fleet.repos' });
-    expect(anyRunnerServesBackend).not.toHaveBeenCalled();
+    expect(threadServeMisfit).not.toHaveBeenCalled();
   });
 
   it('#399: refuses a REPO thread whose ACP agent no enabled runner offers, before any write', async () => {
-    const { service, create } = createService({ threads: { anyRunnerServesBackend: vi.fn().mockResolvedValue(false) } });
+    const { service, create } = createService({ threads: { threadServeMisfit: vi.fn().mockResolvedValue('thread_backend') } });
     await expect(service.create('p1', principal, { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'acp', agent: 'cursor' } }))
       .rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.agent', value: 'cursor' } });
     expect(create).not.toHaveBeenCalled();
@@ -656,5 +707,51 @@ describe('ThreadsService archive after commit', () => {
     cancel.mockRejectedValue(new ConflictAppException({}, 'threads.archived'));
     await expect(service.archive('p1', 't1', 'u1', true)).resolves.toBeUndefined();
     await expect(afterCommit.scope(() => service.archive('p1', 't1', 'u1', true))).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * US-001 (#424): a mode change to `ask`/`full` needs a runner that can host that mode. The thread's own runner is
+ * judged when it has one, because every later turn is pinned to it.
+ */
+describe('ThreadsService.assertModeServed (US-001)', () => {
+  const build = (over: { get?: ReturnType<typeof vi.fn>; threadServeMisfit?: ReturnType<typeof vi.fn> } = {}) => {
+    const get = over.get ?? vi.fn().mockResolvedValue({ ...record, runnerId: 'runner-1' });
+    const threadServeMisfit = over.threadServeMisfit ?? vi.fn().mockResolvedValue(null);
+    const service = new ThreadsService(
+      { get, threadServeMisfit } as unknown as ChatThreadRepository,
+      {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>, {} as FleetJobsService,
+      briefStub(), new AfterCommitService(), permissionStub(),
+    );
+    return { service, get, threadServeMisfit };
+  };
+
+  it('AC-4: mode read returns without any capability refusal', async () => {
+    const { service, get, threadServeMisfit } = build();
+    await expect(service.assertModeServed('p1', 't1', 'read')).resolves.toBeUndefined();
+    expect(get).not.toHaveBeenCalled();
+    expect(threadServeMisfit).not.toHaveBeenCalled();
+  });
+
+  it('judges a REPO thread by its own runner and the mode rule alone', async () => {
+    const { service, threadServeMisfit } = build();
+    await service.assertModeServed('p1', 't1', 'ask');
+    expect(threadServeMisfit).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'm1' }, kind: 'REPO', mode: 'ask', runnerId: 'runner-1', modesOnly: true });
+  });
+
+  it('refuses a mode the thread\'s runner cannot host with 409 threads.modeUnavailable', async () => {
+    const { service } = build({ threadServeMisfit: vi.fn().mockResolvedValue('thread_modes') });
+    await expect(service.assertModeServed('p1', 't1', 'full')).rejects.toMatchObject({ code: 409, prefix: 'threads.modeUnavailable', args: { mode: 'full' } });
+  });
+
+  it('answers 404 when the thread does not exist', async () => {
+    const { service } = build({ get: vi.fn().mockResolvedValue(null) });
+    await expect(service.assertModeServed('p1', 'missing', 'ask')).rejects.toMatchObject({ code: 404, prefix: 'threads.notFound' });
+  });
+
+  it('leaves a non-REPO thread to the existing mode validation', async () => {
+    const { service, threadServeMisfit } = build({ get: vi.fn().mockResolvedValue({ ...record, kind: 'PROJECT' }) });
+    await expect(service.assertModeServed('p1', 't1', 'ask')).resolves.toBeUndefined();
+    expect(threadServeMisfit).not.toHaveBeenCalled();
   });
 });

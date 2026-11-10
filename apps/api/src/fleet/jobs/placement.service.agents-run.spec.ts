@@ -37,6 +37,9 @@ function fixture(runners: PlacementRunnerRow[], job = agentJob()) {
     lockRunners: vi.fn(async () => runners.map((r) => r.id)),
     findActiveLoads: vi.fn(async () => []),
     findThreadAssign: vi.fn(async () => null),
+    // US-008: an AGENT job is a nax command, so placement reads the repo's rule override for it.
+    findRuleOverride: vi.fn(async () => null),
+    setRuleOverrideSummary: vi.fn(async () => undefined),
     createCommand: vi.fn(async () => ({})),
     casAssign: vi.fn(async () => 1),
     findById: vi.fn(async () => job),

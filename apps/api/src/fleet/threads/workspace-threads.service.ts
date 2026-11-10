@@ -3,8 +3,7 @@ import { ConfigType } from '@nestjs/config';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { isUserPrincipal, type AgentPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
-import { assertBackendServed } from './thread-backend-served';
-import type { ThreadBackend } from '../common/thread-jobs';
+import { assertThreadServed } from './thread-backend-served';
 import { FleetCommandType } from '../../common/enums';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { PermissionService } from '../../permissions/permission.service';
@@ -12,11 +11,12 @@ import { ProjectAccessService } from '../../projects/project-access.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
-import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
+import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository, type ThreadServeNeed } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateWorkspaceThread, type CreateWorkspaceThreadInput } from './thread-input';
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { PlacementService } from '../jobs/placement.service';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 
 /**
@@ -41,13 +41,17 @@ export class WorkspaceThreadsService {
     private readonly permissions: PermissionService,
     private readonly fleetJobs: FleetJobsService,
     private readonly afterCommit: AfterCommitService,
+    private readonly placement: PlacementService,
   ) {}
 
   private readonly logger = new Logger(WorkspaceThreadsService.name);
 
-  /** #399: refuses (409) a backend no enabled thread-capable runner offers. The route asks before its approval gate. */
-  async assertBackendServed(backend: ThreadBackend): Promise<void> {
-    await assertBackendServed(this.threads, backend);
+  /**
+   * #399, US-001 (#424): refuses (409) a thread no enabled thread-capable runner can host — its backend, its kind's
+   * hosting capability or its mode's capability. The route asks before its approval gate.
+   */
+  async assertThreadServed(need: ThreadServeNeed): Promise<void> {
+    await assertThreadServed(this.threads, need);
   }
 
   async create(principal: UserPrincipal | AgentPrincipal, input: CreateWorkspaceThreadInput): Promise<ChatThreadRecord> {
@@ -74,7 +78,8 @@ export class WorkspaceThreadsService {
       }
       if (!home) throw new ConflictAppException({}, 'threads.noFleetRepo');
     }
-    await this.assertBackendServed(normalized.backend);   // #399, again at execution: the fleet may have changed
+    // #399, US-001, again at execution: the fleet may have changed.
+    await this.assertThreadServed({ backend: normalized.backend, kind: 'WORKSPACE', mode: 'read' });
     const skills = await this.skills.snapshotForProject(home.id);
     const thread = await this.threads.create({ kind: 'WORKSPACE', projectId: home.id, repoId: null, baseRef: null, feature: null, title: normalized.title, createdById: principal.id, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
     return { ...thread, homeProject: { slug: home.slug, name: home.name } };
@@ -115,10 +120,13 @@ export class WorkspaceThreadsService {
   async get(userId: string, id: string): Promise<ChatThreadDetail> {
     const scope = { kind: 'workspace', userId } as const;
     const thread = await this.requireOwnedThread(userId, id);
-    const [sendRefusal, handoff, pendingActions] = await Promise.all([
+    const [sendRefusal, handoff, pendingActions, queuedTurn] = await Promise.all([
       this.threads.sendRefusalOf(thread.projectId, thread), this.threads.handoff(thread.id), this.threads.pendingActions(scope, thread.id),
+      thread.activeJob?.state === 'QUEUED'
+        ? this.placement.queuedVerdict(thread.activeJob.id, new Date(), this.config.jobQueuedWarnSec)
+        : Promise.resolve(null),
     ]);
-    return { ...thread, sendRefusal, handoff, pendingActions };
+    return { ...thread, sendRefusal, handoff, pendingActions, queuedTurn };
   }
 
   async messages(userId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {

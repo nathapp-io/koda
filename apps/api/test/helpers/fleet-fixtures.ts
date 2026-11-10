@@ -31,14 +31,14 @@ export async function seedFleetBase(prisma: PrismaClient): Promise<{ adminId: st
 }
 
 /** A runner row without a usable key (for placement-level tests; HTTP tests enroll instead). */
-export async function insertRunner(prisma: PrismaClient, over: Partial<{ name: string; labels: string[]; capacity: number; enabled: boolean; lastSeenAt: Date; capabilities: RunnerCapabilities; bootId: string; createdById: string }> = {}): Promise<{ id: string }> {
+export async function insertRunner(prisma: PrismaClient, over: Partial<{ name: string; labels: string[]; capacity: number; enabled: boolean; lastSeenAt: Date; capabilities: RunnerCapabilities; bootId: string; createdById: string; protocolVersion: number; threadCapacity: number }> = {}): Promise<{ id: string }> {
   const n = ++seq;
   return prisma.runner.create({
     data: {
       name: over.name ?? `runner-${n}`, apiKeyHash: `hash-${n}`, os: 'linux', arch: 'x64', labels: over.labels ?? ['linux'],
       capacity: over.capacity ?? 1, capabilities: (over.capabilities ?? FLEET_CAPS) as object, daemonVersion: '0.1.0',
-      protocolVersion: 1, bootId: over.bootId ?? 'boot-1', enabled: over.enabled ?? true,
-      lastSeenAt: over.lastSeenAt ?? new Date(), createdById: over.createdById ?? 'seed',
+      protocolVersion: over.protocolVersion ?? 1, threadCapacity: over.threadCapacity ?? 2, bootId: over.bootId ?? 'boot-1',
+      enabled: over.enabled ?? true, lastSeenAt: over.lastSeenAt ?? new Date(), createdById: over.createdById ?? 'seed',
     },
     select: { id: true },
   });

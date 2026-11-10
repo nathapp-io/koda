@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import type { ThreadActionResult } from '~/lib/thread-controller'
 import type { ThreadApprovalDecision } from '~/lib/thread-types'
@@ -47,6 +47,16 @@ const pendingApprovals = computed(() => controller.thread.value?.pendingApproval
 const homePermissions = useProjectPermissionsFor(() => controller.thread.value?.homeProject?.slug ?? null)
 const canDecideApprovals = computed(() => isCreator.value && homePermissions.permissions.value.hasOwn('thread.answer'))
 
+let queuedRefreshTimer: ReturnType<typeof setInterval> | null = null
+watch(() => controller.thread.value?.activeJob?.state === 'QUEUED', (queued) => {
+  if (queuedRefreshTimer !== null) clearInterval(queuedRefreshTimer)
+  queuedRefreshTimer = queued ? setInterval(() => { void controller.reloadThread() }, 30_000) : null
+}, { immediate: true })
+onBeforeUnmount(() => {
+  if (queuedRefreshTimer !== null) clearInterval(queuedRefreshTimer)
+  queuedRefreshTimer = null
+})
+
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',
 }))
@@ -88,6 +98,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
         @archive="onArchive"
       />
       <FleetThreadsThreadKodaToolsNotice :thread="controller.thread.value" />
+      <FleetThreadsThreadQueuedNotice :thread="controller.thread.value" />
       <FleetThreadsThreadTimeline
         :thread="controller.thread.value"
         :messages="controller.messages.value"

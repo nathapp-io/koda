@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import type { ThreadActionResult } from '~/lib/thread-controller'
 import { allowedThreadModes } from '~/lib/thread-mode-access'
@@ -65,6 +65,16 @@ const pendingApprovals = computed(() => controller.thread.value?.pendingApproval
  */
 const canDecideApprovals = computed(() =>
   permissions.value.has('thread.answer') || (isCreator.value && permissions.value.hasOwn('thread.answer')))
+
+let queuedRefreshTimer: ReturnType<typeof setInterval> | null = null
+watch(() => controller.thread.value?.activeJob?.state === 'QUEUED', (queued) => {
+  if (queuedRefreshTimer !== null) clearInterval(queuedRefreshTimer)
+  queuedRefreshTimer = queued ? setInterval(() => { void controller.reloadThread() }, 30_000) : null
+}, { immediate: true })
+onBeforeUnmount(() => {
+  if (queuedRefreshTimer !== null) clearInterval(queuedRefreshTimer)
+  queuedRefreshTimer = null
+})
 
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',
@@ -141,6 +151,7 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         @plan="onPlan"
         @run="onRun"
       />
+      <FleetThreadsThreadQueuedNotice :thread="controller.thread.value" />
       <FleetThreadsThreadTimeline
         :thread="controller.thread.value"
         :messages="controller.messages.value"

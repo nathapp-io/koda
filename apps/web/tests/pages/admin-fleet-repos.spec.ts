@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach, jest } from '@jest/globals'
 import * as Vue from 'vue'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, defineComponent, h } from 'vue'
 import { mountSfc } from '../helpers/mount-sfc'
 import {
   reposPage, addRepoDialog, reachabilityBadge, uiStubs, enI18n, toastRecorder, ToastRecorder,
@@ -71,12 +71,20 @@ function mountRepos(
   globalThis.window = { confirm: () => over.confirm ?? true } as never
 
   const app = mountSfc(reposPage, {
-    components: uiStubs,
+    components: {
+      ...uiStubs,
+      FleetRepoRuleOverrideDialog: defineComponent({
+        props: { repo: { type: Object, required: true } },
+        setup(props, { emit }) {
+          return () => h('button', { 'data-testid': `fleet-repo-rules-${(props.repo as FleetRepo).owner}-${(props.repo as FleetRepo).name}`, onClick: () => emit('saved', repo('gitlab', { provider: 'gitlab', githubInstallationId: null, ruleOverride: { sha256: 'a'.repeat(64), ruleFiles: 3, rulesMode: 'merge', contextMode: null, updatedAt: '' } })) }, `Configure rule override (${(props.repo as FleetRepo).ruleOverride?.ruleFiles ?? 0})`)
+        },
+      }),
+    },
     // The reachability badge is mounted for real: its label is the page's main output.
     fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview', 'FleetRepoFixChecks', 'FleetRepoFixUnprotected'],
     alias: {
       '~/composables/useApi': apiModule,
-      '~/composables/useFleetRepos': { useFleetRepos: () => ({ setFixChecks: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setFixUnprotected: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setAutoReview: async () => ({ kind: 'pending', request: { id: 'ap1' } }) }) },
+      '~/composables/useFleetRepos': { useFleetRepos: () => ({ getRuleOverride: async () => null, setRuleOverride: async () => ({ kind: 'saved', repo: repo('gitlab', { provider: 'gitlab', githubInstallationId: null, ruleOverride: { sha256: 'a'.repeat(64), ruleFiles: 3, rulesMode: 'merge', contextMode: null, updatedAt: '' } }) }), clearRuleOverride: async () => ({ kind: 'saved', repo: repo('gitlab') }), setFixChecks: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setFixUnprotected: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setAutoReview: async () => ({ kind: 'pending', request: { id: 'ap1' } }) }) },
     },
     globals: {
       ref, computed, watch, nextTick,
@@ -118,6 +126,18 @@ function mountRepos(
 }
 
 describe('Fleet admin Repos page (behaviour)', () => {
+  test('renders GitLab override action and replaces the repo summary after save', async () => {
+    const gitlab = repo('gitlab', { provider: 'gitlab', githubInstallationId: null })
+    const { app, settle, unmount } = mountRepos({ repos: [gitlab] })
+    await settle()
+    expect(app.find('[data-testid="fleet-repo-rules-acme-gitlab"]')).toHaveLength(1)
+    const action = app.find('button').find((button) => button.props['data-testid'] === 'fleet-repo-rules-acme-gitlab')
+    expect(action).toBeDefined()
+    ;(action?.props.onClick as () => void)()
+    await settle()
+    expect(app.text()).toContain('Configure rule override (3)')
+    unmount()
+  })
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).window
     delete (globalThis as Record<string, unknown>).useApi

@@ -115,6 +115,42 @@ describe('agent model aliases overlay (fleet-agent-job US-008)', () => {
   });
 });
 
+describe('rule override context overlay (fleet #370 US-009)', () => {
+  const context = {
+    rules: { overrideDir: '/j/koda-rules', overrideMode: 'replace' as const },
+    projectContext: { file: '/j/koda-context.md', mode: 'replace' as const },
+  };
+
+  test('AC-11: the profile carries the rules directory and the project context', () => {
+    const profile = jobProfileContent('/out', 'p', undefined, undefined, undefined, context);
+    expect(profile.context).toEqual(context);
+  });
+
+  test('AC-12: a job without an override keeps no context key', () => {
+    expect('context' in jobProfileContent('/out', 'p')).toBe(false);
+    expect(jobProfileContent('/out', 'p')).toEqual({ outputDir: '/out', name: 'p' });
+  });
+
+  test('the context overlay keeps the relay, the cost limit and the model aliases', () => {
+    const relay = { bashMode: 'escalate' as const, approvalTimeoutSec: 90, endpoint: { url: 'http://127.0.0.1:43210/ask', secret: 'f'.repeat(64) } };
+    expect(jobProfileContent('/out', 'p', relay, 2.5, { reviewer: 'acp:claude' }, context)).toMatchObject({
+      bot: { costLimit: 2.5 }, agent: { modelAliases: { reviewer: 'acp:claude' } }, context,
+    });
+  });
+
+  test('an override without a project context carries only the rules', () => {
+    const profile = jobProfileContent('/out', 'p', undefined, undefined, undefined, { rules: { overrideDir: '/j/koda-rules', overrideMode: 'merge' } });
+    expect(profile.context).toEqual({ rules: { overrideDir: '/j/koda-rules', overrideMode: 'merge' } });
+  });
+
+  test('writeJobProfile writes the context into the profile file', async () => {
+    const home = await tmp.make('profile-context');
+    const path = await writeJobProfile(home, 'j1', '/out', 'p', undefined, undefined, undefined, context);
+    expect(JSON.parse(await readFile(path, 'utf8')).context).toEqual(context);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+});
+
 describe('job profile file', () => {
   test('names and paths', () => {
     expect(jobProfileName('cabc123')).toBe('koda-job-cabc123');

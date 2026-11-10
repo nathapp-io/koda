@@ -127,6 +127,7 @@ onMounted(() => reload())
               <FleetRepoFixUnprotected v-if="repo.provider === 'github' && repo.githubInstallationId" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
             </TableCell>
             <TableCell class="space-x-1 whitespace-nowrap text-right">
+              <FleetRepoRuleOverrideDialog :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
               <NuxtLink v-if="dispatchHref(repo)" :to="dispatchHref(repo)!" class="inline-flex h-8 items-center rounded-md border border-input px-3 text-xs hover:bg-muted" :data-testid="`fleet-repo-dispatch-${repo.owner}-${repo.name}`">
                 {{ t('fleet.repos.actions.dispatch') }}
               </NuxtLink>

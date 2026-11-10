@@ -379,6 +379,19 @@ function mountEnginePage(over: EnginePageOver) {
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
 
 describe('review and config job headers', () => {
+  test('assigned rule override summary includes count, mode and short sha', async () => {
+    const m = mountEnginePage({ job: jobFixture({ ruleOverride: { sha256: '12345678' + 'a'.repeat(56), ruleFiles: 3, rulesMode: 'replace', contextMode: 'append' } }), records: [] })
+    await m.settle()
+    const summary = m.byId('fleet-job-rule-override')
+    expect(summary).toHaveLength(1)
+    const rendered = summary[0]
+    expect(rendered).toBeDefined()
+    if (!rendered) throw new Error('rule override summary missing')
+    expect(m.app.textOf(rendered)).toContain('3 files')
+    expect(m.app.textOf(rendered)).toContain('replace')
+    expect(m.app.textOf(rendered)).toContain('12345678')
+    m.app.unmount()
+  })
   test('FIX header shows PR #42', async () => {
     const fix = mountEnginePage({ job: jobFixture({ command: 'FIX', feature: 'review-pr-42' }), records: [] })
     await fix.settle()

@@ -993,6 +993,18 @@
         "project": "项目线程",
         "workspace": "工作区线程"
       },
+      "queued": {
+        "title": "此轮仍在排队",
+        "reasonOn": "{runner}：{reason}",
+        "verdict": {
+          "never": "没有运行器可以执行此轮",
+          "waiting_capacity": "正在等待运行器容量",
+          "runners_paused": "所有符合条件的运行器均已暂停",
+          "no_fit": "没有符合条件的运行器可以执行此轮",
+          "no_runners": "没有可用的运行器",
+          "budget_paused": "舰队预算已暂停"
+        }
+      },
       "workspace": {
         "title": "我的线程",
         "homeProject": "归属项目",
@@ -1319,7 +1331,14 @@
       "bot_review": "此运行器上的 nax 无法执行 PR 评审",
       "bot_fix": "此运行器上的 nax 无法执行 PR 修复",
       "agents_run": "此运行器上的 nax 无法执行代理任务",
-      "trust_domain": "执行机正在运行其他项目的任务（隔离）"
+      "trust_domain": "执行机正在运行其他项目的任务（隔离）",
+      "thread_capacity": "运行器已达到线程容量上限",
+      "thread_backend": "运行器不提供此线程后端",
+      "thread_modes": "运行器不支持此线程模式",
+      "threads_disabled": "此运行器已停用线程功能",
+      "thread_write": "运行器无法执行线程写入操作",
+      "project_threads": "运行器无法托管项目线程",
+      "workspace_threads": "运行器无法托管工作区线程"
     },
     "repoReason": {
       "github_app_not_configured": "koda 服务器未配置 GitHub App",
@@ -1895,6 +1914,9 @@
         "pending": "审批待处理；已保存的设置尚未更改。",
         "hint": "没有 nax 检查配置时，允许 FIX 任务运行从 package 脚本检测到的检查。"
       },
+      "ruleOverride": {
+        "open": "规则覆盖（{files}）", "openEmpty": "配置规则覆盖", "title": "仓库规则覆盖", "path": "规则文件路径", "content": "规则文件内容", "remove": "移除文件", "addFile": "添加文件", "rulesMode": "规则模式", "context": "项目上下文", "contextMode": "上下文模式", "save": "保存", "clear": "清除", "close": "关闭", "pending": "审批待处理；已保存的覆盖尚未更改。"
+      },
       "reach": {
         "checking": "检查中…",
         "unchecked": "未检查",
@@ -1930,6 +1952,7 @@
       }
     },
     "jobs": {
+      "ruleOverride": { "summary": "已分配的仓库规则覆盖：{files} 个文件，规则模式 {mode}，上下文 {context}，SHA-256 {sha256}。此记录表示已分配的内容，不代表执行机已应用。" },
       "title": "Fleet 任务",
       "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
       "dispatch": "派发",
