@@ -23,6 +23,9 @@
   "notRepoThread": { "409": "This action needs a repository thread" },
   "noFleetRepo": { "409": "This project has no repository, so a project thread cannot run" },
   "backendUnavailable": { "409": "No enabled runner offers {value} ({field}), so this thread could never run" },
+  "projectThreadsUnavailable": { "409": "No enabled runner can host a project thread, so this thread could never run" },
+  "workspaceThreadsUnavailable": { "409": "No enabled runner can host a workspace thread, so this thread could never run" },
+  "modeUnavailable": { "409": "No enabled runner can host threads in mode {mode}, so this thread could never run" },
   "notCreator": { "403": "Only the thread creator can perform this action", "40003": "Only the thread creator can perform this action" },
   "notPublished": { "409": "Publish the thread's spec before planning" },
   "notPlanned": { "409": "The thread's latest plan has not completed" }

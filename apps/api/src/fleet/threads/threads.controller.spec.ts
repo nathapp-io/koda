@@ -7,8 +7,8 @@ import { ThreadsController } from './threads.controller';
 
 const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
 const ctx = { project: { id: 'p1', slug: 'web' } };
-/** #399: the create route asks the service whether some runner serves the backend before the gate. */
-const served = () => ({ assertBackendServed: vi.fn(async () => undefined) }) as unknown as ThreadsService;
+/** #399, US-001: the create route asks the service whether some runner can host the thread before the gate. */
+const served = () => ({ assertThreadServed: vi.fn(async () => undefined), assertModeServed: vi.fn(async () => undefined), assertModeAllowed: vi.fn(async () => undefined) }) as unknown as ThreadsService;
 
 describe('ThreadsController approval gate', () => {
   it.each([false, true])('message projects raw results and sets 200 only for duplicates (%s)', async (deduplicated) => {
@@ -31,10 +31,28 @@ describe('ThreadsController approval gate', () => {
   it('#399: create refuses a backend no runner serves before the approval gate opens', async () => {
     const run = vi.fn();
     const refusal = new Error('threads.backendUnavailable');
-    const service = { assertBackendServed: vi.fn(async () => { throw refusal; }) } as unknown as ThreadsService;
+    const service = { assertThreadServed: vi.fn(async () => { throw refusal; }) } as unknown as ThreadsService;
     const c = new ThreadsController(service, { run } as unknown as ApprovalRouteGate);
     await expect(c.create({ kind: 'PROJECT', title: 'T', backend: { kind: 'native', model: 'nobody/offers' } }, ctx, principal)).rejects.toBe(refusal);
-    expect(service.assertBackendServed).toHaveBeenCalledWith({ kind: 'native', model: 'nobody/offers' });
+    expect(service.assertThreadServed).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'nobody/offers' }, kind: 'PROJECT', mode: 'read' });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('US-001: create judges a REPO thread with its own mode', async () => {
+    const run = vi.fn().mockResolvedValue({ status: 'executed', result: { id: 't1' } });
+    const service = { assertThreadServed: vi.fn(async () => undefined), assertModeAllowed: vi.fn(async () => undefined) } as unknown as ThreadsService;
+    const c = new ThreadsController(service, { run } as unknown as ApprovalRouteGate);
+    await c.create({ kind: 'REPO', repoId: 'r1', feature: 'f', title: 'T', mode: 'ask', backend: { kind: 'native', model: 'm1' } }, ctx, principal);
+    expect(service.assertThreadServed).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'm1' }, kind: 'REPO', mode: 'ask' });
+  });
+
+  it('US-001: a mode change asks the service before the approval gate opens', async () => {
+    const run = vi.fn();
+    const refusal = new Error('threads.modeUnavailable');
+    const service = { assertModeServed: vi.fn(async () => { throw refusal; }) } as unknown as ThreadsService;
+    const c = new ThreadsController(service, { run } as unknown as ApprovalRouteGate);
+    await expect(c.changeMode('t1', { mode: 'ask' }, ctx, principal)).rejects.toBe(refusal);
+    expect(service.assertModeServed).toHaveBeenCalledWith('p1', 't1', 'ask');
     expect(run).not.toHaveBeenCalled();
   });
   const cases = [

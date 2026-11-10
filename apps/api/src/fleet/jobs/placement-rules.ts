@@ -165,6 +165,53 @@ export function servesThreadBackend(backends: RunnerCapabilities['threadBackends
   return backends?.acp.includes(backend.agent) === true;
 }
 
+/**
+ * US-001 (#424): the thread capability a runner lacks, named for the 409 refusal it causes. The five values are
+ * placement's own thread reasons, so a refusal and a placement misfit never drift apart.
+ */
+export type ThreadCapabilityMisfit = 'project_threads' | 'workspace_threads' | 'thread_modes' | 'thread_backend' | 'thread_write';
+
+/** The mode rule alone: `ask` and `full` need the runner's `threadModes` capability; `read` needs nothing. */
+export function threadModeMisfit(mode: ThreadMode | undefined, capabilities: RunnerCapabilities): 'thread_modes' | null {
+  return (mode === 'ask' || mode === 'full') && capabilities.threadModes !== true ? 'thread_modes' : null;
+}
+
+/**
+ * US-001 (#424): placement's rule order, used to name the runner that got furthest when every runner misfits. The
+ * two kind rules share a rank (a runner is asked for one kind at a time), then the mode rule, then the backend rule.
+ * `thread_write` is last: a session need never reaches it.
+ */
+export const THREAD_MISFIT_ORDER: Readonly<Record<ThreadCapabilityMisfit, number>> = Object.freeze({
+  project_threads: 1,
+  workspace_threads: 1,
+  thread_modes: 2,
+  thread_backend: 3,
+  thread_write: 4,
+});
+
+/**
+ * US-001 (#424): placement's thread rules as one pure function, in `firstMisfit`'s order — the kind rules, then
+ * the mode rule, then the backend rule (or `thread_write` for a non-session action). `firstMisfit` calls it, and so
+ * does thread create and a mode change, so a thread no runner can host is refused with a cause instead of queueing
+ * its first turn forever.
+ */
+export function threadCapabilityMisfit(thread: PlacementThread, capabilities: RunnerCapabilities): ThreadCapabilityMisfit | null {
+  // S5b-R9: a PROJECT thread runs with no checkout, which only a runner advertising projectThreads can host.
+  if (thread.kind === 'PROJECT' && capabilities.projectThreads !== true) return 'project_threads';
+  // Recoverable: a daemon upgrade can enable workspace hosting.
+  if (thread.kind === 'WORKSPACE' && capabilities.workspaceThreads !== true) return 'workspace_threads';
+  // Fleet S5a §4: Publish and Discard run in the worktree, not on an agent, so they need threadWrite and no backend.
+  const action = thread.action ?? 'SESSION';
+  if (action === 'SESSION') {
+    const mode = threadModeMisfit(thread.mode, capabilities);
+    if (mode) return mode;
+    if (!servesThreadBackend(capabilities.threadBackends, thread.backend)) return 'thread_backend';
+    return null;
+  }
+  if (capabilities.threadWrite !== true) return 'thread_write';
+  return null;
+}
+
 /** Spec §4 steps 1-3, in order. Pinned jobs ignore selector labels (the pin is the candidate set). */
 export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: RunnerLoad, now: Date, offlineSec: number): MisfitReason | null {
   if (!runner.enabled) return 'disabled';
@@ -176,19 +223,11 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
   if (isThreadKind(job.command)) {
     if (!job.thread?.enabled) return 'threads_disabled';
     if ((runner.protocolVersion ?? 0) < 4) return 'protocol';
-    // S5b-R9: a PROJECT thread runs with no checkout, which only a runner advertising projectThreads can host.
-    // Recoverable (a daemon upgrade clears it), so an unfit runner leaves the job QUEUED, never cancels it.
-    if (job.thread.kind === 'PROJECT' && runner.capabilities.projectThreads !== true) return 'project_threads';
-    // Recoverable: a daemon upgrade can enable workspace hosting.
-    if (job.thread.kind === 'WORKSPACE' && runner.capabilities.workspaceThreads !== true) return 'workspace_threads';
-    // Fleet S5a §4: Publish and Discard run in the worktree, not on an agent, so they need threadWrite and no backend.
-    const action = job.thread.action ?? 'SESSION';
-    if (action === 'SESSION') {
-      if ((job.thread.mode === 'ask' || job.thread.mode === 'full') && runner.capabilities.threadModes !== true) return 'thread_modes';
-      if (!servesThreadBackend(runner.capabilities.threadBackends, job.thread.backend)) return 'thread_backend';
-    } else if (runner.capabilities.threadWrite !== true) {
-      return 'thread_write';
-    }
+    // US-001 (#424): the thread rules live in one pure function, so a create refusal and a placement misfit agree.
+    // project_threads and workspace_threads are recoverable (a daemon upgrade clears them), so an unfit runner
+    // leaves the job QUEUED, never cancels it.
+    const threadMisfit = threadCapabilityMisfit(job.thread, runner.capabilities);
+    if (threadMisfit) return threadMisfit;
     if (hasTrustDomainMisfit(job, load)) return 'trust_domain';
     if ((load.threads ?? 0) >= (runner.threadCapacity ?? 0)) return 'thread_capacity';
     return null;

@@ -4,7 +4,7 @@ import { MISFIT_REASONS } from '../dashboard/dashboard.types';
 import {
   EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
   toLoads, toPlacementJob, withVaultProviders,
-  servesThreadBackend,
+  servesThreadBackend, threadCapabilityMisfit,
 } from './placement-rules';
 
 const NOW = new Date('2026-10-01T12:00:00.000Z');
@@ -551,5 +551,59 @@ describe('servesThreadBackend (#399)', () => {
     expect(servesThreadBackend(backends, { kind: 'acp', agent: 'claude' })).toBe(true);
     expect(servesThreadBackend(backends, { kind: 'acp', agent: 'cursor' })).toBe(false);
     expect(servesThreadBackend(undefined, { kind: 'acp', agent: 'claude' })).toBe(false);
+  });
+});
+
+/**
+ * US-001 (#424): placement's thread rules as one pure function, so thread create and a mode change can refuse a
+ * thread no runner can host. The order is placement's own: the kind rules first, then the mode rule, then the
+ * backend rule.
+ */
+describe('threadCapabilityMisfit (US-001)', () => {
+  const threadCaps = (over: Partial<RunnerCapabilities> = {}) => caps({ threadBackends: { native: ['m1'], acp: [] }, ...over });
+  const thread = (over: Partial<Parameters<typeof threadCapabilityMisfit>[0]> = {}) => ({
+    enabled: true, backend: { kind: 'native' as const, model: 'm1' }, mode: 'read' as const, ...over,
+  });
+
+  it('AC-1: a PROJECT session on a runner without projectThreads is project_threads', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'PROJECT' }), threadCaps())).toBe('project_threads');
+  });
+
+  it('AC-1 control: the same PROJECT session fits a runner advertising projectThreads', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'PROJECT' }), threadCaps({ projectThreads: true }))).toBeNull();
+  });
+
+  it('AC-2: a WORKSPACE session on a runner without workspaceThreads is workspace_threads', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'WORKSPACE' }), threadCaps())).toBe('workspace_threads');
+  });
+
+  it('AC-2 control: the same WORKSPACE session fits a runner advertising workspaceThreads', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'WORKSPACE' }), threadCaps({ workspaceThreads: true }))).toBeNull();
+  });
+
+  it('AC-3: a REPO session in mode ask on a runner without threadModes is thread_modes', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', mode: 'ask' }), threadCaps())).toBe('thread_modes');
+  });
+
+  it('AC-4: a REPO session in mode read on the same capabilities fits, because read needs no mode capability', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', mode: 'read' }), threadCaps())).toBeNull();
+  });
+
+  it('AC-5: a REPO session in mode full on a mode-capable runner whose backend it does not offer is thread_backend', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', mode: 'full', backend: { kind: 'native', model: 'other/model' } }), threadCaps({ threadModes: true }))).toBe('thread_backend');
+  });
+
+  it('AC-5 control: the same session fits when the runner offers the backend', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', mode: 'full' }), threadCaps({ threadModes: true }))).toBeNull();
+  });
+
+  it('names the kind rule before the mode rule, and the mode rule before the backend rule', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'PROJECT', mode: 'ask' }), threadCaps())).toBe('project_threads');
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', mode: 'ask', backend: { kind: 'native', model: 'other/model' } }), threadCaps())).toBe('thread_modes');
+  });
+
+  it('a non-session action needs threadWrite, not a backend', () => {
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', action: 'PUBLISH' }), threadCaps())).toBe('thread_write');
+    expect(threadCapabilityMisfit(thread({ kind: 'REPO', action: 'PUBLISH' }), threadCaps({ threadWrite: true }))).toBeNull();
   });
 });

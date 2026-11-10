@@ -38,7 +38,7 @@ describe('workspace home project creation', () => {
   let resolveMembership: ReturnType<typeof vi.fn>;
   let service: WorkspaceThreadsService;
   let snapshot: ReturnType<typeof vi.fn>;
-  /** #399: whether some enabled runner serves the requested backend. */
+  /** #399, US-001: the misfit of the runner that got furthest, or null when some runner can host the thread. */
   let served: ReturnType<typeof vi.fn>;
   const input = { title: 't', backend: { kind: 'native' as const } };
 
@@ -49,12 +49,12 @@ describe('workspace home project creation', () => {
   beforeEach(() => {
     principal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@example.com' };
     roles = { a: 'DEVELOPER', b: 'DEVELOPER' }; refused = new Set(); offRoster = new Set(); reachable = [b, a]; anchors = new Set(['a', 'b']); config = { threadsEnabled: true };
-    create = vi.fn(async (value) => ({ id: 'thread', ...value })); snapshot = vi.fn(async () => []); served = vi.fn(async () => true);
+    create = vi.fn(async (value) => ({ id: 'thread', ...value })); snapshot = vi.fn(async () => []); served = vi.fn(async () => null);
     // US-003: the host decision is the `thread.create` key; a project listed in `refused` lacks it.
     can = vi.fn(async (_principal: unknown, _key: string, ctx?: { projectId?: string }) => (refused.has(ctx?.projectId ?? '') ? deny() : allow()));
     resolveMembership = vi.fn(resolveMembershipFor);
     service = new WorkspaceThreadsService(
-      { create, anyRunnerServesBackend: (backend: unknown) => served(backend) } as unknown as ChatThreadRepository,
+      { create, threadServeMisfit: (need: unknown) => served(need) } as unknown as ChatThreadRepository,
       { findAnchor: vi.fn(async (id: string) => anchors.has(id) ? { id: 'repo' } : null) } as unknown as IFleetRepoRepository,
       { snapshotForProject: snapshot } as unknown as SkillsService,
       config as IFleetConfig,
@@ -67,9 +67,22 @@ describe('workspace home project creation', () => {
   });
 
   it('#399: refuses a WORKSPACE thread whose backend no enabled runner offers, before any write', async () => {
-    served.mockResolvedValue(false);
+    served.mockResolvedValue('thread_backend');
     await expect(service.create(principal, { title: 't', backend: { kind: 'native', model: 'nobody/offers-this' } }))
       .rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.model', value: 'nobody/offers-this' } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('US-001: judges a WORKSPACE thread by its own kind and mode', async () => {
+    served.mockResolvedValue(null);
+    await service.create(principal, { title: 't', backend: { kind: 'native', model: 'm1' } });
+    expect(served).toHaveBeenCalledWith({ backend: { kind: 'native', model: 'm1' }, kind: 'WORKSPACE', mode: 'read' });
+  });
+
+  it('US-001: refuses a WORKSPACE thread no runner can host, naming the kind cause', async () => {
+    served.mockResolvedValue('workspace_threads');
+    await expect(service.create(principal, { title: 't', backend: { kind: 'native', model: 'm1' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.workspaceThreadsUnavailable' });
     expect(create).not.toHaveBeenCalled();
   });
 

@@ -20,7 +20,7 @@ function fixture() {
     chatThread: { findFirst: vi.fn().mockImplementation(async () => row), update: vi.fn().mockImplementation(async ({ data }) => ({ ...row, ...data })) },
     fleetJob: { findFirst: vi.fn().mockResolvedValue(null) },
     fleetCommand: { findFirst: vi.fn().mockResolvedValue(null) },
-    runner: { findUnique: vi.fn().mockResolvedValue({ lastSeenAt: new Date(), protocolVersion: 4 }) },
+    runner: { findUnique: vi.fn().mockResolvedValue({ lastSeenAt: new Date(), protocolVersion: 4 }), findMany: vi.fn().mockResolvedValue([]) },
     chatMessage: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'M' }) },
     user: { findUnique: vi.fn().mockResolvedValue({ name: 'Current name', email: 'u@test' }) },
     agent: { findUnique: vi.fn().mockResolvedValue({ name: 'Current agent', slug: 'agent' }) },
@@ -127,7 +127,9 @@ describe('thread mode changes', () => {
   });
   it('rejects a new active job observed only under the thread lock', async () => {
     const f = fixture(); f.live();
-    f.client.fleetJob.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    // US-001: the mode check reads the thread once more (its own runner), so the pre-lock reads are three now:
+    // the service's thread read, the mode check's thread read and the repository's first active-job read.
+    f.client.fleetJob.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     await expect(f.change()).rejects.toMatchObject({ prefix: 'threads.busy' });
     expect(f.client.chatThread.update).not.toHaveBeenCalled();
   });
@@ -164,23 +166,29 @@ describe('thread mode changes', () => {
     await expect(f.change()).rejects.toMatchObject({ prefix: 'threads.input' });
     expect(f.client.chatThread.update).not.toHaveBeenCalled();
   });
+  it('US-001: refuses a mode no runner can host before any write', async () => {
+    const f = fixture();
+    f.client.runner.findMany.mockResolvedValue([{ capabilities: { threadBackends: { native: ['m1'], acp: [] } } }]);
+    await expect(f.change('ask')).rejects.toMatchObject({ prefix: 'threads.modeUnavailable', httpStatus: 409 });
+    expect(f.client.chatThread.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('mode approval route and replay', () => {
   it.each([['read', 'thread.cap.update'], ['ask', 'thread.mode.ask'], ['full', 'thread.mode.full']] as const)('gates %s under the target key', async (mode, key) => {
     const gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { mode } }) };
-    const controller = new ThreadsController({} as never, gate as never);
+    const controller = new ThreadsController({ assertModeServed: vi.fn(async () => undefined) } as never, gate as never);
     await controller.changeMode('T', { mode }, ctx, principal);
     expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key, variant: 'rest:threads.mode', projectId: 'P', input: { slug: 'web', projectId: 'P', id: 'T', mode } });
   });
   it('AC-12: pending does not execute the mode mutation', async () => {
     const changeMode = vi.fn();
-    const controller = new ThreadsController({ changeMode } as never, { run: vi.fn().mockResolvedValue({ status: 'pending', request: { id: 'approval' } }) } as never);
+    const controller = new ThreadsController({ changeMode, assertModeServed: vi.fn(async () => undefined) } as never, { run: vi.fn().mockResolvedValue({ status: 'pending', request: { id: 'approval' } }) } as never);
     await expect(controller.changeMode('T', { mode: 'ask' }, ctx, principal)).rejects.toBeInstanceOf(ApprovalPending);
     expect(changeMode).not.toHaveBeenCalled();
   });
   it('AC-14: invalid mode names the field before opening approval', async () => {
-    const run = vi.fn(); const controller = new ThreadsController({} as never, { run } as never);
+    const run = vi.fn(); const controller = new ThreadsController({ assertModeServed: vi.fn(async () => undefined) } as never, { run } as never);
     await expect(controller.changeMode('T', { mode: 'bogus' as ThreadMode }, ctx, principal)).rejects.toMatchObject({ prefix: 'threads.input', response: expect.objectContaining({ args: { reason: 'mode' } }) });
     expect(run).not.toHaveBeenCalled();
   });

@@ -1,4 +1,5 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
+import type { ThreadCapabilityMisfit } from '../../jobs/placement-rules';
 import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadPendingApproval } from './pending-approvals';
 import type { ThreadSendRefusal } from '../thread-send-rules';
@@ -106,6 +107,21 @@ export interface ThreadHandoffJob { jobId: string; state: string; stateReason: s
 export type ChatThreadHandoff = { plan: ThreadHandoffJob | null; run: ThreadHandoffJob | null };
 
 /**
+ * US-001 (#424): what a thread needs from the fleet to be hosted — its kind, its mode and its backend. The judge is
+ * the same rule placement applies to a thread job, so a create or a mode change refuses exactly what placement
+ * would skip.
+ */
+export interface ThreadServeNeed {
+  backend: ThreadBackend;
+  kind: ChatThreadKind;
+  mode: ThreadMode;
+  /** Judge this runner alone (a thread's own runner, which every later turn is pinned to); absent judges the fleet. */
+  runnerId?: string | null;
+  /** Judge the mode rule only, so a backend change on the runner never refuses a mode change. */
+  modesOnly?: true;
+}
+
+/**
  * S5b 2a-D12: one `PENDING` action of a thread, as the thread detail shows it. `projectSlug` is the slug of the
  * project the action acts in — for a WORKSPACE call the resolved project — never the thread's home project.
  */
@@ -141,10 +157,11 @@ export interface ChatThreadRepository {
   clearPreApproval(projectId: string, threadId: string): Promise<boolean>;
   consumePreApproval(threadId: string): Promise<void>;
   /**
-   * #399: could the fleet ever host `backend`? True when some enabled thread-capable runner (online or not) advertises
-   * it, by placement's own backend rule, and also when no thread-capable runner is enrolled at all.
+   * #399, US-001 (#424): could the fleet ever host this thread? The misfit of the runner that got furthest, by
+   * placement's own thread rules, or null when some runner fits — and also null when no thread-capable runner is
+   * enrolled at all (the fleet is not set up yet, so there is nothing to judge).
    */
-  anyRunnerServesBackend(backend: ThreadBackend): Promise<boolean>;
+  threadServeMisfit(need: ThreadServeNeed): Promise<ThreadCapabilityMisfit | null>;
   create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;

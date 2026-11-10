@@ -11673,7 +11673,7 @@
             "description": "thread.workspace.create is missing, or thread.create is refused in the home project"
           },
           "409": {
-            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)"
+            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399); threads.workspaceThreadsUnavailable: no enabled thread-capable runner can host a WORKSPACE thread (#424)"
           }
         },
         "security": [
@@ -12289,7 +12289,7 @@
             "description": "thread.create is missing"
           },
           "409": {
-            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)"
+            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399); threads.projectThreadsUnavailable: no enabled thread-capable runner can host a PROJECT thread; threads.modeUnavailable: no enabled thread-capable runner can host the requested mode (#424)"
           }
         },
         "security": [
@@ -12527,7 +12527,7 @@
             "description": "Target mode key or creator/any-row thread.cap.update authority is missing"
           },
           "409": {
-            "description": "threads.turnRunning or threads.busy"
+            "description": "threads.turnRunning or threads.busy; threads.modeUnavailable: no enabled thread-capable runner can host the requested mode (#424)"
           }
         },
         "security": [

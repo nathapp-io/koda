@@ -46,12 +46,12 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Create a personal workspace chat thread (thread.workspace.create, hosted by the home project’s thread.create)' })
   @ApiResponse({ status: 201, type: WorkspaceThreadDto })
   @ApiResponse({ status: 403, description: 'thread.workspace.create is missing, or thread.create is refused in the home project' })
-  @ApiResponse({ status: 409, description: 'threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)' })
+  @ApiResponse({ status: 409, description: 'threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399); threads.workspaceThreadsUnavailable: no enabled thread-capable runner can host a WORKSPACE thread (#424)' })
   @ApprovalGated()
   async create(@Body() dto: CreateWorkspaceThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
     const normalized = validateCreateWorkspaceThread(dto);
-    // #399: before the gate, so no approver is asked to approve a thread that could never run.
-    await this.threads.assertBackendServed(normalized.backend);
+    // #399, US-001: before the gate, so no approver is asked to approve a thread that could never run.
+    await this.threads.assertThreadServed({ backend: normalized.backend, kind: 'WORKSPACE', mode: 'read' });
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       key: 'thread.workspace.create', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.create, projectId: null,
       input: { thread: dto },

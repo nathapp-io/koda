@@ -142,11 +142,13 @@ describeDb('workspace turns and archive', () => {
     expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).status).toBe('ACTIVE');
   });
   it.each([false, true])('workspace placement AC-10/11: workspaceThreads=%s', async (workspaceThreads) => {
+    // US-001: the thread is created before the runners change, so the create is not judged against the runner
+    // that cannot host it — the placement assertion below is what this case is about.
+    const thread = await create();
     await prisma.runner.updateMany({ data: { enabled: false } });
     const runner = await insertRunner(prisma, { capabilities: { ...FLEET_CAPS, projectThreads: true, workspaceThreads, threadBackends: { native: ['m1'], acp: [] } } });
     await prisma.runner.update({ where: { id: runner.id }, data: { protocolVersion: 4, threadCapacity: 2 } });
     try {
-      const thread = await create();
       const result = data<{ jobId: string }>(await send(thread.id).expect(201));
       // The send's dispatch places the job, so a direct call runs as the sender.
       const placement = await withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(PlacementService).placeJob(result.jobId));
