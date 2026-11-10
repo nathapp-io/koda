@@ -15,6 +15,7 @@ import type { PermissionService } from '../../permissions/permission.service';
 import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStepInput } from './flow-step-decision';
 import { FLOW_PRD_EDITS_INSTRUCTION, FLOW_STOP_DETAIL_MAX } from './flow-steps';
+import { FLOW_CALL_TEXT_MAX } from './flow-calls';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
 import type { FleetFlowsService } from './fleet-flows.service';
 import type { GitHubAppClient } from '../git-broker/github-app-client';
@@ -967,6 +968,24 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     });
   });
 
+  it('US-005 AC-11/12: records accepted THREAD review summaries and keeps the flow RUNNING', async () => {
+    const findings = [
+      { ...SPEC_FINDING, summary: `first ${'a'.repeat(FLOW_CALL_TEXT_MAX + 40)}` },
+      { ...SPEC_FINDING, id: 'F2', summary: `second ${'b'.repeat(FLOW_CALL_TEXT_MAX + 40)}` },
+    ];
+    const h = build({ flow: { entry: 'THREAD', threadId: 'thread-1', state: 'RUNNING' },
+      snapshot: { job: job({ flowStep: 'SPEC_REVIEW', command: 'AGENT', ref: 'a'.repeat(40), state: 'COMPLETED',
+        agentResult: { status: 'completed', output: JSON.stringify({ findings }) } }), ingestSettled: true } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.step',
+      payload: { step: 'PLAN', jobId: 'j1', accepted: [`first ${'a'.repeat(FLOW_CALL_TEXT_MAX - 6)}`, `second ${'b'.repeat(FLOW_CALL_TEXT_MAX - 7)}`] },
+    }));
+    expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'PLAN', { flowState: 'RUNNING' });
+    expect(h.flows.stop).not.toHaveBeenCalled();
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }), expect.objectContaining({ flowStep: 'PLAN' }));
+  });
+
   it('dispatch AC-5: records the exact flow.step payload in the transaction', async () => {
     const h = build();
     h.activity.record.mockImplementation(async () => { expect(h.inTransaction()).toBe(true); });
@@ -1182,6 +1201,17 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
       snapshot: { job: job({ flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), state: 'FAILED', stateReason: 'review failed' }), ingestSettled: true } });
     await h.service.advance('flow-1', NOW);
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'step_failed', NOW, 'SPEC_REVIEW job job-1 FAILED: review failed');
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-005 AC-13: stops an exhausted-cap THREAD review before dispatching accepted findings', async () => {
+    const findings = [SPEC_FINDING, { ...SPEC_FINDING, id: 'F2', summary: 'Second note' }];
+    const h = build({ flow: { entry: 'THREAD', threadId: 'thread-1', state: 'RUNNING', spentUsd: '5.0000', costCapUsd: '5.0000' },
+      sum: '5.0000',
+      snapshot: { job: job({ flowStep: 'SPEC_REVIEW', command: 'AGENT', ref: 'a'.repeat(40), state: 'COMPLETED',
+        agentResult: { status: 'completed', output: JSON.stringify({ findings }) } }), ingestSettled: true } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'cost_cap', NOW, 'spent 5.0000 of cap 5.0000');
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
   });
 
