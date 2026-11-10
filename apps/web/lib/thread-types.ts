@@ -187,7 +187,16 @@ export interface ThreadDto {
   preApproval: ThreadPreApproval | null
 }
 
+export interface ThreadQueuedTurn {
+  jobId: string
+  queuedAt: string
+  verdict: string
+  reasons: { runnerName: string; reason: string }[]
+}
+
 export interface ThreadDetailDto extends ThreadDto {
+  /** Present only when the active queued turn has an actionable placement explanation. */
+  queuedTurn?: ThreadQueuedTurn | null
   sendRefusal: ThreadSendRefusal | null
   handoff: ThreadHandoff
   /**

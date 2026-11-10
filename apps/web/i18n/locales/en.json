@@ -993,6 +993,18 @@
         "project": "Project thread",
         "workspace": "Workspace thread"
       },
+      "queued": {
+        "title": "This turn is still queued",
+        "reasonOn": "{runner}: {reason}",
+        "verdict": {
+          "never": "No runner can run this turn",
+          "waiting_capacity": "Waiting for runner capacity",
+          "runners_paused": "All eligible runners are paused",
+          "no_fit": "No eligible runner can run this turn",
+          "no_runners": "No runners are available",
+          "budget_paused": "The fleet budget is paused"
+        }
+      },
       "workspace": {
         "title": "My threads",
         "homeProject": "Home project",
@@ -1319,7 +1331,14 @@
       "bot_review": "nax on this runner cannot run PR reviews",
       "bot_fix": "nax on this runner cannot run PR fixes",
       "agents_run": "nax on this runner cannot run agent tasks",
-      "trust_domain": "Runner holds another project's job (isolation)"
+      "trust_domain": "Runner holds another project's job (isolation)",
+      "thread_capacity": "Runner is at thread capacity",
+      "thread_backend": "Runner does not offer this thread backend",
+      "thread_modes": "Runner does not support this thread mode",
+      "threads_disabled": "Threads are disabled on this runner",
+      "thread_write": "Runner cannot perform thread writes",
+      "project_threads": "Runner cannot host project threads",
+      "workspace_threads": "Runner cannot host workspace threads"
     },
     "repoReason": {
       "github_app_not_configured": "The GitHub App is not configured on the koda server",

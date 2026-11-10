@@ -164,10 +164,12 @@ function realComponents(): Record<string, Component> {
   const composer = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), globals)
   // thread-agents-modes US-012: the session approval cards are the page's own children.
   const approvalCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue'), globals)
+  const queuedNotice = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadQueuedNotice.vue'), globals)
   return {
     ...MARKERS,
     ThreadApprovalCard: approvalCard,
     FleetThreadsThreadApprovalCard: approvalCard,
+    FleetThreadsThreadQueuedNotice: queuedNotice,
     ThreadHeader: header,
     FleetThreadsThreadHeader: header,
     ThreadTimeline: timeline,
@@ -378,6 +380,25 @@ afterEach(() => {
   delete g.EventSource
   delete g.useApi
   delete g.useAuth
+})
+
+describe('US-004 queued-turn notice and refresh', () => {
+  test('AC-7: workspace thread page renders queued-turn notice', async () => {
+    const m = mountPage({ real: true, thread: workspaceThread({ queuedTurn: { jobId: 'j', queuedAt: '', verdict: 'no_fit', reasons: [] } }) })
+    await m.settle()
+    expect(byTestId(m.app, 'thread-queued-notice')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('AC-10: queued workspace thread reloads detail after 30 seconds', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] })
+    const m = mountPage({ thread: workspaceThread({ activeJob: { id: 'j1', state: 'QUEUED' } }) })
+    await m.settle()
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(m.get.mock.calls.filter(call => call[0] === '/threads/t1')).toHaveLength(2)
+    m.app.unmount()
+    jest.useRealTimers()
+  })
 })
 
 describe('US-006 AC-1..AC-6: pages/threads/[id].vue — the loaded thread', () => {

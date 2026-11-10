@@ -279,6 +279,7 @@ export function registerFleetComponents(app: { component: (name: string, c: Comp
     FleetAge: 'Age.vue',
     FleetRunnerCapabilityChips: 'RunnerCapabilityChips.vue',
     FleetNativeSelect: 'NativeSelect.vue',
+    FleetThreadsThreadQueuedNotice: 'threads/ThreadQueuedNotice.vue',
   })) {
     app.component(name, instantiate(webFile('components', 'fleet', file), {}, {}).default as Component)
   }
@@ -297,6 +298,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetRepoFixChecks: 'RepoFixChecks.vue',
   FleetRepoFixUnprotected: 'RepoFixUnprotected.vue',
   FleetNativeSelect: 'NativeSelect.vue',
+  FleetThreadsThreadQueuedNotice: 'threads/ThreadQueuedNotice.vue',
   FleetBudgetTable: 'BudgetTable.vue',
   FleetScheduleTable: 'ScheduleTable.vue',
   FleetScheduleHistory: 'ScheduleHistory.vue',
@@ -443,4 +445,4 @@ export type FleetComponentName =
   | 'FleetAnalyticsIngestNotice' | 'FleetAnalyticsIngestTable'
   | 'FleetDashboardTiles' | 'FleetDashboardAttentionList' | 'FleetDashboardActiveRunsTable' | 'FleetDashboardRecentRunsList'
   | 'FleetDashboardRunnerHealthList' | 'FleetDashboardCredentialDigestChips' | 'FleetDashboardOverview'
-  | 'FleetCredentialsCredentialGrid' | 'FleetCredentialsProfileInventory'
+  | 'FleetCredentialsCredentialGrid' | 'FleetCredentialsProfileInventory' | 'FleetThreadsThreadQueuedNotice'
