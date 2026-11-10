@@ -7,6 +7,7 @@ import type { AcpAgentProbe } from '../capabilities/acp-agent-probe';
 import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import { NaxJobCheck } from '../capabilities/job-check';
+import { RetryingJobCheck } from '../capabilities/job-check-retry';
 import { vaultHelperEnabled } from '../commands/vault';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
@@ -205,10 +206,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
   // C10 US-009: `providerKey` resolves a provider through the job's own provider-key socket, so the post-checkout check
   // does not refuse a vault-only job for a key koda holds (branch review B1).
+  // #406: a check that only timed out (a busy host) is asked again before the job fails.
   const jobCheck = naxMode
-    ? new NaxJobCheck({
-      nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs,
-      providerKey: (job, providerId) => broker.providerKeyGranted(job, providerId),
+    ? new RetryingJobCheck({
+      inner: new NaxJobCheck({
+        nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs,
+        providerKey: (job, providerId) => broker.providerKeyGranted(job, providerId),
+      }),
+      retries: tuning.jobCheckRetries, backoffMs: tuning.jobCheckRetryBackoffMs, sleep,
     })
     : undefined;   // D104
   const executor = options.executorFactory?.() ?? new HostExecutor({

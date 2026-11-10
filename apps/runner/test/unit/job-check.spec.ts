@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload, RunnerCapabilities } from '@nathapp/fleet-protocol';
-import { NaxJobCheck } from '../../src/capabilities/job-check';
+import { NaxJobCheck, type JobCheck } from '../../src/capabilities/job-check';
+import { RetryingJobCheck } from '../../src/capabilities/job-check-retry';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { PROVIDER_CRED_SOCKET_ENV } from '../../src/credentials/provider-cred';
 import { createGit } from '../../src/executor/git';
@@ -60,7 +61,7 @@ function vaultProvider(granted: readonly string[]): { credentials: CredentialPro
   return { credentials, asked };
 }
 
-async function world(profiles: string[], vault?: VaultOptions) {
+async function world(profiles: string[], vault?: VaultOptions, wrap: (check: JobCheck) => JobCheck = (check) => check) {
   const base = await tmp.make('jobcheck');
   const origin = await makeOrigin(base, 'origin', {
     files: {
@@ -86,7 +87,7 @@ async function world(profiles: string[], vault?: VaultOptions) {
   const calls: Array<{ readonly argv: readonly string[]; readonly options: SpawnNaxOptions }> = [];
   const ex = new HostExecutor({
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(),
-    sleep: async () => undefined, credentials: vault === undefined ? NO_CREDENTIALS : provider.credentials, approvals: NO_APPROVALS, jobCheck,
+    sleep: async () => undefined, credentials: vault === undefined ? NO_CREDENTIALS : provider.credentials, approvals: NO_APPROVALS, jobCheck: wrap(jobCheck),
     spawnNax: (argv, options) => { calls.push({ argv, options }); return HANDLE; },
   });
   return { naxHome, row, ex, caps, calls, asked: provider.asked };
@@ -115,6 +116,40 @@ describe('HostExecutor.prepare with the job check (D104), fake nax and real git'
     const w = await world([]);
     await writeFile(join(w.naxHome, 'fake-untrusted'), '');
     expect(await w.ex.prepare(w.row)).toEqual({ ok: false, reason: 'project untrusted' });
+  });
+});
+
+/** #406: the first answer is a timeout, then the real check answers. */
+function timesOutOnce(inner: JobCheck): JobCheck & { calls: number } {
+  const check = {
+    calls: 0,
+    check: async (...args: Parameters<JobCheck['check']>) => {
+      check.calls += 1;
+      return check.calls === 1 ? 'trust check failed: NAX_TIMEOUT' : inner.check(...args);
+    },
+  };
+  return check;
+}
+
+describe('HostExecutor.prepare with a retried job check (#406)', () => {
+  test('a check that times out once passes on the retry and the job is prepared', async () => {
+    let flaky: ReturnType<typeof timesOutOnce> | undefined;
+    const slept: number[] = [];
+    const w = await world([], undefined, (check) => {
+      flaky = timesOutOnce(check);
+      return new RetryingJobCheck({ inner: flaky, retries: 2, backoffMs: 2_000, sleep: async (ms) => { slept.push(ms); } });
+    });
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    expect(flaky?.calls).toBe(2);
+    expect(slept).toEqual([2_000]);
+  });
+  test('a cancel during the retry backoff ends prepare as cancelled, not failed', async () => {
+    let cancelled = false;
+    const w = await world([], undefined, (check) => new RetryingJobCheck({
+      inner: timesOutOnce(check), retries: 2, backoffMs: 2_000, sleep: async () => { cancelled = true; },
+    }));
+    expect(await w.ex.prepare(w.row, { isCancelled: () => cancelled })).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
+    await expect(stat(jobProfilePath(w.naxHome, 'cjob1'))).rejects.toThrow();
   });
 });
 
