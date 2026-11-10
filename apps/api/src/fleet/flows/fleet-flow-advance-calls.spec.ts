@@ -279,12 +279,13 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     expect(h.flows.stop).not.toHaveBeenCalled();
     expect(h.calls.apply).not.toHaveBeenCalled();
   });
-  it('AC-15: thread-entry findings stop rather than applying calls', async () => {
+  it('AC-15: thread-entry findings dispatch PLAN and do not apply spec calls', async () => {
     const h = build({ flow: { entry: 'THREAD', threadId: 'thread-1' } });
     await h.service.advance('flow-1', NOW);
-    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'review_findings', NOW, expect.stringContaining('Missing AC'));
+    expect(h.flows.stop).not.toHaveBeenCalled();
     expect(h.calls.apply).not.toHaveBeenCalled();
-    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }),
+      expect.objectContaining({ flowStep: 'PLAN' }));
   });
 
   it('calls bypass exhausted cap and the dispatch spec-sha guard', async () => {
