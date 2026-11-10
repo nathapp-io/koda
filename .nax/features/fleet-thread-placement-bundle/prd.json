@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T10:03:09.821Z",
+  "updatedAt": "2026-11-10T11:07:23.231Z",
   "userStories": [
     {
       "id": "US-001",
@@ -740,14 +740,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-package wire changes and transactional placement snapshots must remain atomic with casAssign and command publication; no new authentication or permission algorithm is introduced."
+        "reasoning": "Cross-package wire changes and transactional placement snapshots must remain atomic with casAssign and command publication; no new authentication or permission algorithm is introduced.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/assign-payload.ts",
@@ -812,7 +815,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "139604be6ff46c775d2e3324bc2b45ae0f45256f"
     },
     {
       "id": "US-009",
