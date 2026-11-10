@@ -1162,7 +1162,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
       expect.objectContaining({ flowStep: 'RUN' }));
   });
 
-  it('US-009 AC-8: thread PRD_REVIEW omits the PRD edits instruction', async () => {
+  it('US-009 AC-8: thread PRD_REVIEW includes the PRD edits instruction', async () => {
     const plan = job({ flowStep: 'PLAN', command: 'PLAN' });
     const h = build({ flow: { entry: 'THREAD', threadId: 'thread-1', state: 'RUNNING' },
       snapshot: { job: job({ flowStep: 'PLAN', command: 'PLAN', state: 'COMPLETED' }), ingestSettled: true } });
@@ -1174,7 +1174,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const task = h.jobs.dispatch.mock.calls[0]?.[2];
     expect(task?.command).toBe('AGENT');
     expect(h.jobs.dispatch.mock.calls[0]?.[3]).toMatchObject({ flowStep: 'PRD_REVIEW' });
-    if (task?.command === 'AGENT') expect(task.agent.task).not.toContain(FLOW_PRD_EDITS_INSTRUCTION);
+    if (task?.command === 'AGENT') expect(task.agent.task).toContain(FLOW_PRD_EDITS_INSTRUCTION);
   });
 
   it('US-009 AC-9: stops a failed SPEC_REVIEW instead of dispatching another pass', async () => {

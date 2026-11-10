@@ -92,15 +92,14 @@ describe('decideFlowStep', () => {
   it('US-008 AC-2 dispatches RUN after an empty PRD_REVIEW verdict', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[]}' }) }))).toEqual({ kind: 'dispatch', step: 'RUN' });
   });
-  it('US-008 AC-3 stops on SPEC_REVIEW findings', () => {
-    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","class":"minor","summary":"Missing AC","fix":"add it"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
+  it('US-008 AC-3 accepts non-question SPEC_REVIEW findings', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","class":"minor","summary":"Missing AC","fix":"add it"}]}' }) }))).toMatchObject({ kind: 'dispatch', step: 'PLAN', accepted: [{ summary: 'Missing AC' }] });
   });
-  it('US-008 AC-4 formats findings with formatFindings', () => {
-    const findings = [{ id: 'F1', class: 'minor' as const, summary: 'Missing AC', fix: 'add it' }];
-    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","class":"minor","summary":"Missing AC","fix":"add it"}]}' }) }))).toEqual({ kind: 'stop', reason: 'review_findings', detail: formatFindings(findings) });
+  it('US-008 AC-4 dispatches PLAN with finding summaries', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","class":"minor","summary":"Missing AC","fix":"add it"}]}' }) }))).toMatchObject({ kind: 'dispatch', step: 'PLAN' });
   });
-  it('US-008 AC-5 stops on PRD_REVIEW findings', () => {
-    expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[{"class":"minor","summary":"Update plan","fix":"update it"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
+  it('US-008 AC-5 accepts non-question PRD_REVIEW findings', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[{"class":"minor","summary":"Update plan","fix":"update it"}]}' }) }))).toMatchObject({ kind: 'dispatch', step: 'RUN', accepted: [{ summary: 'Update plan' }] });
   });
   it('US-008 AC-6 reports an unreadable null SPEC_REVIEW output', () => {
     expect(decideFlowStep(input({ latestJob: job({ id: 'j2', step: 'SPEC_REVIEW', agentOutput: null }) }))).toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'SPEC_REVIEW job j2: verdict unreadable (no agent output)' });
@@ -306,9 +305,9 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ canApplyCalls: true, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
       .toMatchObject({ kind: 'stop', reason: 'review_findings' });
   });
-  it('US-005 AC-4 stops findings when calls cannot be applied', () => {
+  it('US-005 AC-4 dispatches accepted THREAD findings', () => {
     expect(decideFlowStep(input({ latestJob: classifiedReview('SPEC_REVIEW', [minor]) })))
-      .toEqual({ kind: 'stop', reason: 'review_findings', detail: formatFindings([minor]) });
+      .toEqual({ kind: 'dispatch', step: 'PLAN', accepted: [minor] });
   });
   it('US-005 AC-5 applies calls for a first nax-entry SPEC_REVIEW finding', () => {
     expect(decideFlowStep(input({ canApplyCalls: true,
@@ -458,10 +457,10 @@ describe('decideFlowStep', () => {
         latestJob: reviewWithEdits('PRD_REVIEW', []) })))
         .toEqual({ kind: 'dispatch', step: 'RUN' });
     });
-    it('AC-8 ignores PRD edits when calls cannot be applied', () => {
+    it('AC-8 applies PRD edits even when spec calls cannot be applied', () => {
       expect(decideFlowStep(input({ canApplyCalls: false, planCount: 1,
         latestJob: reviewWithEdits('PRD_REVIEW', []) })))
-        .toEqual({ kind: 'dispatch', step: 'RUN' });
+        .toEqual({ kind: 'apply_prd_edits', jobId: 'review-1', edits: [edit], accepted: [] });
     });
     it('AC-9 applies first-round PRD findings and ignores accompanying edits', () => {
       expect(decideFlowStep(input({ canApplyCalls: true, planCount: 1,
@@ -508,6 +507,38 @@ describe('decideFlowStep', () => {
       expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2, questionsJobId: 'review-2',
         answers: [{ id: '1', answer: 'A1' }], latestJob: secondRound([minor]) })))
         .toEqual({ kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'review-2', findings: [minor] });
+    });
+  });
+
+  describe('US-005 THREAD-entry accepted review findings', () => {
+    const edit: FlowPrdEdit = { story: 'US-001', op: 'add_ac', new: 'Cover behavior' };
+    it('AC-1 and AC-2 dispatches PLAN with non-ambiguous SPEC_REVIEW findings', () => {
+      const findings = [minor, { ...minor, id: 'm2' }];
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
+        .toEqual({ kind: 'dispatch', step: 'PLAN', accepted: findings });
+      const answered = { id: 'a2', class: 'answered', summary: 'Already covered', fix: 'n/a' };
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: classifiedReview('SPEC_REVIEW', [answered]) })))
+        .toEqual({ kind: 'dispatch', step: 'PLAN', accepted: [answered] });
+    });
+    it('AC-3/4 keeps ambiguous and over-limit findings stopped', () => {
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: classifiedReview('SPEC_REVIEW', [minor, ambiguous]) })))
+        .toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
+      const findings = Array.from({ length: 21 }, (_, index) => ({ ...minor, id: `m${index}` }));
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
+        .toMatchObject({ kind: 'stop', reason: 'review_findings' });
+    });
+    it('AC-5..8 handles THREAD PRD findings and edits', () => {
+      const finding = { ...minor, summary: 'Review note' };
+      const withEdit = job({ step: 'PRD_REVIEW', agentOutput: JSON.stringify({ findings: [finding], prdEdits: [edit, { ...edit, story: 'US-002' }] }) });
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: withEdit }))).toEqual({ kind: 'apply_prd_edits', jobId: 'j1', edits: [edit, { ...edit, story: 'US-002' }], accepted: [finding] });
+      expect(decideFlowStep(input({ canApplyCalls: false, prdEditsJobId: 'j1', latestJob: withEdit }))).toEqual({ kind: 'dispatch', step: 'RUN' });
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: classifiedReview('PRD_REVIEW', [finding]) }))).toEqual({ kind: 'dispatch', step: 'RUN', accepted: [finding] });
+      const noFindings = job({ step: 'PRD_REVIEW', agentOutput: JSON.stringify({ findings: [], prdEdits: [edit] }) });
+      expect(decideFlowStep(input({ canApplyCalls: false, prdEditsJobId: null, latestJob: noFindings }))).toEqual({ kind: 'apply_prd_edits', jobId: 'j1', edits: [edit], accepted: [] });
+    });
+    it('AC-9/10 keeps NAX calls and RULE gates unchanged', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, latestJob: classifiedReview('SPEC_REVIEW', [minor]) }))).toMatchObject({ kind: 'apply_calls' });
+      expect(decideFlowStep(input({ canApplyCalls: false, latestJob: ruleJob({ agentOutput: ruleVerdict([], [{ item: 'S-1', question: 'Which?' }]) }) }))).toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
     });
   });
 
