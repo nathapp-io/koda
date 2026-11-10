@@ -97,6 +97,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.job.shell.escalate': 'project',
   'fleet.budget.override': 'any',
   'fleet.repo.fix.unprotected': 'global',
+  'fleet.repo.rules.configure': 'global',
   'thread.mode.ask': 'project',
   'thread.mode.full': 'project',
   // C10 US-003: the GLOBAL provider key writes (the create route ships with US-003).
@@ -668,6 +669,22 @@ describe('fleet.repo.review.configure', () => {
 
   it('AC-12: is approvable', () => {
     expect(findCatalogEntry('fleet.repo.review.configure')?.approval.approvable).toBe(true);
+  });
+});
+
+/**
+ * US-007 (#370): the per-repo rule override is a global, approvable repo write. It changes the
+ * rules a repo's jobs run with, so an agent's write has to be able to wait for a human.
+ */
+describe('fleet.repo.rules.configure', () => {
+  it('is a global role key', () => {
+    expect(findCatalogEntry('fleet.repo.rules.configure')).toMatchObject({ scope: 'global', access: 'role' });
+  });
+
+  it('is a high-risk approvable key, so an agent caller waits', () => {
+    expect(findCatalogEntry('fleet.repo.rules.configure')).toMatchObject({
+      risk: 'high', approval: { approvable: true, default: 'agent' },
+    });
   });
 });
 

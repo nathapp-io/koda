@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags, type SchemaObject } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
@@ -10,12 +10,40 @@ import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { FleetReposService } from './fleet-repos.service';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
-import { FleetRepoDto } from './dto/fleet-repo.dto';
+import { FleetRepoDto, RuleOverrideDto } from './dto/fleet-repo.dto';
 import { ListFleetReposQuery } from './dto/list-fleet-repos.query';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
+import { validateRuleOverride } from './rule-override';
+
+/**
+ * The body of `PUT /fleet/repos/:id/rule-override`. It is documented rather than declared as a
+ * DTO class, because the body is not validated by the pipe: the pure validator owns it, so the
+ * rules it refuses are the ones the route and the service both answer.
+ */
+const RULE_OVERRIDE_BODY: SchemaObject = {
+  type: 'object',
+  required: ['rules'],
+  properties: {
+    rules: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['path', 'content'],
+        properties: { path: { type: 'string' }, content: { type: 'string' } },
+      },
+    },
+    rulesMode: { type: 'string', enum: ['merge', 'replace'] },
+    context: {
+      type: 'object',
+      nullable: true,
+      required: ['content'],
+      properties: { content: { type: 'string' }, mode: { type: 'string', enum: ['append', 'replace'] } },
+    },
+  },
+};
 
 /**
  * Fleet S1: the repo admin routes, migrated onto permission keys by permissions P1d (US-008). Each key
@@ -141,6 +169,71 @@ export class FleetReposController {
       variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
       projectId: null,
       input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  /**
+   * The repo's rule override (#370): the rule files and the optional context its jobs run with.
+   * The read hands out the rule bodies, so it asks the same key the write does, but it is not
+   * approval-gated: an approval releases a write, not a read.
+   */
+  @Get(':id/rule-override')
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.repo.rules.configure')
+  @ApiOperation({ summary: 'Read the rule override of a registered repo (fleet.repo.rules.configure, global)' })
+  @ApiResponse({ status: 200, type: RuleOverrideDto })
+  @ApiResponse({ status: 403, description: 'fleet.repo.rules.configure is missing globally' })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  async getRuleOverride(@Param('id') id: string) {
+    return JsonResponse.Ok(await this.repos.getRuleOverride(id));
+  }
+
+  /**
+   * Stores the repo's rule override. The body is validated before the approval gate, so an
+   * invalid body answers 400 and never becomes an approval request; the service validates again
+   * when the approved request runs.
+   */
+  @Put(':id/rule-override')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.repo.rules.configure')
+  @ApprovalGated()
+  @ApiOperation({ summary: 'Set the rule override of a registered repo (fleet.repo.rules.configure, global)' })
+  @ApiBody({ schema: RULE_OVERRIDE_BODY })
+  @ApiResponse({ status: 200, type: FleetRepoDto })
+  @ApiResponse({ status: 400, description: 'The rule override is not valid: { reason }' })
+  @ApiResponse({ status: 403, description: 'fleet.repo.rules.configure is missing globally' })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  async setRuleOverride(@Param('id') id: string, @Body() body: unknown) {
+    validateRuleOverride(body);
+    const outcome = await this.routeGate.run<FleetRepoDto>({
+      key: 'fleet.repo.rules.configure',
+      variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideSet,
+      projectId: null,
+      input: { id, body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  /** Removes the repo's rule override. */
+  @Delete(':id/rule-override')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.repo.rules.configure')
+  @ApprovalGated()
+  @ApiOperation({ summary: 'Clear the rule override of a registered repo (fleet.repo.rules.configure, global)' })
+  @ApiResponse({ status: 200, type: FleetRepoDto })
+  @ApiResponse({ status: 403, description: 'fleet.repo.rules.configure is missing globally' })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  async clearRuleOverride(@Param('id') id: string) {
+    const outcome = await this.routeGate.run<FleetRepoDto>({
+      key: 'fleet.repo.rules.configure',
+      variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideClear,
+      projectId: null,
+      input: { id },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

@@ -12,6 +12,8 @@ describe('FleetRepoRouteCommands', () => {
   const fixPatch = { trustDetectedChecks: true };
   /** The fix-unprotected route's `{ id, patch }` frozen input. */
   const unprotectedPatch = { allowUnprotected: true };
+  /** The rule-override set route's `{ id, body }` frozen input (US-007). */
+  const ruleBody = { rules: [{ path: 'api.md', content: 'answer with the summary' }], rulesMode: 'merge' };
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { id: 'r1', repoId: 'r1', reachable: true };
@@ -22,6 +24,8 @@ describe('FleetRepoRouteCommands', () => {
       configureAutoReview: vi.fn().mockResolvedValue(result),
       configureFixChecks: vi.fn().mockResolvedValue(result),
       configureFixUnprotected: vi.fn().mockResolvedValue(result),
+      setRuleOverride: vi.fn().mockResolvedValue(result),
+      clearRuleOverride: vi.fn().mockResolvedValue(result),
     };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new FleetRepoRouteCommands(registry, repos as unknown as FleetReposService, loader as unknown as ActorPrincipalLoader).onModuleInit();
@@ -48,6 +52,14 @@ describe('FleetRepoRouteCommands', () => {
       action: 'fixUnprotected', key: 'fleet.repo.fix.unprotected', variant: 'rest:fleet-repos.fix-unprotected',
       raw: { id: 'r1', patch: { ...unprotectedPatch, extra: 1 } }, parsed: { id: 'r1', patch: unprotectedPatch },
     },
+    {
+      action: 'ruleOverrideSet', key: 'fleet.repo.rules.configure', variant: 'rest:fleet-repos.rule-override.set',
+      raw: { id: 'r1', body: ruleBody }, parsed: { id: 'r1', body: ruleBody },
+    },
+    {
+      action: 'ruleOverrideClear', key: 'fleet.repo.rules.configure', variant: 'rest:fleet-repos.rule-override.clear',
+      raw: { id: 'r1' }, parsed: { id: 'r1' },
+    },
   ] as const;
   /** Inputs every variant must refuse: no object, no id, an empty id, a non-string id. */
   const invalidFor = (action: string) => [
@@ -55,11 +67,12 @@ describe('FleetRepoRouteCommands', () => {
     ...(action === 'autoReview' ? [{ id: 'r1' }, { id: 'r1', patch: { enabled: 'yes' } }] : []),
     ...(action === 'fixChecks' ? [{ id: 'r1' }, { id: 'r1', patch: { trustDetectedChecks: 'yes' } }] : []),
     ...(action === 'fixUnprotected' ? [{ id: 'r1' }, { id: 'r1', patch: { allowUnprotected: 'yes' } }] : []),
+    ...(action === 'ruleOverrideSet' ? [{ id: 'r1' }, { id: 'r1', body: { rules: 'nope' } }] : []),
   ];
 
-  it('AC-12: registers the six matching variants', () => {
+  it('AC-12: registers the eight matching variants', () => {
     const { registry } = build();
-    expect(Object.values(FLEET_REPO_ROUTE_VARIANTS)).toHaveLength(6);
+    expect(Object.values(FLEET_REPO_ROUTE_VARIANTS)).toHaveLength(8);
     for (const { action, key, variant } of cases) {
       expect(registry.get(key, FLEET_REPO_ROUTE_VARIANTS[action])).toMatchObject({ key, variant });
     }
@@ -79,6 +92,8 @@ describe('FleetRepoRouteCommands', () => {
       if (action === 'autoReview') expect(repos.configureAutoReview).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', patch);
       if (action === 'fixChecks') expect(repos.configureFixChecks).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', fixPatch);
       if (action === 'fixUnprotected') expect(repos.configureFixUnprotected).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', unprotectedPatch);
+      if (action === 'ruleOverrideSet') expect(repos.setRuleOverride).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', ruleBody);
+      if (action === 'ruleOverrideClear') expect(repos.clearRuleOverride).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1');
       if (action === 'delete') {
         expect(repos.remove).toHaveBeenCalledExactlyOnceWith('a1', 'r1');
         expect(out).toBeNull();

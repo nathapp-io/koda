@@ -66,10 +66,10 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
   // 134 after the two thread approval decision routes (US-008); 137 after the three GLOBAL provider
   // credential routes (C10 US-003/US-004); 140 after the three project ones (C10 US-005); 142 after
   // the thread pre-approval routes (fleet flow US-008); 144 after thread/nax flow create (US-009/010);
-  // 145 after flow stop (US-011); 146 after the flow answers route (US-011). The OpenAPI contract
-  // pins the same operations.
-  it('AC-12 (US-007): collects exactly 146 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(146);
+  // 145 after flow stop (US-011); 146 after the flow answers route (US-011); 148 after the two
+  // fleet repo rule-override writes (US-007). The OpenAPI contract pins the same operations.
+  it('AC-12 (US-007): collects exactly 148 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(148);
   });
 
   it('AC-2: reports no permission contract violations over the booted app', () => {

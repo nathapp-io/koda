@@ -22,7 +22,8 @@ import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
 import type { FleetRepoRecord } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
-import { FleetRepoDto } from './dto/fleet-repo.dto';
+import { FleetRepoDto, RuleOverrideDto } from './dto/fleet-repo.dto';
+import { ruleOverrideSha256, validateRuleOverride } from './rule-override';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import type { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
@@ -154,6 +155,71 @@ export class FleetReposService {
         summary: dto.allowUnprotected ? 'fix on unprotected default branch allowed' : 'fix on unprotected default branch disallowed',
       });
       return FleetRepoDto.from(updated);
+    });
+  }
+
+  /**
+   * The repo's rule override (#370): the rule files and the optional project context its jobs run
+   * with, in place of the ones in the repo's own checkout. The read answers the full override (the
+   * rule bodies included) or null when the repo has none; an unknown repo is a 404.
+   *
+   * The read is not approval-gated: it hands out rule bodies, so it asks the same key the write
+   * does, but a rule override is not a secret an approval has to release.
+   */
+  async getRuleOverride(id: string): Promise<RuleOverrideDto | null> {
+    const row = await this.repo.findById(id);
+    if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+    const override = await this.repo.findRuleOverride(id);
+    return override === null ? null : RuleOverrideDto.from(override);
+  }
+
+  /**
+   * Stores the repo's rule override and audits it as a repo write. The body is validated here (the
+   * route validates it before the approval gate, so an invalid body never becomes a request) and
+   * the hash is computed over the validated input, so the stored row and its summary agree.
+   *
+   * The principal is part of the signature because the approval engine re-enters this method as the
+   * requesting actor; the override records who wrote it.
+   */
+  async setRuleOverride(principal: UserPrincipal | AgentPrincipal, id: string, raw: unknown): Promise<FleetRepoDto> {
+    return this.txManager.run(async () => {
+      const row = await this.repo.findById(id);
+      if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+      const input = validateRuleOverride(raw);
+      const sha256 = ruleOverrideSha256(input);
+      await this.repo.upsertRuleOverride(id, input, sha256, {
+        id: principal.id,
+        type: principal.actorType === 'user' ? 'USER' : 'AGENT',
+      });
+      await this.audit.record({
+        key: 'fleet.repo.rules.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
+        summary: `rule override set (${input.rules.length} files, ${input.rulesMode})`,
+      });
+      const updated = await this.repo.findById(id);
+      return FleetRepoDto.from(updated ?? row);
+    });
+  }
+
+  /**
+   * Removes the repo's rule override. The audit entry is written only when there was an override to
+   * remove, so a clear of a repo that never had one leaves no trace of a write that changed nothing.
+   *
+   * The principal is part of the signature because the approval engine re-enters this method as the
+   * requesting actor; the removed row carried its own attribution, so nothing here records the
+   * caller's id again.
+   */
+  async clearRuleOverride(principal: UserPrincipal | AgentPrincipal, id: string): Promise<FleetRepoDto> {
+    return this.txManager.run(async () => {
+      const row = await this.repo.findById(id);
+      if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+      if (await this.repo.deleteRuleOverride(id)) {
+        await this.audit.record({
+          key: 'fleet.repo.rules.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
+          summary: 'rule override cleared',
+        });
+      }
+      const updated = await this.repo.findById(id);
+      return FleetRepoDto.from(updated ?? row);
     });
   }
 

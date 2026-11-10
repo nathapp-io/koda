@@ -18,6 +18,15 @@ describe('fleet admin handler gates', () => {
     { key: 'fleet.repo.delete', variant: 'rest:fleet-repos.delete', input: { id: 'r1' }, noBody: true, call: (repos: FleetReposController) => repos.remove('r1') },
     { key: 'fleet.repo.check', variant: 'rest:fleet-repos.check', input: { id: 'r1' }, noBody: false, call: (repos: FleetReposController) => repos.check('r1') },
     { key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.auto-review', input: { id: 'r1', patch: { enabled: false } }, noBody: false, call: (repos: FleetReposController) => repos.configureAutoReview('r1', { enabled: false }) },
+    {
+      key: 'fleet.repo.rules.configure', variant: 'rest:fleet-repos.rule-override.set',
+      input: { id: 'r1', body: { rules: [{ path: 'api.md', content: 'answer with the summary' }] } },
+      noBody: false, call: (repos: FleetReposController) => repos.setRuleOverride('r1', { rules: [{ path: 'api.md', content: 'answer with the summary' }] }),
+    },
+    {
+      key: 'fleet.repo.rules.configure', variant: 'rest:fleet-repos.rule-override.clear',
+      input: { id: 'r1' }, noBody: false, call: (repos: FleetReposController) => repos.clearRuleOverride('r1'),
+    },
   ];
   for (const c of cases) {
     it(`${c.key}: global gate, pending exception and executed response`, async () => {

@@ -1,7 +1,37 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import type { RuleOverrideInput } from '../rule-override';
 
 export const FLEET_REPO_REPOSITORY = Symbol('FLEET_REPO_REPOSITORY');
+
+/**
+ * The rule-override facts a repo listing carries: the hash, the file count and the modes, but never
+ * the rule bodies. Read from the row's scalar columns, so listing repos does not load rule files.
+ */
+export interface RuleOverrideSummary {
+  sha256: string;
+  ruleFiles: number;
+  rulesMode: 'merge' | 'replace';
+  contextMode: 'append' | 'replace' | null;
+  updatedAt: Date;
+}
+
+/** The stored override of one repo: its rule files, its optional context and its hash. */
+export interface FleetRepoRuleOverrideRecord {
+  repoId: string;
+  rules: { path: string; content: string }[];
+  rulesMode: 'merge' | 'replace';
+  context: { content: string; mode: 'append' | 'replace' } | null;
+  sha256: string;
+  ruleFiles: number;
+  updatedAt: Date;
+}
+
+/** Who wrote an override: the principal the write is attributed to. */
+export interface RuleOverrideActor {
+  id: string;
+  type: 'USER' | 'AGENT';
+}
 
 export interface FleetRepoRecord {
   id: string;
@@ -30,6 +60,11 @@ export interface FleetRepoRecord {
    * older fixtures stay valid; absent means `false` (the migration default).
    */
   fixAllowUnprotected?: boolean;
+  /**
+   * The repo's rule override summary (#370), when it has one. Optional so a fixture written before
+   * the relation stays valid; absent means none.
+   */
+  ruleOverride?: RuleOverrideSummary | null;
 }
 
 export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
@@ -39,7 +74,7 @@ export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
 export interface IFleetRepoRepository {
   findProject(slug: string): Promise<{ id: string; slug: string } | null>;
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
-  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected'>): Promise<FleetRepoRecord>;
+  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected' | 'ruleOverride'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
   /**
    * The nax flow entry resolves a remote URL to its repo: the owner and name compare
@@ -74,4 +109,23 @@ export interface IFleetRepoRepository {
   countUnfinishedJobs(repoId: string): Promise<number>;
   /** SELECT ... FOR UPDATE on the repo row, so the delete decision sees a stable row (review m6). */
   lockForDelete(id: string): Promise<void>;
+  /**
+   * The repo's stored rule override (#370), with its rule bodies; null when it has none.
+   */
+  findRuleOverride(repoId: string): Promise<FleetRepoRuleOverrideRecord | null>;
+  /**
+   * Stores the repo's rule override, replacing an earlier one. The input is the validated one and
+   * the hash is the one computed over it, so the stored row and its summary agree.
+   */
+  upsertRuleOverride(
+    repoId: string,
+    input: RuleOverrideInput,
+    sha256: string,
+    actor: RuleOverrideActor,
+  ): Promise<FleetRepoRuleOverrideRecord>;
+  /**
+   * Removes the repo's rule override; false when there was none, so the caller audits only a real
+   * removal.
+   */
+  deleteRuleOverride(repoId: string): Promise<boolean>;
 }

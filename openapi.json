@@ -9130,6 +9130,226 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/rule-override": {
+      "get": {
+        "operationId": "FleetReposController_getRuleOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleOverrideDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.rules.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read the rule override of a registered repo (fleet.repo.rules.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "put": {
+        "operationId": "FleetReposController_setRuleOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rules"
+                ],
+                "properties": {
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "path",
+                        "content"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "rulesMode": {
+                    "type": "string",
+                    "enum": [
+                      "merge",
+                      "replace"
+                    ]
+                  },
+                  "context": {
+                    "type": "object",
+                    "nullable": true,
+                    "required": [
+                      "content"
+                    ],
+                    "properties": {
+                      "content": {
+                        "type": "string"
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "append",
+                          "replace"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The rule override is not valid: { reason }"
+          },
+          "403": {
+            "description": "fleet.repo.rules.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the rule override of a registered repo (fleet.repo.rules.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "FleetReposController_clearRuleOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.rules.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Clear the rule override of a registered repo (fleet.repo.rules.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}": {
       "delete": {
         "operationId": "FleetReposController_remove",
@@ -21276,6 +21496,46 @@
           "name"
         ]
       },
+      "RuleOverrideSummaryDto": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the validated override"
+          },
+          "ruleFiles": {
+            "type": "number",
+            "description": "How many rule files the override carries"
+          },
+          "rulesMode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string",
+            "description": "Whether the rules merge with the repo rules or replace them"
+          },
+          "contextMode": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "type": "string",
+            "nullable": true,
+            "description": "Whether the context is appended to the project context or replaces it"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the override was last written (ISO 8601)"
+          }
+        },
+        "required": [
+          "sha256",
+          "ruleFiles",
+          "rulesMode",
+          "updatedAt"
+        ]
+      },
       "FleetRepoDto": {
         "type": "object",
         "properties": {
@@ -21344,6 +21604,16 @@
           "fixAllowUnprotected": {
             "type": "boolean",
             "description": "Allow FIX to push although the default branch is unprotected (override, default off)"
+          },
+          "ruleOverride": {
+            "nullable": true,
+            "description": "The repo rule override summary, when the repo has one",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RuleOverrideSummaryDto"
+              }
+            ]
           }
         },
         "required": [
@@ -21447,6 +21717,85 @@
         },
         "required": [
           "allowUnprotected"
+        ]
+      },
+      "RuleOverrideFileDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Rule file path, relative to the job rules directory"
+          },
+          "content": {
+            "type": "string",
+            "description": "The rule file body"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      },
+      "RuleOverrideContextDto": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The context body"
+          },
+          "mode": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "type": "string",
+            "description": "Whether the context is appended to the project context or replaces it"
+          }
+        },
+        "required": [
+          "content",
+          "mode"
+        ]
+      },
+      "RuleOverrideDto": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleOverrideFileDto"
+            }
+          },
+          "rulesMode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string"
+          },
+          "context": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RuleOverrideContextDto"
+              }
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the validated override"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the override was last written (ISO 8601)"
+          }
+        },
+        "required": [
+          "rules",
+          "rulesMode",
+          "sha256",
+          "updatedAt"
         ]
       },
       "NaxFileEntryDto": {

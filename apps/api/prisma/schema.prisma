@@ -826,10 +826,32 @@ model FleetRepo {
   prReviews      FleetPrReview[]
   providerCredentials ProviderCredential[]
   fleetFlows          FleetFlow[]
+  ruleOverride       FleetRepoRuleOverride?
 
   @@unique([provider, owner, name])
   @@index([projectId])
   @@index([autoReview])
+}
+
+/// #370: a repo's own rule files and project context, in place of the ones in its checkout. One row
+/// per repo; the rules are the file bodies (`{ path, content }[]`), `rulesMode` says whether they
+/// merge with the repo's own rules (`merge`) or replace them (`replace`), and the context says
+/// whether the context is appended to the project's or replaces it (`append` | `replace`).
+/// `ruleFiles` and `sha256` are the summary a repo listing carries, so listing a repo never reads
+/// the rule bodies.
+model FleetRepoRuleOverride {
+  repoId         String   @id
+  rules          Json
+  rulesMode      String // merge | replace
+  contextContent String?
+  contextMode    String? // append | replace
+  ruleFiles      Int
+  sha256         String
+  updatedById    String
+  updatedByType  String // USER | AGENT
+  updatedAt      DateTime @updatedAt
+
+  repo FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
 }
 
 /// Fleet auto-review: one row per (repo, PR number, head SHA). The claim that stops two passes for the
