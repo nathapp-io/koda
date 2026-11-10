@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T08:27:56.556Z",
+  "updatedAt": "2026-11-10T08:45:02.940Z",
   "userStories": [
     {
       "id": "US-001",
@@ -461,14 +461,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Changes a bounded pure decision branch and activity/instruction plumbing in two existing services; existing PRD commit, creator-access, approval and cost-cap implementations are reused unchanged rather than introducing authorization logic."
+        "reasoning": "Changes a bounded pure decision branch and activity/instruction plumbing in two existing services; existing PRD commit, creator-access, approval and cost-cap implementations are reused unchanged rather than introducing authorization logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-step-decision.ts",
@@ -512,7 +515,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "302a860a8715e779c0b88f162a0614cde2d7eea4"
     },
     {
       "id": "US-006",
