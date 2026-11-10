@@ -118,6 +118,16 @@ Existing-page gaps:
 - 2 critical findings (`handlebars`, `shell-quote`) are dev/build-tool-only (pulled by `@hey-api/openapi-ts` codegen and `ts-jest`, not any runtime path) — no production exposure, but still flagged by `bun audit` and worth clearing eventually.
 - Remaining ~80 are dominated by nuxt/vite build-toolchain internals, `@nuxt/devtools`, eslint's dependency tree, and prisma CLI — dev-only, each needs an individually-tested major bump.
 
+**2026-11-10:** `bun audit` reported 64 vulnerabilities (25 high, 27 moderate, 12 low). Brought that to 2 (1 high, 1 low) with compatible bumps plus targeted overrides; no source changes were needed. `npm audit` is not applicable here — the repo is Bun-only and has no `package-lock.json` (the command fails with `ENOLOCK`); `bun audit` is the workspace-native check.
+- Direct bumps: API `@fastify/static` 10.1.10, `@modelcontextprotocol/node` 2.1.2, `@modelcontextprotocol/server` 2.4.0, `@nestjs/platform-express` 12.4.2, `@nestjs/cli` 12.0.12, `joi` 18.3.2, `nodemailer` 10.5.0; web `nuxt`/`@nuxt/schema` 4.6.4, `@nuxt/devtools` 4.1.0, `vite` 8.3.7, `vue-tsc` 3.3.14, `isomorphic-dompurify` 2.36.0.
+- Root `overrides` added: `@hono/node-server` ^2.1.6, `@intlify/core` ^11.4.18, `@intlify/unplugin-vue-i18n` ^11.2.8, `body-parser` ^2.4.0, `fast-uri@^3` 3.1.9 / `fast-uri@^4` 4.2.3, `glob@^10`/`glob@^13` ^14.0.4, `joi@^17` 17.13.9, `minimatch@^9`/`minimatch@^10` 11.0.5, `multer` ^2.5.0, `node-forge` ^1.4.3, `qs` ^6.17.1, `serialize-javascript` ^7.1.4, `undici@^7` 7.30.2 / `undici@^8` 8.12.4, `zod@^4` 4.6.7.
+- The two major overrides were checked against their consumers: `archiver-utils` uses `glob.sync`, still exported by glob 14, and `@typescript-eslint/*`, `glob`, `@nestjs/cli` and `@ts-morph/common` use the minimatch function/class API that minimatch 11 preserves.
+- Verified with `bun run type-check`, `bun run lint`, `bun run test` (API, CLI, runner, web), `bun run build`, `bun install --frozen-lockfile`, and integration shards 1/4-4/4. Shards 1-3 were fully green; shard 4 had one `db-shared` file fail on a cross-project DB collision (its fixture registers `root@koda.test`), and that file passes in isolation on a fresh database. `bun audit --production` matches the full-audit count.
+
+**Still open after 2026-11-10 (deferred, each needs its own change):**
+- `zod` 3.25.76 (high, GHSA-mrhx-c7xc-m3w5; advisory fixed only in >=4.6.6). The web app pins `@vee-validate/zod@4.15.1`, whose peer is `zod ^3.24.0` and whose `toTypedSchema` imports `ZodFirstPartyTypeKind`, removed in zod 4. The runner's `@anthropic-ai/sandbox-runtime` (via `@nathapp/nax-agent`) also pins zod 3. Follow-up: port `toTypedSchema` to a local zod-4 adapter, bump web to zod 4.6.7+, then override `zod@^3`; re-test web forms and the runner sandbox. Current exposure is memory growth while validating oversized constrained collections, and the web copy only sees developer-defined static form schemas.
+- `deepmerge` 4.3.1 (low, GHSA-gcqx-w48m-w2h4): latest published release is 4.3.1, so there is no fixed version to upgrade to. Reached only from build/test tooling (nitropack's rollup plugin and jest-config). Revisit when 4.3.2+ ships.
+
 ---
 
 ## 4. Suggested priority order
