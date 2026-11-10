@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T08:51:33.570Z",
+  "updatedAt": "2026-11-10T10:03:09.821Z",
   "userStories": [
     {
       "id": "US-001",
@@ -614,14 +614,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Coordinates schema, repository projections and REST/approval/catalog contracts by extending the existing fix-unprotected pattern, not designing new infrastructure; the new global access-control key requires strict security TDD."
+        "reasoning": "Coordinates schema, repository projections and REST/approval/catalog contracts by extending the existing fix-unprotected pattern, not designing new infrastructure; the new global access-control key requires strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/repos/fleet-repos.service.ts",
@@ -703,7 +706,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d827699928994d1bc870b3b24397220cbeb6c942"
     },
     {
       "id": "US-008",
