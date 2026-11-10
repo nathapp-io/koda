@@ -49,6 +49,40 @@ describe('FleetJobsService transactional audit', () => {
     expect(record).toHaveBeenCalledExactlyOnceWith({ key: 'fleet.job.cancel', resourceType: 'fleet-job', resourceId: 'j', projectId: 'p', summary: `${['QUEUED', 'ASSIGNED'].includes(state) ? 'cancelled from' : 'cancel requested in'} ${state}` });
   });
 
+  describe('cancelBeforeRunner (#428)', () => {
+    const threadAudit = { key: 'thread.stop', resourceType: 'thread', resourceId: 't', projectId: 'p', summary: 'stop cancelled the queued turn' };
+
+    it('cancels a QUEUED job server-side and records the job and thread audit entries in the transaction', async () => {
+      const { service, record, order } = setup({ ...job, state: 'QUEUED' });
+      await expect(service.cancelBeforeRunner('u', 'p', 'j', threadAudit)).resolves.toBe(true);
+      expect(record).toHaveBeenNthCalledWith(1, expect.objectContaining({ key: 'fleet.job.cancel', summary: 'cancelled from QUEUED' }));
+      expect(record).toHaveBeenNthCalledWith(2, threadAudit);
+      expect(order).toEqual(['transition', 'audit', 'audit']);
+    });
+
+    it('cancels an ASSIGNED job whose ASSIGN was never acked', async () => {
+      const { service, repo } = setup({ ...job, state: 'ASSIGNED', runnerId: 'runner' });
+      repo.findPendingCommand.mockResolvedValue({ id: 'assign' });
+      await expect(service.cancelBeforeRunner('u', 'p', 'j', threadAudit)).resolves.toBe(true);
+    });
+
+    it.each(['ASSIGNED', 'RUNNING', 'UPLOADING', 'CANCELLED', 'COMPLETED'])('answers false for a job a runner holds or that ended (%s), writing nothing and throwing nothing', async (state) => {
+      const { service, record, repo, order } = setup({ ...job, state, runnerId: 'runner' });
+      await expect(service.cancelBeforeRunner('u', 'p', 'j', threadAudit)).resolves.toBe(false);
+      expect(order).toEqual([]);
+      expect(record).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.createCommand).not.toHaveBeenCalled();
+    });
+
+    it('answers false for a missing job or one of another project', async () => {
+      const { service, repo } = setup();
+      await expect(service.cancelBeforeRunner('u', 'other', 'j', threadAudit)).resolves.toBe(false);
+      repo.lockById.mockResolvedValue(null);
+      await expect(service.cancelBeforeRunner('u', 'p', 'j', threadAudit)).resolves.toBe(false);
+    });
+  });
+
   it('AC-9: does not audit an already requested cancel', async () => {
     const { service, record } = setup({ ...job, state: 'RUNNING', runnerId: 'runner', cancelRequestedAt: new Date() });
     await service.cancel('u', 'p', 'j', true);

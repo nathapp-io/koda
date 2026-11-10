@@ -20,6 +20,7 @@ import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { cancelUnstartedTurn } from './thread-stop';
 import { PlacementService } from '../jobs/placement.service';
 import type { ThreadMode } from '../common/thread-jobs';
 
@@ -173,8 +174,12 @@ export class ThreadsService {
     return this.threads.changeMode(projectId, threadId, { id: principal.id, type: principal.actorType === 'agent' ? 'AGENT' : 'USER' }, mode, anyRow.allowed);
   }
 
-  stop(projectId: string, threadId: string, userId: string, canOperate = false): Promise<void> {
-    return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_STOP_TURN, {}, canOperate);
+  /** #428: a turn no runner has started is cancelled server-side; any other turn gets the runner's stop command. */
+  async stop(projectId: string, threadId: string, userId: string, canOperate = false): Promise<void> {
+    const scope = { kind: 'project' as const, projectId };
+    const unstarted = await this.threads.unstartedTurnJob(scope, threadId, userId, canOperate);
+    if (unstarted && await cancelUnstartedTurn(this.fleetJobs, userId, unstarted, { id: threadId, workspace: false })) return;
+    return this.threads.command(scope, threadId, userId, FleetCommandType.THREAD_STOP_TURN, {}, canOperate);
   }
 
   endSession(projectId: string, threadId: string, userId: string, canOperate = false): Promise<void> {

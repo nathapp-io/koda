@@ -28,7 +28,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval, type ThreadScope, type ThreadServeNeed, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval, type UnstartedTurn, type ThreadScope, type ThreadServeNeed, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import { readPendingApprovals } from './domain/pending-approvals';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
@@ -391,6 +391,16 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       runnerId = job.runnerId;
     });
     if (runnerId) this.notifier.notify(runnerId);
+  }
+
+  async unstartedTurnJob(scope: ThreadScope, threadId: string, userId: string, canOperate = false): Promise<UnstartedTurn | null> {
+    const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) }, select: { createdById: true } });
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    if (!canOperate && thread.createdById !== userId) throw new ForbiddenAppException({}, 'permissions');
+    const job = await this.currentThreadJob(threadId);
+    // C2-D7: only a SESSION turn is Stop's to end; a queued PUBLISH or DISCARD keeps answering noSession.
+    if (!job || job.threadTurn?.action !== 'SESSION' || (job.state !== 'QUEUED' && job.state !== 'ASSIGNED')) return null;
+    return { jobId: job.id, projectId: job.projectId };
   }
 
   async archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null> {
@@ -757,7 +767,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       // Permissions P1 US-002: the requester and the turn's action decide whether this is a live session someone
       // else started, which input-bearing calls must not steer.
       select: {
-        id: true, state: true, runnerId: true, leaseEpoch: true, requestedById: true, requestedByType: true,
+        id: true, projectId: true, state: true, runnerId: true, leaseEpoch: true, requestedById: true, requestedByType: true,
         threadTurn: { select: { action: true } },
       },
     });

@@ -170,7 +170,7 @@ describe('workspace read, cap and command scope', () => {
     id: 't1', kind: 'WORKSPACE' as const, projectId: 'p1', createdById: 'u',
     homeProject: { slug: 'web', name: 'Web' }, maxCostUsd: '5',
   };
-  let repository: Record<'list' | 'get' | 'sendRefusalOf' | 'handoff' | 'pendingActions' | 'messages' | 'updateCap' | 'command', ReturnType<typeof vi.fn>>;
+  let repository: Record<'list' | 'get' | 'sendRefusalOf' | 'handoff' | 'pendingActions' | 'messages' | 'updateCap' | 'command' | 'unstartedTurnJob', ReturnType<typeof vi.fn>>;
   let can: ReturnType<typeof vi.fn>;
   let config: { threadsEnabled: boolean };
   let principal: UserPrincipal;
@@ -181,7 +181,7 @@ describe('workspace read, cap and command scope', () => {
       list: vi.fn(async () => [record]), get: vi.fn(async () => record), sendRefusalOf: vi.fn(async () => null),
       handoff: vi.fn(async () => ({ plan: null, run: null })), pendingActions: vi.fn(async () => []),
       messages: vi.fn(async () => [{ id: 'm1', seq: 1 }]),
-      updateCap: vi.fn(async () => record), command: vi.fn(async () => undefined),
+      updateCap: vi.fn(async () => record), command: vi.fn(async () => undefined), unstartedTurnJob: vi.fn(async () => null),
     };
     config = { threadsEnabled: true };
     can = vi.fn(async () => allow());
