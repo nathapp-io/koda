@@ -16,6 +16,7 @@ import { isMaxCostUsd, validateCreateWorkspaceThread, type CreateWorkspaceThread
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { PlacementService } from '../jobs/placement.service';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 
 /**
@@ -40,6 +41,7 @@ export class WorkspaceThreadsService {
     private readonly permissions: PermissionService,
     private readonly fleetJobs: FleetJobsService,
     private readonly afterCommit: AfterCommitService,
+    private readonly placement: PlacementService,
   ) {}
 
   private readonly logger = new Logger(WorkspaceThreadsService.name);
@@ -118,10 +120,13 @@ export class WorkspaceThreadsService {
   async get(userId: string, id: string): Promise<ChatThreadDetail> {
     const scope = { kind: 'workspace', userId } as const;
     const thread = await this.requireOwnedThread(userId, id);
-    const [sendRefusal, handoff, pendingActions] = await Promise.all([
+    const [sendRefusal, handoff, pendingActions, queuedTurn] = await Promise.all([
       this.threads.sendRefusalOf(thread.projectId, thread), this.threads.handoff(thread.id), this.threads.pendingActions(scope, thread.id),
+      thread.activeJob?.state === 'QUEUED'
+        ? this.placement.queuedVerdict(thread.activeJob.id, new Date(), this.config.jobQueuedWarnSec)
+        : Promise.resolve(null),
     ]);
-    return { ...thread, sendRefusal, handoff, pendingActions };
+    return { ...thread, sendRefusal, handoff, pendingActions, queuedTurn };
   }
 
   async messages(userId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {

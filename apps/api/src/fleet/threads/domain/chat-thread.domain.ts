@@ -1,5 +1,6 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadCapabilityMisfit } from '../../jobs/placement-rules';
+import type { QueuedVerdict } from '../../jobs/placement.service';
 import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadPendingApproval } from './pending-approvals';
 import type { ThreadSendRefusal } from '../thread-send-rules';
@@ -140,6 +141,7 @@ export type ChatThreadDetail = ChatThreadRecord & {
   handoff: ChatThreadHandoff;
   /** Oldest first, at most `MAX_PENDING_ACTIONS`; empty for a thread whose actions are all decided (2a-D12). */
   pendingActions: ChatThreadPendingAction[];
+  queuedTurn: QueuedVerdict | null;
 };
 
 export interface ChatMessageRecord {

@@ -104,6 +104,38 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
     const thread = await service.get('p1', 't1');
 
     expect(thread.session).toEqual(session);
+    expect(thread.queuedTurn).toBeNull();
+    expect(thread.sendRefusal).toBeNull();
+    expect(thread.handoff).toEqual({ plan: null, run: null });
+    expect(thread.pendingActions).toEqual([]);
+  });
+});
+
+describe('ThreadsService.get queued turn', () => {
+  const make = (activeJob: { id: string; state: string } | null, verdict = { jobId: 'j1', queuedAt: new Date('2026-10-15T12:00:00.000Z'), verdict: 'no_fit' as const, reasons: [] }) => {
+    const threads = {
+      get: vi.fn().mockResolvedValue({ ...record, activeJob }),
+      sendRefusalOf: vi.fn().mockResolvedValue(null), handoff: vi.fn().mockResolvedValue({ plan: null, run: null }),
+      pendingActions: vi.fn().mockResolvedValue([]),
+    } as unknown as ChatThreadRepository;
+    const placement = { queuedVerdict: vi.fn().mockResolvedValue(verdict) };
+    const service = new ThreadsService(threads, {} as never, {} as never, { threadsEnabled: true, jobQueuedWarnSec: 60 } as never, {} as never,
+      briefStub(), new AfterCommitService(), permissionStub(), placement as never);
+    return { service, placement };
+  };
+
+  it('AC-6: running job returns null without querying placement', async () => {
+    const { service, placement } = make({ id: 'j1', state: 'RUNNING' });
+    expect((await service.get('p1', 't1')).queuedTurn).toBeNull();
+    expect(placement.queuedVerdict).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: queued job passes the warning threshold and exposes the computed verdict', async () => {
+    const verdict = { jobId: 'j1', queuedAt: new Date('2026-10-15T12:00:00.000Z'), verdict: 'no_fit' as const, reasons: [] };
+    const { service, placement } = make({ id: 'j1', state: 'QUEUED' }, verdict);
+    const result = await service.get('p1', 't1');
+    expect(placement.queuedVerdict).toHaveBeenCalledWith('j1', expect.any(Date), 60);
+    expect(result.queuedTurn).toBe(verdict);
   });
 });
 

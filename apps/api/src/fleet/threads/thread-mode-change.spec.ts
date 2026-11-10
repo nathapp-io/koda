@@ -36,7 +36,7 @@ function fixture() {
   const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const repo = new PrismaChatThreadRepository(prisma as never, jobs as never, tx as never, {} as never, {} as never, notifier as never, { snapshot: async () => ({ match: () => null }) } as never, { threadsEnabled: true, runnerOfflineSec: 120 } as never, audit as never, bus);
   const permissions = { can: vi.fn().mockResolvedValue({ allowed: true }) };
-  const service = new ThreadsService(repo, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, permissions as never);
+  const service = new ThreadsService(repo, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, permissions as never, { queuedVerdict: vi.fn() } as never);
   const change = (mode: ThreadMode = 'ask', who = principal) => service.changeMode('P', 'T', who, mode);
   const live = (state = 'RUNNING', action = 'SESSION') => {
     row.runnerId = 'R';

@@ -14,6 +14,23 @@ import { FleetCommandType } from '../../common/enums';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { Logger } from '@nestjs/common';
 
+describe('WorkspaceThreadsService.get queued turn', () => {
+  it('AC-8: returns the computed verdict for a queued active job', async () => {
+    const thread = { id: 't1', projectId: 'p1', activeJob: { id: 'j1', state: 'QUEUED' } };
+    const verdict = { jobId: 'j1', queuedAt: new Date('2026-10-15T12:00:00.000Z'), verdict: 'no_fit' as const, reasons: [] };
+    const threads = {
+      get: vi.fn().mockResolvedValue(thread), sendRefusalOf: vi.fn().mockResolvedValue(null),
+      handoff: vi.fn().mockResolvedValue({ plan: null, run: null }), pendingActions: vi.fn().mockResolvedValue([]),
+    };
+    const placement = { queuedVerdict: vi.fn().mockResolvedValue(verdict) };
+    const service = new WorkspaceThreadsService(threads as never, {} as never, {} as never,
+      { threadsEnabled: true, jobQueuedWarnSec: 60 } as never, {} as never, {} as never, {} as never,
+      {} as never, new AfterCommitService(), placement as never);
+    expect((await service.get('u1', 't1')).queuedTurn).toBe(verdict);
+    expect(placement.queuedVerdict).toHaveBeenCalledWith('j1', expect.any(Date), 60);
+  });
+});
+
 const allow = (): PermissionDecision => ({ allowed: true, reason: 'granted' });
 const deny = (reason: PermissionDecision['reason'] = 'not-granted'): PermissionDecision => ({ allowed: false, reason });
 
@@ -182,7 +199,7 @@ describe('workspace read, cap and command scope', () => {
   });
 
   it('AC-5: reads the owned thread with its send refusal and handoff', async () => {
-    await expect(service.get('u', 't1')).resolves.toEqual({ ...record, sendRefusal: null, handoff: { plan: null, run: null }, pendingActions: [] });
+    await expect(service.get('u', 't1')).resolves.toEqual({ ...record, sendRefusal: null, handoff: { plan: null, run: null }, pendingActions: [], queuedTurn: null });
     expect(repository.get).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1');
     // The send refusal is judged against the thread's home project.
     expect(repository.sendRefusalOf).toHaveBeenCalledWith('p1', record);

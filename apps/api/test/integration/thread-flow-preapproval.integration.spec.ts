@@ -122,13 +122,13 @@ describeDb('thread flow pre-approval', () => {
     const missingRunner = await thread({ specPublished: true });
     await txManager.run(() => expect(service.lockForFlow(projectId, missingRunner.id)).rejects.toMatchObject({ prefix: 'threads.runnerMissing' }));
 
-    const disabled = new ThreadsService(service['threads'], {} as never, {} as never, { threadsEnabled: false } as never, {} as never, {} as never, {} as never, {} as never);
+    const disabled = new ThreadsService(service['threads'], {} as never, {} as never, { threadsEnabled: false } as never, {} as never, {} as never, {} as never, {} as never, { queuedVerdict: vi.fn() } as never);
     await txManager.run(() => expect(disabled.lockForFlow('wrong-project', ready.id)).rejects.toMatchObject({ prefix: 'threads.notFound' }));
     const projectThread = await thread({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null });
     await txManager.run(() => expect(disabled.lockForFlow(projectId, projectThread.id)).rejects.toMatchObject({ prefix: 'threads.notRepoThread' }));
     const archived = await thread({ status: 'ARCHIVED', specPublished: false, runnerId: null });
     await txManager.run(() => expect(disabled.lockForFlow(projectId, archived.id)).rejects.toMatchObject({ prefix: 'threads.disabled' }));
-    const enabled = new ThreadsService(service['threads'], {} as never, {} as never, { threadsEnabled: true } as never, {} as never, {} as never, {} as never, {} as never);
+    const enabled = new ThreadsService(service['threads'], {} as never, {} as never, { threadsEnabled: true } as never, {} as never, {} as never, {} as never, {} as never, { queuedVerdict: vi.fn() } as never);
     await txManager.run(() => expect(enabled.lockForFlow(projectId, archived.id)).rejects.toMatchObject({ prefix: 'threads.archived' }));
   });
 

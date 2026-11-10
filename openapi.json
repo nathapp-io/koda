@@ -24192,6 +24192,85 @@
           "createdAt"
         ]
       },
+      "QueuedTurnReasonDto": {
+        "type": "object",
+        "properties": {
+          "runnerName": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "disabled",
+              "labels",
+              "capacity",
+              "protocol",
+              "sandbox",
+              "interaction",
+              "tools",
+              "offline",
+              "budget_paused",
+              "executor",
+              "provider_missing",
+              "provider_unavailable",
+              "approvals_relay",
+              "busy_repo",
+              "config_jobs",
+              "bot_review",
+              "bot_fix",
+              "bot_rulings",
+              "agents_run",
+              "trust_domain",
+              "thread_capacity",
+              "thread_backend",
+              "thread_modes",
+              "threads_disabled",
+              "thread_write",
+              "project_threads",
+              "workspace_threads"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "runnerName",
+          "reason"
+        ]
+      },
+      "QueuedTurnDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verdict": {
+            "enum": [
+              "never",
+              "budget_paused",
+              "runners_paused",
+              "waiting_capacity",
+              "no_fit",
+              "no_runners"
+            ],
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueuedTurnReasonDto"
+            }
+          }
+        },
+        "required": [
+          "jobId",
+          "queuedAt",
+          "verdict",
+          "reasons"
+        ]
+      },
       "WorkspaceThreadDetailDto": {
         "type": "object",
         "properties": {
@@ -24413,6 +24492,15 @@
               "$ref": "#/components/schemas/PendingActionDto"
             }
           },
+          "queuedTurn": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueuedTurnDto"
+              }
+            ]
+          },
           "homeProject": {
             "required": [
               "slug",
@@ -24461,7 +24549,8 @@
           "lastWrite",
           "sendRefusal",
           "handoff",
-          "pendingActions"
+          "pendingActions",
+          "queuedTurn"
         ]
       },
       "ChatMessageDto": {
@@ -25135,6 +25224,15 @@
             "items": {
               "$ref": "#/components/schemas/PendingActionDto"
             }
+          },
+          "queuedTurn": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueuedTurnDto"
+              }
+            ]
           }
         },
         "required": [
@@ -25169,7 +25267,8 @@
           "lastWrite",
           "sendRefusal",
           "handoff",
-          "pendingActions"
+          "pendingActions",
+          "queuedTurn"
         ]
       },
       "ChangeThreadModeDto": {

@@ -20,6 +20,7 @@ import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
 import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { PlacementService } from '../jobs/placement.service';
 import type { ThreadMode } from '../common/thread-jobs';
 
 @Injectable()
@@ -35,6 +36,7 @@ export class ThreadsService {
     private readonly projectBrief: ProjectBriefService,
     private readonly afterCommit: AfterCommitService,
     private readonly permissions: PermissionService,
+    private readonly placement: PlacementService,
   ) {}
 
   /** Check before opening approval and again at execution: approval never substitutes for possession of the mode key. */
@@ -102,10 +104,13 @@ export class ThreadsService {
     const scope = { kind: 'project', projectId } as const;
     const result = await this.threads.get(scope, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
-    const [sendRefusal, handoff, pendingActions] = await Promise.all([
+    const [sendRefusal, handoff, pendingActions, queuedTurn] = await Promise.all([
       this.threads.sendRefusalOf(projectId, result), this.threads.handoff(result.id), this.threads.pendingActions(scope, result.id),
+      result.activeJob?.state === 'QUEUED'
+        ? this.placement.queuedVerdict(result.activeJob.id, new Date(), this.config.jobQueuedWarnSec)
+        : Promise.resolve(null),
     ]);
-    return { ...result, sendRefusal, handoff, pendingActions };
+    return { ...result, sendRefusal, handoff, pendingActions, queuedTurn };
   }
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
     const thread = await this.threads.get({ kind: 'project', projectId }, id);

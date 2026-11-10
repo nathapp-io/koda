@@ -17,7 +17,7 @@ describe('workspace turn boundaries', () => {
     const cancel = vi.fn(async () => undefined);
     const service = new WorkspaceThreadsService(repository as never, {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'home' }]) } as never,
-      { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never, { can } as unknown as PermissionService, { cancel } as never, new AfterCommitService());
+      { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never, { can } as unknown as PermissionService, { cancel } as never, new AfterCommitService(), { queuedVerdict: vi.fn() } as never);
     return { service, repository, can, cancel };
   }
   /** US-003: hosting is the `thread.create` key of the thread's home project, and its refusal is `permissions`. */
@@ -61,7 +61,7 @@ describe('workspace turn boundaries', () => {
       {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'p' }]) } as never,
       { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never,
-      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(),
+      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(), { queuedVerdict: vi.fn() } as never,
     );
     const principal: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@test.com' };
     await service.sendMessage(principal, 't', { text: 'hi', clientMessageId: 'cm' });
@@ -75,7 +75,7 @@ describe('workspace turn boundaries', () => {
       {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'p' }]) } as never,
       { resolveMembership: vi.fn(async () => null) } as never,
-      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(),
+      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(), { queuedVerdict: vi.fn() } as never,
     );
     const agent: AgentPrincipal = { actorType: 'agent', id: 'ag', slug: 'ag', status: 'ACTIVE', agentRoles: [], capabilities: [] };
     await service.sendMessage(agent, 't', { text: 'hi', clientMessageId: 'cm' });

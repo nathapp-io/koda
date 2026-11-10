@@ -5,6 +5,8 @@ import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thr
 import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
+import { UNPLACEABLE_VERDICTS } from '../../jobs/unplaceable-verdict';
+import type { MisfitReason } from '../../jobs/placement-rules';
 
 /**
  * B3: the runner's outcome for the last decision sent for one pending request. The decision route answers `200` as soon
@@ -79,10 +81,24 @@ export class PendingActionDto {
   @ApiProperty({ description: 'When the action was proposed' }) createdAt: Date;
 }
 
+export class QueuedTurnReasonDto {
+  @ApiProperty() runnerName: string;
+  @ApiProperty() reason: MisfitReason;
+}
+
+export class QueuedTurnDto {
+  @ApiProperty() jobId: string;
+  @ApiProperty({ format: 'date-time' }) queuedAt: string;
+  @ApiProperty({ enum: UNPLACEABLE_VERDICTS.filter((verdict) => verdict !== 'fits_not_placed') })
+  verdict: Exclude<(typeof UNPLACEABLE_VERDICTS)[number], 'fits_not_placed'>;
+  @ApiProperty({ type: [QueuedTurnReasonDto] }) reasons: QueuedTurnReasonDto[];
+}
+
 export class ThreadDetailDto extends ThreadDto {
   @ApiProperty({ enum: ['disabled', 'archived', 'costCap', 'budgetPaused', 'runnerOffline', 'runnerOutdated', 'closing', 'turnRunning'], nullable: true }) sendRefusal: ThreadSendRefusal | null;
   @ApiProperty({ type: 'object', properties: { plan: { type: 'object', nullable: true, additionalProperties: true }, run: { type: 'object', nullable: true, additionalProperties: true } } }) handoff: ChatThreadHandoff;
   @ApiProperty({ type: [PendingActionDto], description: 'The thread\'s PENDING actions, oldest first (2a-D12)' }) pendingActions: PendingActionDto[];
+  @ApiProperty({ type: QueuedTurnDto, nullable: true }) queuedTurn: QueuedTurnDto | null;
 }
 
 export class ThreadListDto {
