@@ -1914,6 +1914,9 @@
         "pending": "审批待处理；已保存的设置尚未更改。",
         "hint": "没有 nax 检查配置时，允许 FIX 任务运行从 package 脚本检测到的检查。"
       },
+      "ruleOverride": {
+        "open": "规则覆盖（{files}）", "openEmpty": "配置规则覆盖", "title": "仓库规则覆盖", "path": "规则文件路径", "content": "规则文件内容", "remove": "移除文件", "addFile": "添加文件", "rulesMode": "规则模式", "context": "项目上下文", "contextMode": "上下文模式", "save": "保存", "clear": "清除", "close": "关闭", "pending": "审批待处理；已保存的覆盖尚未更改。"
+      },
       "reach": {
         "checking": "检查中…",
         "unchecked": "未检查",
@@ -1949,6 +1952,7 @@
       }
     },
     "jobs": {
+      "ruleOverride": { "summary": "已分配的仓库规则覆盖：{files} 个文件，规则模式 {mode}，上下文 {context}，SHA-256 {sha256}。此记录表示已分配的内容，不代表执行机已应用。" },
       "title": "Fleet 任务",
       "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
       "dispatch": "派发",

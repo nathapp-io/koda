@@ -117,6 +117,28 @@ export interface FleetRunnerSummary {
 
 export type FleetProvider = 'github' | 'gitlab'
 
+export interface FleetRuleOverrideSummary {
+  sha256: string
+  ruleFiles: number
+  rulesMode: 'merge' | 'replace'
+  contextMode: 'append' | 'replace' | null
+  updatedAt: string
+}
+
+export interface FleetRuleOverride {
+  rules: { path: string; content: string }[]
+  rulesMode: 'merge' | 'replace'
+  context: { content: string; mode: 'append' | 'replace' } | null
+  sha256: string
+  updatedAt: string
+}
+
+export interface FleetRuleOverrideBody {
+  rules: { path: string; content: string }[]
+  rulesMode: 'merge' | 'replace'
+  context: { content: string; mode: 'append' | 'replace' } | null
+}
+
 export interface FleetRepo {
   id: string
   projectId: string
@@ -134,6 +156,7 @@ export interface FleetRepo {
   fixTrustDetectedChecks: boolean
   /** FIX may push although the default branch is unprotected (audited override, default off). */
   fixAllowUnprotected: boolean
+  ruleOverride: FleetRuleOverrideSummary | null
   createdAt: string
 }
 
@@ -354,6 +377,7 @@ export interface FleetJobDto {
   agentResult?: AgentJobResultDto | null
   /** US-006 (US-004 wire shape): the workflow result, null when the job has none. */
   workflow: FleetJobWorkflowDto | null
+  ruleOverride?: { sha256: string; ruleFiles: number; rulesMode: 'merge' | 'replace'; contextMode: 'append' | 'replace' | null } | null
 }
 
 export interface FleetJobEventDto {

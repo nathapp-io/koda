@@ -1914,6 +1914,9 @@
         "pending": "Approval is pending; the saved setting has not changed.",
         "hint": "Allow FIX jobs to run checks detected from package scripts when no nax check configuration is present."
       },
+      "ruleOverride": {
+        "open": "Rules override ({files})", "openEmpty": "Configure rule override", "title": "Repository rule override", "path": "Rule file path", "content": "Rule file content", "remove": "Remove file", "addFile": "Add file", "rulesMode": "Rules mode", "context": "Project context", "contextMode": "Context mode", "save": "Save", "clear": "Clear", "close": "Close", "pending": "Approval is pending; the saved override has not changed."
+      },
       "reach": {
         "checking": "Checking…",
         "unchecked": "Not checked",
@@ -1949,6 +1952,7 @@
       }
     },
     "jobs": {
+      "ruleOverride": { "summary": "Assigned repository rule override: {files} files, {mode} rules, context {context}, SHA-256 {sha256}. This records what was assigned, not proof the runner applied it." },
       "title": "Fleet jobs",
       "subtitle": "nax runs and plans dispatched to fleet runners",
       "dispatch": "Dispatch",

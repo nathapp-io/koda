@@ -3,11 +3,12 @@ import { apiPath } from '~/lib/api-path'
 import { extractApiError } from '~/composables/useApi'
 import { mapLimit } from '~/lib/map-limit'
 import { FLEET_LIST_SIZE } from '~/lib/fleet-types'
-import type { FleetPage, FleetRepo, FleetRepoCheck, NewFleetRepo } from '~/lib/fleet-types'
+import type { FleetPage, FleetRepo, FleetRepoCheck, FleetRuleOverride, FleetRuleOverrideBody, NewFleetRepo } from '~/lib/fleet-types'
 import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 
 export type AutoReviewBody = { enabled: false } | { enabled: true; profiles?: string[]; maxCostUsd?: number }
 export type AutoReviewResult = { kind: 'saved'; repo: FleetRepo } | { kind: 'pending'; request: ApprovalRequestSummary }
+export type RuleOverrideResult = AutoReviewResult
 
 export type RepoCheckState =
   | { status: 'checking' }
@@ -98,6 +99,24 @@ export function useFleetRepos() {
     return { kind: 'saved', repo: data }
   }
 
+  async function getRuleOverride(id: string): Promise<FleetRuleOverride | null> {
+    return await $api.get<FleetRuleOverride | null>(apiPath`/fleet/repos/${id}/rule-override`)
+  }
+
+  async function setRuleOverride(id: string, body: FleetRuleOverrideBody): Promise<RuleOverrideResult> {
+    const data = await $api.put<FleetRepo | ApprovalRequestSummary>(apiPath`/fleet/repos/${id}/rule-override`, { ...body })
+    if ('permissionKey' in data) return { kind: 'pending', request: data }
+    repos.value = repos.value.map((repo) => repo.id === id ? data : repo)
+    return { kind: 'saved', repo: data }
+  }
+
+  async function clearRuleOverride(id: string): Promise<RuleOverrideResult> {
+    const data = await $api.delete<FleetRepo | ApprovalRequestSummary>(apiPath`/fleet/repos/${id}/rule-override`)
+    if ('permissionKey' in data) return { kind: 'pending', request: data }
+    repos.value = repos.value.map((repo) => repo.id === id ? data : repo)
+    return { kind: 'saved', repo: data }
+  }
+
   async function remove(id: string): Promise<void> {
     await $api.delete(apiPath`/fleet/repos/${id}`)
     removed = new Set([...removed, id])
@@ -105,5 +124,5 @@ export function useFleetRepos() {
     checks.value = Object.fromEntries(Object.entries(checks.value).filter(([key]) => key !== id))
   }
 
-  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, setAutoReview, setFixChecks, setFixUnprotected, remove }
+  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, setAutoReview, setFixChecks, setFixUnprotected, getRuleOverride, setRuleOverride, clearRuleOverride, remove }
 }

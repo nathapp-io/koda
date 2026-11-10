@@ -352,6 +352,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 
       <FleetJobProgress v-if="!configJob" :job="job" />
       <FleetJobPipeline v-if="!configJob" :job="job" />
+      <p v-if="job.ruleOverride" data-testid="fleet-job-rule-override">{{ t('fleet.jobs.ruleOverride.summary', { files: job.ruleOverride.ruleFiles, mode: job.ruleOverride.rulesMode, context: job.ruleOverride.contextMode ?? '-', sha256: job.ruleOverride.sha256.slice(0, 8) }) }}</p>
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
