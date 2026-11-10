@@ -3,7 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
-import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem, FixOutcome, FixReady } from '../domain/fleet-job.domain';
+import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem, FixOutcome, FixReady, JobRuleOverrideSummary } from '../domain/fleet-job.domain';
 import type { AgentJobInput, AgentJobResult } from '../../common/agent-jobs';
 import type { MisfitReason } from '../placement-rules';
 
@@ -43,6 +43,17 @@ export class FleetJobWorkflowDto implements FleetJobWorkflow {
   @ApiProperty() declare workflowPassed: boolean;
   @ApiProperty({ type: [String] }) declare reasons: string[];
   @ApiProperty({ type: [FleetJobWorkflowItemDto] }) declare openItems: FleetJobWorkflowItemDto[];
+}
+
+/**
+ * US-008 (#370): the summary of the repo rule override a job was assigned — the hash, the number of rule
+ * files and the two modes. The rule bodies stay on the repo; a job records only what it was assigned.
+ */
+export class JobRuleOverrideSummaryDto {
+  @ApiProperty() declare sha256: string;
+  @ApiProperty() declare ruleFiles: number;
+  @ApiProperty({ enum: ['merge', 'replace'] }) declare rulesMode: 'merge' | 'replace';
+  @ApiPropertyOptional({ type: String, nullable: true, enum: ['append', 'replace'] }) declare contextMode: 'append' | 'replace' | null;
 }
 
 export class FleetJobDto {
@@ -111,6 +122,8 @@ export class FleetJobDto {
   declare tickets: FleetJobTicketDto[] | null;
   @ApiPropertyOptional({ type: FleetJobConfigEditDto, nullable: true, description: 'Config job edit summary (fleet S3 §4.3). Null for nax jobs and on list pages.' })
   declare configEdit: FleetJobConfigEditDto | null;
+  @ApiPropertyOptional({ type: JobRuleOverrideSummaryDto, nullable: true, description: 'The summary of the repo rule override this job was assigned (US-008). Null when the job was assigned without one.' })
+  declare ruleOverride: JobRuleOverrideSummaryDto | null;
 
   /** Internal columns (runnerBootId, eventSeq, ackedRunnerSeq, attributedAt) stay server-side. */
   static from(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
@@ -132,6 +145,8 @@ export class FleetJobDto {
       agent: r.agentInput ?? null, agentResult: r.agentResult ?? null,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun, workflow: r.workflow ?? null,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
+      // US-008: the summary of the rule override the job was assigned, as the record carries it.
+      ruleOverride: r.ruleOverride ? Object.assign(new JobRuleOverrideSummaryDto(), r.ruleOverride) : null,
     });
   }
 

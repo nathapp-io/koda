@@ -60,6 +60,9 @@ function fixture(runners: PlacementRunnerRow[], keys: Record<string, string[]> =
     findActiveLoads: vi.fn(async () => []),
     findQueuedPage: vi.fn(async () => [{ id: record.id, queuedAt: NOW }]),
     findThreadAssign: vi.fn(async () => null),
+    // US-008: a RUN job is a nax command, so placement reads the repo's rule override for it.
+    findRuleOverride: vi.fn(async () => null),
+    setRuleOverrideSummary: vi.fn(async () => undefined),
     createCommand: vi.fn(async (c: { type: FleetCommandType; payload: unknown }) => c),
     casAssign: vi.fn(async () => 1),
     findById: vi.fn(async () => record),

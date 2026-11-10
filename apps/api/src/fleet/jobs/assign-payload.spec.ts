@@ -135,6 +135,56 @@ describe('review decision snapshot wire', () => {
 });
 
 /**
+ * US-008 (#370): the repo's rule override travels with the ASSIGN of a nax job, and only of a nax job. A
+ * THREAD turn and a config job never carry one (the designer's call, 2026-11-10): a thread has no nax run of
+ * its own, and a config job edits configuration instead of running nax.
+ */
+describe('rule override assign payload (US-008)', () => {
+  const override = {
+    sha256: 'a'.repeat(64),
+    rulesMode: 'merge' as const,
+    rules: [{ path: 'api.md', content: 'always answer with the summary' }],
+    context: { content: 'the project answers in english', mode: 'append' as const },
+  };
+
+  it('AC-1: a RUN job carries the override it was given', () => {
+    const payload = buildAssignPayload(job, repo, 'https://x/y.git', identity, undefined, override);
+    expect(payload.ruleOverride).toEqual(override);
+  });
+
+  it('AC-2: a THREAD job carries no override', () => {
+    const payload = buildAssignPayload({ ...job, command: 'THREAD' }, repo, 'https://x/y.git', identity, undefined, override);
+    expect(payload).not.toHaveProperty('ruleOverride');
+  });
+
+  it('AC-3: a CONFIG_EDIT job carries no override', () => {
+    const payload = buildAssignPayload({ ...job, command: 'CONFIG_EDIT' }, repo, 'https://x/y.git', identity, undefined, override);
+    expect(payload).not.toHaveProperty('ruleOverride');
+  });
+
+  it('AC-4: a FIX job with no override carries no override key', () => {
+    const payload = buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-7' }, repo, 'https://x/y.git', identity, undefined, null);
+    expect(payload).not.toHaveProperty('ruleOverride');
+  });
+
+  it('carries the override on the other nax commands: PLAN, REVIEW, FIX and AGENT', () => {
+    const plan = buildAssignPayload({ ...job, command: 'PLAN' }, repo, 'https://x/y.git', identity, undefined, override);
+    const review = buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-7' }, repo, 'https://x/y.git', identity, undefined, override);
+    const fix = buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-7' }, repo, 'https://x/y.git', identity, undefined, override);
+    const agent = buildAssignPayload({ ...job, command: 'AGENT', agentInput: { name: 'a', task: 't' } }, repo, 'https://x/y.git', identity, undefined, override);
+    expect(plan.ruleOverride).toEqual(override);
+    expect(review.ruleOverride).toEqual(override);
+    expect(fix.ruleOverride).toEqual(override);
+    expect(agent.ruleOverride).toEqual(override);
+  });
+
+  it('carries no override on a CONFIG_DRIFT job', () => {
+    const payload = buildAssignPayload({ ...job, command: 'CONFIG_DRIFT' }, repo, 'https://x/y.git', identity, undefined, override);
+    expect(payload).not.toHaveProperty('ruleOverride');
+  });
+});
+
+/**
  * US-005: an AGENT assignment carries the dispatch input as its `agent` block, and never a `review` block —
  * the runner runs the named agent instead of a PR review, so a review block on an AGENT payload would make it
  * look like a REVIEW job.

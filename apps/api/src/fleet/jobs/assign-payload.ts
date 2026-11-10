@@ -1,8 +1,21 @@
 import type { IFleetConfig } from '../../config/fleet.config';
-import type { AssignPayload, GitIdentity } from '../common/protocol';
+import type { AssignPayload, GitIdentity, RuleOverrideAssign } from '../common/protocol';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 import type { ThreadAssign } from '../common/thread-jobs';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
+import type { FleetJobKind } from '../../common/enums';
+
+/**
+ * US-008 (#370): the nax commands a repo's rule override travels with. A THREAD turn and a config job
+ * never carry one (the designer's call, 2026-11-10): a thread turn is not a nax run of its own, and a
+ * config job edits configuration instead of running nax.
+ */
+const RULE_OVERRIDE_COMMANDS: readonly FleetJobKind[] = ['RUN', 'PLAN', 'REVIEW', 'FIX', 'AGENT'];
+
+/** The commands a repo's rule override travels with; placement reads the override for these only. */
+export function carriesRuleOverride(command: FleetJobKind): boolean {
+  return RULE_OVERRIDE_COMMANDS.includes(command);
+}
 
 /**
  * Plan D17: the App bot for GitHub, the configured bot for GitLab.
@@ -25,7 +38,14 @@ export function gitIdentityFor(
   return { name: bot, email: `${bot}@users.noreply.github.com` };
 }
 
-export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, cloneUrl: string, gitIdentity: GitIdentity, thread?: ThreadAssign): AssignPayload {
+export function buildAssignPayload(
+  job: FleetJobRecord,
+  repo: FleetRepoRef,
+  cloneUrl: string,
+  gitIdentity: GitIdentity,
+  thread?: ThreadAssign,
+  ruleOverride?: RuleOverrideAssign | null,
+): AssignPayload {
   const hasReview = job.command === 'REVIEW' || job.command === 'FIX';
   const reviewPrNumber = hasReview ? prNumberOfReviewFeature(job.feature) : null;
   if (hasReview && reviewPrNumber === null) throw new Error('invalid review feature');
@@ -62,6 +82,11 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
     } : {}),
     ...(thread ? { thread } : {}),
     ...(isAgent ? { agent: { ...agentInput } } : {}),
+    // US-008 (#370): the repo's rule override, read when the job was assigned. Only a nax job carries
+    // one, and only when the repo has an override at all.
+    ...(ruleOverride !== null && ruleOverride !== undefined && carriesRuleOverride(job.command)
+      ? { ruleOverride }
+      : {}),
     // US-004: a flow PLAN job has no thread but does know the branch it must write, so it gets the same
     // expectation a thread PLAN sends; every other command never does.
     ...(job.command === 'PLAN' && (job.threadId || job.flowId) ? { expectBranch: job.ref } : {}),

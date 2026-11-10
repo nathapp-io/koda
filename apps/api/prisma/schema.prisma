@@ -1142,6 +1142,7 @@ model FleetJob {
   flowId             String?
   flowStep           String?
   flowFeatureId      String? // US-001: the flow feature this job belongs to (null for a job no flow owns)
+  ruleOverride       Json? // US-008 (#370): the summary of the repo rule override this job was assigned: { sha256, ruleFiles, rulesMode, contextMode }
   updatedAt          DateTime  @updatedAt
 
   project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)

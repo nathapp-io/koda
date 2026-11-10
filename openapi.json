@@ -20610,6 +20610,37 @@
           "files"
         ]
       },
+      "JobRuleOverrideSummaryDto": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string"
+          },
+          "ruleFiles": {
+            "type": "number"
+          },
+          "rulesMode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string"
+          },
+          "contextMode": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "sha256",
+          "ruleFiles",
+          "rulesMode"
+        ]
+      },
       "FleetJobDto": {
         "type": "object",
         "properties": {
@@ -20894,6 +20925,16 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/FleetJobConfigEditDto"
+              }
+            ]
+          },
+          "ruleOverride": {
+            "nullable": true,
+            "description": "The summary of the repo rule override this job was assigned (US-008). Null when the job was assigned without one.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JobRuleOverrideSummaryDto"
               }
             ]
           }

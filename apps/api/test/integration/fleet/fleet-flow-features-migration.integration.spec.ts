@@ -16,6 +16,8 @@ const MIGRATION = '20261203090000_fleet_flow_features';
 const SCHEMA = 'fleet_flow_features_mig';
 vi.setConfig({ testTimeout: 60_000 });
 
+interface FlowFeatureRow { flowFeatureId: string | null }
+
 describeDb('fleet flow features migration (PG)', () => {
   let scratch: ScratchSchema;
 
@@ -54,15 +56,28 @@ describeDb('fleet flow features migration (PG)', () => {
     await scratch?.drop();
   });
 
+  /**
+   * The job's flow feature, read with raw SQL: the generated client always selects the columns of the
+   * *current* schema, and this scratch schema predates the rule-override column (US-008), so a client
+   * read would ask for a column the schema does not have.
+   */
+  const flowFeatureOf = async (id: string): Promise<FlowFeatureRow> => {
+    const rows = await scratch.db.$queryRawUnsafe<FlowFeatureRow[]>(
+      `SELECT "flowFeatureId"::text AS "flowFeatureId" FROM "FleetJob" WHERE "id" = '${id}'`,
+    );
+    expect(rows).toHaveLength(1);
+    return rows[0];
+  };
+
   it('AC-1: a job of a flow is scoped to the position-0 feature of that flow', async () => {
     // The chain must really have run, or the backfill would run against an empty schema.
     expect(migrationsBefore(MIGRATION).length).toBeGreaterThan(0);
-    const job = await scratch.db.fleetJob.findUniqueOrThrow({ where: { id: 'j1' } });
+    const job = await flowFeatureOf('j1');
     expect(job.flowFeatureId).toBe('ff0');
   });
 
   it('AC-2: a job that belongs to no flow has no flow feature', async () => {
-    const job = await scratch.db.fleetJob.findUniqueOrThrow({ where: { id: 'j2' } });
+    const job = await flowFeatureOf('j2');
     expect(job.flowFeatureId).toBeNull();
   });
 

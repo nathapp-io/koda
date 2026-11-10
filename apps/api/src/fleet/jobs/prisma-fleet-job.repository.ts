@@ -7,7 +7,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState, FleetJobKind } from '../../common/enums';
-import type { RunnerCapabilities, BashMode } from '../common/protocol';
+import type { RunnerCapabilities, BashMode, RuleOverrideAssign } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import type { ThreadAssign } from '../common/thread-jobs';
 import { PROJECT_CODE_LIMITS, THREAD_LIMITS } from '../common/thread-jobs';
@@ -17,9 +17,43 @@ import type { ConfigJobResult } from '../common/config-jobs';
 import type { FlowStep } from '../flows/flow-steps';
 import {
   ActiveJobRef, agentInputOf, agentResultOf, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters, FixReady,
-  FleetJobPrRulings, FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
-  QueuedCursor, QueuedScanFilter,
+  FleetJobPrRulings, FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, JobRuleOverrideSummary, NewFleetJob,
+  PlacementRunnerRow, QueuedCursor, QueuedScanFilter,
 } from './domain/fleet-job.domain';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * US-008 (#370): the stored summary of an assigned rule override. The column is unconstrained JSON, so it is
+ * mapped through a shape guard: a value this app did not write is absent (null), never an unchecked assertion.
+ */
+function toRuleOverrideSummary(value: unknown): JobRuleOverrideSummary | null {
+  if (!isRecord(value)) return null;
+  const { sha256, ruleFiles, rulesMode } = value;
+  if (typeof sha256 !== 'string' || sha256.length === 0) return null;
+  if (typeof ruleFiles !== 'number' || !Number.isInteger(ruleFiles) || ruleFiles < 0) return null;
+  if (rulesMode !== 'merge' && rulesMode !== 'replace') return null;
+  const rawContextMode = value['contextMode'];
+  if (rawContextMode !== null && rawContextMode !== undefined && rawContextMode !== 'append' && rawContextMode !== 'replace') return null;
+  const contextMode = rawContextMode === 'append' ? 'append' : rawContextMode === 'replace' ? 'replace' : null;
+  return { sha256, ruleFiles, rulesMode, contextMode };
+}
+
+/**
+ * US-008 (#370): the rule files of a stored override, read defensively: a row koda did not write is not trusted,
+ * so an entry that is not a `{ path, content }` pair is dropped rather than sent to a runner.
+ */
+function readRuleFiles(value: unknown): { path: string; content: string }[] {
+  if (!Array.isArray(value)) return [];
+  const rules: { path: string; content: string }[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    if (typeof entry['path'] !== 'string' || typeof entry['content'] !== 'string') continue;
+    rules.push({ path: entry['path'], content: entry['content'] });
+  }
+  return rules;
+}
 
 const toJob = (r: JobRow): FleetJobRecord => ({
   ...r,
@@ -42,6 +76,8 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   // US-003: both agent columns are unconstrained JSON, so they are mapped through their shape guards.
   agentInput: agentInputOf(r.agentInput),
   agentResult: agentResultOf(r.agentResult),
+  // US-008: the summary of the rule override this job was assigned, through its own shape guard.
+  ruleOverride: toRuleOverrideSummary(r.ruleOverride),
 });
 
 const toCommand = (r: FleetCommandRow): FleetCommandRecord => ({ ...r, type: r.type as FleetCommandType });
@@ -61,6 +97,43 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, fixTrustDetectedChecks: true, fixAllowUnprotected: true },
     });
     return r ? { ...r, provider: r.provider as FleetRepoRef['provider'] } : null;
+  }
+
+  /**
+   * US-008 (#370): the repo's stored rule override, with its rule bodies, as the ASSIGN carries it. Null when
+   * the repo has none. A row whose stored JSON is not a rules array is read as no override at all, so a broken
+   * row never sends a half-built override to a runner.
+   */
+  async findRuleOverride(repoId: string): Promise<RuleOverrideAssign | null> {
+    const row = await this.db.fleetRepoRuleOverride.findUnique({ where: { repoId } });
+    if (!row) return null;
+    if (!Array.isArray(row.rules)) return null;
+    const rulesMode = row.rulesMode === 'replace' ? 'replace' : row.rulesMode === 'merge' ? 'merge' : null;
+    if (rulesMode === null) return null;
+    // The context is optional: a row without one carries no context, and a row with context content but
+    // no usable mode is not a row this app wrote.
+    let context: { content: string; mode: 'append' | 'replace' } | null = null;
+    if (row.contextContent !== null) {
+      if (row.contextMode !== 'append' && row.contextMode !== 'replace') return null;
+      context = { content: row.contextContent, mode: row.contextMode };
+    }
+    return {
+      sha256: row.sha256,
+      rulesMode,
+      rules: readRuleFiles(row.rules),
+      ...(context === null ? {} : { context }),
+    };
+  }
+
+  /**
+   * US-008 (#370): the summary of the rule override a job was assigned. Null clears the column (SQL null), so a
+   * job assigned without an override records none.
+   */
+  async setRuleOverrideSummary(jobId: string, summary: JobRuleOverrideSummary | null): Promise<void> {
+    await this.db.fleetJob.update({
+      where: { id: jobId },
+      data: { ruleOverride: summary === null ? Prisma.DbNull : (summary as unknown as Prisma.InputJsonValue) },
+    });
   }
 
   /**

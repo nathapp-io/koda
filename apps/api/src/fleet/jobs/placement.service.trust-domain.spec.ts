@@ -58,6 +58,9 @@ function fixture(queued: QueuedJob[], held: ActiveJobRef[] = []) {
     findActiveLoads: vi.fn(async () => held),
     findQueuedPage: vi.fn(async () => queued.map((j, i) => ({ id: j.id, queuedAt: new Date(NOW.getTime() + i * 1_000) }))),
     findThreadAssign: vi.fn(async (id: string) => (byId.get(id)?.command === 'THREAD' ? threadAssignOf(byId.get(id) as QueuedJob) : null)),
+    // US-008: a RUN job is a nax command, so placement reads the repo's rule override for it.
+    findRuleOverride: vi.fn(async () => null),
+    setRuleOverrideSummary: vi.fn(async () => undefined),
     findById: vi.fn(async (id: string) => jobRecord(byId.get(id) as QueuedJob)),
     createCommand: vi.fn(async (c: { type: string; payload: unknown }) => c),
     pinThreadRunner: vi.fn(async () => undefined),

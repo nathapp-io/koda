@@ -124,6 +124,14 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['FleetRepoDto']?.properties ?? {})).toContain('ruleOverride');
   });
 
+  it('exposes the rule override a job was assigned (US-008)', () => {
+    // #370: the job page reads the summary of the repo rule override a job was assigned. The summary is
+    // a null-able object on the job, never the rule bodies.
+    expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toContain('ruleOverride');
+    expect(Object.keys(spec.components.schemas['JobRuleOverrideSummaryDto']?.properties ?? {}).sort())
+      .toEqual(['contextMode', 'ruleFiles', 'rulesMode', 'sha256']);
+  });
+
   it('exposes the thread run route and its body (US-007)', () => {
     expect(spec.paths['/api/projects/{slug}/threads/{id}/run']?.['post']).toBeDefined();
     const schemas = spec.components.schemas as Record<string, unknown>;
