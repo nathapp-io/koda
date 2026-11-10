@@ -7,8 +7,8 @@
       <div class="mx-auto max-w-3xl space-y-4">
         <h2 class="text-lg font-semibold">{{ t('fleet.repos.ruleOverride.title') }}</h2>
         <div v-for="(rule, index) in rules" :key="index" class="grid gap-2 border-b border-border pb-3">
-          <Input v-model="rule.path" :aria-label="t('fleet.repos.ruleOverride.path')" />
-          <Textarea v-model="rule.content" :aria-label="t('fleet.repos.ruleOverride.content')" />
+          <Input v-model="rule.path" :disabled="!allowed || saving" :aria-label="t('fleet.repos.ruleOverride.path')" />
+          <Textarea v-model="rule.content" :disabled="!allowed || saving" :aria-label="t('fleet.repos.ruleOverride.content')" />
           <Button variant="outline" :disabled="!allowed || saving" @click="rules.splice(index, 1)">{{ t('fleet.repos.ruleOverride.remove') }}</Button>
         </div>
         <Button variant="outline" :disabled="!allowed || saving" @click="rules.push({ path: '', content: '' })">{{ t('fleet.repos.ruleOverride.addFile') }}</Button>
