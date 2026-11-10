@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T08:45:02.940Z",
+  "updatedAt": "2026-11-10T08:51:33.570Z",
   "userStories": [
     {
       "id": "US-001",
@@ -547,14 +547,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Pure bounded-input validation is localized, but the canonical SHA-256 contract and untrusted path/content boundary trigger the cryptography/security override."
+        "reasoning": "Pure bounded-input validation is localized, but the canonical SHA-256 contract and untrusted path/content boundary trigger the cryptography/security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-prd-edits.ts",
@@ -576,7 +579,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9365a6329924dffcb2c75f035af766479dbab5bb"
     },
     {
       "id": "US-007",
