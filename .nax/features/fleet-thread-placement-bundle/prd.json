@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T11:25:39.818Z",
+  "updatedAt": "2026-11-10T11:49:40.450Z",
   "userStories": [
     {
       "id": "US-001",
@@ -934,14 +934,17 @@
         "US-007",
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends existing repo-composable result handling and permission-aware Vue controls with a standard editable dialog and additive job summary; the new global permission check still requires strict security TDD."
+        "reasoning": "Extends existing repo-composable result handling and permission-aware Vue controls with a standard editable dialog and additive job summary; the new global permission check still requires strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/RepoFixUnprotected.vue",
@@ -1015,7 +1018,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "911ba781cd0b4645da761c9074c40a4a9575a49c"
     },
     {
       "id": "US-011",
