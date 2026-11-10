@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T07:44:29.101Z",
+  "updatedAt": "2026-11-10T08:01:02.760Z",
   "userStories": [
     {
       "id": "US-001",
@@ -277,14 +277,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Adds a read-only getter over US-002's shared judgement and additive detail fields using existing placement inputs and DI; no authorization or session lifecycle implementation changes."
+        "reasoning": "Adds a read-only getter over US-002's shared judgement and additive detail fields using existing placement inputs and DI; no authorization or session lifecycle implementation changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/placement.service.ts",
@@ -341,7 +344,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "04bc507d5014b5c190c303949dd3c1616f8cef30"
     },
     {
       "id": "US-004",
