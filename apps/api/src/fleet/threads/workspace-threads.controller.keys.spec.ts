@@ -65,10 +65,18 @@ describe('WorkspaceThreadsController route keys (US-003)', () => {
     expect(deps.map((dep) => (dep as { name: string }).name)).toEqual(['WorkspaceThreadsService', 'ApprovalRouteGate']);
   });
 
+  it('#399: refuses a backend no runner serves before the approval gate opens', async () => {
+    const run = vi.fn();
+    const refusal = new Error('threads.backendUnavailable');
+    const controller = new WorkspaceThreadsController({ assertBackendServed: vi.fn(async () => { throw refusal; }) } as never, { run } as unknown as ApprovalRouteGate);
+    await expect(controller.create({ title: 'thread', backend: { kind: 'native', model: 'nobody/offers' } } as never, { actorType: 'user', id: 'u', role: 'MEMBER' } as never)).rejects.toBe(refusal);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('AC-9: routes create through the global approval gate with the body unchanged', async () => {
     const body = { title: 'thread', backend: { kind: 'native', model: 'm1' } };
     const run = vi.fn(async () => ({ status: 'executed' as const, result: { id: 't1' } }));
-    const controller = new WorkspaceThreadsController({} as never, { run } as unknown as ApprovalRouteGate);
+    const controller = new WorkspaceThreadsController({ assertBackendServed: vi.fn(async () => undefined) } as never, { run } as unknown as ApprovalRouteGate);
 
     await controller.create(body as never, { actorType: 'user', id: 'u', role: 'MEMBER' } as never);
 

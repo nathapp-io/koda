@@ -151,6 +151,20 @@ function hasTrustDomainMisfit(job: PlacementJob, load: RunnerLoad): boolean {
     || [...(load.rawProjectIds ?? [])].some((projectId) => projectId !== job.projectId);
 }
 
+/**
+ * Fleet S5a §4: can a runner advertising `backends` host a session on `backend`? A native backend without a model takes
+ * any native model the runner offers; one with a model needs that exact id. An ACP backend needs its agent. #399: thread
+ * create asks the same question of every enabled thread-capable runner and refuses a backend none of them offers.
+ * Only the backend is judged there; placement's other thread rules (scope, modes, capacity) are not.
+ */
+export function servesThreadBackend(backends: RunnerCapabilities['threadBackends'], backend: ThreadBackend): boolean {
+  if (backend.kind === 'native') {
+    const models = backends?.native;
+    return !!models?.length && (backend.model === undefined || models.includes(backend.model));
+  }
+  return backends?.acp.includes(backend.agent) === true;
+}
+
 /** Spec §4 steps 1-3, in order. Pinned jobs ignore selector labels (the pin is the candidate set). */
 export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: RunnerLoad, now: Date, offlineSec: number): MisfitReason | null {
   if (!runner.enabled) return 'disabled';
@@ -171,12 +185,7 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
     const action = job.thread.action ?? 'SESSION';
     if (action === 'SESSION') {
       if ((job.thread.mode === 'ask' || job.thread.mode === 'full') && runner.capabilities.threadModes !== true) return 'thread_modes';
-      const backends = runner.capabilities.threadBackends;
-      const backend = job.thread.backend;
-      if (backend.kind === 'native') {
-        const models = backends?.native;
-        if (!models?.length || (backend.model !== undefined && !models.includes(backend.model))) return 'thread_backend';
-      } else if (!backends?.acp.includes(backend.agent)) return 'thread_backend';
+      if (!servesThreadBackend(runner.capabilities.threadBackends, job.thread.backend)) return 'thread_backend';
     } else if (runner.capabilities.threadWrite !== true) {
       return 'thread_write';
     }

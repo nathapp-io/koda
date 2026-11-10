@@ -4074,7 +4074,7 @@ describeIntegration('API Integration Tests', () => {
       name: `thread-handoff-${threadId}`, apiKeyHash: `thread-handoff-${threadId}`, os: 'linux', arch: 'x64', labels: [],
       capacity: 2, capabilities: {
         nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
-        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], ...extraCapabilities,
+        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] }, ...extraCapabilities,
       }, daemonVersion: '0.1.0', protocolVersion: 4,
       bootId: `thread-handoff-${threadId}`, lastSeenAt: new Date(), createdById: world.ids.root,
     } });
@@ -4338,7 +4338,7 @@ describeIntegration('API Integration Tests', () => {
         name: `plan-${thread.id}`, apiKeyHash: `plan-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
         capabilities: {
           nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
-          profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'],
+          profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] },
         },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: `plan-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
       } });
@@ -4476,7 +4476,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = body<{ id: string; repoId: string; feature: string; specPath: string }>(await createThread(feature).expect(201));
       const runner = await db().runner.create({ data: {
         name: `run-${thread.id}`, apiKeyHash: `run-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'] },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: `run-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
@@ -4531,7 +4531,7 @@ describeIntegration('API Integration Tests', () => {
       const thread = body<{ id: string }>(await createThread(feature).expect(201));
       const runner = await db().runner.create({ data: {
         name: `run-assign-${thread.id}`, apiKeyHash: `run-assign-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
-        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'] },
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], threadBackends: { native: ['m1'], acp: [] } },
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: `run-assign-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });

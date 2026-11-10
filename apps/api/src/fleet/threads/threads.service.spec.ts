@@ -302,7 +302,7 @@ describe('ThreadsService.create (US-003)', () => {
     const findById = vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', defaultBranch: 'trunk' });
     const snapshotForProject = over.snapshot ?? vi.fn().mockResolvedValue([]);
     const service = new ThreadsService(
-      { create, ...over.threads } as unknown as ChatThreadRepository,
+      { create, anyRunnerServesBackend: vi.fn().mockResolvedValue(true), ...over.threads } as unknown as ChatThreadRepository,
       { findAnchor, findById, ...over.repos } as unknown as IFleetRepoRepository,
       { snapshotForProject } as unknown as SkillsService,
       { threadsEnabled: true, ...over.config } as unknown as ConfigType<typeof fleetConfig>,
@@ -346,6 +346,31 @@ describe('ThreadsService.create (US-003)', () => {
     const { service, create } = createService({ repos: { findById: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'other', defaultBranch: 'trunk' }) } });
     await expect(service.create('p1', principal, { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } }))
       .rejects.toMatchObject({ code: 404, prefix: 'fleet.repos' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('#399: refuses a PROJECT thread whose native model no enabled runner offers, before any write', async () => {
+    const anyRunnerServesBackend = vi.fn().mockResolvedValue(false);
+    const { service, create, findAnchor } = createService({ threads: { anyRunnerServesBackend } });
+    await expect(service.create('p1', principal, { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'deepseek/deepseek-v4.1-flash-1017' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.model', value: 'deepseek/deepseek-v4.1-flash-1017' } });
+    expect(anyRunnerServesBackend).toHaveBeenCalledWith({ kind: 'native', model: 'deepseek/deepseek-v4.1-flash-1017' });
+    expect(findAnchor).toHaveBeenCalledWith('p1');   // the anchor check answers first (noFleetRepo before backendUnavailable)
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('#399: an unknown REPO answers 404 before the backend is judged', async () => {
+    const anyRunnerServesBackend = vi.fn().mockResolvedValue(false);
+    const { service } = createService({ threads: { anyRunnerServesBackend }, repos: { findById: vi.fn().mockResolvedValue(null) } });
+    await expect(service.create('p1', principal, { repoId: 'missing', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } }))
+      .rejects.toMatchObject({ code: 404, prefix: 'fleet.repos' });
+    expect(anyRunnerServesBackend).not.toHaveBeenCalled();
+  });
+
+  it('#399: refuses a REPO thread whose ACP agent no enabled runner offers, before any write', async () => {
+    const { service, create } = createService({ threads: { anyRunnerServesBackend: vi.fn().mockResolvedValue(false) } });
+    await expect(service.create('p1', principal, { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'acp', agent: 'cursor' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.agent', value: 'cursor' } });
     expect(create).not.toHaveBeenCalled();
   });
 

@@ -11671,6 +11671,9 @@
           },
           "403": {
             "description": "thread.workspace.create is missing, or thread.create is refused in the home project"
+          },
+          "409": {
+            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)"
           }
         },
         "security": [
@@ -12284,6 +12287,9 @@
           },
           "403": {
             "description": "thread.create is missing"
+          },
+          "409": {
+            "description": "threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)"
           }
         },
         "security": [

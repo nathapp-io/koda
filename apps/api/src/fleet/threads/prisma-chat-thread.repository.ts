@@ -13,7 +13,8 @@ import { ForbiddenAppException, NotFoundAppException, ValidationAppException } f
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
 import { actorTypeFor, type ActorType } from '../../action-context/action-context';
-import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
+import { DEFAULT_APPROVAL_TIMEOUT_SEC, type RunnerCapabilities } from '../common/protocol';
+import { servesThreadBackend } from '../jobs/placement-rules';
 import { isRunnerOnline } from '../common/runner-online';
 import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, type IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { ACTIVE_STATES } from '../jobs/job-state';
@@ -70,6 +71,17 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly audit: AuditRecorder,
     private readonly threadEvents: ThreadEventBus,
   ) {}
+
+  async anyRunnerServesBackend(backend: ThreadBackend): Promise<boolean> {
+    const runners = await this.prisma.client.runner.findMany({
+      where: { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } },
+      select: { capabilities: true },
+    });
+    // #399: with no thread-capable runner enrolled, the fleet is not set up yet and there is nothing to judge against;
+    // the thread is accepted and queues as before. Stored capabilities were validated by parseCapabilities at enroll/sync.
+    if (runners.length === 0) return true;
+    return runners.some((runner) => servesThreadBackend((runner.capabilities as unknown as RunnerCapabilities | null)?.threadBackends, backend));
+  }
 
   async create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
     const row = await this.audit.audited(

@@ -38,6 +38,8 @@ describe('workspace home project creation', () => {
   let resolveMembership: ReturnType<typeof vi.fn>;
   let service: WorkspaceThreadsService;
   let snapshot: ReturnType<typeof vi.fn>;
+  /** #399: whether some enabled runner serves the requested backend. */
+  let served: ReturnType<typeof vi.fn>;
   const input = { title: 't', backend: { kind: 'native' as const } };
 
   /** `resolveMembership`'s refusal for an agent that is not on the project's roster. */
@@ -47,12 +49,12 @@ describe('workspace home project creation', () => {
   beforeEach(() => {
     principal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@example.com' };
     roles = { a: 'DEVELOPER', b: 'DEVELOPER' }; refused = new Set(); offRoster = new Set(); reachable = [b, a]; anchors = new Set(['a', 'b']); config = { threadsEnabled: true };
-    create = vi.fn(async (value) => ({ id: 'thread', ...value })); snapshot = vi.fn(async () => []);
+    create = vi.fn(async (value) => ({ id: 'thread', ...value })); snapshot = vi.fn(async () => []); served = vi.fn(async () => true);
     // US-003: the host decision is the `thread.create` key; a project listed in `refused` lacks it.
     can = vi.fn(async (_principal: unknown, _key: string, ctx?: { projectId?: string }) => (refused.has(ctx?.projectId ?? '') ? deny() : allow()));
     resolveMembership = vi.fn(resolveMembershipFor);
     service = new WorkspaceThreadsService(
-      { create } as unknown as ChatThreadRepository,
+      { create, anyRunnerServesBackend: (backend: unknown) => served(backend) } as unknown as ChatThreadRepository,
       { findAnchor: vi.fn(async (id: string) => anchors.has(id) ? { id: 'repo' } : null) } as unknown as IFleetRepoRepository,
       { snapshotForProject: snapshot } as unknown as SkillsService,
       config as IFleetConfig,
@@ -62,6 +64,13 @@ describe('workspace home project creation', () => {
       {} as never,
       new AfterCommitService(),
     );
+  });
+
+  it('#399: refuses a WORKSPACE thread whose backend no enabled runner offers, before any write', async () => {
+    served.mockResolvedValue(false);
+    await expect(service.create(principal, { title: 't', backend: { kind: 'native', model: 'nobody/offers-this' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.model', value: 'nobody/offers-this' } });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('AC-6/7: chooses oldest home and persists WORKSPACE with null repo fields', async () => {

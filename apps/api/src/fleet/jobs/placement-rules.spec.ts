@@ -4,6 +4,7 @@ import { MISFIT_REASONS } from '../dashboard/dashboard.types';
 import {
   EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
   toLoads, toPlacementJob, withVaultProviders,
+  servesThreadBackend,
 } from './placement-rules';
 
 const NOW = new Date('2026-10-01T12:00:00.000Z');
@@ -530,5 +531,25 @@ describe('AGENT placement (US-005)', () => {
 
   it('control: a RUN job does not need agentsRun', () => {
     expect(misfit(job(), runner())).toBeNull();
+  });
+});
+
+describe('servesThreadBackend (#399)', () => {
+  const backends = { native: ['opencode-go/deepseek-v4.1-flash'], acp: ['claude'] };
+  it('a native backend without a model takes any native model the runner offers', () => {
+    expect(servesThreadBackend(backends, { kind: 'native' })).toBe(true);
+  });
+  it('a native backend with a model needs that exact id', () => {
+    expect(servesThreadBackend(backends, { kind: 'native', model: 'opencode-go/deepseek-v4.1-flash' })).toBe(true);
+    expect(servesThreadBackend(backends, { kind: 'native', model: 'deepseek/deepseek-v4.1-flash-1017' })).toBe(false);
+  });
+  it('a runner with no native models serves no native backend', () => {
+    expect(servesThreadBackend({ native: [], acp: ['claude'] }, { kind: 'native' })).toBe(false);
+    expect(servesThreadBackend(undefined, { kind: 'native' })).toBe(false);
+  });
+  it('an ACP backend needs its agent', () => {
+    expect(servesThreadBackend(backends, { kind: 'acp', agent: 'claude' })).toBe(true);
+    expect(servesThreadBackend(backends, { kind: 'acp', agent: 'cursor' })).toBe(false);
+    expect(servesThreadBackend(undefined, { kind: 'acp', agent: 'claude' })).toBe(false);
   });
 });

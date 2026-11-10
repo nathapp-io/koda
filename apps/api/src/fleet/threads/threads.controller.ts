@@ -48,12 +48,15 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Create a chat thread (thread.create)' })
   @ApiResponse({ status: 201, type: ThreadDto })
   @ApiResponse({ status: 403, description: 'thread.create is missing' })
+  @ApiResponse({ status: 409, description: 'threads.backendUnavailable: no enabled thread-capable runner offers backend.model, backend.agent or (no model) any native model (#399)' })
   @ApprovalGated()
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     const normalized = validateCreateThread(dto, dto.baseRef ?? 'main');
     if (normalized.kind === 'REPO' && normalized.mode !== 'read') {
       await this.threads.assertModeAllowed(ctx.project.id, principal, normalized.mode);
     }
+    // #399: before the gate, so no approver is asked to approve a thread that could never run.
+    await this.threads.assertBackendServed(normalized.backend);
     const alsoKeys = normalized.kind === 'REPO' && normalized.mode !== 'read' ? [`thread.mode.${normalized.mode}`] : [];
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       ...(alsoKeys.length ? { alsoKeys } : {}),
