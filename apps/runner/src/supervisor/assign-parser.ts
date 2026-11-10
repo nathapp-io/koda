@@ -1,4 +1,4 @@
-import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type RuleOverrideAssign, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -202,6 +202,48 @@ function cleanProjectUnavailable(v: unknown): ProjectRepoUnavailable[] | null {
 
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
 
+/** fleet #370 (US-009): the rule override the API stores per repo and sends with the ASSIGN. */
+const RULE_OVERRIDE_MAX_FILES = 50;
+/** The API's rule path pattern (`apps/api/src/fleet/repos/rule-override.ts`): lowercase segments and a `.md` file. */
+const RULE_PATH_RE = /^[a-z0-9_-]+(\/[a-z0-9_-]+){0,3}\.md$/;
+/** The stored override's hash: lowercase hex, 64 characters. */
+const RULE_SHA256_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * fleet #370 (US-009): the repo's rule override, read when the job was assigned. Only the validated fields are
+ * copied; the rule path is checked against the same pattern the API validates it with, so a path that could leave
+ * the rules directory never reaches the job directory.
+ */
+function cleanRuleOverride(v: unknown): RuleOverrideAssign | null {
+  if (!isObj(v)) return null;
+  const sha256 = v['sha256'];
+  if (typeof sha256 !== 'string' || !RULE_SHA256_RE.test(sha256)) return null;
+  const rulesMode = v['rulesMode'];
+  if (rulesMode !== 'merge' && rulesMode !== 'replace') return null;
+  const rawRules = v['rules'];
+  if (!Array.isArray(rawRules) || rawRules.length > RULE_OVERRIDE_MAX_FILES) return null;
+  const rules: { path: string; content: string }[] = [];
+  for (const entry of rawRules) {
+    if (!isObj(entry)) return null;
+    const path = entry['path'];
+    const content = entry['content'];
+    if (typeof path !== 'string' || !RULE_PATH_RE.test(path)) return null;
+    if (typeof content !== 'string') return null;
+    rules.push({ path, content });
+  }
+  const rawContext = v['context'];
+  let context: RuleOverrideAssign['context'];
+  if (rawContext !== undefined) {
+    if (!isObj(rawContext)) return null;
+    const content = rawContext['content'];
+    const mode = rawContext['mode'];
+    if (typeof content !== 'string') return null;
+    if (mode !== 'append' && mode !== 'replace') return null;
+    context = { content, mode };
+  }
+  return { sha256, rulesMode, rules, ...(context === undefined ? {} : { context }) };
+}
+
 /**
  * D30: the server is trusted to deliver, not to be well formed. Every field that reaches a path, an argv or git config
  * is re-validated, and only the validated fields are copied. `ref` is only bounded here: an odd ref becomes a fixed
@@ -265,6 +307,17 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     if (cleaned === null) return badAgent();
     agent = cleaned;
   } else if (rawAgent !== undefined) return badAgent();
+  // fleet #370 (US-009): the repo's rule override travels with the nax commands only (RUN, PLAN, REVIEW, FIX,
+  // AGENT). A THREAD turn and a config job never carry one: a thread turn is not a nax run of its own, and a config
+  // job edits configuration instead of running nax. An override of any other shape is refused whole.
+  const rawRuleOverride = p['ruleOverride'];
+  let ruleOverride: RuleOverrideAssign | undefined;
+  if (rawRuleOverride !== undefined) {
+    if (isThread || isConfig) return bad('ruleOverride');
+    const cleaned = cleanRuleOverride(rawRuleOverride);
+    if (cleaned === null) return bad('ruleOverride');
+    ruleOverride = cleaned;
+  }
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
   if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
@@ -301,7 +354,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
       ...(reviewRulings === undefined ? {} : { rulings: reviewRulings }),
       ...(reviewDecisions === undefined ? {} : { decisions: reviewDecisions }),
     } } : {};
-    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review, ...(agent === undefined ? {} : { agent }) } };
+    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review, ...(agent === undefined ? {} : { agent }), ...(ruleOverride === undefined ? {} : { ruleOverride }) } };
   }
   const t = p['thread'];
   if (!isObj(t)) return bad('thread');

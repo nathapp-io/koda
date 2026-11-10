@@ -391,6 +391,53 @@ describe('HostExecutor prepare cost profiles (US-007)', () => {
   });
 });
 
+describe('HostExecutor rule override (fleet #370 US-009)', () => {
+  const OVERRIDE = { sha256: 'a'.repeat(64), rulesMode: 'merge' as const, rules: [{ path: 'api.md', content: 'api rule' }] };
+
+  test('AC-13: prepare materializes the override and points the job profile at it', async () => {
+    const w = await world('RUN', { ruleOverride: OVERRIDE });
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
+    expect(profile.context.rules.overrideDir).toBe(join(w.row.jobDir, 'koda-rules'));
+    expect(profile.context.rules.overrideMode).toBe('merge');
+    expect(await readFile(join(w.row.jobDir, 'koda-rules', 'api.md'), 'utf8')).toBe('api rule');
+  });
+
+  test('AC-13: a job without an override keeps no context in its profile', async () => {
+    const w = await world('RUN');
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'))).not.toHaveProperty('context');
+  });
+
+  test('AC-14: the FIX step rewrites the profile with the override', async () => {
+    const w = await world('FIX', { review: { prNumber: 42, botLogin: 'koda-fleet[bot]' }, ruleOverride: OVERRIDE });
+    const credentials: CredentialProvider = {
+      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      release: async () => undefined,
+      currentToken: () => 'tok-fix',
+      freshToken: async () => ({ ok: true, token: 'tok-fix' }),
+    };
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS, spawnNax: () => ({ pid: 4242, pgid: 4242 }),
+    });
+    expect(await ex.prepare(w.row)).toEqual({ ok: true, branch: null });
+    const costDir = join(w.row.jobDir, 'nax-out', 'cost');
+    await mkdir(costDir, { recursive: true });
+    await writeFile(join(costDir, 'plan.jsonl'), `${JSON.stringify({ callId: 'review-call', costUsd: 0.3 })}\n`);
+    await ex.spawnFixStep(w.row);
+    const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
+    expect(profile.context.rules.overrideDir).toBe(join(w.row.jobDir, 'koda-rules'));
+    expect(profile.context.rules.overrideMode).toBe('merge');
+  });
+
+  test('AC-15: a rule path outside the rules directory fails the prepare with the workspace reason', async () => {
+    const w = await world('RUN', { ruleOverride: { ...OVERRIDE, rules: [{ path: '../escaped.md', content: 'x' }] } });
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: false, reason: 'workspace: rule override path' });
+    await expect(stat(join(w.base, 'escaped.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
 describe('HostExecutor RUN', () => {
   test('wires the production logger into progress commit failures (#186)', async () => {
     const w = await world();
