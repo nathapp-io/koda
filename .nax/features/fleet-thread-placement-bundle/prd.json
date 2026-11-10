@@ -3,7 +3,7 @@
   "feature": "fleet-thread-placement-bundle",
   "branchName": "feat/fleet-thread-placement-bundle",
   "createdAt": "2026-12-04T00:00:00Z",
-  "updatedAt": "2026-11-10T07:31:45.709Z",
+  "updatedAt": "2026-11-10T07:44:29.101Z",
   "userStories": [
     {
       "id": "US-001",
@@ -183,14 +183,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Introduces a shared jobs abstraction and coordinates dashboard repository, types and configuration while preserving existing classification and projection behavior."
+        "reasoning": "Introduces a shared jobs abstraction and coordinates dashboard repository, types and configuration while preserving existing classification and projection behavior.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/dashboard/attention-unplaceable.ts",
@@ -243,7 +246,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a12bf721e878c128bfeedc00816d237304c09fd8"
     },
     {
       "id": "US-003",
