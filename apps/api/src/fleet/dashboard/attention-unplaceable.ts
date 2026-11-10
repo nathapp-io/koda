@@ -1,11 +1,9 @@
-import {
-  evaluateRunners, jobScopePause, MisfitReason, PERMANENT_MISFITS, PlacementRunner, RunnerLoad, toPlacementJob, withVaultProviders,
-} from '../jobs/placement-rules';
+import { jobScopePause, MisfitReason, PlacementRunner, RunnerLoad, toPlacementJob, withVaultProviders } from '../jobs/placement-rules';
 import { jobItem } from './attention-jobs';
 import { isThreadKind } from '../common/thread-jobs';
+import { judgeUnplaceable, UnplaceableVerdict } from '../jobs/unplaceable-verdict';
 import {
   AttentionItem, AttentionReason, AttentionThresholds, DASHBOARD_LIMITS, DashboardJobRow, DashboardRunnerRow, secondsSince, Severity,
-  UnplaceableVerdict,
 } from './dashboard.types';
 
 /** The parts of PauseSnapshot the dry-run needs. */
@@ -21,6 +19,8 @@ export interface DryRunInput {
   /** Runner-held loads across all projects. */
   loads: ReadonlyMap<string, RunnerLoad>;
   pauses: DryRunPauses;
+  /** US-002 (#425): the thread kill switch (FLEET_THREADS_ENABLED); a THREAD job is unplaceable while it is off. */
+  threadsEnabled: boolean;
   /**
    * C10 (branch review B3): the providers the vault could hand one queued job, from that job's own scope.
    * Absent means the vault serves none, and a `providerVault` runner is then judged like any other — the
@@ -42,20 +42,15 @@ export interface DryRunResult {
 
 /** Misfits the runner itself can clear (a credential, the service environment): they raise its runner_unhealthy to error. */
 const RUNNER_FIXABLE_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['provider_missing', 'provider_unavailable', 'interaction']);
-const WAITING_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['capacity', 'busy_repo', 'trust_domain']);
 
 /** Runners with unreadable capabilities are never candidates (spec §1.4). */
 const toCandidate = (r: DashboardRunnerRow): PlacementRunner | null =>
   r.capabilities === null
     ? null
-    : { id: r.id, name: r.name, enabled: r.enabled, lastSeenAt: r.lastSeenAt, labels: r.labels, capacity: r.capacity, capabilities: r.capabilities };
-
-function classify(reasons: readonly MisfitReason[]): { verdict: UnplaceableVerdict; severity: Severity } {
-  if (reasons.every((r) => PERMANENT_MISFITS.has(r))) return { verdict: 'never', severity: 'error' };
-  if (reasons.every((r) => WAITING_REASONS.has(r))) return { verdict: 'waiting_capacity', severity: 'warning' };
-  if (reasons.every((r) => r === 'budget_paused')) return { verdict: 'runners_paused', severity: 'warning' };
-  return { verdict: 'no_fit', severity: 'warning' };
-}
+    : {
+      id: r.id, name: r.name, enabled: r.enabled, lastSeenAt: r.lastSeenAt, labels: r.labels, capacity: r.capacity,
+      capabilities: r.capabilities, protocolVersion: r.protocolVersion, threadCapacity: r.threadCapacity,
+    };
 
 /**
  * Spec §2.3. Evaluated in the global context; the caller filters `items` to its scope. Same inputs as
@@ -65,27 +60,30 @@ export function jobUnplaceableItems(input: DryRunInput, now: Date, t: AttentionT
   const candidates = input.runners.map(toCandidate).filter((r): r is PlacementRunner => r !== null);
   const blocked = new Set<string>();
   const items = input.queued.flatMap((job): ScopedItem[] => {
-    if (job.projectDeleted || isThreadKind(job.command) || secondsSince(now, job.queuedAt) <= t.jobQueuedWarnSec) return [];
+    if (job.projectDeleted || secondsSince(now, job.queuedAt) <= t.jobQueuedWarnSec) return [];
+    // US-002 (#425): a THREAD job is judged like any other job, from its turn. A THREAD row with no turn is a
+    // broken row placement skips too, so the dry-run skips it as well.
+    const thread = isThreadKind(job.command) ? job.threadTurn : undefined;
+    if (isThreadKind(job.command) && !thread) return [];
     const emit = (verdict: UnplaceableVerdict, severity: Severity, reasons: AttentionReason[], reasonsTotal: number): ScopedItem[] => [{
       projectId: job.projectId,
       item: jobItem('job_unplaceable', job, severity, job.queuedAt, { verdict, reasons: reasons.slice(0, DASHBOARD_LIMITS.reasonsShown), reasonsTotal }),
     }];
-    if (jobScopePause(job, (keys) => input.pauses.match(keys) ?? null)) return emit('budget_paused', 'warning', [], 0);
-    const pool = job.pinnedRunnerId ? candidates.filter((r) => r.id === job.pinnedRunnerId) : candidates;
-    if (pool.length === 0) return emit('no_runners', 'error', [], 0);
-    const judged = toPlacementJob(job, job);
+    const judged = toPlacementJob(job, job, thread ? { ...thread, enabled: input.threadsEnabled } : undefined);
     const placement = input.vaultProviders ? withVaultProviders(judged, input.vaultProviders(job)) : judged;
-    const verdicts = evaluateRunners(placement, pool, input.loads, (id) => input.pauses.runnerPaused(id), now, t.runnerOfflineSec);
-    const misfits = verdicts
-      .flatMap((v) => (v.reason === null ? [] : [{ runnerId: v.runner.id, runnerName: v.runner.name, reason: v.reason }]))
-      .sort((a, b) => a.runnerName.localeCompare(b.runnerName) || a.runnerId.localeCompare(b.runnerId));
-    // A queued job with a compatible runner is delayed, not unplaceable. Keep this
-    // attention signal for genuine placement blockers only.
-    if (misfits.length < verdicts.length) return [];
-    const reasons = misfits.map(({ runnerName, reason }) => ({ runnerName, reason }));
-    misfits.filter((m) => RUNNER_FIXABLE_REASONS.has(m.reason)).forEach((m) => blocked.add(m.runnerId));
-    const { verdict, severity } = classify(misfits.map((m) => m.reason));
-    return emit(verdict, severity, reasons, reasons.length);
+    const pool = job.pinnedRunnerId ? candidates.filter((r) => r.id === job.pinnedRunnerId) : candidates;
+    // The one judgement every queued job's verdict comes from (US-002): the dashboard and the thread detail read
+    // the same answer, so they cannot drift from placement.
+    const judgement = judgeUnplaceable({
+      job: placement,
+      scopePaused: jobScopePause(job, (keys) => input.pauses.match(keys) ?? null) !== null,
+      pool, loads: input.loads, runnerPaused: (id) => input.pauses.runnerPaused(id), now, offlineSec: t.runnerOfflineSec,
+    });
+    // A queued job with a compatible runner is delayed, not unplaceable.
+    if (!judgement) return [];
+    judgement.misfits.filter((m) => RUNNER_FIXABLE_REASONS.has(m.reason)).forEach((m) => blocked.add(m.runnerId));
+    const reasons = judgement.misfits.map(({ runnerName, reason }) => ({ runnerName, reason }));
+    return emit(judgement.verdict, judgement.severity, reasons, judgement.misfits.length);
   });
   return { items, fixableBlockedRunnerIds: blocked };
 }

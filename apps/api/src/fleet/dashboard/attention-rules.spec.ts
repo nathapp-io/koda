@@ -21,6 +21,7 @@ const input = (scope: AttentionInput['scope']): AttentionInput => ({
     queued: [dashJob({ id: 'j9', projectId: 'p2', projectSlug: 'ops', feature: 'secret-feature', state: 'QUEUED', runnerId: null, queuedAt: secAgo(300), selectorLabels: ['gpu'] })],
     loads: new Map([['r2', { active: 1, repoIds: new Set(['repo1']) }]]),
     pauses: NO_PAUSE,
+    threadsEnabled: true,
   },
 });
 

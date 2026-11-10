@@ -23,7 +23,7 @@ export const dashCaps = (over: Partial<RunnerCapabilities> = {}): RunnerCapabili
 
 export const dashRunner = (over: Partial<DashboardRunnerRow> = {}): DashboardRunnerRow => ({
   id: 'r1', name: 'wk-mac', os: 'darwin', arch: 'arm64', labels: ['mac'], enabled: true, lastSeenAt: secAgo(10), capacity: 1,
-  daemonVersion: '0.4.0', capabilities: dashCaps(), ...over,
+  daemonVersion: '0.4.0', capabilities: dashCaps(), protocolVersion: 1, threadCapacity: 2, ...over,
 });
 
 export const dashJob = (over: Partial<DashboardJobRow> = {}): DashboardJobRow => ({

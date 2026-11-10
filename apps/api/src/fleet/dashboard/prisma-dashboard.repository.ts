@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { FleetJobKind, FleetJobState } from '../../common/enums';
 import type { BashMode } from '../common/protocol';
+import type { ThreadAction, ThreadBackend, ThreadMode } from '../common/thread-jobs';
 import type { ActiveJobRef, FleetJobStory } from '../jobs/domain/fleet-job.domain';
 import { ACTIVE_STATES, RUNNER_HELD_STATES, TERMINAL_STATES } from '../jobs/job-state';
 import type { DashboardJobRow, DashboardRecentRow, DashboardScope, PendingSummary } from './dashboard.types';
@@ -16,6 +17,15 @@ const JOB_SELECT = {
   repo: { select: { owner: true, name: true, provider: true } },
 } satisfies Prisma.FleetJobSelect;
 
+/**
+ * US-002 (#425): the queued window also reads a THREAD job's turn, so the dry-run can judge the job the way
+ * placement does (backend, action, kind and mode).
+ */
+const QUEUED_SELECT = {
+  ...JOB_SELECT,
+  threadTurn: { select: { action: true, backend: true, mode: true, thread: { select: { kind: true } } } },
+} satisfies Prisma.FleetJobSelect;
+
 const RECENT_SELECT = {
   id: true, feature: true, command: true, state: true, stateReason: true, costSpentUsd: true, startedAt: true, finishedAt: true, resultPrUrl: true,
   project: { select: { slug: true } },
@@ -24,6 +34,7 @@ const RECENT_SELECT = {
 } satisfies Prisma.FleetJobSelect;
 
 type JobSelected = Prisma.FleetJobGetPayload<{ select: typeof JOB_SELECT }>;
+type QueuedSelected = Prisma.FleetJobGetPayload<{ select: typeof QUEUED_SELECT }>;
 type RecentSelected = Prisma.FleetJobGetPayload<{ select: typeof RECENT_SELECT }>;
 
 const toJobRow = (r: JobSelected): DashboardJobRow => ({
@@ -34,6 +45,22 @@ const toJobRow = (r: JobSelected): DashboardJobRow => ({
   storiesTruncated: r.storiesTruncated, costSpentUsd: r.costSpentUsd.toString(), maxCostUsd: r.maxCostUsd.toString(),
   queuedAt: r.queuedAt, assignedAt: r.assignedAt, startedAt: r.startedAt, lastHeartbeatAt: r.lastHeartbeatAt,
   profiles: r.profiles, selectorLabels: r.selectorLabels, pinnedRunnerId: r.pinnedRunnerId, bashMode: r.bashMode as BashMode,
+});
+
+/**
+ * US-002 (#425): the turn as placement reads it. The kind mapping is the one `findThreadAssign` uses: the API
+ * always names the thread's kind, and a row that says something else (or nothing) is a REPO thread.
+ */
+const toThreadTurn = (turn: { action: string; backend: Prisma.JsonValue; mode: string; thread: { kind: string } }): DashboardJobRow['threadTurn'] => ({
+  backend: turn.backend as unknown as ThreadBackend,
+  action: turn.action as ThreadAction,
+  kind: turn.thread.kind === 'WORKSPACE' ? 'WORKSPACE' : turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO',
+  mode: (turn.mode || 'read') as ThreadMode,
+});
+
+const toQueuedJobRow = (r: QueuedSelected): DashboardJobRow => ({
+  ...toJobRow(r),
+  ...(r.command === 'THREAD' && r.threadTurn ? { threadTurn: toThreadTurn(r.threadTurn) } : {}),
 });
 
 const toRecentRow = (r: RecentSelected): DashboardRecentRow => ({
@@ -60,7 +87,10 @@ export class PrismaDashboardRepository implements IDashboardRepository {
   async findRunners(): Promise<RawRunnerRow[]> {
     return this.db.runner.findMany({
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
-      select: { id: true, name: true, os: true, arch: true, labels: true, enabled: true, lastSeenAt: true, capacity: true, daemonVersion: true, capabilities: true },
+      select: {
+        id: true, name: true, os: true, arch: true, labels: true, enabled: true, lastSeenAt: true, capacity: true,
+        daemonVersion: true, capabilities: true, protocolVersion: true, threadCapacity: true,
+      },
     });
   }
 
@@ -84,9 +114,9 @@ export class PrismaDashboardRepository implements IDashboardRepository {
   async findQueuedWindow(limit: number): Promise<DashboardJobRow[]> {
     const rows = await this.db.fleetJob.findMany({
       where: { state: FleetJobState.QUEUED },
-      orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: limit, select: JOB_SELECT,
+      orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: limit, select: QUEUED_SELECT,
     });
-    return rows.map(toJobRow);
+    return rows.map(toQueuedJobRow);
   }
 
   async findRecentJobs(scope: DashboardScope, finishedSince: Date, limit: number): Promise<DashboardRecentRow[]> {

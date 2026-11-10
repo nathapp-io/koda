@@ -1,7 +1,13 @@
 import type { FleetJobKind, FleetJobState } from '../../common/enums';
 import type { BashMode, RunnerCapabilities } from '../common/protocol';
+import type { ChatThreadKind, ThreadAction, ThreadBackend, ThreadMode } from '../common/thread-jobs';
 import type { FleetJobStory } from '../jobs/domain/fleet-job.domain';
 import type { MisfitReason } from '../jobs/placement-rules';
+import type { UnplaceableVerdict } from '../jobs/unplaceable-verdict';
+
+/** US-002 (#425): the verdicts live with the judgement that names them; the dashboard types re-export them. */
+export { UNPLACEABLE_VERDICTS } from '../jobs/unplaceable-verdict';
+export type { UnplaceableVerdict } from '../jobs/unplaceable-verdict';
 
 /** S2b (c) spec §1.1. */
 export type DashboardScope = { kind: 'global' } | { kind: 'project'; projectId: string };
@@ -37,6 +43,10 @@ export interface DashboardRunnerRow {
   capacity: number;
   daemonVersion: string;
   capabilities: RunnerCapabilities | null;
+  /** US-002 (#425): placement refuses a THREAD job on a runner below protocol 4. */
+  protocolVersion: number;
+  /** US-002 (#425): how many thread sessions this runner hosts at once. */
+  threadCapacity: number;
 }
 
 /** An active (or dry-run QUEUED) job with what the rules and the DTO need. */
@@ -69,6 +79,11 @@ export interface DashboardJobRow {
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   bashMode: BashMode;
+  /**
+   * US-002 (#425): a THREAD job's turn — the backend, action, kind and mode placement judges it by. Absent for
+   * every other command, and for a THREAD row with no turn (a broken row placement skips too).
+   */
+  threadTurn?: { backend: ThreadBackend; action: ThreadAction; kind: ChatThreadKind; mode: ThreadMode };
 }
 
 /** A terminal job finished inside the recent window (spec §1.2). */
@@ -99,8 +114,6 @@ export const ATTENTION_KINDS = ['job_silent', 'job_waiting_approval', 'job_unpla
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 export const SEVERITIES = ['error', 'warning'] as const;
 export type Severity = (typeof SEVERITIES)[number];
-export const UNPLACEABLE_VERDICTS = ['never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed'] as const;
-export type UnplaceableVerdict = (typeof UNPLACEABLE_VERDICTS)[number];
 export const CONDITION_TYPES = ['offline', 'credential', 'interaction', 'stale_nax', 'configuration'] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
 export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired', 'expiring'] as const;

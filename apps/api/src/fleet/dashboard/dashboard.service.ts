@@ -9,7 +9,7 @@ import { buildDashboardView, DashboardView, readCapabilities } from './dashboard
 import { AttentionThresholds, DASHBOARD_LIMITS, DashboardJobRow, DashboardRunnerRow, DashboardScope } from './dashboard.types';
 import { DASHBOARD_REPOSITORY, IDashboardRepository } from './domain/dashboard.domain';
 
-type DashboardConfig = Pick<IFleetConfig, 'runnerOfflineSec' | 'jobSilentSec' | 'jobSilentErrorSec' | 'jobStartSec' | 'jobQueuedWarnSec' | 'credentialExpiryWarnDays'>;
+type DashboardConfig = Pick<IFleetConfig, 'runnerOfflineSec' | 'jobSilentSec' | 'jobSilentErrorSec' | 'jobStartSec' | 'jobQueuedWarnSec' | 'credentialExpiryWarnDays' | 'threadsEnabled'>;
 
 /** The answer for a scope the vault can serve nothing for; shared, never mutated. */
 const NO_PROVIDERS: ReadonlySet<string> = new Set<string>();
@@ -49,7 +49,7 @@ export class FleetDashboardService {
       runnerOfflineSec: this.cfg.runnerOfflineSec, jobSilentSec: this.cfg.jobSilentSec, jobSilentErrorSec: this.cfg.jobSilentErrorSec,
       jobStartSec: this.cfg.jobStartSec, jobQueuedWarnSec: this.cfg.jobQueuedWarnSec, credentialExpiryWarnDays: this.cfg.credentialExpiryWarnDays,
     };
-    const attention = buildAttention({ scope, runners, heldByRunner, activeJobs: listed, pending, dryRun: { queued, loads, pauses, ...(await this.vaultAvailability(queued, runners)) } }, now, thresholds);
+    const attention = buildAttention({ scope, runners, heldByRunner, activeJobs: listed, pending, dryRun: { queued, loads, pauses, threadsEnabled: this.cfg.threadsEnabled, ...(await this.vaultAvailability(queued, runners)) } }, now, thresholds);
     const runLoads = new Map([...loads].map(([id, load]) => [id, load.active] as const));
     return buildDashboardView({ scope, now, offlineSec: this.cfg.runnerOfflineSec, runners, heldByRunner: runLoads, active, recent, counts, pending, attention });
   }

@@ -1,11 +1,12 @@
 import { DASH_NOW, DASH_THRESHOLDS, dashCaps, dashJob, dashRunner, secAgo } from '../../common/test-helpers/fleet-dashboard';
 import type { RunnerLoad } from '../jobs/placement-rules';
 import { DryRunInput, jobUnplaceableItems } from './attention-unplaceable';
+import type { DashboardRunnerRow } from './dashboard.types';
 
 const QUEUED = dashJob({ state: 'QUEUED', runnerId: null, assignedAt: null, startedAt: null, lastHeartbeatAt: null, queuedAt: secAgo(120) });
 const NO_PAUSE = { runnerPaused: () => false, match: () => null };
 const input = (over: Partial<DryRunInput> = {}): DryRunInput => ({
-  queued: [QUEUED], runners: [dashRunner()], loads: new Map<string, RunnerLoad>(), pauses: NO_PAUSE, ...over,
+  queued: [QUEUED], runners: [dashRunner()], loads: new Map<string, RunnerLoad>(), pauses: NO_PAUSE, threadsEnabled: true, ...over,
 });
 const run = (over: Partial<DryRunInput> = {}) => jobUnplaceableItems(input(over), DASH_NOW, DASH_THRESHOLDS);
 const only = (over: Partial<DryRunInput> = {}) => {
@@ -15,8 +16,55 @@ const only = (over: Partial<DryRunInput> = {}) => {
 };
 
 describe('job_unplaceable (S2b (c) §2.3)', () => {
-  it('US-006: does not emit unplaceable attention for an old queued THREAD job', () => {
+  /**
+   * US-002 (#425): a queued THREAD job is judged like any other job, so the thread page can explain why it waits.
+   * The turn carries what placement needs (backend, action, kind, mode); the kill switch comes from the config.
+   */
+  const THREAD_TURN = { backend: { kind: 'native', model: 'm1' }, action: 'SESSION', kind: 'REPO', mode: 'read' } as const;
+  const THREAD = { ...QUEUED, command: 'THREAD', threadTurn: THREAD_TURN };
+  /** A protocol-4 runner that offers the backend and has a free thread slot. */
+  const threadHost = (over: Partial<DashboardRunnerRow> = {}) => dashRunner({
+    protocolVersion: 4, threadCapacity: 2, capabilities: dashCaps({ threadBackends: { native: ['m1'], acp: [] } }), ...over,
+  });
+
+  it('AC-7: names the backend no runner offers for a queued THREAD job', () => {
+    const runners = [dashRunner({ id: 'r1', name: 'aa-box', protocolVersion: 4 }), dashRunner({ id: 'r2', name: 'zz-box', protocolVersion: 4 })];
+    const item = only({ queued: [THREAD], runners }).item;
+    expect(item).toMatchObject({ kind: 'job_unplaceable', severity: 'warning' });
+    expect(item.reasons).toEqual([{ runnerName: 'aa-box', reason: 'thread_backend' }, { runnerName: 'zz-box', reason: 'thread_backend' }]);
+  });
+
+  it('AC-8: skips a queued THREAD job with no turn (placement skips it too)', () => {
     expect(run({ queued: [{ ...QUEUED, command: 'THREAD' }] }).items).toEqual([]);
+  });
+
+  it('AC-9: names threads_disabled for every runner when the thread kill switch is off', () => {
+    const item = only({ queued: [THREAD], threadsEnabled: false }).item;
+    expect(item.reasons).toEqual([{ runnerName: 'wk-mac', reason: 'threads_disabled' }]);
+  });
+
+  it('AC-10: a pinned runner out of thread capacity is waiting_capacity', () => {
+    const runner = threadHost({ threadCapacity: 1 });
+    const loads = new Map<string, RunnerLoad>([['r1', { active: 0, repoIds: new Set(), projectIds: new Set(), rawProjectIds: new Set(), threads: 1 }]]);
+    const item = only({ queued: [{ ...THREAD, pinnedRunnerId: 'r1' }], runners: [runner], loads }).item;
+    expect(item).toMatchObject({
+      verdict: 'waiting_capacity', severity: 'warning', reasons: [{ runnerName: 'wk-mac', reason: 'thread_capacity' }], reasonsTotal: 1,
+    });
+  });
+
+  it('AC-11: a runner that can take the turn yields no item', () => {
+    expect(run({ queued: [THREAD], runners: [threadHost()] }).items).toEqual([]);
+    // The same runner with its only thread slot taken is reported, so the empty answer above is the runner's
+    // fitness and not the dry-run skipping THREAD jobs.
+    const held = new Map<string, RunnerLoad>([['r1', { active: 0, repoIds: new Set(), projectIds: new Set(), rawProjectIds: new Set(), threads: 1 }]]);
+    expect(run({ queued: [THREAD], runners: [threadHost({ threadCapacity: 1 })], loads: held }).items).toHaveLength(1);
+  });
+
+  it('AC-15: a RUN job whose every runner is disabled is still never (error)', () => {
+    const item = only({ runners: [dashRunner({ enabled: false })] }).item;
+    expect(item).toMatchObject({
+      verdict: 'never', severity: 'error', reasons: [{ runnerName: 'wk-mac', reason: 'disabled' }], reasonsTotal: 1,
+    });
   });
 
   it('ignores a job younger than FLEET_JOB_QUEUED_WARN_SEC and a job of a soft-deleted project', () => {
