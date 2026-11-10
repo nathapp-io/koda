@@ -18,10 +18,10 @@ describe('CI integration shard matrix', () => {
   it('lists exactly the shard indexes the denominator asks Vitest to run', () => {
     const shardList = shardBlock.match(/shard: \[([^\]]+)\]/)?.[1];
     const denominator = shardBlock.match(/shards: \[(\d+)\]/)?.[1];
-    expect(shardList).toBeDefined();
-    expect(denominator).toBeDefined();
+    if (shardList === undefined) throw new Error('shard list not found');
+    if (denominator === undefined) throw new Error('shard denominator not found');
 
-    const indexes = shardList!.split(',').map((value) => Number(value.trim()));
+    const indexes = shardList.split(',').map((value) => Number(value.trim()));
     const count = Number(denominator);
     expect(indexes).toEqual(Array.from({ length: count }, (_, index) => index + 1));
   });
