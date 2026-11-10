@@ -1,0 +1,1016 @@
+{
+  "project": "koda",
+  "feature": "fleet-thread-placement-bundle",
+  "branchName": "feat/fleet-thread-placement-bundle",
+  "createdAt": "2026-12-04T00:00:00Z",
+  "updatedAt": "2026-11-10T05:42:17.048Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Refuse unhostable thread creates and mode changes",
+      "description": "**Goal** \u2014 Refuse thread create and mode changes with a cause-specific 409 when enrolled runners cannot host the permanent kind/mode/backend combination.\n\n**Motivation** \u2014 A thread that misses one is accepted (201) and its first turn queues forever with `stateReason = null`.\n\n**Approach** \u2014\n- New `threadCapabilityMisfit(thread: PlacementThread, capabilities: RunnerCapabilities): ThreadCapabilityMisfit | null` in `placement-rules.ts`, with `type ThreadCapabilityMisfit = 'project_threads' | 'workspace_threads' | 'thread_modes' | 'thread_backend' | 'thread_write'`. It runs placement's capability-only thread rules in `firstMisfit`'s order: `kind === 'PROJECT'` without `projectThreads === true` gives `project_threads`; `kind === 'WORKSPACE'` without `workspaceThreads === true` gives `workspace_threads`; for `action` SESSION (absent means SESSION), `mode` `ask` or `full` without `threadModes === true` gives `thread_modes`, then `!servesThreadBackend(...)` gives `thread_backend`; for any other action, `threadWrite !== true` gives `thread_write`.\n- `firstMisfit` (`placement-rules.ts:169`)\n  - Baseline: the thread branch checks the five rules inline (lines 181-191).\n  - Target: after `threads_disabled` and `protocol`, it returns `threadCapabilityMisfit(job.thread, runner.capabilities)` when that is non-null, then `trust_domain` and `thread_capacity` as today. Same results for every input.\n- `ChatThreadRepository.anyRunnerServesBackend(backend)` (`apps/api/src/fleet/threads/domain/chat-thread.domain.ts:147`)\n  - Baseline: `anyRunnerServesBackend(backend: ThreadBackend): Promise<boolean>`.\n  - Target: `threadServeMisfit(need: ThreadServeNeed): Promise<ThreadCapabilityMisfit | null>`, with `interface ThreadServeNeed { backend: ThreadBackend; kind: ChatThreadKind; mode: ThreadMode; runnerId?: string | null; modesOnly?: true }`. `PrismaChatThreadRepository` reads `runner` rows with `enabled: true` and `protocolVersion >= THREAD_MIN_PROTOCOL_VERSION`, or, when `runnerId` is a string, only that runner's row (any `enabled` value; a missing row means nothing to judge). No rows: `null` (the #399 \"fleet not set up\" rule). Otherwise each row is judged with `threadCapabilityMisfit({ backend, kind, mode, enabled: true, action: 'SESSION' }, capabilities)`, or, when `modesOnly` is set, only by the mode rule (`mode` `ask`/`full` and `threadModes !== true` gives `thread_modes`, anything else `null`), so a backend change on the runner never refuses a mode change; any `null` verdict gives `null`. When every row misfits, the answer is the misfit of the runner that got furthest, by placement order `project_threads` = `workspace_threads` < `thread_modes` < `thread_backend` (the latest-ordered misfit wins).\n- `assertBackendServed(threads, backend)` (`apps/api/src/fleet/threads/thread-backend-served.ts:17`)\n  - Target: `assertThreadServed(threads: Pick<ChatThreadRepository, 'threadServeMisfit'>, need: ThreadServeNeed): Promise<void>`. `null` returns. `thread_backend` throws `ConflictAppException(refusalArgs(backend), 'threads.backendUnavailable')` exactly as today; `project_threads` throws `ConflictAppException({}, 'threads.projectThreadsUnavailable')`; `workspace_threads` throws `ConflictAppException({}, 'threads.workspaceThreadsUnavailable')`; `thread_modes` throws `ConflictAppException({ mode }, 'threads.modeUnavailable')`. `thread_write` cannot occur (the need is always a SESSION); the switch is exhaustive, and an unexpected value throws `Error('unexpected thread misfit')`.\n- `ThreadsService.assertBackendServed(backend)` and `WorkspaceThreadsService.assertBackendServed(backend)` become `assertThreadServed(need)`. `ThreadsService.create` calls it with `{ backend, kind: 'PROJECT', mode: 'read' }` for a PROJECT thread and `{ backend, kind: 'REPO', mode: normalized.mode }` for a REPO thread; `WorkspaceThreadsService.create` with `{ backend, kind: 'WORKSPACE', mode: 'read' }`. `ThreadsController.create` and `WorkspaceThreadsController.create` call it before the approval gate with the normalized kind, and mode `normalized.mode` for a REPO thread or `'read'` for a PROJECT or WORKSPACE thread, as #399 does for the backend.\n- New `ThreadsService.assertModeServed(projectId: string, threadId: string, mode: ThreadMode): Promise<void>`: for `mode === 'read'` it returns; otherwise it loads the thread (`threads.notFound` 404 when missing), returns when `thread.kind !== 'REPO'` (so the existing 400 `threads.input` for a non-REPO ask/full still wins), and calls `assertThreadServed({ backend: thread.backend, kind: 'REPO', mode, runnerId: thread.runnerId, modesOnly: true })`. `ThreadsController.changeMode` calls it before the approval gate, and `ThreadsService.changeMode` calls it again before `this.threads.changeMode(...)`.\n- i18n `apps/api/src/i18n/{en,zh}/threads.json` gain `projectThreadsUnavailable`, `workspaceThreadsUnavailable` and `modeUnavailable` (`{mode}`), each with a `\"409\"` message. The 409 `@ApiResponse` descriptions on the create and mode routes name the new keys.\n\nThread create still accepts a thread when no thread-capable runner is enrolled (#399's \"fleet not set up\" rule). Capacity, budget, online state and labels are not judged at create: they are not permanent, and the thread page now explains them through `queuedTurn`. The mode check judges the thread's own runner when it has one, because every later turn is pinned to it (`pinnedRunnerId: thread.runnerId`). A thread that has not run yet is judged against the fleet.\n\n**Scope** \u2014 In: pure placement extraction, repository/service/controller preflight, errors, fixture updates and `bun run generate` for OpenAPI/CLI. Out: dashboard judgements (US-002), detail queuedTurn (US-003), queued notice (US-004), and judging runner capacity, online state, labels or budget at thread create or mode change.\n\n**Interface** \u2014 `threadCapabilityMisfit(thread: PlacementThread, capabilities: RunnerCapabilities): ThreadCapabilityMisfit | null`; `type ThreadCapabilityMisfit = 'project_threads' | 'workspace_threads' | 'thread_modes' | 'thread_backend' | 'thread_write'`; `interface ThreadServeNeed { backend: ThreadBackend; kind: ChatThreadKind; mode: ThreadMode; runnerId?: string | null; modesOnly?: true }`; `threadServeMisfit(need: ThreadServeNeed): Promise<ThreadCapabilityMisfit | null>`; `assertThreadServed(threads: Pick<ChatThreadRepository, 'threadServeMisfit'>, need: ThreadServeNeed): Promise<void>`; `ThreadsService.assertModeServed(projectId: string, threadId: string, mode: ThreadMode): Promise<void>`.",
+      "acceptanceCriteria": [
+        "[unit] threadCapabilityMisfit for a PROJECT SESSION thread on capabilities that offer a native model but whose projectThreads is not true returns 'project_threads'.",
+        "[unit] threadCapabilityMisfit for a WORKSPACE SESSION thread on capabilities whose workspaceThreads is not true returns 'workspace_threads'.",
+        "[unit] threadCapabilityMisfit for a REPO SESSION in mode ask on capabilities whose threadModes is not true returns 'thread_modes'.",
+        "[unit] threadCapabilityMisfit for a REPO SESSION in mode read on the same capabilities, with a served backend, returns null; ThreadsService.assertModeServed(projectId, threadId, 'read') likewise returns without a capability refusal.",
+        "[unit] threadCapabilityMisfit for a REPO SESSION in mode full with threadModes: true and a backend model the capabilities do not offer returns 'thread_backend'.",
+        "[unit] assertThreadServed with a stub threadServeMisfit resolving 'project_threads' rejects with a 409 whose i18n key is threads.projectThreadsUnavailable.",
+        "[unit] assertThreadServed with the stub resolving 'workspace_threads' rejects with key threads.workspaceThreadsUnavailable.",
+        "[unit] assertThreadServed with the stub resolving 'thread_modes' for need mode full rejects with key threads.modeUnavailable and args { mode: 'full' }.",
+        "[integration] With the test Postgres and one enabled runner at protocol 4 that offers a native model but not projectThreads, POST /api/projects/:slug/threads for a PROJECT thread answers 409 with the threads.projectThreadsUnavailable message, and no thread row is persisted for that request.",
+        "[integration] With one enabled runner that offers the backend but not workspaceThreads, POST /api/threads for a WORKSPACE thread answers 409 with the threads.workspaceThreadsUnavailable message, and no thread row is persisted for that request.",
+        "[integration] With one enabled runner that offers the backend without threadModes, POST /api/projects/:slug/threads for a REPO thread in mode ask answers 409 with the threads.modeUnavailable message naming ask, and no thread row is persisted for that request.",
+        "[integration] With two enabled runners, one offering the backend without threadModes and one with threadModes: true that does not offer the backend, creating a REPO thread in mode full for that backend answers 409 with the threads.backendUnavailable message.",
+        "[integration] With no enabled runner at protocol 4 or later, POST /api/projects/:slug/threads for a PROJECT thread answers 201.",
+        "[integration] PATCH /api/projects/:slug/threads/:id/mode with { mode: 'ask' } on a REPO thread whose runnerId names a runner without threadModes answers 409 with threads.modeUnavailable while another enabled runner has threadModes: true, and the thread's stored mode is unchanged.",
+        "[integration] PATCH /api/projects/:slug/threads/:id/mode with { mode: 'ask' } on a REPO thread whose runner has threadModes: true but no longer offers the thread's backend answers 200 (the mode check judges only threadModes)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "threads",
+        "placement",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module placement/repository/controller changes at thread session mode and approval boundaries require strict security isolation; preserve permission and error precedence."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/threads/thread-backend-served.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/test/integration/fleet/thread-backend-unavailable.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/thread-capability-unavailable.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "threadCapabilityMisfit returns thread_write for a non-SESSION action without threadWrite, even when the backend is not served.",
+        "threadServeMisfit returns null for a pinned runner id whose row is missing.",
+        "threadServeMisfit returns thread_modes for a pinned disabled runner without threadModes when modesOnly is true.",
+        "assertThreadServed preserves the existing threads.backendUnavailable args for backend.agent, backend.model and backend.kind refusals.",
+        "A PROJECT or WORKSPACE ask/full mode change still returns 400 threads.input rather than a new capability refusal."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/thread-backend-served.spec.ts",
+          "reason": "its cases call `assertBackendServed` with a stub `anyRunnerServesBackend`; they move to `assertThreadServed` with a stub `threadServeMisfit` returning `'thread_backend'` or `null`, keeping the same `threads.backendUnavailable` field/value expectations, and gain the three new-cause cases."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.spec.ts",
+          "reason": "the #399 cases mock `anyRunnerServesBackend`; they mock `threadServeMisfit` instead and expect it called with `{ backend, kind, mode }`; the repository mock in its `build()` gains `threadServeMisfit` in place of `anyRunnerServesBackend`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.spec.ts",
+          "reason": "the #399 case mocks `anyRunnerServesBackend`; it mocks `threadServeMisfit` and expects `{ backend, kind: 'WORKSPACE', mode: 'read' }`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.spec.ts",
+          "reason": "the create case spies `assertBackendServed(backend)`; it spies `assertThreadServed` with `{ backend, kind, mode }`, and the service mock gains `assertModeServed` for the mode route."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.keys.spec.ts",
+          "reason": "its service mock exposes `assertBackendServed`; it exposes `assertThreadServed` instead."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement-rules.spec.ts",
+          "reason": "gains the US-001 `threadCapabilityMisfit` cases; the existing `firstMisfit` thread cases stay unchanged because the results are the same."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/thread-backend-unavailable.integration.spec.ts",
+          "reason": "its runner fixtures advertise only `threadBackends`; fixtures that create PROJECT or WORKSPACE threads or ask/full REPO threads gain `projectThreads`, `workspaceThreads` or `threadModes: true` so they keep testing the backend refusal alone."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/gated-project-thread-routes.integration.spec.ts",
+          "reason": "runner fixtures gain `projectThreads: true` and `threadModes: true` where the case creates a PROJECT thread or an ask/full REPO thread, so the gate cases still reach the approval gate."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/gated-thread-handoff-routes.integration.spec.ts",
+          "reason": "runner fixtures gain `threadModes: true` where a case creates an ask/full REPO thread or changes mode to ask/full, so the gate cases still reach the gate."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/gated-thread-session-routes.integration.spec.ts",
+          "reason": "runner fixtures gain `threadModes: true` where a case creates an ask/full REPO thread or changes mode to ask/full, so the gate cases still reach the gate."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-workspace-threads.integration.spec.ts",
+          "reason": "runner fixtures gain `workspaceThreads: true`, so workspace thread create still reaches its permission checks."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "runner fixtures used by thread create gain the capability for the thread kind and mode they create, so the endpoint cases still answer 201."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/thread-mode-change.spec.ts",
+          "reason": "`ThreadsService.changeMode` now calls `assertModeServed` before the repository; the service built at `:39` with `{} as never` collaborators gets a repository stub whose `get` returns the thread and whose `threadServeMisfit` resolves `null`, and the controller case at `:173-184` gives its service mock `assertModeServed`; existing expectations are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/thread-mode-change.integration.spec.ts",
+          "reason": "the `live()` runner at `:29-30` keeps `threadModes: true`, which the mode-only check needs; any fixture that changes to ask/full on a runner without `threadModes` now expects 409 `threads.modeUnavailable`; existing 200 cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/workspace-turns.integration.spec.ts",
+          "reason": "the `workspaceThreads=false` case (`:144-150`) creates its thread before it disables the other runners and inserts the runner with `workspaceThreads: false`, so create still answers 201 and the placement assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-project-thread-placement.integration.spec.ts",
+          "reason": "AC-6 and the cases at `:30-35` and `:87-92` create the PROJECT thread while a `projectThreads: true` runner is enabled (or before the lacking runner syncs), so create answers 201 when the file runs alone; placement assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/en/threads.json",
+          "reason": "gains `projectThreadsUnavailable`, `workspaceThreadsUnavailable` and `modeUnavailable`; existing keys unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/threads.json",
+          "reason": "gains the same three keys in Chinese; existing keys unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the 409 descriptions; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Explain unplaceable THREAD jobs in the dashboard",
+      "description": "**Goal** \u2014 Judge queued THREAD jobs with the same placement rules and shared verdict classification as other jobs.\n\n**Motivation** \u2014 `jobUnplaceableItems` (`apps/api/src/fleet/dashboard/attention-unplaceable.ts:64`) returns nothing for `isThreadKind(job.command)`, and the thread page shows the message as pending with no explanation.\n\n**Approach** \u2014\n- New `apps/api/src/fleet/jobs/unplaceable-verdict.ts`:\n  - `export const UNPLACEABLE_VERDICTS` and `export type UnplaceableVerdict`, moved unchanged from `dashboard.types.ts:102` (values `never`, `budget_paused`, `runners_paused`, `waiting_capacity`, `no_fit`, `no_runners`, `fits_not_placed`); `dashboard.types.ts` re-exports both, so `fleet-dashboard.dto.ts` and other importers keep working.\n  - `export interface UnplaceableJudgement { verdict: UnplaceableVerdict; severity: 'error' | 'warning'; misfits: Array<{ runnerId: string; runnerName: string; reason: MisfitReason }> }`.\n  - `export function judgeUnplaceable(input: { job: PlacementJob; scopePaused: boolean; pool: readonly PlacementRunner[]; loads: ReadonlyMap<string, RunnerLoad>; runnerPaused: (runnerId: string) => boolean; now: Date; offlineSec: number }): UnplaceableJudgement | null`. Order: `scopePaused` gives `budget_paused`/warning with no misfits; an empty `pool` gives `no_runners`/error; otherwise `evaluateRunners(...)`, and when some runner has `reason === null` the answer is `null` (delayed, not unplaceable). Misfits sort by `runnerName`, then `runnerId`. The classification is today's `classify`, with `thread_capacity` added to the waiting reasons (`capacity`, `busy_repo`, `trust_domain`, `thread_capacity`).\n- `jobUnplaceableItems` (`attention-unplaceable.ts:64`)\n  - Baseline: returns `[]` for `isThreadKind(job.command)`; classifies inline.\n  - Target: a THREAD row with a `threadTurn` is judged like any other job, with `toPlacementJob(job, job, { ...job.threadTurn, enabled: input.threadsEnabled })`; a THREAD row with no `threadTurn` is skipped (placement skips such a broken row too). All rows go through `judgeUnplaceable`, and `RUNNER_FIXABLE_REASONS` handling stays.\n- `DryRunInput` gains `threadsEnabled: boolean`; `DashboardService` passes `this.cfg.threadsEnabled`, and its `DashboardConfig` `Pick` (`dashboard.service.ts:12`) gains `'threadsEnabled'`.\n- `DashboardJobRow` gains optional `threadTurn?: { backend: ThreadBackend; action: ThreadAction; kind: ChatThreadKind; mode: ThreadMode }`. `PrismaDashboardRepository.findQueuedWindow` fills it for THREAD rows from the job's `fleetThreadTurn` (`mode` absent means `read`, `backend`, `action`) and its thread's `kind` (`WORKSPACE`/`PROJECT`, otherwise `REPO`), the same mapping `findThreadAssign` uses.\n- `DashboardRunnerRow` gains `protocolVersion: number` and `threadCapacity: number`, selected by `findRunners`; `toCandidate` copies both into the `PlacementRunner`.\n\nPlacement owns the thread rules. Create, mode change, the dashboard and thread detail all reach them through `threadCapabilityMisfit`, `evaluateRunners` and `judgeUnplaceable`, never a copy (`apps/api/CLAUDE.md` dashboard rule). Retain current classify priority: all permanent misfits -> never/error; all waiting reasons -> waiting_capacity/warning; all budget_paused -> runners_paused/warning; otherwise no_fit/warning. Preserve unreadable-capability exclusion, reason limits/totals, project scoping and scoped vault providers. Update dashboard fixture builders and select expectations.\n\n**Scope** \u2014 In: shared pure judgement, dashboard rows/config/candidate mapping and real dashboard integration. Out: thread create/mode preflight (US-001), PlacementService.queuedVerdict and detail DTOs (US-003), and web queued notice (US-004). Writing `FleetJob.stateReason` for a queued THREAD job; the reason is computed on read (dashboard, thread detail).\n\n**Interface** \u2014 `export interface UnplaceableJudgement { verdict: UnplaceableVerdict; severity: 'error' | 'warning'; misfits: Array<{ runnerId: string; runnerName: string; reason: MisfitReason }> }`; `export function judgeUnplaceable(input: { job: PlacementJob; scopePaused: boolean; pool: readonly PlacementRunner[]; loads: ReadonlyMap<string, RunnerLoad>; runnerPaused: (runnerId: string) => boolean; now: Date; offlineSec: number }): UnplaceableJudgement | null`.",
+      "acceptanceCriteria": [
+        "[unit] judgeUnplaceable with scopePaused: true returns { verdict: 'budget_paused', severity: 'warning', misfits: [] }.",
+        "[unit] judgeUnplaceable with an empty pool returns { verdict: 'no_runners', severity: 'error', misfits: [] }.",
+        "[unit] judgeUnplaceable returns null when at least one runner in the pool has no misfit.",
+        "[unit] judgeUnplaceable where every runner fails thread_capacity returns verdict waiting_capacity with severity warning.",
+        "[unit] judgeUnplaceable where every runner fails disabled returns verdict never with severity error.",
+        "[unit] judgeUnplaceable lists misfits sorted by runnerName, then runnerId.",
+        "[unit] jobUnplaceableItems for a QUEUED THREAD row queued 120 s ago (warn 60 s) whose threadTurn backend model no runner offers yields one job_unplaceable item whose reasons give thread_backend for every runner.",
+        "[unit] jobUnplaceableItems for a QUEUED THREAD row without threadTurn yields no item.",
+        "[unit] jobUnplaceableItems for a QUEUED THREAD row with threadTurn and threadsEnabled: false yields an item whose reasons are threads_disabled for every runner.",
+        "[unit] jobUnplaceableItems for a QUEUED THREAD row pinned to a runner whose threadCapacity is 1 and which holds one thread yields an item with verdict waiting_capacity.",
+        "[unit] jobUnplaceableItems for a QUEUED THREAD row that a runner at protocol 4, with a free thread slot and the backend, can take yields no item.",
+        "[integration] With the test Postgres, a QUEUED THREAD job whose turn's backend model no enabled runner offers, queued longer than jobQueuedWarnSec, appears in GET /api/fleet/dashboard attention as job_unplaceable with reason thread_backend for that runner.",
+        "[integration] PrismaDashboardRepository.findRunners returns each runner's protocolVersion and threadCapacity.",
+        "[integration] PrismaDashboardRepository.findQueuedWindow returns a THREAD row's threadTurn with the turn's backend, action and mode and the thread's kind.",
+        "[unit] jobUnplaceableItems for a QUEUED RUN job queued 120 seconds ago in an undeleted, unpaused scope, with jobQueuedWarnSec 60 and a nonempty candidate pool whose runners all fail disabled, still emits job_unplaceable with verdict never and severity error after classification moves to judgeUnplaceable."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "dashboard",
+        "placement",
+        "threads"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Introduces a shared jobs abstraction and coordinates dashboard repository, types and configuration while preserving existing classification and projection behavior."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/dashboard/attention-unplaceable.ts",
+        "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
+        "apps/api/src/fleet/dashboard/dashboard.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/dashboard/attention-unplaceable.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/unplaceable-verdict.ts",
+        "apps/api/src/fleet/jobs/unplaceable-verdict.spec.ts",
+        "apps/api/test/integration/fleet/dashboard-thread-unplaceable.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "judgeUnplaceable returns budget_paused/warning when scopePaused is true even if pool is empty.",
+        "jobUnplaceableItems retains reasonsTotal for all runners while truncating displayed reasons to DASHBOARD_LIMITS.reasonsShown.",
+        "jobUnplaceableItems preserves fixableBlockedRunnerIds for provider_missing, provider_unavailable and interaction misfits on ordinary jobs."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/dashboard/attention-unplaceable.spec.ts",
+          "reason": "the case asserting a QUEUED THREAD job yields no item now asserts a THREAD row without `threadTurn` yields no item; a THREAD row with a turn is judged (US-002 cases). Fixtures gain `threadsEnabled` in `DryRunInput`."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/dashboard.types.ts",
+          "reason": "`UnplaceableVerdict` becomes a re-export from the new jobs module unplaceable-verdict; `DashboardJobRow` gains optional `threadTurn`; `DashboardRunnerRow` gains `protocolVersion` and `threadCapacity`."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/fleet-dashboard.ts",
+          "reason": "its runner-row builder gains `protocolVersion: 4` and `threadCapacity: 2` defaults so existing dashboard tests still type-check."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/attention-rules.spec.ts",
+          "reason": "its `dryRun` fixture gains `threadsEnabled: true`; expectations are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/dashboard.service.spec.ts",
+          "reason": "expects `buildAttention`'s dry-run input to carry `threadsEnabled` from config; runner rows gain the two fields."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/prisma-dashboard.repository.spec.ts",
+          "reason": "`findRunners` select expectations gain `protocolVersion` and `threadCapacity`."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/dashboard.service.ts",
+          "reason": "its `DashboardConfig` `Pick` gains `'threadsEnabled'` and the dry-run input passes it."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Expose computed queued-turn reasons in thread detail",
+      "description": "**Goal** \u2014 Add a read-only queued placement verdict to project and workspace thread detail responses.\n\n**Motivation** \u2014 A thread created while its backend was offered can still get stuck later: the runner drops the model, is disabled, or is downgraded.\n\n**Approach** \u2014\n- New `PlacementService.queuedVerdict(jobId: string, now: Date, minQueuedSec: number): Promise<QueuedVerdict | null>`, with `interface QueuedVerdict { jobId: string; queuedAt: Date; verdict: UnplaceableVerdict; reasons: Array<{ runnerName: string; reason: MisfitReason }> }`. Read-only: no transaction lock and no write. `null` when the job is missing, not `QUEUED`, or queued for `minQueuedSec` seconds or less, or when `judgeUnplaceable` answers `null`. Otherwise it loads the same inputs `placeJob` loads (repo, pause snapshot, `findPlacementRunners(pinned ? [pinned] : undefined)`, loads, thread assign), builds the job with `toPlacementJob` and `judgedJob`, and calls `judgeUnplaceable`.\n- `ChatThreadDetail` (`chat-thread.domain.ts`) gains `queuedTurn: QueuedVerdict | null`. `ThreadsService.get` and `WorkspaceThreadsService.get` set it to `placement.queuedVerdict(activeJob.id, new Date(), config.jobQueuedWarnSec)` when `activeJob?.state === 'QUEUED'`, else `null`. Both services gain a `PlacementService` constructor dependency, appended as the last constructor parameter (already provided in the threads module through `FleetJobsModule`).\n- New `QueuedTurnDto` (`apps/api/src/fleet/threads/dto/thread.dto.ts`): `jobId: string`, `queuedAt: string` (ISO), `verdict` (enum of `UnplaceableVerdict` without `fits_not_placed`, which `judgeUnplaceable` never returns), `reasons: QueuedTurnReasonDto[]` (`runnerName`, `reason`). `ThreadDetailDto` gains `@ApiProperty({ type: QueuedTurnDto, nullable: true }) queuedTurn: QueuedTurnDto | null`, which `WorkspaceThreadDetailDto` inherits.\n\nWire field `queuedTurn` on `GET /api/projects/{slug}/threads/{id}` and `GET /api/threads/{id}`: `null` or `{ \"jobId\": string, \"queuedAt\": ISO string, \"verdict\": \"never\" | \"waiting_capacity\" | \"runners_paused\" | \"no_fit\" | \"no_runners\" | \"budget_paused\", \"reasons\": [{ \"runnerName\": string, \"reason\": MisfitReason }] }`. `PlacementService.queuedVerdict` calls `judgeUnplaceable`; US-003's unit test observes the verdict through `queuedVerdict`, the service entry point. Update every positional construction of both thread services, including thread-mode-change.spec.ts, workspace-turns.spec.ts and thread-flow-preapproval.integration.spec.ts, and preserve the DB-free threads.module.spec.ts compile test. Regenerate `openapi.json` and CLI types with `bun run generate`.\n\n**Scope** \u2014 In: nonlocking placement query, thread detail assembly, DTO/contract generation and tests. Out: shared classifier/dashboard extraction (US-002), web rendering/polling (US-004), and writing `FleetJob.stateReason` for a queued THREAD job; the reason is computed on read (dashboard, thread detail).\n\n**Interface** \u2014 `PlacementService.queuedVerdict(jobId: string, now: Date, minQueuedSec: number): Promise<QueuedVerdict | null>`; `interface QueuedVerdict { jobId: string; queuedAt: Date; verdict: UnplaceableVerdict; reasons: Array<{ runnerName: string; reason: MisfitReason }> }`; `@ApiProperty({ type: QueuedTurnDto, nullable: true }) queuedTurn: QueuedTurnDto | null`.",
+      "acceptanceCriteria": [
+        "[unit] PlacementService.queuedVerdict returns null for a job whose state is RUNNING.",
+        "[unit] queuedVerdict returns null for a QUEUED job queued 30 s ago with minQueuedSec 60.",
+        "[unit] queuedVerdict for a QUEUED THREAD job queued 120 s ago whose only runner misses the turn's backend returns { jobId, queuedAt, verdict: 'no_fit', reasons: [{ runnerName, reason: 'thread_backend' }] }.",
+        "[unit] queuedVerdict for a job pinned to runner r1 asks findPlacementRunners for exactly ['r1'].",
+        "[unit] queuedVerdict returns null for a QUEUED job queued 120 s ago when one runner fits it.",
+        "[unit] ThreadsService.get returns queuedTurn: null without calling queuedVerdict when the thread's activeJob is RUNNING.",
+        "[unit] ThreadsService.get with activeJob { id: 'j1', state: 'QUEUED' } calls queuedVerdict with 'j1', a Date and the configured jobQueuedWarnSec, and returns its result as queuedTurn.",
+        "[unit] WorkspaceThreadsService.get with a QUEUED activeJob returns the result of queuedVerdict as queuedTurn.",
+        "[integration] With the test Postgres, a REPO thread whose QUEUED turn has been queued longer than jobQueuedWarnSec and whose pinned runner no longer offers the backend answers GET /api/projects/:slug/threads/:id with queuedTurn.verdict no_fit and one reason naming that runner with thread_backend.",
+        "[integration] The same thread with a turn queued less than jobQueuedWarnSec ago answers queuedTurn: null.",
+        "[unit] The committed openapi.json ThreadDetailDto schema has a queuedTurn property referencing QueuedTurnDto, whose properties are exactly jobId, queuedAt, verdict and reasons.",
+        "[unit] For a thread without a QUEUED activeJob, ThreadsService.get preserves the existing sendRefusal, handoff and pendingActions values while returning queuedTurn: null."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "threads",
+        "placement",
+        "contract"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Adds a read-only getter over US-002's shared judgement and additive detail fields using existing placement inputs and DI; no authorization or session lifecycle implementation changes."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/threads/workspace-threads.service.ts",
+        "apps/api/src/fleet/threads/dto/thread.dto.ts",
+        "apps/api/src/fleet/jobs/unplaceable-verdict.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/placement-queued-verdict.spec.ts",
+        "apps/api/test/integration/fleet/thread-queued-turn.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "queuedVerdict returns null at exactly minQueuedSec seconds of queue age.",
+        "queuedVerdict returns null for a missing job without acquiring any transaction or row lock.",
+        "queuedVerdict leaves FleetJob.stateReason unchanged when it reports no_fit.",
+        "WorkspaceThreadsService.get still returns 404 for another creator's thread before reading its queued verdict."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.spec.ts",
+          "reason": "`get` cases expect `queuedTurn` (null unless the active job is QUEUED); the `build()` helper and every positional `new ThreadsService(...)` site gain a trailing `PlacementService` mock with `queuedVerdict`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.spec.ts",
+          "reason": "`get` cases expect `queuedTurn`; every positional `new WorkspaceThreadsService(...)` site gains a trailing `PlacementService` mock."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/thread-mode-change.spec.ts",
+          "reason": "its positional `new ThreadsService(...)` call at `:39` gains the `PlacementService` argument (appended last); expectations unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-turns.spec.ts",
+          "reason": "its positional `new WorkspaceThreadsService(...)` calls (`:18`, `:59`, `:73`) gain the `PlacementService` argument (appended last); expectations unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/thread-flow-preapproval.integration.spec.ts",
+          "reason": "its positional service constructions (`:125`, `:131`) gain the `PlacementService` argument (appended last); expectations unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.module.spec.ts",
+          "reason": "the module compile must still resolve `ThreadsService` and `WorkspaceThreadsService` with the new `PlacementService` dependency; a provider mock is added only if the compile needs one, and no assertion changes."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for `QueuedTurnDto` and `ThreadDetailDto.queuedTurn`; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Show queued-turn reasons on both thread pages",
+      "description": "**Goal** \u2014 Render a localized queued-turn notice and refresh detail while a thread's active job remains queued.\n\n**Motivation** \u2014 The thread page shows the message as pending with no explanation.\n\n**Approach** \u2014\n- `ThreadDetailDto` in `apps/web/lib/thread-types.ts` gains `queuedTurn?: ThreadQueuedTurn | null`, with `ThreadQueuedTurn { jobId: string; queuedAt: string; verdict: string; reasons: { runnerName: string; reason: string }[] }`.\n- New `apps/web/components/fleet/threads/ThreadQueuedNotice.vue` (auto-registered as `FleetThreadsThreadQueuedNotice`), prop `thread: ThreadDetailDto`. It renders nothing when `thread.queuedTurn` is null or absent. Otherwise a `role=\"status\"` section `data-testid=\"thread-queued-notice\"` with `fleet.threads.queued.title`, the `fleet.threads.queued.verdict.<verdict>` text, and one list item per reason, the text of `fleet.threads.queued.reasonOn` with `{runner}` = `runnerName` and `{reason}` = `t('fleet.misfit.<reason>')`.\n- Mounted above the timeline on `apps/web/pages/[project]/threads/[id].vue` and `apps/web/pages/threads/[id].vue`.\n- While the loaded thread's `activeJob?.state` is `QUEUED`, each page reloads the thread detail every 30 seconds; it stops once it is not, and the timer is cleared when the page unmounts.\n- `fleet.misfit` in `apps/web/i18n/locales/{en,zh}.json` gains the 7 thread reasons: `thread_capacity`, `thread_backend`, `thread_modes`, `threads_disabled`, `thread_write`, `project_threads`, `workspace_threads`.\n\nAdd `fleet.threads.queued.*` copy for all six producible verdicts in English and Chinese. Existing thread-controller fallback polling only runs when not live and a turn is running; the queued timer must refresh detail independently of that fallback. Register the real component in both mount-sfc.ts maps and the component-name union; extend project and workspace page suites and use fake timers for lifecycle assertions. Runner names and reason labels render via interpolation only.\n\n**Scope** \u2014 In: optional client wire type, notice, both page mounts/timers, locales and Jest coverage. Out: API queuedVerdict/DTO work (US-003), dashboard changes (US-002), and live push of the queued-turn reason; the thread page polls every 30 seconds while the turn is queued.\n\n**Interface** \u2014 `queuedTurn?: ThreadQueuedTurn | null`; `ThreadQueuedTurn { jobId: string; queuedAt: string; verdict: string; reasons: { runnerName: string; reason: string }[] }`; component prop `thread: ThreadDetailDto`.",
+      "acceptanceCriteria": [
+        "[unit] FleetThreadsThreadQueuedNotice renders no thread-queued-notice element when thread.queuedTurn is null.",
+        "[unit] FleetThreadsThreadQueuedNotice renders no thread-queued-notice element when thread.queuedTurn is absent.",
+        "[unit] With queuedTurn { verdict: 'no_fit', reasons: [{ runnerName: 'r1', reason: 'thread_backend' }] }, it renders a role=status element data-testid=thread-queued-notice that shows the fleet.threads.queued.title text.",
+        "[unit] With that queuedTurn, it shows the fleet.threads.queued.verdict.no_fit text.",
+        "[unit] With that queuedTurn, it renders one list item whose text is fleet.threads.queued.reasonOn with runner r1 and the fleet.misfit.thread_backend label.",
+        "[unit] The project thread page pages/[project]/threads/[id].vue renders thread-queued-notice for a thread detail whose queuedTurn is set.",
+        "[unit] The workspace thread page pages/threads/[id].vue renders thread-queued-notice for a thread detail whose queuedTurn is set.",
+        "[unit] While the loaded thread's activeJob.state is QUEUED, advancing fake timers by 30 seconds makes the project thread page fetch the thread detail once more.",
+        "[unit] After a reload returns activeJob: null, advancing fake timers by another 30 seconds makes the project thread page fetch nothing.",
+        "[unit] While the loaded thread's activeJob.state is QUEUED, advancing fake timers by 30 seconds makes the workspace thread page fetch the thread detail once more.",
+        "[unit] After the project thread page unmounts with a QUEUED active turn, advancing fake timers by 30 seconds makes it fetch nothing.",
+        "[unit] The keys fleet.misfit.thread_capacity, thread_backend, thread_modes, threads_disabled, thread_write, project_threads and workspace_threads resolve to non-empty strings in both the en and zh locales.",
+        "[unit] fleet.threads.queued.title, fleet.threads.queued.reasonOn and fleet.threads.queued.verdict.<v> for each of never, waiting_capacity, runners_paused, no_fit, no_runners and budget_paused resolve to non-empty strings in both locales."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "threads",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A standard localized notice and the same bounded timer lifecycle on two existing Vue pages use existing reload methods; component mounts and fake timers cover the behavior without new abstractions."
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-types.ts",
+        "apps/web/pages/[project]/threads/[id].vue",
+        "apps/web/pages/threads/[id].vue",
+        "apps/web/components/fleet/threads/ThreadStaleBanner.vue",
+        "apps/web/lib/thread-controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/threads/ThreadQueuedNotice.vue",
+        "apps/web/tests/components/thread-queued-notice.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "After the workspace page unmounts with a QUEUED active turn, advancing fake timers by 30 seconds makes it fetch nothing.",
+        "After a workspace detail reload returns a RUNNING activeJob, advancing fake timers by 30 seconds makes it fetch nothing.",
+        "A runnerName containing HTML appears as literal text in the queued notice without creating elements."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.threads.queued.*` and the 7 thread `fleet.misfit.*` labels; existing keys unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same keys in Chinese."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "add `FleetThreadsThreadQueuedNotice` to the component-file maps and the component-name union so page tests can mount the real component; existing entries unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "gains the US-004 project-page notice and 30-second reload cases; its thread fixture gains `queuedTurn: null`, and existing assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-thread-detail-page.spec.ts",
+          "reason": "gains the US-004 workspace-page notice case; its thread fixture gains `queuedTurn: null`, and existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Advance thread-entry flows past non-question review findings",
+      "description": "**Goal** \u2014 Let THREAD-entry review steps accept minor/answered findings and apply flow-owned PRD edits without editing the thread's spec.\n\n**Motivation** \u2014 Each stop needs a person to read the ticket, get the spec fixed, republish, start a new flow and approve it again.\n\n**Approach** \u2014\n- `FlowStepAction`'s `dispatch` member (`flow-step-decision.ts:66`) gains `accepted?: FlowFinding[]`.\n- `decideFlowStep`, for a COMPLETED SPEC_REVIEW or PRD_REVIEW job with a readable verdict:\n  - Baseline: no findings with PRD edits applies them only when `canApplyCalls`; with findings, `!canApplyCalls` stops with `review_ambiguous` (any ambiguous finding) or `review_findings`.\n  - Target, no findings: PRD_REVIEW with `prdEdits.length > 0` and `prdEditsJobId !== job.id` returns `apply_prd_edits` (`accepted: []`) whatever `canApplyCalls` is.\n  - Target, findings with `canApplyCalls === false` (THREAD entry), in this order:\n    1. any `ambiguous` finding: `stop` `review_ambiguous` (unchanged);\n    2. more than `FLOW_CALLS_MAX_FINDINGS` findings: `stop` `review_findings` (unchanged);\n    3. SPEC_REVIEW: `{ kind: 'dispatch', step: 'PLAN', accepted: verdict.findings }`;\n    4. PRD_REVIEW with `prdEdits.length > 0` and `prdEditsJobId !== job.id`: `{ kind: 'apply_prd_edits', jobId, edits: verdict.prdEdits, accepted: verdict.findings }`;\n    5. PRD_REVIEW with `prdEditsJobId === job.id`: `{ kind: 'dispatch', step: 'RUN' }` (the findings were recorded with the edits);\n    6. PRD_REVIEW otherwise: `{ kind: 'dispatch', step: 'RUN', accepted: verdict.findings }`.\n  - `canApplyCalls === true` (NAX entry) is unchanged in every branch.\n- `FleetFlowAdvanceService.recordStep(flow, featureId, step, jobId, prNumber?)` (`fleet-flow-advance.service.ts:523`)\n  - Target: `recordStep(flow, featureId, step, jobId, prNumber?, accepted?: readonly FlowFinding[])`. When `accepted` is non-empty, the `flow.step` activity payload gains `accepted: accepted.map((f) => truncateFlowText(safeFlowJsonText(f.summary), FLOW_CALL_TEXT_MAX))`, the treatment `advancePrdEdits` gives its accepted findings. The dispatch path (`:126`) passes `action.accepted`.\n- `FleetFlowAdvanceService` passes `prdEdits: flow.entry === 'NAX'` to `buildStepDispatch` (`fleet-flow-advance.service.ts:463`). Target: `prdEdits: true`, so a THREAD-entry PRD_REVIEW task also carries `FLOW_PRD_EDITS_INSTRUCTION` (`flow-steps.ts:74`); without it the reviewer never emits edits.\n- The RULE and FIX `canApplyCalls` gates (`flow-step-decision.ts:204`, `:231`) are unchanged.\n\nThread flows pass non-question findings without editing the spec. PRD edits commit to the flow's branch through the existing `FleetFlowCallsService.applyPrdEdits`, whose stale-head guard (head must equal the PLAN result sha) already protects a branch that moved under the flow. Every dispatch still goes through the cost-cap and creator-access guards in the decide pass, so a passing flow never exceeds `costCapUsd`, and no stop (and so no stop ticket) is written for findings the flow handled. koda's verdict classes are only `answered`, `minor` and `ambiguous`; there is no major/blocker class. Update contrary old THREAD assertions in existing decision, advance, calls, PRD edit and integration suites while retaining NAX-entry behavior.\n\n**Scope** \u2014 In: review decision algorithm, accepted activity summaries, PRD instructions/commit path and regression assertions. Out: thread placement (US-001\u2013004), rule overrides (US-006\u2013010), writing review spec calls into a thread flow's spec; spec calls stay NAX-entry only; changing the RULE and FIX steps' thread-entry gates; and re-recording accepted findings in crash-recovery recordStep. Sending review findings back to the thread and resuming the flow on the next publish (#426 option 1). A new web view of the flow's accepted findings; they are recorded in the `flow.step` and `flow.prd_edits` activity payloads.\n\n**Interface** \u2014 `accepted?: FlowFinding[]` on the dispatch member of `FlowStepAction`; `recordStep(flow, featureId, step, jobId, prNumber?, accepted?: readonly FlowFinding[])`; `accepted: accepted.map((f) => truncateFlowText(safeFlowJsonText(f.summary), FLOW_CALL_TEXT_MAX))`.",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep with canApplyCalls: false and a COMPLETED SPEC_REVIEW whose verdict has two minor findings returns { kind: 'dispatch', step: 'PLAN', accepted: <those two findings> }.",
+        "[unit] decideFlowStep with canApplyCalls: false and a COMPLETED SPEC_REVIEW with one answered finding returns a PLAN dispatch whose accepted holds that finding.",
+        "[unit] decideFlowStep with canApplyCalls: false and a COMPLETED SPEC_REVIEW with one minor and one ambiguous finding returns stop with reason review_ambiguous.",
+        "[unit] decideFlowStep with canApplyCalls: false and 21 minor findings returns stop with reason review_findings.",
+        "[unit] decideFlowStep with canApplyCalls: false, a COMPLETED PRD_REVIEW with one minor finding, two prdEdits and a prdEditsJobId other than the job's returns { kind: 'apply_prd_edits', jobId, edits: <the two edits>, accepted: <the finding> }.",
+        "[unit] The same PRD_REVIEW with prdEditsJobId equal to the job's id returns { kind: 'dispatch', step: 'RUN' } with no accepted key.",
+        "[unit] decideFlowStep with canApplyCalls: false, a COMPLETED PRD_REVIEW with one minor finding and no prdEdits returns a RUN dispatch whose accepted holds the finding.",
+        "[unit] decideFlowStep with canApplyCalls: false, a COMPLETED PRD_REVIEW with no findings, one prdEdit and prdEditsJobId null returns apply_prd_edits with accepted: [].",
+        "[unit] decideFlowStep with canApplyCalls: true and a COMPLETED SPEC_REVIEW with one minor finding returns apply_calls.",
+        "[unit] decideFlowStep with canApplyCalls: false and a COMPLETED RULE job whose verdict has one question returns stop with reason review_ambiguous.",
+        "[unit] FleetFlowAdvanceService advancing a RUNNING THREAD-entry flow whose latest job is a COMPLETED SPEC_REVIEW with two minor findings records one flow.step activity for the PLAN dispatch whose payload accepted lists the two summaries, each cut to FLOW_CALL_TEXT_MAX characters.",
+        "[unit] That advance leaves the flow RUNNING and writes no stop decision.",
+        "[unit] Advancing a THREAD-entry flow whose spend has reached its costCapUsd, with the same SPEC_REVIEW verdict, writes a stop with reason cost_cap.",
+        "[unit] A flow.step activity for a dispatch without accepted findings has no accepted key in its payload.",
+        "[unit] Dispatching the PRD_REVIEW step of a RUNNING THREAD-entry flow sends an agent task that contains FLOW_PRD_EDITS_INSTRUCTION."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "threads",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Changes a bounded pure decision branch and activity/instruction plumbing in two existing services; existing PRD commit, creator-access, approval and cost-cap implementations are reused unchanged rather than introducing authorization logic."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-prd-edits.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision-thread-entry.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Advancing a THREAD-entry PRD_REVIEW applies its edits through the existing PRD commit path without calling the spec-call apply method.",
+        "A THREAD-entry PRD edit commit whose branch head no longer equals the PLAN result sha is refused by the existing stale-head guard.",
+        "Accepted finding summaries containing control characters are sanitized before appearing in flow.step activity.",
+        "Advancing a review with accepted findings after creator access is lost stops with creator_lost_access rather than dispatching."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "cases asserting a `canApplyCalls: false` SPEC_REVIEW or PRD_REVIEW with only `minor`/`answered` findings returns `stop` `review_findings` now expect the US-005 dispatch or `apply_prd_edits` actions; the case asserting no PRD edits for `canApplyCalls: false` with a clean verdict now expects `apply_prd_edits`; ambiguous and over-20 cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "`US-009 AC-8: thread PRD_REVIEW omits the PRD edits instruction` (`:1165`) flips to expect the THREAD-entry PRD_REVIEW task to contain `FLOW_PRD_EDITS_INSTRUCTION`; any THREAD-entry case that expects a `review_findings` stop on minor findings now expects the next step's dispatch; NAX-entry cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+          "reason": "`AC-15: thread-entry findings stop rather than applying calls` (`:282-287`, a `minor` finding on a THREAD flow) now expects a PLAN dispatch and no stop; `calls.apply` is still not called."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts",
+          "reason": "`AC-10: a SPEC_REVIEW finding stops the flow` (`:129-136`) uses one `minor` finding; for the THREAD flow it creates it now expects the flow `RUNNING` with a PLAN job dispatched; a stop case keeps its intent with an `ambiguous` finding."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-prd-edits.spec.ts",
+          "reason": "a THREAD-entry flow now applies PRD edits; any case asserting THREAD entry skips them flips to expect the commit."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Validate and hash repo rule overrides",
+      "description": "**Goal** \u2014 Provide the pure validated input and stable content hash contract for per-repo overrides.\n\n**Motivation** \u2014 C11 was deferred on 2026-10-07 until nax could take rules and project context from outside the repo.\n\n**Approach** \u2014 US-006 owns `apps/api/src/fleet/repos/rule-override.ts` alone (pure, no database). US-007 owns the model, migration, repository methods, DTOs, service methods, routes, route-command variants, permission key and i18n entry.\n\n- New `apps/api/src/fleet/repos/rule-override.ts`:\n  - `RULE_OVERRIDE_LIMITS = { maxFiles: 50, maxFileBytes: 32768, maxTotalBytes: 262144, maxContextBytes: 32768, maxPathLength: 200 }`.\n  - `RULE_PATH_PATTERN = /^[a-z0-9_-]+(\\/[a-z0-9_-]+){0,3}\\.md$/` (lowercase only, one to four segments, `.md` file). Lowercase-only keeps two paths from naming one file on a case-insensitive filesystem (macOS runners).\n  - `validateRuleOverride(raw: unknown): RuleOverrideInput`, with `RuleOverrideInput { rules: { path: string; content: string }[]; rulesMode: 'merge' | 'replace'; context: { content: string; mode: 'append' | 'replace' } | null }`. `rulesMode` defaults to `merge`, `context.mode` to `append`. Refusals throw `ValidationAppException({ reason }, 'fleet.ruleOverride')` (400), with `reason` one of: `rules` (not an array, or more than 50), `path` (fails the pattern or is longer than 200), `duplicatePath`, `content` (not a string, empty, contains NUL, or over 32,768 UTF-8 bytes), `size` (all contents together over 262,144 bytes), `rulesMode`, `context` (not an object, content empty, contains NUL, or over 32,768 bytes), `contextMode`, `empty` (no rules and no context).\n  - `ruleOverrideSha256(input: RuleOverrideInput): string`: lowercase hex SHA-256 of `JSON.stringify({ rules: <rules sorted by path>, rulesMode, context })`, so the same content in any order hashes the same.\n\nNo database, route or caller. Use the project's exception style; count UTF-8 bytes rather than JavaScript character count. The normalized input is the shared contract consumed by US-007; do not add schema, route DTO, i18n or repository changes in this story.\n\n**Scope** \u2014 In: pure rule-override.ts and its colocated unit spec. Out: storage/routes/permission/i18n (US-007), ASSIGN/protocol (US-008), runner validation/materialization (US-009), web form (US-010), and validating rule-file frontmatter or running nax's neutrality lint in koda. Organisation-wide, per-project and per-job rule sets; this feature adds per-repo overrides only.\n\n**Interface** \u2014 `RULE_OVERRIDE_LIMITS = { maxFiles: 50, maxFileBytes: 32768, maxTotalBytes: 262144, maxContextBytes: 32768, maxPathLength: 200 }`; `RULE_PATH_PATTERN = /^[a-z0-9_-]+(\\/[a-z0-9_-]+){0,3}\\.md$/`; `RuleOverrideInput { rules: { path: string; content: string }[]; rulesMode: 'merge' | 'replace'; context: { content: string; mode: 'append' | 'replace' } | null }`; `validateRuleOverride(raw: unknown): RuleOverrideInput`; `ruleOverrideSha256(input: RuleOverrideInput): string`.",
+      "acceptanceCriteria": [
+        "[unit] validateRuleOverride({ rules: [{ path: 'api.md', content: 'x' }] }) returns { rules: [{ path: 'api.md', content: 'x' }], rulesMode: 'merge', context: null }.",
+        "[unit] validateRuleOverride with context: { content: 'c' } and no mode returns context: { content: 'c', mode: 'append' }.",
+        "[unit] validateRuleOverride refuses a rule path ../x.md with a 400 whose reason is path.",
+        "[unit] validateRuleOverride refuses a rule path a.txt with reason path.",
+        "[unit] validateRuleOverride refuses the uppercase rule path API.md with reason path.",
+        "[unit] validateRuleOverride refuses two rules with the same path with reason duplicatePath.",
+        "[unit] validateRuleOverride refuses 51 rules with reason rules.",
+        "[unit] validateRuleOverride refuses a rule content of 32,769 UTF-8 bytes with reason content.",
+        "[unit] validateRuleOverride refuses a rule content containing a NUL character with reason content.",
+        "[unit] validateRuleOverride refuses nine rules of 30,000 bytes each (270,000 in total) with reason size.",
+        "[unit] validateRuleOverride refuses rulesMode: 'append' with reason rulesMode.",
+        "[unit] validateRuleOverride refuses context: { content: 'c', mode: 'merge' } with reason contextMode.",
+        "[unit] validateRuleOverride refuses { rules: [] } with no context with reason empty.",
+        "[unit] ruleOverrideSha256 returns the same 64-character lowercase hex string for the same two rules given in either order.",
+        "[unit] ruleOverrideSha256 returns a different string when one rule's content changes."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "rules",
+        "validation",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Pure bounded-input validation is localized, but the canonical SHA-256 contract and untrusted path/content boundary trigger the cryptography/security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-prd-edits.ts",
+        "apps/api/src/fleet/repos/dto/update-fix-checks.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/repos/rule-override.ts",
+        "apps/api/src/fleet/repos/rule-override.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "validateRuleOverride accepts a context-only override with rules: [] and a non-empty context within maxContextBytes.",
+        "validateRuleOverride refuses non-array rules with reason rules.",
+        "validateRuleOverride refuses empty or non-string rule content with reason content.",
+        "validateRuleOverride refuses an empty, NUL-containing or oversized context with reason context.",
+        "validateRuleOverride refuses a fifth path segment or a path longer than 200 characters with reason path.",
+        "validateRuleOverride measures multibyte rule content in UTF-8 bytes when applying maxFileBytes."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Persist and approval-gate per-repo rule overrides",
+      "description": "**Goal** \u2014 Add globally permissioned REST storage for rule overrides with approval-gated mutation and audited summaries.\n\n**Motivation** \u2014 User ruling: its own permission key, `fleet.repo.rules.configure`.\n\n**Approach** \u2014 US-006 owns `apps/api/src/fleet/repos/rule-override.ts` alone (pure, no database). US-007 owns the model, migration, repository methods, DTOs, service methods, routes, route-command variants, permission key and i18n entry.\n\n- New Prisma model `FleetRepoRuleOverride` (`apps/api/prisma/schema.prisma`), migration `apps/api/prisma/migrations/20261204090000_fleet_repo_rule_override/migration.sql`: `repoId String @id` (relation to `FleetRepo`, `onDelete: Cascade`), `rules Json` (array of `{ path, content }`), `rulesMode String` (`merge` | `replace`), `contextContent String?`, `contextMode String?` (`append` | `replace`), `ruleFiles Int`, `sha256 String`, `updatedById String`, `updatedByType String`, `updatedAt DateTime @updatedAt`. `FleetRepo` gains `ruleOverride FleetRepoRuleOverride?`.\n- `IFleetRepoRepository` gains `findRuleOverride(repoId): Promise<FleetRepoRuleOverrideRecord | null>`, `upsertRuleOverride(repoId, input, sha256, actor)` and `deleteRuleOverride(repoId): Promise<boolean>`. `FleetRepoRecord` gains optional `ruleOverride?: RuleOverrideSummary | null`, with `RuleOverrideSummary { sha256: string; ruleFiles: number; rulesMode: 'merge' | 'replace'; contextMode: 'append' | 'replace' | null; updatedAt: Date }`, read by `list` and `findById` from the row's scalar columns (`sha256`, `ruleFiles`, `rulesMode`, `contextMode`, `updatedAt`), never from the `rules` Json, so listing repos does not load rule bodies.\n- `FleetRepoDto` gains `ruleOverride: RuleOverrideSummaryDto | null` (`updatedAt` as ISO string), from `FleetRepoDto.from` (absent gives `null`).\n- `FleetReposService` gains `getRuleOverride(id)`, `setRuleOverride(principal, id, raw)` and `clearRuleOverride(principal, id)`. Set and clear run in `txManager.run`: unknown repo gives `NotFoundAppException({}, 'fleet.repos')`; set validates, hashes, upserts and records an audit entry `{ key: 'fleet.repo.rules.configure', resourceType: 'fleet-repo', resourceId: id, projectId, summary: 'rule override set (<n> files, <rulesMode>)' }`; clear deletes and records `summary: 'rule override cleared'` only when a row existed. Set and clear both return the updated `FleetRepoDto` (with its `ruleOverride` summary); `getRuleOverride` returns the full `RuleOverrideDto` (`rules`, `rulesMode`, `context`, `sha256`, `updatedAt`) or `null`.\n- `FleetReposController` gains `GET :id/rule-override` (`@UseGuards(RequiresGuard)`, `@Requires('fleet.repo.rules.configure')`, not approval-gated, returns `RuleOverrideDto` or `null`, because it returns full rule bodies), `PUT :id/rule-override` and `DELETE :id/rule-override` (both `@HttpCode(200)`, `@UseGuards(RequiresGuard)`, `@Requires('fleet.repo.rules.configure')`, `@ApprovalGated()`, mirroring `configureFixUnprotected`), with Swagger responses 200/202/400/403/404. The PUT handler calls `validateRuleOverride(body)` before `routeGate.run`, so an invalid body answers 400 and never becomes an approval request; the service validates again at execution.\n- `FLEET_REPO_ROUTE_VARIANTS` gains `ruleOverrideSet: 'rest:fleet-repos.rule-override.set'` and `ruleOverrideClear: 'rest:fleet-repos.rule-override.clear'`; `FleetRepoRouteCommands.onModuleInit` registers both for `fleet.repo.rules.configure`.\n- `NEW_KEY_SCOPES` (`catalog.ts:126`) gains `'fleet.repo.rules.configure': 'global'` (high risk through the `fleet.repo.` prefix, so an agent caller waits for a human by default).\n- i18n `apps/api/src/i18n/{en,zh}/fleet.json` gain a `ruleOverride` entry with `\"-2\"` and `\"400\"` messages naming `{reason}`, as `threads.json` `input` does.\n\n`setRuleOverride` calls `validateRuleOverride` and `ruleOverrideSha256`; US-007's integration ACs prove the route refuses what the validator refuses and stores the hash it computes. The web sends `PUT /fleet/repos/{id}/rule-override` with JSON body `{ \"rules\": [{ \"path\": \"api.md\", \"content\": \"...\" }], \"rulesMode\": \"merge\", \"context\": { \"content\": \"...\", \"mode\": \"append\" } }` (context may be `null`), `DELETE` with no body; both answer `FleetRepoDto` (or an approval request). It reads `GET` as `RuleOverrideDto` or `null`, and reads `ruleOverride` from `FleetRepoDto`. Use existing AuditRecorder and envelope patterns. Add RuleOverrideDto and RuleOverrideSummaryDto alongside FleetRepoDto in the existing dto/fleet-repo.dto.ts. Update route-command variants 6->8, NEW_KEY_SCOPES expectations, regenerate role-matrix snapshot/cell count 245->246, gated-operation count 146->148, OpenAPI/admin gate tables, and regenerate `openapi.json` and CLI types with `bun run generate`. Do not load rule bodies for repo summaries or inherit the unrelated GitHub-only fix-unprotected constraint.\n\n**Scope** \u2014 In: table/relation/migration, repositories/DTOs/services, approval/RBAC/audit/i18n/routes and contract regeneration. Out: changing pure validator ownership (US-006), job snapshot/ASSIGN (US-008), runner materialization (US-009), admin dialog (US-010), CLI/assistant/MCP tools, permission inventory TSV changes and extra route rate limiting beyond the global throttler. Concurrent writes of one repo's rule override; the last committed write wins. Organisation-wide, per-project and per-job rule sets; this feature adds per-repo overrides only. Editing `.nax/rules/` or `.nax/context.md` in any repo; the existing S3 config-edit flow still owns in-repo rule changes.\n\n**Interface** \u2014 `findRuleOverride(repoId): Promise<FleetRepoRuleOverrideRecord | null>`; `upsertRuleOverride(repoId, input, sha256, actor)`; `deleteRuleOverride(repoId): Promise<boolean>`; `RuleOverrideSummary { sha256: string; ruleFiles: number; rulesMode: 'merge' | 'replace'; contextMode: 'append' | 'replace' | null; updatedAt: Date }`; `getRuleOverride(id)`; `setRuleOverride(principal, id, raw)`; `clearRuleOverride(principal, id)`; GET/PUT/DELETE `:id/rule-override` guarded by `fleet.repo.rules.configure` globally.",
+      "acceptanceCriteria": [
+        "[integration] With the test Postgres, PUT /api/fleet/repos/:id/rule-override by a user holding fleet.repo.rules.configure globally, with two rules and a context, answers 200 with a FleetRepoDto whose ruleOverride.sha256 equals ruleOverrideSha256 of the validated input.",
+        "[integration] After that PUT, GET /api/fleet/repos/:id/rule-override returns the same rules, rulesMode and context.",
+        "[integration] After that PUT, GET /api/fleet/repos lists the repo with ruleOverride { sha256, ruleFiles: 2, rulesMode: 'merge', contextMode: 'append', updatedAt }.",
+        "[integration] DELETE /api/fleet/repos/:id/rule-override answers 200, and a following GET .../rule-override returns null.",
+        "[integration] A user without fleet.repo.rules.configure globally gets 403 on PUT, and no override row is written.",
+        "[integration] An agent holding fleet.repo.rules.configure globally, with no approval policy, gets 202 on PUT with an approval request whose permissionKey is fleet.repo.rules.configure, and no override row exists.",
+        "[integration] Approving that request through POST /api/approvals/:id/decisions with { decision: 'approve' } writes the override row.",
+        "[integration] GET and DELETE /api/fleet/repos/:id/rule-override by a user holding fleet.repo.read but not fleet.repo.rules.configure answer 403.",
+        "[integration] PUT, GET and DELETE /api/fleet/repos/:id/rule-override on an unknown repo id answer 404 fleet.repos.",
+        "[unit] FleetReposService.setRuleOverride records one audit entry with key fleet.repo.rules.configure, resource type fleet-repo and summary 'rule override set (2 files, merge)' for two rules in merge mode.",
+        "[unit] FleetReposService.clearRuleOverride records one audit entry with summary 'rule override cleared' when an override row existed.",
+        "[unit] FleetReposService.clearRuleOverride records no audit entry when the repo had no override.",
+        "[unit] FleetRepoRouteCommands registers a command for key fleet.repo.rules.configure at variant rest:fleet-repos.rule-override.set whose execution calls FleetReposService.setRuleOverride with the frozen id and body.",
+        "[unit] FleetRepoRouteCommands registers a command for key fleet.repo.rules.configure at variant rest:fleet-repos.rule-override.clear whose execution calls FleetReposService.clearRuleOverride with the frozen id.",
+        "[integration] An agent holding fleet.repo.rules.configure globally, with no approval policy, sending PUT with a bad path (../x.md), duplicate path, oversized content, NUL, bad mode or nothing in it answers 400 fleet.ruleOverride with the corresponding reason before the approval gate, no approval request is created, and no override is stored."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "rules",
+        "prisma",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Coordinates schema, repository projections and REST/approval/catalog contracts by extending the existing fix-unprotected pattern, not designing new infrastructure; the new global access-control key requires strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/repos/fleet-repos.controller.ts",
+        "apps/api/src/fleet/repos/fleet-repo-route.commands.ts",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/test/integration/fleet/fleet-repo-fix-unprotected-route.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261204090000_fleet_repo_rule_override/migration.sql",
+        "apps/api/src/fleet/repos/fleet-repos.rule-override.spec.ts",
+        "apps/api/test/integration/fleet/fleet-repo-rule-override-route.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Deleting a FleetRepo cascades deletion of its FleetRepoRuleOverride row.",
+        "A GitLab repo accepts the same valid rule-override PUT as a GitHub repo.",
+        "An agent DELETE with the global key and no approval policy returns 202 and preserves the override until approval.",
+        "A repo summary returned by GET /api/fleet/repos contains no rule content or context content."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "gains the `FleetRepoRuleOverride` model and the `FleetRepo.ruleOverride` relation."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repo-route.commands.spec.ts",
+          "reason": "`Object.values(FLEET_REPO_ROUTE_VARIANTS)` length 6 becomes 8; the case table gains `ruleOverrideSet` and `ruleOverrideClear` (key `fleet.repo.rules.configure`), and the repos mock gains `setRuleOverride` and `clearRuleOverride`."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/dto/fleet-repo.dto.spec.ts",
+          "reason": "gains the `FleetRepoDto.from` `ruleOverride` cases (absent gives `null`); existing cases unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its `NEW_KEY_SCOPES` copy gains `'fleet.repo.rules.configure': 'global'`."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated for the new key's row cells; never hand-edited beyond the regenerated output."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "`toHaveLength(245)` for each row's cells becomes 246."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "`gatedOperations` gains the put and delete operations on /api/fleet/repos/{id}/rule-override; the 146 count in the describe title and AC-5 becomes 148."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the gated-route count 146 becomes 148, with the comment naming the two rule-override routes."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "gains cases for the three rule-override operations and rows for the PUT and DELETE routes with key `fleet.repo.rules.configure` in the global admin route table; existing cases unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-admin-gates.spec.ts",
+          "reason": "gains the two gated rule-override routes in its admin gate table; existing rows unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "gains the `ruleOverride` entry with a `\"400\"` message; existing keys unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "gains the same entry in Chinese; existing keys unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Snapshot repo rule overrides into assignments and jobs",
+      "description": "**Goal** \u2014 Snapshot the current per-repo override at nax job assignment and retain its summary on the job.\n\n**Motivation** \u2014 Designer calls (user asked for them, 2026-11-10): rule sets are per repo only; the override is read when the job is assigned, like `fixTrustDetectedChecks`.\n\n**Approach** \u2014\n- `AssignPayload` (`packages/fleet-protocol/src/index.ts`, types only) gains `ruleOverride?: RuleOverrideAssign`, with `RuleOverrideAssign { sha256: string; rulesMode: 'merge' | 'replace'; rules: { path: string; content: string }[]; context?: { content: string; mode: 'append' | 'replace' } }`, documented as present only on RUN, PLAN, REVIEW, FIX and AGENT.\n- `IFleetJobRepository` gains `findRuleOverride(repoId): Promise<RuleOverrideAssign | null>` and `setRuleOverrideSummary(jobId, summary: JobRuleOverrideSummary | null): Promise<void>`, with `JobRuleOverrideSummary { sha256: string; ruleFiles: number; rulesMode: 'merge' | 'replace'; contextMode: 'append' | 'replace' | null }`.\n- `FleetJob` gains `ruleOverride Json?`, migration `apps/api/prisma/migrations/20261204100000_fleet_job_rule_override/migration.sql`. `FleetJobRecord` gains optional `ruleOverride?: JobRuleOverrideSummary | null` (absent means none), like `prRulings?`, so existing record literals stay valid.\n- `buildAssignPayload(job, repo, cloneUrl, gitIdentity, thread?)` (`apps/api/src/fleet/jobs/assign-payload.ts:28`)\n  - Target: `buildAssignPayload(job, repo, cloneUrl, gitIdentity, thread?, ruleOverride?: RuleOverrideAssign | null)`; spreads `{ ruleOverride }` when it is non-null and `job.command` is one of RUN, PLAN, REVIEW, FIX, AGENT. Otherwise the key is absent.\n- `PlacementService.assign` (`placement.service.ts:263`)\n  - Target: for those five commands it reads `this.repo.findRuleOverride(job.repoId)` inside the placement transaction, passes it to `buildAssignPayload`, and calls `setRuleOverrideSummary(job.id, summaryOf(override))` (`null` when there is none) right after `casAssign` and before `findById`, so the `after` record that `buildAssignPayload` and `transitions.record` use already carries the summary. THREAD and config-kind jobs read nothing and write nothing.\n- `FleetJobDto` gains `@ApiPropertyOptional({ nullable: true }) ruleOverride: JobRuleOverrideSummaryDto | null` from `FleetJobDto.from`.\n\nThe rule override travels with the ASSIGN, not a separate fetch, so a readopted job runs with the override it was assigned. Turning an override off or changing it affects jobs assigned after the change. Mixed versions: an older runner drops the unknown `ruleOverride` field (its parser copies an allow-list) and runs with the repo's own rules. An older API never sends it. The job's `ruleOverride` therefore records what was assigned, not proof that nax applied it. The `FleetRepoRuleOverride` row written by `setRuleOverride` is what `findRuleOverride` reads at assignment; US-008's integration ACs store it through the US-007 route. Wire field `ruleOverride` at the top level of the ASSIGN command payload: `{ \"sha256\": 64-hex string, \"rulesMode\": \"merge\" | \"replace\", \"rules\": [{ \"path\": string, \"content\": string }], \"context\"?: { \"content\": string, \"mode\": \"append\" | \"replace\" } }`. The job page reads `ruleOverride` from `FleetJobDto` as `null` or `{ \"sha256\", \"ruleFiles\", \"rulesMode\", \"contextMode\" }`. Use import type only for the shared protocol in API code. Add JobRuleOverrideSummaryDto alongside FleetJobDto in the existing jobs/dto/fleet-job.dto.ts; extend placement mock repositories for nax commands and regenerate OpenAPI/CLI contracts.\n\n**Scope** \u2014 In: shared wire type, job JSON migration/record/DTO, repository mapping, assignment transaction and payload integration. Out: override configuration storage/routes (US-007), runner parser/profile changes (US-009), job summary UI (US-010), applying an override to CONFIG jobs or threads, copying the override into the run bundle and adding a runner capability.\n\n**Interface** \u2014 `RuleOverrideAssign { sha256: string; rulesMode: 'merge' | 'replace'; rules: { path: string; content: string }[]; context?: { content: string; mode: 'append' | 'replace' } }`; `findRuleOverride(repoId): Promise<RuleOverrideAssign | null>`; `setRuleOverrideSummary(jobId, summary: JobRuleOverrideSummary | null): Promise<void>`; `JobRuleOverrideSummary { sha256: string; ruleFiles: number; rulesMode: 'merge' | 'replace'; contextMode: 'append' | 'replace' | null }`; `buildAssignPayload(job, repo, cloneUrl, gitIdentity, thread?, ruleOverride?: RuleOverrideAssign | null)`.",
+      "acceptanceCriteria": [
+        "[unit] buildAssignPayload for a RUN job with a ruleOverride argument returns a payload whose ruleOverride equals that argument.",
+        "[unit] buildAssignPayload for a THREAD job with a ruleOverride argument returns a payload with no ruleOverride key.",
+        "[unit] buildAssignPayload for a CONFIG_EDIT job with a ruleOverride argument returns a payload with no ruleOverride key.",
+        "[unit] buildAssignPayload for a FIX job with ruleOverride null returns a payload with no ruleOverride key.",
+        "[integration] With the test Postgres, a repo with a rule override stored through PUT /api/fleet/repos/:id/rule-override and one online runner, dispatching a RUN through POST /api/projects/:slug/fleet/jobs writes one ASSIGN FleetCommand whose payload.ruleOverride has the stored sha256, rulesMode, rules and context.",
+        "[integration] After that dispatch, the FleetJob row's ruleOverride is { sha256, ruleFiles: <n>, rulesMode, contextMode }.",
+        "[integration] After that dispatch, GET /api/projects/:slug/fleet/jobs/:id returns the same object as ruleOverride.",
+        "[integration] A RUN dispatched on a repo without an override writes an ASSIGN with no ruleOverride key and leaves the job's ruleOverride null.",
+        "[integration] A RUN queued while the only runner is at capacity, whose repo's override is cleared through DELETE /api/fleet/repos/:id/rule-override before the runner syncs with a free slot through POST /api/fleet/runner/sync, is assigned with no ruleOverride key in its ASSIGN.",
+        "[integration] A THREAD turn placed on a repo with an override writes an ASSIGN with no ruleOverride key.",
+        "[integration] PrismaFleetJobRepository.findRuleOverride maps a stored row to { sha256, rulesMode, rules, context: { content, mode } }.",
+        "[integration] PrismaFleetJobRepository.findRuleOverride omits context for a row whose contextContent is null.",
+        "[integration] PrismaFleetJobRepository.findRuleOverride returns null for a repo with no row.",
+        "[integration] When an assigned job runs on an older runner that drops the unknown ruleOverride field and uses the repo's rules, GET job detail still reports the assigned ruleOverride summary."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "placement",
+        "protocol",
+        "rules",
+        "prisma"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-package wire changes and transactional placement snapshots must remain atomic with casAssign and command publication; no new authentication or permission algorithm is introduced."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/assign-payload.ts",
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/test/integration/fleet/placement-fix-trust.integration.spec.ts",
+        "packages/fleet-protocol/src/index.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261204100000_fleet_job_rule_override/migration.sql",
+        "apps/api/test/integration/fleet/placement-rule-override.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "buildAssignPayload includes the supplied override for PLAN, REVIEW, FIX and AGENT commands.",
+        "PlacementService.assign performs no rule override repository read or summary write for THREAD, CONFIG_EDIT, CONFIG_DRIFT or CONFIG.",
+        "When casAssign loses the assignment race, no override summary or ASSIGN command is written.",
+        "A later override change does not alter an already persisted ASSIGN payload or job ruleOverride summary."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "gains `FleetJob.ruleOverride Json?`."
+        },
+        {
+          "path": "packages/fleet-protocol/src/index.ts",
+          "reason": "gains `RuleOverrideAssign` and `AssignPayload.ruleOverride` (types only)."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/assign-payload.spec.ts",
+          "reason": "gains the US-008 `ruleOverride` cases; existing cases unchanged because an absent override leaves the payload as it is."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/dto/fleet-job.dto.spec.ts",
+          "reason": "gains the `ruleOverride` mapping case; fixtures gain `ruleOverride: null`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.agents-run.spec.ts",
+          "reason": "its job-repository mock gains `findRuleOverride` (resolving `null`) and `setRuleOverrideSummary`, because `assign` now calls them for AGENT jobs; existing assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.provider-vault.spec.ts",
+          "reason": "its job-repository mock gains `findRuleOverride` (resolving `null`) and `setRuleOverrideSummary`, because `assign` now calls them for nax jobs; existing assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.queued-scan.spec.ts",
+          "reason": "its job-repository mock gains `findRuleOverride` (resolving `null`) and `setRuleOverrideSummary`, because `assign` now calls them for nax jobs; existing assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.trust-domain.spec.ts",
+          "reason": "its job-repository mock gains `findRuleOverride` (resolving `null`) and `setRuleOverrideSummary`, because `assign` now calls them for nax jobs; existing assertions unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Materialize assigned overrides into per-job nax profiles",
+      "description": "**Goal** \u2014 Validate assigned overrides and hand private job-directory rules/context to every supported nax job through its profile.\n\n**Motivation** \u2014 koda passes none (`buildNaxArgv`, `apps/runner/src/executor/nax-process.ts`).\n\n**Approach** \u2014\n- `parseAssign` (`apps/runner/src/supervisor/assign-parser.ts`)\n  - Target: a top-level `ruleOverride` is accepted only on RUN, PLAN, REVIEW, FIX and AGENT. It must be an object with `sha256` (64 lowercase hex), `rulesMode` (`merge`|`replace`), `rules` (array of at most 50 `{ path, content }`, path matching `^[a-z0-9_-]+(\\/[a-z0-9_-]+){0,3}\\.md$`, content a string), and an optional `context` (`{ content: string, mode: 'append' | 'replace' }`). It is copied into the cleaned assign. Any other shape, or the key on another command, fails with `bad('ruleOverride')`.\n- New `apps/runner/src/executor/rule-override.ts`: `materializeRuleOverride(jobDir: string, override: RuleOverrideAssign): Promise<JobProfileContext>`, with `JobProfileContext { rules: { overrideDir: string; overrideMode: 'merge' | 'replace' }; projectContext?: { file: string; mode: 'append' | 'replace' } }`. It removes `<jobDir>/koda-rules` and `<jobDir>/koda-context.md` first, writes every rule to `<jobDir>/koda-rules/<path>` (directories 0700, files 0600), writes `context.content` to `<jobDir>/koda-context.md` when present, and returns absolute paths. A path that resolves outside `<jobDir>/koda-rules` throws `Error('rule override path')`.\n- `jobProfileContent(outputDir, projectName, relay?, botCostLimitUsd?, modelAliases?)` and `writeJobProfile(...)` (`job-profile.ts:31`, `:48`)\n  - Target: both gain a last optional `context?: JobProfileContext`. When present, the profile JSON gains `context: { rules: { overrideDir, overrideMode }, projectContext?: { file, mode } }`; when absent the profile is unchanged.\n- `HostExecutor.prepare` (`host-executor.ts:115`) and `HostExecutor.spawnFixStep` (`:212`): when `assign.ruleOverride` is present, call `materializeRuleOverride(jobDir, assign.ruleOverride)` and pass the result to `writeJobProfile`. `prepareConfigJob` and thread hosting are unchanged.\n\nThe override reaches nax through the per-job profile (`writeJobProfile`, `apps/runner/src/executor/job-profile.ts:48`) rather than argv, so every nax command the job runs (`run`, `plan`, `bot review`, `bot fix`, `agents run`) gets it; CONFIG jobs and threads never do. `.nax/` rule files are never edited by this feature. The override lives in the job directory only. The rule override travels with the ASSIGN, not a separate fetch, so a readopted job runs with the override it was assigned. Turning an override off or changing it affects jobs assigned after the change. The existing parser's `bad('ruleOverride')` serializes detail `invalid ruleOverride`; retain that convention. CONFIG denotes the config-job family here: packages/fleet-protocol/src/config-jobs.ts defines CONFIG_EDIT and CONFIG_DRIFT, not a new literal CONFIG command. A materialization Error('rule override path') propagates into HostExecutor.prepare's existing reasonFromError mapping as { ok: false, reason: 'workspace: rule override path' }; do not change generic prepare error formatting. Check all rule destinations before writing any rule so a malicious outside path writes no file. Preserve relay, bot cost, model aliases and atomic 0600 profile writing; the FIX second profile write must also include context. Use real temp files and injected naxHome in tests, not the installed nax.\n\n**Scope** \u2014 In: cleaned wire validation, private materialization, optional profile overlay and prepare/FIX integration. Out: API override storage/snapshot (US-007/008), web admin (US-010), applying to CONFIG or threads, adding argv flags, a runner capability for rule overrides, copying overrides into bundles or editing checkout .nax rules/context.\n\n**Interface** \u2014 `materializeRuleOverride(jobDir: string, override: RuleOverrideAssign): Promise<JobProfileContext>`; `JobProfileContext { rules: { overrideDir: string; overrideMode: 'merge' | 'replace' }; projectContext?: { file: string; mode: 'append' | 'replace' } }`; `context?: JobProfileContext` as the last optional argument to `jobProfileContent` and `writeJobProfile`; malformed assignments fail with `bad('ruleOverride')`.",
+      "acceptanceCriteria": [
+        "[unit] parseAssign on a RUN ASSIGN with ruleOverride { sha256: <64 hex>, rulesMode: 'merge', rules: [{ path: 'api.md', content: 'x' }] } returns ok with assign.ruleOverride equal to it.",
+        "[unit] parseAssign on an otherwise well-formed RUN ASSIGN whose ruleOverride.rules[0].path is ../x.md returns { ok: false, detail: 'invalid ruleOverride' }, the existing bad('ruleOverride') representation of refusal reason ruleOverride.",
+        "[unit] parseAssign on an otherwise well-formed RUN ASSIGN whose ruleOverride.rulesMode is 'append' returns { ok: false, detail: 'invalid ruleOverride' }, the existing bad('ruleOverride') representation of refusal reason ruleOverride.",
+        "[unit] parseAssign on an otherwise well-formed RUN ASSIGN whose ruleOverride.sha256 has 63 characters returns { ok: false, detail: 'invalid ruleOverride' }, the existing bad('ruleOverride') representation of refusal reason ruleOverride.",
+        "[unit] parseAssign on an otherwise well-formed THREAD, CONFIG_EDIT or CONFIG_DRIFT ASSIGN carrying ruleOverride returns { ok: false, detail: 'invalid ruleOverride' }, the existing bad('ruleOverride') representation of refusal reason ruleOverride.",
+        "[unit] materializeRuleOverride(jobDir, override) with rules api.md and pkg/web.md and a context writes <jobDir>/koda-rules/api.md, <jobDir>/koda-rules/pkg/web.md and <jobDir>/koda-context.md with the given contents, and returns { rules: { overrideDir: <jobDir>/koda-rules, overrideMode: 'merge' }, projectContext: { file: <jobDir>/koda-context.md, mode: 'append' } }.",
+        "[unit] materializeRuleOverride on a job dir that already holds koda-rules/old.md leaves only the new rule files under koda-rules.",
+        "[unit] materializeRuleOverride without a context, on a job dir that holds koda-context.md, removes that file and returns no projectContext.",
+        "[unit] The rule files materializeRuleOverride writes have mode 0600.",
+        "[unit] materializeRuleOverride given a rule path that resolves outside <jobDir>/koda-rules rejects with rule override path and writes no file.",
+        "[unit] jobProfileContent(outDir, name, undefined, undefined, undefined, { rules: { overrideDir: '/j/koda-rules', overrideMode: 'replace' }, projectContext: { file: '/j/koda-context.md', mode: 'replace' } }) returns an object whose context equals { rules: { overrideDir: '/j/koda-rules', overrideMode: 'replace' }, projectContext: { file: '/j/koda-context.md', mode: 'replace' } }.",
+        "[unit] jobProfileContent(outDir, name) returns an object with no context key.",
+        "[unit] HostExecutor.prepare for a RUN job whose assign has a ruleOverride writes the per-job profile with context.rules.overrideDir equal to <jobDir>/koda-rules, read back from the profile file in the injected nax home.",
+        "[unit] HostExecutor.spawnFixStep for a FIX job whose assign has a ruleOverride writes the per-job profile with context.rules.overrideDir equal to <jobDir>/koda-rules.",
+        "[unit] When materializeRuleOverride throws Error('rule override path') for an assigned path outside the rules directory, HostExecutor.prepare returns { ok: false, reason: 'workspace: rule override path' } through the existing reasonFromError mapping."
+      ],
+      "tags": [
+        "runner",
+        "fleet",
+        "rules",
+        "protocol",
+        "security"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Untrusted assignment parsing and path containment cross the filesystem trust boundary, while private profiles retain relay/credential-sensitive settings; strict security isolation applies."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/executor/job-profile.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/test/unit/host-executor.spec.ts",
+        "packages/fleet-protocol/src/index.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/executor/rule-override.ts",
+        "apps/runner/src/executor/rule-override.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseAssign accepts the cleaned override for PLAN, REVIEW, FIX and AGENT as well as RUN.",
+        "parseAssign rejects uppercase SHA hex, uppercase rule paths, 51 rules, non-string content and invalid context modes with invalid ruleOverride.",
+        "materializeRuleOverride writes nested rule directories with mode 0700 and context files with mode 0600.",
+        "jobProfileContent preserves the relay configuration, model aliases and bot cost limit when context is supplied.",
+        "Preparing a job with an override leaves the checkout's .nax/rules and .nax/context.md unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/supervisor/assign-parser.spec.ts",
+          "reason": "gains the US-009 `ruleOverride` cases; existing cases unchanged."
+        },
+        {
+          "path": "apps/runner/src/executor/job-profile.spec.ts",
+          "reason": "gains the `context` cases; existing cases unchanged because an absent `context` leaves the profile as it is."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "gains the `prepare` and `spawnFixStep` cases with a `ruleOverride`; existing cases unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Configure repo overrides in the admin web and show job snapshots",
+      "description": "**Goal** \u2014 Provide the globally permissioned rule-override dialog and display which override a job was assigned.\n\n**Motivation** \u2014 A registered repo can carry a rule override: rule files laid out like `.nax/rules/`, an optional project-context file, and nax's combine modes.\n\n**Approach** \u2014\n- `FleetRepo` (`apps/web/lib/fleet-types.ts`) gains `ruleOverride: FleetRuleOverrideSummary | null`; `FleetJobDto` (`fleet-types.ts:295`) gains `ruleOverride?: FleetJobRuleOverride | null`; new `FleetRuleOverride` (full body).\n- `useFleetRepos()` gains `getRuleOverride(id): Promise<FleetRuleOverride | null>` (`GET /fleet/repos/${id}/rule-override`), `setRuleOverride(id, body)` (`PUT`) and `clearRuleOverride(id)` (`DELETE`). The last two return `{ kind: 'pending', request }` when the answer has `permissionKey`, else `{ kind: 'saved', repo }` with the returned `FleetRepo`.\n- New `apps/web/components/fleet/RepoRuleOverrideDialog.vue` (`FleetRepoRuleOverrideDialog`), prop `repo: FleetRepo`. A button `data-testid=\"fleet-repo-rules-<owner>-<name>\"` labelled `fleet.repos.ruleOverride.open` (with the file count when `repo.ruleOverride` is set) opens a dialog that loads the override with `getRuleOverride`. It shows one row per rule file (path input, content textarea, remove button), an add-file button, a `rulesMode` select (merge, replace), a context textarea and a context-mode select (append, replace), plus Save and Clear buttons, all disabled without `fleet.repo.rules.configure` in the global permissions. Save sends `{ rules: [{ path, content }], rulesMode, context: { content, mode } | null }` (context `null` when the textarea is empty). A pending answer shows `fleet.repos.ruleOverride.pending`; a failure shows `extractApiError(err)` in `role=\"alert\"`; a saved answer emits `saved` with the returned repo, which the page puts in its `repos` list, so the button's file count follows.\n- `apps/web/pages/admin/fleet/repos.vue` mounts it in the actions cell for every repo.\n- `apps/web/pages/[project]/fleet/jobs/[id]/index.vue` shows `data-testid=\"fleet-job-rule-override\"` when `job.ruleOverride` is set: `fleet.jobs.ruleOverride.summary` (worded as the override the job was assigned) with `{files}`, `{mode}`, `{context}` and the first 8 characters of `sha256`.\n- i18n keys `fleet.repos.ruleOverride.*` and `fleet.jobs.ruleOverride.summary` in `en.json` and `zh.json`.\n\nThe web sends `PUT /fleet/repos/{id}/rule-override` with JSON body `{ \"rules\": [{ \"path\": \"api.md\", \"content\": \"...\" }], \"rulesMode\": \"merge\", \"context\": { \"content\": \"...\", \"mode\": \"append\" } }` (context may be `null`), `DELETE` with no body; both answer `FleetRepoDto` (or an approval request). It reads `GET` as `RuleOverrideDto` or `null`, and reads `ruleOverride` from `FleetRepoDto`. The job page reads `ruleOverride` from `FleetJobDto` as `null` or `{ \"sha256\", \"ruleFiles\", \"rulesMode\", \"contextMode\" }`. Use `useGlobalPermissions()`, `extractApiError(err)`, `$api` and existing apiPath escaping. Mount the actual dialog through both test mount-sfc maps/name union and update FleetRepo fixtures in existing repo component/composable/page tests. GitLab is supported; do not copy the GitHub-only visibility restriction of unrelated repo switches. The assigned summary is not proof an older runner applied it.\n\n**Scope** \u2014 In: web types/composable/dialog/actions integration, saved/pending/errors, job assignment summary, locales and Jest tests. Out: backend validation/persistence/approval enforcement (US-007), assignment snapshot (US-008), runner materialization (US-009), new CLI/assistant/MCP tools, and a new web view of flow accepted findings. Organisation-wide, per-project and per-job rule sets; this feature adds per-repo overrides only. Editing `.nax/rules/` or `.nax/context.md` in any repo; the existing S3 config-edit flow still owns in-repo rule changes.\n\n**Interface** \u2014 `getRuleOverride(id): Promise<FleetRuleOverride | null>`; `setRuleOverride(id, body)` and `clearRuleOverride(id)` return `{ kind: 'pending', request }` or `{ kind: 'saved', repo }`; `ruleOverride: FleetRuleOverrideSummary | null` on `FleetRepo`; `ruleOverride?: FleetJobRuleOverride | null` on `FleetJobDto`; component prop `repo: FleetRepo`, event `saved` with returned repo.",
+      "acceptanceCriteria": [
+        "[unit] useFleetRepos().setRuleOverride('r1', body) sends PUT to /fleet/repos/r1/rule-override with that body and, for a FleetRepo answer, returns { kind: 'saved', repo }.",
+        "[unit] setRuleOverride returns { kind: 'pending', request } when the answer carries permissionKey.",
+        "[unit] clearRuleOverride('r1') sends DELETE to /fleet/repos/r1/rule-override and returns { kind: 'saved', repo }.",
+        "[unit] After a saved answer whose repo has ruleOverride.ruleFiles 3, the admin Repos page shows the dialog's open button with the file count 3.",
+        "[unit] FleetRepoRuleOverrideDialog shows the open button with the file count 2 when repo.ruleOverride.ruleFiles is 2.",
+        "[unit] Opening the dialog calls getRuleOverride with the repo id and renders one row per returned rule with its path and content.",
+        "[unit] Adding a file, typing path web.md and content w, and pressing Save calls setRuleOverride with rules ending in { path: 'web.md', content: 'w' }.",
+        "[unit] Saving with an empty context textarea sends context: null.",
+        "[unit] Saving with context text c and mode replace sends context: { content: 'c', mode: 'replace' }.",
+        "[unit] Save and Clear are disabled when the global permissions lack fleet.repo.rules.configure.",
+        "[unit] A pending answer to Save shows the fleet.repos.ruleOverride.pending text.",
+        "[unit] A rejected Save shows the extractApiError message in an element with role=alert.",
+        "[unit] The admin Repos page renders a FleetRepoRuleOverrideDialog open button for a GitLab repo.",
+        "[unit] The job page renders data-testid=fleet-job-rule-override with the fleet.jobs.ruleOverride.summary text holding the file count, the rules mode and the first 8 characters of sha256 when job.ruleOverride is set.",
+        "[unit] The fleet.repos.ruleOverride.* keys the dialog uses and fleet.jobs.ruleOverride.summary resolve to non-empty strings in both the en and zh locales."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "rules",
+        "admin",
+        "approvals",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-007",
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends existing repo-composable result handling and permission-aware Vue controls with a standard editable dialog and additive job summary; the new global permission check still requires strict security TDD."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/RepoFixUnprotected.vue",
+        "apps/web/composables/useFleetRepos.ts",
+        "apps/web/pages/admin/fleet/repos.vue",
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/lib/fleet-types.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/RepoRuleOverrideDialog.vue",
+        "apps/web/tests/components/repo-rule-override-dialog.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "getRuleOverride('r1') sends GET /fleet/repos/r1/rule-override and returns the full override or null unchanged.",
+        "clearRuleOverride returns a pending result when the API answer carries permissionKey.",
+        "A pending Save leaves the repo's displayed persisted file count unchanged.",
+        "The job page omits fleet-job-rule-override when the summary is null or absent.",
+        "The job summary displays contextMode and describes the override as assigned rather than guaranteed applied."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`FleetRepo` gains `ruleOverride`, `FleetJobDto` gains optional `ruleOverride`, new `FleetRuleOverride`."
+        },
+        {
+          "path": "apps/web/composables/useFleetRepos.ts",
+          "reason": "gains the three rule-override calls."
+        },
+        {
+          "path": "apps/web/pages/admin/fleet/repos.vue",
+          "reason": "mounts `FleetRepoRuleOverrideDialog` in the actions cell."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "shows the rule-override summary."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.repos.ruleOverride.*` and `fleet.jobs.ruleOverride.summary`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same keys in Chinese."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "add `FleetRepoRuleOverrideDialog: 'RepoRuleOverrideDialog.vue'` to both component-file maps and the name union; existing entries unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-fleet-repos.spec.ts",
+          "reason": "its `FleetRepo` fixtures gain `ruleOverride: null`, and the page mounts the real `FleetRepoRuleOverrideDialog`; existing switch-count assertions unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/repo-auto-review.spec.ts",
+          "reason": "its `FleetRepo` fixture gains `ruleOverride: null` so it still matches the type."
+        },
+        {
+          "path": "apps/web/tests/components/repo-fix-checks.spec.ts",
+          "reason": "its `FleetRepo` fixture gains `ruleOverride: null` so it still matches the type."
+        },
+        {
+          "path": "apps/web/tests/components/repo-fix-unprotected.spec.ts",
+          "reason": "its `FleetRepo` fixture gains `ruleOverride: null` so it still matches the type."
+        },
+        {
+          "path": "apps/web/tests/composables/useFleetRepos.spec.ts",
+          "reason": "gains the three rule-override cases; `FleetRepo` fixtures gain `ruleOverride: null`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Record the decision to retain koda thread skill tools",
+      "description": "**Goal** \u2014 Record the #375 decision in the existing thread design's section 1.5 without changing runtime behavior.\n\n**Motivation** \u2014 The runner depends on nax-agent alone, and koda's thread skills are an API-side snapshot (`SkillsService.snapshotForProject`) delivered in the ASSIGN, not a disk scan.\n\n**Approach** \u2014 `docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md` \u00a71.5 gains a decision paragraph. Adds a decision paragraph for #375 to \u00a71.5 of `docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md`: koda keeps `load_skill` and `read_skill_file` because nax's resource catalog and skills provider are in the `@nathapp/nax` CLI package (`packages/nax/src/resources/`), not exported by `@nathapp/nax-agent` (which exports only the `ToolProvider` and `ProviderTool` types); the runner depends on nax-agent alone; and koda's skills are an API snapshot delivered in the ASSIGN, not a disk scan. Revisit if nax-agent exports the catalog. Name the decision date 2026-11-10. Nothing else in the document changes.\n\n**Scope** \u2014 In: the dated #375 paragraph in \u00a71.5 Runner fetch and agent access. Out: runtime thread placement/reviews (US-001\u2013005), override implementation (US-006\u2013010), and swapping koda's thread skill tools for nax's resource catalog (#375); the decision is recorded, no runtime change.\n\n**Interface** \u2014 Existing `load_skill` / `read_skill_file` (`apps/runner/src/thread/tools/`) remain unchanged; no new runtime interface.\n\n**No-test** \u2014 documentation only; no code path reads this file.",
+      "acceptanceCriteria": [
+        "[review] docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md \u00a71.5 Runner fetch and agent access has a paragraph naming #375 and the date 2026-11-10 that states koda keeps load_skill and read_skill_file.",
+        "[review] That paragraph names @nathapp/nax packages/nax/src/resources/ as where nax's resource catalog and skills provider live, and states that @nathapp/nax-agent exports only the ToolProvider and ProviderTool types.",
+        "[review] That paragraph states that koda's thread skills are an API snapshot delivered in the ASSIGN rather than a disk scan, and that the decision is revisited if nax-agent exports the catalog.",
+        "[review] The #375 documentation change leaves all pre-existing \u00a71.5 fetch and tool-access instructions unchanged; its diff is confined to the new decision paragraph, with no runner dependency or runtime tool changes."
+      ],
+      "tags": [
+        "docs",
+        "fleet",
+        "threads",
+        "decision"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "One reviewable paragraph in one existing root design document; binding US-011 is retained despite general rules against documentation-only stories.",
+        "noTestJustification": "The binding specification explicitly declares this documentation-only story no-test; no code path reads the edited design document and runtime behavior is unchanged."
+      },
+      "contextFiles": [
+        "docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md",
+          "reason": "\u00a71.5 gains the #375 decision paragraph; nothing else in the document changes."
+        }
+      ],
+      "workdirSource": "defaulted"
+    }
+  ],
+  "analysis": "Repository investigation and architecture: This is an enhancement to an existing Bun/Turborepo monorepo, not greenfield. The supplied detected Express/Next.js labels are inaccurate: the app contexts identify NestJS 12/Fastify/Prisma 7 for apps/api and Nuxt 4/Vue SSR for apps/web (.nax/mono/apps/api/context.md:23, .nax/mono/apps/web/context.md:21). The runner is Bun-only ESM with SQLite and injected execution seams (.nax/mono/apps/runner/context.md:15). codebase-memory MCP was unavailable in this session, so discovery used direct source reads, Glob and Grep. No runtime implementation or test execution was performed while drafting this PRD. Before API implementation, read the nathapp-nestjs-patterns skill and app guidance; retain Nathapp envelopes, exceptions, transaction management and audit conventions. Never edit generated AGENTS files, generated CLI files or openapi.json manually. The root generation chain is bun run generate -> API build/export -> OpenAPI CLI generation (package.json:20-24). Binding workdirs and dependencies are intentional even when a story also regenerates root/CLI contracts or US-008 edits the shared protocol package. US-011 is the explicitly binding documentation-only exception and has no workdir because it changes root documentation.\n\nUS-001 findings: PlacementThread already carries optional kind, action and mode (apps/api/src/fleet/jobs/placement-rules.ts:26); firstMisfit currently checks disabled/online/budget/labels/executor, then thread enablement and protocol, then the five inline capability rules, trust domain and thread capacity (placement-rules.ts:169-199). Extract only the capability rules without changing first-failure order or the native/ACP backend semantics of servesThreadBackend (placement-rules.ts:159). PrismaChatThreadRepository.anyRunnerServesBackend currently selects enabled protocol>=THREAD_MIN_PROTOCOL_VERSION runners and accepts an empty fleet (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:75-84). Replace the repository interface and all old mocks/callers, not just the helper export. assertBackendServed currently preserves backend field/value refusal args (apps/api/src/fleet/threads/thread-backend-served.ts:6-20). ThreadsService.create checks PROJECT after anchor lookup and REPO after scoped repo lookup, with permission checks retained (apps/api/src/fleet/threads/threads.service.ts:40-76). Workspace create selects a reachable permitted home project before backend validation (workspace-threads.service.ts:53-80). Existing get/scope and changeMode permission checks must not be bypassed (threads.service.ts:82-92, 143-159; workspace-threads.service.ts:105-122). The mode preflight must use only threadModes, judging a pinned runner even if disabled, and must not turn backend drift into a mode refusal. No capable enrolled runner is still acceptance, not 409. Controllers must preflight before approval creation, while services recheck during approved execution. Integration fixtures which previously advertised only threadBackends need the appropriate projectThreads/workspaceThreads/threadModes flag to keep unrelated gate tests meaningful. Update thread-backend-served.spec.ts, both thread service/controller suites, placement-rules.spec.ts, thread-mode-change.spec.ts, and backend-unavailable, gated-project-thread-routes, gated-thread-handoff-routes, gated-thread-session-routes, permissions-workspace-threads, endpoint e2e, workspace-turns and fleet-project-thread-placement integration fixtures. For intentional placement-misfit tests create the thread while a capable runner exists, then remove/downgrade capabilities. Add English/Chinese thread errors and regenerate contracts.\n\nUS-002/003 findings and shared seam: attention-unplaceable currently duplicates classify, excludes all THREAD jobs and omits protocol/thread capacity from toCandidate (apps/api/src/fleet/dashboard/attention-unplaceable.ts:45-91). Preserve classification priority: all PERMANENT_MISFITS -> never/error; all capacity/busy_repo/trust_domain/thread_capacity -> waiting_capacity/warning; all budget_paused -> runners_paused/warning; otherwise no_fit/warning. Scope budget pause wins over no runners; a single fitting runner means null, never fits_not_placed. The existing constant contains seven verdicts and dashboard DTO imports must remain compatible through a re-export (dashboard.types.ts:102-103, dto/fleet-dashboard.dto.ts:8). Shared judgeUnplaceable belongs in jobs, not dashboard, to avoid a reverse domain dependency. Preserve sorted misfits, reasonsShown truncation/reasonsTotal, fixableBlockedRunnerIds, global evaluation followed by project filtering, unreadable-capability candidate exclusion and vault scoping. PrismaDashboardRepository.JOB_SELECT/toJobRow currently lack fleetThreadTurn and thread.kind; findRunners lacks protocolVersion/threadCapacity (prisma-dashboard.repository.ts:11-36, 60-65, 84-90). Copy the existing findThreadAssign kind/mode fallback rather than inventing a different mapping (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:310). Dashboard service/config picks, RawRunnerRow-dependent fixtures, common/test-helpers/fleet-dashboard.ts, attention-rules.spec.ts, dashboard.service.spec.ts and prisma-dashboard.repository.spec.ts all need coordinated shape updates.\n\nPlacementService.placeJob illustrates the inputs queuedVerdict must reuse: repo, pauses, pinned candidates, active loads, thread assign and judgedJob for scoped vault providers (apps/api/src/fleet/jobs/placement.service.ts:103-142). judgedJob/vault memoization is already available (placement.service.ts:88-101). queuedVerdict must use findById/nonlocking reads, not lockById, lockRunners, txManager.run, assign, transitions or stateReason writes. The age boundary is strict: queued age <= minQueuedSec returns null. fillRunnerThreads skips a missing turn/repo (placement.service.ts:188-226); dashboard must skip a THREAD row without threadTurn. ThreadsService.get and WorkspaceThreadsService.get currently assemble detail without queuedTurn (threads.service.ts:82-92, workspace-threads.service.ts:115-122). Append PlacementService as the last constructor parameter to avoid shifting existing positional collaborators, update all direct constructions in service tests, workspace-turns.spec.ts, thread-mode-change.spec.ts and test/integration/thread-flow-preapproval.integration.spec.ts, and keep threads.module.spec.ts a DB-free DI test. ChatThreadDetail and ThreadDetailDto carry the new field, WorkspaceThreadDetailDto inherits it (threads/domain/chat-thread.domain.ts:122, threads/dto/thread.dto.ts:82, dto/workspace-thread.dto.ts:22). queuedAt must serialize to ISO; expose only six producible verdicts in QueuedTurnDto. Regenerate OpenAPI and CLI after US-003.\n\nUS-004 findings: Project detail uses useThread and exposes controller.reloadThread (apps/web/pages/[project]/threads/[id].vue:29-38); workspace detail uses useWorkspaceThread with creator-scoped reads and home-project summaries (apps/web/pages/threads/[id].vue:29-59). Mount the shared notice above each timeline without changing existing permission or transcript behavior. Existing controller fallback polling only runs while live=false and messages indicate a running turn (apps/web/lib/thread-controller.ts:132-161), so it does not satisfy the required independent 30-second queued-activeJob detail refresh. Use lifecycle-managed page polling triggered by loaded activeJob.state, clear on unmount/state exit and test using fake timers. Treat runnerName/reasons as untrusted interpolated text, not HTML; use both locale files and existing fleet.misfit labels. Extend tests/helpers/mount-sfc.ts component maps/name union and both detail-page suites so real component behavior is exercised.\n\nUS-005 findings: FlowStepAction dispatch has no accepted list (apps/api/src/fleet/flows/flow-step-decision.ts:62-70). Clean PRD edits are gated by canApplyCalls and nonempty THREAD findings stop at lines 141-156; NAX answered-question/replanning behavior follows and must remain unchanged (flow-step-decision.ts:157-183). RULE/FIX gates remain at lines 204 and 231. The dispatch path calls recordStep without accepted at fleet-flow-advance.service.ts:126; buildStepDispatch restricts PRD edit instructions to NAX at :463; recordStep currently records only step/jobId at :523-538. Reuse the existing safeFlowJsonText/truncateFlowText treatment from advancePrdEdits (:330). Existing decide cost-cap guard is at :632 and all creator-access/budget guards and stale PLAN-head protection remain authoritative. Accepted minor/answered findings must not edit the thread's spec, create a stop ticket or call apply_calls; PRD edits use the existing flow-owned edit commit path. Update old contrary assertions in flow-step-decision.spec.ts, fleet-flow-advance.service.spec.ts, fleet-flow-advance-calls.spec.ts, fleet-flow-advance-prd-edits.spec.ts and fleet-flow-advance.integration.spec.ts; retain ambiguous and over-20 stops and all NAX regression anchors. Recovery recordStep deliberately does not reconstruct accepted findings.\n\nUS-006/007 findings: The pure validator can mirror the unknown-input/object/text handling style of apps/api/src/fleet/flows/flow-prd-edits.ts:20-45, but is a separate rules contract with UTF-8 byte limits, lowercase paths, duplicate detection, defaults and stable SHA-256. Only US-006 owns rule-override.ts and its unit spec; US-007 consumes them without broadening the validator's scope. FleetReposService already has txManager, AuditRecorder and a configureFixUnprotected precedent (apps/api/src/fleet/repos/fleet-repos.service.ts:31-42, 147-162). Use the actual AuditRecorder service rather than adding an unrelated AuditService. Controller precedent freezes id/body under a dedicated global key and converts ApprovalPending to 202 (fleet-repos.controller.ts:128-148). Route commands currently register six variants using parseRouteInput/routeCommand and reload the requesting principal (fleet-repo-route.commands.ts:15-22, 91-100); add two variants and retain approval execution revalidation. The catalog currently adds the fix-unprotected key through NEW_KEY_SCOPES and marks fleet.repo. high-risk (apps/api/src/permissions/catalog.ts:120-135, 171). GET full bodies needs rules.configure, not repo.read; PUT must validate before producing any approval request; PUT/DELETE are approval-gated 200/202 writes and audit within the mutation transaction. No GitHub-only restriction applies to rules: GitLab repos must work too. PrismaFleetRepoRepository.findById currently reads scalar repo only and findPage uses Paginate (prisma-fleet-repo.repository.ts:22-25, 53-56, 88-92); add scalar summary selection, not the rules JSON, to list/findById. Existing creation input Omit signatures may need excluding the new derived optional summary to prevent accidental Prisma writes. New rule-override DTO classes are colocated in the existing repos/dto/fleet-repo.dto.ts; no additional DTO source-file output is required. Add the cascading override table and actor attribution; use local union types, no Prisma enums. Update route-command variant count 6->8; permission cells 245->246 and regenerate role-matrix snapshot; approval contract/integration gated counts 146->148; extend fleet OpenAPI/admin-gate tables; regenerate API/CLI contracts and both fleet i18n files.\n\nUS-008 findings: AssignPayload is shared through packages/fleet-protocol; the API may import that package with import type only. buildAssignPayload already combines thread, review, FIX trust/rulings and AGENT task fields (apps/api/src/fleet/jobs/assign-payload.ts:28-69); add override only for RUN/PLAN/REVIEW/FIX/AGENT without affecting other fields. PlacementService.assign currently does casAssign then findById, builds payload, pins thread, creates command and records transition (placement.service.ts:263-278). The override read and summary write must share that placement transaction; write summary after successful casAssign and before findById, so after/payload/activity see the same snapshot. No override read or summary write for THREAD/config. Do not snapshot at dispatch: queued jobs must observe later override changes at assignment. Existing assignments/requeues should explicitly clear the summary to null if no override exists. Add the nullable FleetJob JSON column, optional record field to preserve literals, repository mapping and DTO summary; only the summary is stored on FleetJob, full bodies travel in persisted ASSIGN. Preserve cas assignment, row lock ordering, lease fencing, transaction atomicity and postcommit publish/wake semantics. Update assign-payload.spec.ts, fleet-job.dto.spec.ts, and placement service AGENT/provider-vault/queued-scan/trust-domain mocks with null-returning findRuleOverride/setRuleOverrideSummary. Integration must configure through the US-007 route to exercise the persistence seam.\n\nUS-009 findings: parseAssign validates and copies an allow-list, with bad(what) producing detail 'invalid <what>' (apps/runner/src/supervisor/assign-parser.ts:14-17, 211-230). Spec wording bad('ruleOverride') therefore means the existing parser convention, not a new error schema. Validate the top-level field before returning any cleaned assign; reject its presence for THREAD/all config kinds and malformed SHA/modes/paths/array/context. jobProfileContent currently merges output/name, bot cost and model aliases, with separate relay/nonrelay return branches; both must gain optional context without dropping relay secrets or aliases (apps/runner/src/executor/job-profile.ts:31-45). writeJobProfile already uses atomic temp/rename and 0600 (:48-55); append the optional argument. HostExecutor.prepare writes a profile after checkout/capability checks (host-executor.ts:115-138); spawnFixStep rewrites it with remaining budget (:212-230), so both must materialize and pass context or the FIX second step loses the override. Materialize under private jobDir with fresh rules/context paths, 0700 directories/0600 files and a prewrite containment check; do not mutate checkout .nax files, change argv, apply to config/thread hosting or fetch mutable repo overrides during readoption. Prefer real temp filesystem tests and read actual profile JSON through injected naxHome; extend assign-parser.spec.ts/job-profile.spec.ts/test/unit/host-executor.spec.ts. Preserve git/token/relay environment handling nearby. Mixed versions deliberately need no capability/protocol negotiation: old runner allow-list drops override; recorded summary means assigned, not applied.\n\nUS-010 findings: RepoFixUnprotected already demonstrates permission-derived disabled controls, saved emits, pending copy and extractApiError role=alert (apps/web/components/fleet/RepoFixUnprotected.vue:15-43). useFleetRepos has discriminated pending/saved results and updates its list on successful writes (apps/web/composables/useFleetRepos.ts:80-98). Mirror this for GET/PUT/DELETE, retaining path escaping with apiPath. Add typed full body and separate repo/job summary shapes, all locale keys and the actual dialog to admin actions for both forges. Saved repo replacement must update file-count immediately, while pending requests leave persisted summary unchanged. Job detail copy must describe the assignment snapshot, not guarantee application. Update mount-sfc component registration maps and union, composable tests, admin-page tests, job-page tests and FleetRepo fixtures in repo-auto-review/repo-fix-checks/repo-fix-unprotected component suites. UI permission checks supplement, never replace, server enforcement.\n\nUS-011 findings: The destination is section 1.5 Runner fetch and agent access (built in phase B), which currently documents a thread snapshot, pinned source fetch and koda load_skill/read_skill_file access (docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md:227-239). Add only the dated #375 decision paragraph there; no runner dependency or runtime tool change.\n\nDelivery, migration and verification: Dependency chains are 001->002->003->004 and 006->007->008->009, with 010 after 007+008; 005 and 011 are independent. US-001/003 and US-007/008 share root generated outputs; US-005 shares API files and fixture suites with other work, and US-004/010 share locale JSON/mount helper. Serialize conflicting generated-file updates or regenerate from the combined API state. Migrations are additive, ordered 20261204090000_fleet_repo_rule_override then 20261204100000_fleet_job_rule_override; existing repos/jobs have no override, existing optional record literals remain accepted and absent web queuedTurn renders nothing. Regenerate Prisma client after schema changes before API export. Database tests use existing canRunDbTests gate with KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; they must actually pass outside the sandbox, not merely skip. Use private Testcontainers DB in a second worktree and never concurrently force-reset one test DB. API Vitest uses vi mocks and SWC decorator metadata; module wiring tests remain unit/no DB. Web uses Jest real SFC mounts and fake timers; runner uses bun:test with real files/injected nax rather than the installed CLI. No generated acceptance file is edited or relocated. Security-sensitive mode/session boundaries, approval/RBAC routes, SHA hashing and profile/filesystem trust paths use strict three-session-tdd. Preserve tenant/creator scope, no transient capacity/online/budget checks at create, no persisted queued refusal state, existing creator/cost/approval guards and absence of raw rule bodies from repo listings or job summary UI. Done means all five issues' specified behaviors and failure rows are implemented, contracts regenerated, migrations present, DB behavior verified outside sandbox, both locales updated and the documentation decision reviewed; no unrequested CLI/tool surface or runtime skill catalog replacement is introduced.\n\nRefine-pass audit: Enumerated all 144 numbered spec acceptance criteria against the draft. The following original criterion numbers remain in the same story and the same leading ordinal positions in acceptanceCriteria: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-002 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-003 [1,2,3,4,5,6,7,8,9,10,11]; US-004 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-005 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-007 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-008 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-009 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-010 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-011 [1,2,3]. No numbered spec criterion was deleted, moved to another story or demoted to suggestedCriteria. Qualifying context remains attached, including US-001.15's mode-only/backend-drift parenthetical, US-002.7's 120s/60s threshold, US-005.6's no-accepted-key clause and US-009.14's profile-file readback in injected nax home. There are no deprecated grep/file/verbatim AC tags.\n\nThe audit found and corrected concrete codebase mismatches: parseAssign returns { ok: false, detail: 'invalid ruleOverride' }, not an invented reason property (apps/runner/src/supervisor/assign-parser.ts:16-17); US-009.2-.6 now spell out that observable representation without changing refusal semantics. HostExecutor.prepare catches the materializer's Error and calls reasonFromError (host-executor.ts:137-138), which prefixes non-Git errors with 'workspace: ' (apps/runner/src/executor/git.ts:52-56); the prepare failure criterion now expects 'workspace: rule override path' while the direct materializer criterion still expects Error('rule override path'). CONFIG_JOB_KINDS contains only CONFIG_EDIT and CONFIG_DRIFT (packages/fleet-protocol/src/config-jobs.ts:2-6); the generic failure-table CONFIG label does not require adding a literal CONFIG job kind. The added runner-family criterion therefore names supported CONFIG_DRIFT alongside the preserved CONFIG_EDIT criterion. New DTO classes are added to existing repo/job DTO files instead of requiring invented extra source files.\n\nAll stories have observable negative paths: 001 capability 409s/no writes; 002 no-runner/disabled/broken-turn judgements; 003 null for nonqueued or too-young jobs; 004 absent notice and stopped polling; 005 ambiguous/over-limit/cost-cap stops; 006 validation exceptions; 007 invalid-body/403/404/approval deferral; 008 omitted payloads and null summaries; 009 malformed assignment and containment refusals; 010 disabled permission controls and visible errors; 011 review-only unchanged-document/runtime boundary. Regression anchors were made explicit for firstMisfit thread capacity, existing RUN dashboard classification, pre-existing thread detail fields, missing repo summary mapping and existing repo switches. The existing admin fixture expects auto-review/fix-checks/fix-unprotected switches only for a GitHub repo with an installation (apps/web/tests/pages/admin-fleet-repos.spec.ts:126-135); the new GitLab rule dialog must not alter that existing switch policy. All 18 failure-table scenarios remain covered, including the assignment-summary behavior of an older runner; no legacy runner binary or new runtime dependency is required to verify the API snapshot contract.\n\nContext-file audit: all lists match the spec's recommended files within the five-file limit; US-007 now includes fleet-repo-fix-unprotected-route.integration.spec.ts instead of displacing that critical route precedent with the upstream validator. US-003 may read unplaceable-verdict.ts because US-002 creates it. Expected-file lists now match the spec's new-file ownership and do not overlap contextFiles. All eleven binding story ids, workdirs and dependency arrays remain unchanged; in particular US-010 retains both US-007 and US-008 even though one is transitively upstream. All 19 feature-level out-of-scope items remain verbatim, including the explicitly US-007-qualified throttling item that the spec placed in its feature-level list; no story-local block was hoisted. Descriptions retain the design algorithms and now explicitly avoid the erroneous generic prepare-reason/literal-CONFIG interpretations. Routing was reduced for standard additive/detail/UI/business-decision work (US-003/004/005) and for pattern-based permission configuration (US-007 no longer expert; US-010 medium), while retaining strict three-session-tdd where new session-mode/access-control, SHA-256 or filesystem/profile trust code warrants it. This audit is a manual source/spec comparison, not a claim of executed runtime tests.",
+  "outOfScope": [
+    "Organisation-wide, per-project and per-job rule sets; this feature adds per-repo overrides only.",
+    "Validating rule-file frontmatter or running nax's neutrality lint in koda; nax checks the override directory when the job runs, and a refusal fails the job as any nax failure does.",
+    "Applying a rule override to CONFIG jobs (`CONFIG_EDIT`, `CONFIG_DRIFT`, `CONFIG`) or to thread sessions.",
+    "A runner capability for rule overrides; an older runner drops the field and runs with the repo's rules.",
+    "A CLI command, assistant tool or MCP tool to read or change a rule override; this feature adds the REST routes and the web dialog only.",
+    "Copying the override into the run bundle; the job's `ruleOverride` summary (sha, counts, modes) is the record.",
+    "Editing `.nax/rules/` or `.nax/context.md` in any repo; the existing S3 config-edit flow still owns in-repo rule changes.",
+    "Sending review findings back to the thread and resuming the flow on the next publish (#426 option 1).",
+    "Writing review spec calls into a thread flow's spec; spec calls stay NAX-entry only.",
+    "Changing the RULE and FIX steps' thread-entry gates (`flow-step-decision.ts:204`, `:231`).",
+    "A new web view of the flow's accepted findings; they are recorded in the `flow.step` and `flow.prd_edits` activity payloads.",
+    "Judging runner capacity, online state, labels or budget at thread create or mode change.",
+    "Writing `FleetJob.stateReason` for a queued THREAD job; the reason is computed on read (dashboard, thread detail).",
+    "Live push of the queued-turn reason; the thread page polls every 30 seconds while the turn is queued.",
+    "Swapping koda's thread skill tools for nax's resource catalog (#375); the decision is recorded, no runtime change.",
+    "Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` for `fleet.repo.rules.configure`; new keys live in `NEW_KEY_SCOPES`, as `fleet.repo.fix.unprotected` does.",
+    "Concurrent writes of one repo's rule override; the last committed write wins.",
+    "Re-recording accepted findings when the decide pass recovers a dispatch after a crash (`recordStep` recovery path); the replayed `flow.step` activity carries no `accepted` list.",
+    "US-007 only: rate limiting the rule-override routes beyond the global throttler; they are global-admin, approval-gated writes."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}
