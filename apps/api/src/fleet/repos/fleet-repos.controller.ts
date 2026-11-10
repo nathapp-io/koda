@@ -208,6 +208,9 @@ export class FleetReposController {
   @ApiResponse({ status: 404, description: 'No such repo' })
   async setRuleOverride(@Param('id') id: string, @Body() body: unknown) {
     validateRuleOverride(body);
+    // The repo has to be there before the gate opens a request for it: a request for a repo that
+    // does not exist could only fail when it runs.
+    await this.repos.assertRepoExists(id);
     const outcome = await this.routeGate.run<FleetRepoDto>({
       key: 'fleet.repo.rules.configure',
       variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideSet,
@@ -229,6 +232,9 @@ export class FleetReposController {
   @ApiResponse({ status: 403, description: 'fleet.repo.rules.configure is missing globally' })
   @ApiResponse({ status: 404, description: 'No such repo' })
   async clearRuleOverride(@Param('id') id: string) {
+    // The repo has to be there before the gate opens a request for it: a request for a repo that
+    // does not exist could only fail when it runs.
+    await this.repos.assertRepoExists(id);
     const outcome = await this.routeGate.run<FleetRepoDto>({
       key: 'fleet.repo.rules.configure',
       variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideClear,

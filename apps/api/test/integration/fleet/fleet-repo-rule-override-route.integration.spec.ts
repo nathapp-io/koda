@@ -183,6 +183,16 @@ describeIntegration('fleet repo rule override route (PG)', () => {
     expect(JSON.stringify(res.body)).toContain('Fleet repository not found');
   });
 
+  it.each(['put', 'delete'] as const)('AC-9: an agent holding the key gets 404 on %s against an unknown repo', async (method) => {
+    // The agent passes the guard and reaches the handler, so the repo lookup has to happen before
+    // the approval gate: a request for a repo that cannot exist is a 404, not a 202.
+    const call = method === 'put' ? put('no-such-repo', BODY, agent.apiKey) : del('no-such-repo', agent.apiKey);
+    const res = await call.expect(404);
+    expect(JSON.stringify(res.body)).toContain('Fleet repository not found');
+    // No approval request was opened for a write that could never run.
+    expect(await db.approvalRequest.count()).toBe(0);
+  });
+
   it.each([
     ['a path outside the rules directory', { rules: [{ path: '../x.md', content: 'x' }] }, 'path'],
     ['a duplicate path', { rules: [{ path: 'api.md', content: 'x' }, { path: 'api.md', content: 'y' }] }, 'duplicatePath'],

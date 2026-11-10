@@ -159,6 +159,18 @@ export class FleetReposService {
   }
 
   /**
+   * The repo lookup a gated rule-override write makes before it opens an approval request. A repo
+   * that does not exist is a 404, not a request waiting for an approval whose execution could only
+   * fail; so the gate is reached for a repo that is there.
+   *
+   * The write re-checks the repo inside its own transaction, so a repo deleted between this lookup
+   * and the execution is still refused there.
+   */
+  async assertRepoExists(id: string): Promise<void> {
+    if (!(await this.repo.findById(id))) throw new NotFoundAppException({}, 'fleet.repos');
+  }
+
+  /**
    * The repo's rule override (#370): the rule files and the optional project context its jobs run
    * with, in place of the ones in the repo's own checkout. The read answers the full override (the
    * rule bodies included) or null when the repo has none; an unknown repo is a 404.

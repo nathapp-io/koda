@@ -143,6 +143,13 @@ describe('FleetReposService rule override', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 
+  it('AC-9: refuses an unknown repo before an approval request could be opened for it', async () => {
+    repo.findById.mockResolvedValue(null);
+
+    await expect(service().assertRepoExists('r1')).rejects.toBeInstanceOf(NotFoundAppException);
+    await expect(service().assertRepoExists('r1')).rejects.toMatchObject({ prefix: 'fleet.repos' });
+  });
+
   it('reads the full override of a repo, or null when it has none', async () => {
     await service().setRuleOverride(principal(), 'r1', body);
 
