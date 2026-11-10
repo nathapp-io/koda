@@ -11,8 +11,9 @@ import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { AppModule } from '../../src/app.module';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { createFastifyAdapter } from '../../src/common/fastify-adapter';
+import { TEST_PASSWORD } from './test-credentials';
 
-export const TEST_PASSWORD = 'Admin1234!Aa';
+export { TEST_PASSWORD, TEST_PASSWORD_HASH } from './test-credentials';
 
 export interface HttpAppOptions {
   registrationEnabled: boolean;
