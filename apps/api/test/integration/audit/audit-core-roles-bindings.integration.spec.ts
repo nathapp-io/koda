@@ -45,7 +45,7 @@ describeIntegration('US-007 audited roles, bindings and members', () => {
   };
   beforeAll(async () => {
     await resetDb();
-    app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null, adapter: 'fastify' });
+    app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
     const registered = await api<{ accessToken: string; user: { id: string } }>('POST', '/api/auth/register', 201, {

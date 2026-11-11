@@ -19,6 +19,8 @@ import type { Server } from 'node:http';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { createFastifyAdapter } from '../../../src/common/fastify-adapter';
+import { initFastifyApp } from '../../helpers/http-app';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
@@ -175,7 +177,7 @@ describeIntegration('API Integration Tests', () => {
     // `abortOnError: false` makes the Nest factory rethrow instead of process.exit(1) when a
     // token is looked up before its module registers — the US-003 skills tests rely on it so a
     // missing SKILL_RESOLVER fails its own test instead of the whole suite.
-    app = await AppFactory.create(AppModule, { abortOnError: false });
+    app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter(), { abortOnError: false });
 
     // Get CombinedAuthGuard from DI before init() — DI container is ready
     const combinedGuard = app.get(CombinedAuthGuard);
@@ -189,7 +191,7 @@ describeIntegration('API Integration Tests', () => {
       .useAppGlobalGuards();
 
     // NOW init — compiles route handlers with the guards registered above.
-    await app.init();
+    await initFastifyApp(app);
     // Own one IPv4 loopback listener for the lifecycle instead of letting Supertest bind/close an
     // unspecified-address ephemeral server on every request. This avoids repeated port churn through
     // host proxy interception, whose 407 responses otherwise fail arbitrary endpoint assertions.

@@ -7,9 +7,11 @@ import 'reflect-metadata';
 import { EXCEPTION_FILTERS_METADATA, FILTER_CATCH_EXCEPTIONS } from '@nestjs/common/constants';
 import { Controller, Get, type ArgumentsHost } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import request from 'supertest';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { getSchemaPath } from '@nestjs/swagger';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { HttpAdapterHost } from '@nestjs/core';
 import type { ApprovalRequestRecord } from '../domain/approval.domain';
 import { ApprovalRequestSummaryDto } from '../dto/approval-request.dto';
@@ -115,9 +117,12 @@ describe('@ApprovalGated()', () => {
 
   it('REG-1: redeem-gated validation errors retain their HTTP 400 response', async () => {
     const module = await Test.createTestingModule({ controllers: [ValidationProbe] }).compile();
-    const app = module.createNestApplication();
+    const app = AppFactory.useApp(module.createNestApplication(new FastifyAdapter()));
     try {
       await app.init();
+      // supertest binds fastify.server directly, bypassing fastify.listen(); boot
+      // explicitly so route contexts receive their hook arrays (see test/helpers/http-app.ts).
+      await (app.getHttpAdapter().getInstance() as { ready(): Promise<unknown> }).ready();
       await request(app.getHttpServer()).get('/probe').expect(400);
     } finally {
       await app.close();

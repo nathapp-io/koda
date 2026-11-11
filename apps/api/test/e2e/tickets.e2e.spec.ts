@@ -1,16 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../src/app.module';
 
 describe('Tickets E2E', () => {
-  let app: INestApplication;
+  let app: NathApplication;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = module.createNestApplication();
+    app = AppFactory.useApp(module.createNestApplication(new FastifyAdapter()));
     await app.init();
   });
 

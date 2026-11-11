@@ -1,8 +1,9 @@
 import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-gate';
 import { KbDocumentDeletion } from '../../../src/rag/kb-document-deletion.service';
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { ConfigService } from '@nestjs/config';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { RagController } from '../../../src/rag/rag.controller';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
@@ -28,7 +29,7 @@ import { PermissionService } from '../../../src/permissions/permission.service';
  * which should be handled by the global exception filter and returned to clients.
  */
 describe('RagController — Project ID Validation at API Boundary (AC6)', () => {
-  let app: INestApplication;
+  let app: NathApplication;
   let ragService: RagService;
   let mockPrismaService: Record<string, unknown>;
 
@@ -103,7 +104,7 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
       ],
     }).compile();
 
-    app = module.createNestApplication();
+    app = AppFactory.useApp(module.createNestApplication(new FastifyAdapter()));
     await app.init();
     ragService = module.get(RagService);
   });

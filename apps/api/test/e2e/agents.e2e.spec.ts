@@ -4,6 +4,8 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { createFastifyAdapter } from '../../src/common/fastify-adapter';
+import { initFastifyApp } from '../helpers/http-app';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 import { expectGuardActive, fixtureDb } from '../helpers/action-context';
@@ -60,7 +62,7 @@ describeIntegration('Agents API E2E', () => {
 
     await resetDb();
 
-    app = await AppFactory.create(AppModule);
+    app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter());
     const combinedGuard = app.get(CombinedAuthGuard);
     app.setJwtAuthGuard(combinedGuard);
     app
@@ -69,7 +71,7 @@ describeIntegration('Agents API E2E', () => {
       .useAppGlobalFilters()
       .useAppGlobalGuards();
 
-    await app.init();
+    await initFastifyApp(app);
     httpServer = app.getHttpServer();
 
     const adminRegisterRes = await request(httpServer)
