@@ -3,7 +3,7 @@
   "feature": "w2-memory-outbox-actions",
   "branchName": "feat/w2-memory-outbox-actions",
   "createdAt": "2026-11-11T00:00:00.000Z",
-  "updatedAt": "2026-11-11T16:18:14.521Z",
+  "updatedAt": "2026-11-11T16:31:47.050Z",
   "userStories": [
     {
       "id": "US-001",
@@ -135,14 +135,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Additive page and localization work with legacy harness adjustments; project and own-scoped permission gates require the access-control security override."
+        "reasoning": "Additive page and localization work with legacy harness adjustments; project and own-scoped permission gates require the access-control security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/memory.vue",
@@ -174,7 +177,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5f3ea171c3becac19432b056ecf3d9b7f1742836"
     },
     {
       "id": "US-004",
