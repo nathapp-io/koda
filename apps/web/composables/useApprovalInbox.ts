@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { withDeadline } from '~/lib/with-deadline'
 import { DETAIL_FETCH_LIMIT, buildRequestQuery, sortPendingRequests } from '~/lib/approval-requests'
 import type {
   ApprovalRequestCounts, ApprovalRequestDetail, ApprovalRequestPage, ApprovalRequestSummary,
@@ -34,6 +35,9 @@ const JOB_LIST_SIZE = 100
  * pending requests reload on it instead of polling twice (the admin inbox has no live channel).
  */
 export const approvalRequestsVersion = ref(0)
+
+/** A list request that has not answered by then is a failed load: the inbox must end in rows, empty or an error. */
+export const APPROVAL_LIST_DEADLINE_MS = 30_000
 
 const requestPath = (id: string): string => apiPath`/approvals/${id}`
 
@@ -82,10 +86,18 @@ export function useApprovalInbox() {
   const hasPrev = ref(false)
   const requestCounts = ref<ApprovalRequestCounts | null>(null)
   let latestCountsId = 0
+  let latestListId = 0
 
-  /** The last list answer, kept in the refs beside it so a page can render the inbox from either. */
+  /**
+   * The last list answer, kept in the refs beside it so a page can render the inbox from either.
+   * A request that does not answer within the deadline rejects, and an answer that lands after a
+   * newer `list` call began is returned but never stored: it would put an older page over a newer one.
+   */
   async function list(filters: RequestListFilters): Promise<ApprovalRequestPage> {
-    const answer = toPage(await $api.get<Partial<ApprovalRequestPage>>('/approvals', { query: buildRequestQuery(filters) }))
+    const id = ++latestListId
+    const request = $api.get<Partial<ApprovalRequestPage>>('/approvals', { query: buildRequestQuery(filters) })
+    const answer = toPage(await withDeadline(request, APPROVAL_LIST_DEADLINE_MS))
+    if (id !== latestListId) return answer
     requests.value = answer.records
     total.value = answer.total
     page.value = answer.current

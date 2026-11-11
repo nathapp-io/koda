@@ -248,4 +248,26 @@ describe('pages/[project]/approvals.vue — the project inbox', () => {
     expect(m.toast.errors).toEqual(['Project not found'])
     m.app.unmount()
   })
+
+  test('#435: a project lookup that fails shows a retry, and Retry lists the requests once it resolves', async () => {
+    let attempt = 0
+    const api = fakeApi({
+      project: jest.fn(async () => {
+        attempt += 1
+        if (attempt === 1) throw new ApiError(500, 'boom')
+        return { id: 'p1' }
+      }),
+      approvals: jest.fn(async () => pageOf([row('r1')])),
+    })
+    const m = mountPage(projectPage, { api, params: { project: 'sandbox' } })
+    await settle()
+    const retry = m.app.find('[data-testid="approvals-project-retry"]')
+    expect(retry).toHaveLength(1)
+    expect(m.app.find('[data-testid="approvals-project-load-failed"]')).toHaveLength(1)
+    ;(retry[0].props.onClick as () => void)()
+    await settle()
+    expect(m.app.find('[data-testid="approvals-project-load-failed"]')).toHaveLength(0)
+    expect(m.app.find('[data-testid="approval-request-row-r1"]')).toHaveLength(1)
+    m.app.unmount()
+  })
 })
