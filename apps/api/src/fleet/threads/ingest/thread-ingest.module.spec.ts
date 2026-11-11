@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { GlobalStubsModule } from '../../../common/test-helpers/global-stubs.module';
 import { ThreadIngestBootstrap } from './thread-ingest.bootstrap';
 import { THREAD_UNFOLDED_STREAM_SOURCE } from './domain/thread-ingest.domain';
@@ -34,7 +35,7 @@ describe('ThreadIngestModule (US-007 wiring)', () => {
     })
     class BootProbeModule {}
     const moduleRef = await Test.createTestingModule({ imports: [BootProbeModule] }).compile();
-    const app = moduleRef.createNestApplication({ logger: false });
+    const app = moduleRef.createNestApplication(new FastifyAdapter(), { logger: false });
     try {
       await app.init();
       expect(ingestor.catchUp).toHaveBeenCalledWith('J1', 1);
