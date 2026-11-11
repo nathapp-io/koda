@@ -72,11 +72,16 @@ ARG BUILD_APP=api
 
 COPY --from=builder /app/bun.lock ./bun.lock
 COPY --from=deps /tmp/app-runtime-deps.json ./apps/runtime/package.json
+COPY --from=builder /app/apps/${BUILD_APP}/scripts/check-runtime-deps.ts /tmp/check-runtime-deps.ts
 
-# Install only production dependencies for the runtime app package
+# Install only production dependencies for the runtime app package.
+# This install resolves `~` ranges fresh, so fail the build when a Nest/nathapp
+# package lands twice at different versions (the API cannot boot, #437).
 RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
     cd /app/apps/runtime && \
     bun install --frozen-lockfile --production && \
+    bun /tmp/check-runtime-deps.ts /app/apps/runtime/node_modules && \
+    rm /tmp/check-runtime-deps.ts && \
     rm -rf /app/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
            /app/apps/runtime/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
            /app/apps/runtime/node_modules/@lancedb/lancedb-linux-x64-gnu && \
