@@ -126,6 +126,8 @@ export interface ThreadServeNeed {
   runnerId?: string | null;
   /** Judge the mode rule only, so a backend change on the runner never refuses a mode change. */
   modesOnly?: true;
+  /** #436: a disabled `runnerId` runner is unserved whatever it offers (a send's turn is never placed on one). */
+  enabledOnly?: true;
 }
 
 /**

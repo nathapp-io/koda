@@ -961,3 +961,53 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     expect(rejected.deliveredMessageId).toBeNull();
   });
 });
+
+/**
+ * #436: a send is judged the way its turn will be placed. A pinned thread (runnerId) is judged against that runner alone,
+ * and with `enabledOnly` a disabled pinned runner counts as unserved even if it offers the backend; an unpinned need, or
+ * a pinned runner that no longer exists, is judged against the fleet.
+ */
+describe('PrismaChatThreadRepository.threadServeMisfit pinned runner (#436)', () => {
+  const caps = (models: string[]) => ({ projectThreads: true, workspaceThreads: true, threadBackends: { native: models, acp: [] } });
+  const need = { backend: { kind: 'native' as const, model: 'm' }, kind: 'PROJECT' as const, mode: 'read' as const };
+  const repoWith = (rows: Array<{ id: string; enabled: boolean; capabilities: unknown }>) => {
+    const findMany = vi.fn(async (args: { where: { id?: string; enabled?: boolean } }) =>
+      rows.filter((r) => (args.where.id ? r.id === args.where.id : r.enabled)));
+    const repo = new PrismaChatThreadRepository(
+      { client: { runner: { findMany } } } as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
+      { threadsEnabled: true } as never, mockAuditRecorder, new ThreadEventBus(),
+    );
+    return repo;
+  };
+  const R1 = (models: string[], enabled = true) => ({ id: 'r1', enabled, capabilities: caps(models) });
+  const R2 = { id: 'r2', enabled: true, capabilities: caps(['m']) };
+
+  it('refuses when the pinned runner dropped the backend although another runner offers it', async () => {
+    await expect(repoWith([R1(['x']), R2]).threadServeMisfit({ ...need, runnerId: 'r1' })).resolves.toBe('thread_backend');
+  });
+
+  it('allows when the pinned runner still serves the thread', async () => {
+    await expect(repoWith([R1(['m']), R2]).threadServeMisfit({ ...need, runnerId: 'r1' })).resolves.toBeNull();
+  });
+
+  it('with enabledOnly, a disabled pinned runner that offers the backend is unserved', async () => {
+    await expect(repoWith([R1(['m'], false), R2]).threadServeMisfit({ ...need, runnerId: 'r1', enabledOnly: true })).resolves.toBe('thread_backend');
+  });
+
+  it('without enabledOnly (mode change), a disabled pinned runner is still judged by capability alone', async () => {
+    await expect(repoWith([R1(['m'], false), R2]).threadServeMisfit({ ...need, runnerId: 'r1' })).resolves.toBeNull();
+  });
+
+  it('a pinned runner that no longer exists falls back to the fleet', async () => {
+    await expect(repoWith([R2]).threadServeMisfit({ ...need, runnerId: 'gone', enabledOnly: true })).resolves.toBeNull();
+    await expect(repoWith([R1(['x'])]).threadServeMisfit({ ...need, runnerId: 'gone', enabledOnly: true })).resolves.toBe('thread_backend');
+  });
+
+  it('an unpinned need is judged against the fleet', async () => {
+    await expect(repoWith([R1(['x']), R2]).threadServeMisfit(need)).resolves.toBeNull();
+  });
+
+  it('no thread-capable runner enrolled is not judged', async () => {
+    await expect(repoWith([]).threadServeMisfit({ ...need, runnerId: null })).resolves.toBeNull();
+  });
+});

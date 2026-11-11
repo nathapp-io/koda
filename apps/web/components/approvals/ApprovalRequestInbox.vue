@@ -334,17 +334,19 @@ async function cancel(id: string): Promise<void> {
 
 /** The newest `reload` call: an older one that settles late must not touch what the newer one shows. */
 let latestReloadId = 0
+/** Set on leave: a deadline that fires later must not toast on, or write state for, a page that is gone. */
+let unmounted = false
 
 async function reload(): Promise<void> {
   const id = ++latestReloadId
   try {
     await list(tab.value === 'pending' ? { tab: 'pending', projectId } : { tab: 'all', page: page.value, projectId })
-    if (id !== latestReloadId) return
+    if (id !== latestReloadId || unmounted) return
     loaded.value = true
     loadFailed.value = false
     stale.value = false
   } catch (err: unknown) {
-    if (id !== latestReloadId) return
+    if (id !== latestReloadId || unmounted) return
     if (isForbidden(err)) {
       // A refusal is not a transient failure: nothing to poll for.
       forbidden.value = true
@@ -359,7 +361,7 @@ async function reload(): Promise<void> {
     return
   } finally {
     // Only the newest call may end the loading state, and every call ends: `list` has a deadline.
-    if (id === latestReloadId) pending.value = false
+    if (id === latestReloadId && !unmounted) pending.value = false
   }
   await reconcileOpenRow()
 }
@@ -423,6 +425,7 @@ onMounted(() => {
   if (openId.value !== null) void loadDetail(openId.value)
 })
 onBeforeUnmount(() => {
+  unmounted = true
   polling.stop()
   liveReload.cancel()
 })

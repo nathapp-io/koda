@@ -114,6 +114,36 @@ describeIntegration('thread message refuses a backend no runner offers any more 
       expect(data<{ message: { id: string } }>(retry).message.id).toBe(data<{ message: { id: string } }>(first).message.id);
     });
 
+    it('pinned to R1, refuses when R1 dropped the backend although R2 offers it, and writes nothing', async () => {
+      const r1 = await threadRunner();
+      const id = await create();
+      await prisma.chatThread.update({ where: { id }, data: { runnerId: r1.id } });
+      await prisma.runner.update({ where: { id: r1.id }, data: { capabilities: { ...FLEET_CAPS, projectThreads: true, workspaceThreads: true, threadBackends: { native: [OTHER], acp: [] } } as object } });
+      await threadRunner();
+      const before = await writes(id);
+      const res = await send(id, `cm-${++seq}`).expect(409);
+      expect(res.body.message).toBe(REFUSAL);
+      expect(await writes(id)).toEqual(before);
+    });
+
+    it('pinned to R1, refuses when R1 is disabled although R2 offers the backend', async () => {
+      const r1 = await threadRunner();
+      const id = await create();
+      await prisma.chatThread.update({ where: { id }, data: { runnerId: r1.id } });
+      await prisma.runner.update({ where: { id: r1.id }, data: { enabled: false } });
+      await threadRunner();
+      const before = await writes(id);
+      await send(id, `cm-${++seq}`).expect(409);
+      expect(await writes(id)).toEqual(before);
+    });
+
+    it('pinned to R1 that still serves the backend, the send is allowed', async () => {
+      const r1 = await threadRunner();
+      const id = await create();
+      await prisma.chatThread.update({ where: { id }, data: { runnerId: r1.id } });
+      await send(id, `cm-${++seq}`).expect(201);
+    });
+
     it('with no thread-capable runner enrolled (only a protocol-1 runner), the send is not judged', async () => {
       await threadRunner();
       const id = await create();

@@ -53,11 +53,13 @@ type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRe
 /** A runner row that stored no capabilities hosts nothing: every thread rule misfits on it. */
 const NO_CAPABILITIES = { threadBackends: undefined } as unknown as RunnerCapabilities;
 
-/** #436: what hosting this stored thread needs from the fleet: its backend, its kind and its mode. */
-const serveNeedOf = (thread: { kind: string | null; mode: string | null; backend: unknown }): ThreadServeNeed => ({
+/** #436: what hosting this stored thread needs: its backend, kind and mode, on its pinned runner when it has one. */
+const serveNeedOf = (thread: { kind: string | null; mode: string | null; backend: unknown; runnerId: string | null }): ThreadServeNeed => ({
   backend: thread.backend as ThreadBackend,
   kind: mapThreadKind(thread.kind),
   mode: (thread.mode ?? 'read') as ThreadMode,
+  runnerId: thread.runnerId,
+  enabledOnly: true,
 });
 
 /** Shared visibility fence, applied before and after acquiring mutation locks. */
@@ -89,22 +91,25 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    *
    * A `runnerId` narrows the judgement to that runner alone (any `enabled` value — a thread's own runner is judged
    * even when it is disabled, because every later turn is pinned to it), and `modesOnly` judges the mode rule alone,
-   * so a backend the runner no longer offers never refuses a mode change.
+   * so a backend the runner no longer offers never refuses a mode change. #436: a send also sets `enabledOnly`, so a
+   * disabled pinned runner is unserved; a `runnerId` naming no runner row is judged against the fleet.
    *
    * #399: with no thread-capable runner enrolled, the fleet is not set up yet and there is nothing to judge against;
    * the thread is accepted and queues as before. Stored capabilities were validated by parseCapabilities at enroll/sync.
    */
   async threadServeMisfit(need: ThreadServeNeed): Promise<ThreadCapabilityMisfit | null> {
-    const runners = await this.prisma.client.runner.findMany({
-      where: need.runnerId
-        ? { id: need.runnerId }
-        : { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } },
-      select: { capabilities: true },
+    const select = { capabilities: true, enabled: true } as const;
+    // #436: a pinned thread's turn is placed on its own runner alone; a runner that no longer exists pins nothing.
+    const pinned = need.runnerId ? await this.prisma.client.runner.findMany({ where: { id: need.runnerId }, select }) : [];
+    const runners = pinned.length > 0 ? pinned : await this.prisma.client.runner.findMany({
+      where: { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } }, select,
     });
     if (runners.length === 0) return null;
     let furthest: ThreadCapabilityMisfit | null = null;
     for (const runner of runners) {
       const capabilities = (runner.capabilities as unknown as RunnerCapabilities | null) ?? NO_CAPABILITIES;
+      // A disabled pinned runner is the same cause as one that dropped the backend: nothing enabled offers it.
+      if (need.enabledOnly && !runner.enabled && pinned.length > 0) return 'thread_backend';
       const misfit = need.modesOnly
         ? threadModeMisfit(need.mode, capabilities)
         : threadCapabilityMisfit({ backend: need.backend, kind: need.kind, mode: need.mode, enabled: true, action: 'SESSION' }, capabilities);

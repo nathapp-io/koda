@@ -785,4 +785,15 @@ describe('ApprovalRequestInbox — a load can never spin forever (#435)', () => 
     expect(m.byId('approval-request-row-all-row')).toHaveLength(1)
     m.app.unmount()
   })
+
+  test('a load that times out after the page was left does not toast or write state', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
+    const get = jest.fn(() => new Promise<never>(() => undefined))
+    const m = mountInbox({ get })
+    await m.settle()
+    m.app.unmount()
+    jest.advanceTimersByTime(APPROVAL_LIST_DEADLINE_MS + 1)
+    await m.settle()
+    expect(m.toast.errors).toEqual([])
+  })
 })
