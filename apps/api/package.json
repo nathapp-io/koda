@@ -87,7 +87,6 @@
     "@nathapp/fleet-protocol": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
     "@nestjs/cli": "^12.0.12",
-    "@nestjs/platform-express": "^12.4.2",
     "@nestjs/testing": "^12.2.0",
     "@swc/core": "^1.16.13",
     "@testcontainers/postgresql": "^12.2.0",
