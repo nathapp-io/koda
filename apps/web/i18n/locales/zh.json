@@ -514,7 +514,9 @@
       "reason": "原因（可选）",
       "reasonPlaceholder": "为什么要退役此记忆项？",
       "reasonTooLong": "原因不能超过 500 个字符。",
-      "confirm": "退役"
+      "confirm": "退役",
+      "done": "记忆项已退役。",
+      "pending": "退役申请已提交审批。"
     }
   },
   "codeIntel": {

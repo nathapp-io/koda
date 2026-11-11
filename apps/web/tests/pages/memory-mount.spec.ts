@@ -54,6 +54,10 @@ async function buildPageBundle(): Promise<string> {
   // Compile WITHOUT inlineTemplate so setup() returns the bindings object
   // (instead of a render function). We need direct access to items / loadMore
   // / etc. to drive the load-more interaction.
+  descriptor.scriptSetup!.content = descriptor.scriptSetup!.content.replace(
+    /import \{ useProjectRef \} from ['"]~\/composables\/useProjectRef['"]\s*/,
+    'const useProjectRef = (_slug: string) => ({ load: async () => null })\n',
+  )
   const scriptResult = sfc.compileScript(descriptor, { id: pagePath })
 
   // Path aliases + Nuxt auto-imports: substitute to make the bundle self-contained.

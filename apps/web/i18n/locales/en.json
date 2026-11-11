@@ -514,7 +514,9 @@
       "reason": "Reason (optional)",
       "reasonPlaceholder": "Why is this memory item being retired?",
       "reasonTooLong": "Reason must be 500 characters or fewer.",
-      "confirm": "Retire"
+      "confirm": "Retire",
+      "done": "Memory item retired.",
+      "pending": "Retirement request submitted for approval."
     }
   },
   "codeIntel": {

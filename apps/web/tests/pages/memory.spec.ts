@@ -504,6 +504,10 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
 
     formatConfidence: (v: number) => v.toFixed(2),
     canRetire: () => false,
+    retireTarget: VueFull.ref(null),
+    retireBusy: VueFull.ref(false),
+    openRetire: jest.fn(),
+    confirmRetire: jest.fn(),
     KIND_OPTIONS: ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'],
     STATUS_OPTIONS: ['', 'active', 'superseded', 'rejected'],
 

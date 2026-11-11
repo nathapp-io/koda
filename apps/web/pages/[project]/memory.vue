@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { Brain } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
 import { useMemory, watchDebouncedMemorySearch } from '~/composables/useMemory'
+import { useProjectRef } from '~/composables/useProjectRef'
+import type { MemoryItem, RetireOutcome } from '~/composables/useMemory'
 
 definePageMeta({ layout: 'default' })
 
@@ -23,7 +25,12 @@ const {
   loadMemory,
   applyFilters,
   loadMore,
+  retireDecision,
+  retireNote,
 } = useMemory(slug)
+const projectRef = useProjectRef(slug)
+const retireTarget = ref<MemoryItem | null>(null)
+const retireBusy = ref(false)
 
 const KIND_OPTIONS = ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE']
 const STATUS_OPTIONS = ['', 'active', 'superseded', 'rejected']
@@ -55,6 +62,41 @@ function canRetire(item: { kind: string; status: string }) {
 function toggleNote(itemId: string) {
   if (expandedNotes.has(itemId)) expandedNotes.delete(itemId)
   else expandedNotes.add(itemId)
+}
+
+function openRetire(item: MemoryItem) {
+  retireTarget.value = item
+}
+
+async function confirmRetire(reason: string) {
+  const item = retireTarget.value
+  if (!item || retireBusy.value) return
+  retireBusy.value = true
+  try {
+    let outcome: RetireOutcome
+    if (item.kind === 'DECISION') outcome = await retireDecision(item.id, reason)
+    else if (item.kind === 'NOTE') {
+      const projectId = await projectRef.load()
+      if (!projectId) throw new Error('Project could not be resolved')
+      outcome = await retireNote(item.id, projectId, reason)
+    }
+    else return
+
+    retireTarget.value = null
+    if (outcome.kind === 'pending') {
+      toast.success(t('memory.retire.pending'))
+    }
+    else {
+      toast.success(t('memory.retire.done'))
+      await withToastError(applyFilters)
+    }
+  }
+  catch (err) {
+    toast.error(extractApiError(err))
+  }
+  finally {
+    retireBusy.value = false
+  }
 }
 
 onMounted(() => {
@@ -146,12 +188,20 @@ function formatConfidence(value: number) {
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ formatConfidence(item.confidence) }}</td>
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.status }}</span></td>
             <td class="px-4 py-3">
-              <Button v-if="canRetire(item)" variant="outline" size="sm">{{ t('memory.retire.action') }}</Button>
+              <Button v-if="canRetire(item)" variant="outline" size="sm" @click="openRetire(item)">{{ t('memory.retire.action') }}</Button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <MemoryRetireDialog
+      :open="retireTarget !== null"
+      :item-label="retireTarget?.subject ?? ''"
+      :busy="retireBusy"
+      @update:open="(open) => { if (!open) retireTarget = null }"
+      @confirm="confirmRetire"
+    />
 
     <div v-if="hasMore" class="flex justify-center">
       <Button variant="outline" :disabled="isLoading" @click="loadMoreAndToast">
