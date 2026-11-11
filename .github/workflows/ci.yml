@@ -17,9 +17,9 @@ on:
       - "openapi.json"
       - "turbo.json"
       - ".nax/**"
-  # No workflow-level path filter on PRs: every job is a required check on main,
-  # and a PR whose workflow never ran could not be merged. The `changes` job
-  # applies the same filter instead; the other jobs skip (= pass) without code changes.
+  # No workflow-level path filter on PRs: a PR whose workflow never ran could not
+  # be merged because its required checks would never report. The `changes` job
+  # applies the same filter instead; the required jobs skip (= pass) without code changes.
   pull_request:
     branches: [main]
 
@@ -68,60 +68,13 @@ jobs:
             echo "No code changes: the other CI jobs are skipped."
           fi
 
-  # ─── Typecheck + Lint (parallel) ────────────────────────────────────────────
-  checks:
-    name: ${{ matrix.check }}
-    needs: changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    strategy:
-      fail-fast: true
-      matrix:
-        check: [type-check, lint]
-    # Skipped per step, not per job: a skipped matrix job reports under its
-    # unexpanded name, so the required lint / type-check checks would never arrive.
-    steps:
-      - if: needs.changes.outputs.code == 'true'
-        uses: actions/checkout@v7
-
-      - if: needs.changes.outputs.code == 'true'
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-
-      - if: needs.changes.outputs.code == 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-
-      - if: needs.changes.outputs.code == 'true'
-        name: Cache bun dependencies
-        uses: actions/cache@v6
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - if: needs.changes.outputs.code == 'true'
-        name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - if: needs.changes.outputs.code == 'true'
-        name: Generate Prisma client
-        run: bun run db:generate
-
-      - if: needs.changes.outputs.code == 'true'
-        name: Generate OPENAPI types
-        run: bun run generate:cli
-
-      - if: needs.changes.outputs.code == 'true'
-        name: ${{ matrix.check }}
-        run: bun run ${{ matrix.check }}
-
-  # ─── Web Build (H8 regression guard) ───────────────────────────────────────
-  web-build:
-    name: web build
+  # ─── Static quality gates (required check: quality) ────────────────────────
+  # Lint, type-check, the web build and the policy gates share one setup and are
+  # all turbo-cached (~13s of real work combined), so they run in a single job
+  # instead of four. Check steps are gated on setup success rather than the job
+  # status, so one failing gate still reports the others like the old jobs did.
+  quality:
+    name: quality
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -148,45 +101,27 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build web
-        run: bun run build --filter=@nathapp/koda-web
-
-  # ─── Policy Gates ────────────────────────────────────────────────────────
-  policy-gates:
-    name: policy-gates
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-
-      - name: Cache bun dependencies
-        uses: actions/cache@v6
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       - name: Generate Prisma client
         run: bun run db:generate
 
       - name: Generate OPENAPI types
+        id: setup
         run: bun run generate:cli
 
+      - name: Lint
+        if: steps.setup.outcome == 'success'
+        run: bun run lint
+
+      - name: Type check
+        if: steps.setup.outcome == 'success'
+        run: bun run type-check
+
+      - name: Build web
+        if: steps.setup.outcome == 'success'
+        run: bun run build --filter=@nathapp/koda-web
+
       - name: Run policy gates
+        if: steps.setup.outcome == 'success'
         run: cd apps/api && bun run policy:gates -- --project=test-project
 
       - name: Upload gate results
@@ -496,7 +431,7 @@ jobs:
     name: evaluate
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [changes, checks, test]
+    needs: [changes, quality, test]
     if: needs.changes.outputs.code == 'true'
     services:
       postgres:
