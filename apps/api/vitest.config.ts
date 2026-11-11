@@ -28,14 +28,30 @@ const DB_MODE = canRunDbTests();
 const SPEC_GLOBS = ['src/**/*.spec.ts', 'test/**/*.spec.ts'];
 const EXCLUDE = ['**/node_modules/**', '**/dist/**', '.nax/**'];
 
-// DB mode: re-importing the app graph for each of ~200 serial files was most of the
-// run (and twice as slow on CI runners), so DB specs that do not mock modules share
-// one module cache (`isolate: false`). Module-mocking specs and anything else stay isolated.
+// Reuse the app graph within bounded groups: one cache for the entire DB tier
+// lets a long-lived worker reach its heap limit. Each project gets a fresh worker,
+// while files within it still avoid repeated imports. Module mocks stay isolated.
+const SHARED_DB_BATCH_SIZE = 25;
 const dbProjects = (): TestProjectConfiguration[] => {
-  const shared = findSharedDbSpecs(__dirname);
+  const shared = findSharedDbSpecs(__dirname).sort();
+  const batches = Array.from({ length: Math.ceil(shared.length / SHARED_DB_BATCH_SIZE) }, (_, index) =>
+    shared.slice(index * SHARED_DB_BATCH_SIZE, (index + 1) * SHARED_DB_BATCH_SIZE),
+  );
   return [
-    { extends: true, test: { name: 'db-shared', include: shared, exclude: EXCLUDE, isolate: false } },
-    { extends: true, test: { name: 'db-isolated', include: SPEC_GLOBS, exclude: [...EXCLUDE, ...shared], isolate: true } },
+    ...batches.map((include, index): TestProjectConfiguration => ({
+      extends: true,
+      test: {
+        name: `db-shared-${index + 1}`, include, exclude: EXCLUDE, isolate: false,
+        sequence: { groupOrder: index },
+      },
+    })),
+    {
+      extends: true,
+      test: {
+        name: 'db-isolated', include: SPEC_GLOBS, exclude: [...EXCLUDE, ...shared], isolate: true,
+        sequence: { groupOrder: batches.length },
+      },
+    },
   ];
 };
 

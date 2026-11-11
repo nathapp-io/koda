@@ -2,7 +2,7 @@ import { PrismaClient } from '../../src/generated/prisma/client';
 import request from 'supertest';
 import type { RunnerCapabilities, SyncRequest } from '../../src/fleet/common/protocol';
 import { grantBaseline, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
-import { data, loginToken, TEST_PASSWORD, TEST_PASSWORD_HASH } from './http-app';
+import { data, loginToken, TEST_PASSWORD_HASH } from './http-app';
 
 export const FLEET_CAPS: RunnerCapabilities = {
   nax: { version: '0.83.0', protocols: ['native'] },
@@ -56,11 +56,12 @@ export interface FleetHttpWorld {
 }
 
 /**
- * Root admin (registered), projects `web` and `ops`, users dev (a developer on web), viewer
+ * Root owner, projects `web` and `ops`, users dev (a developer on web), viewer
  * (a viewer on web) and outsider (no project grant), GitHub fleet repos acme/app on web (default
  * branch `trunk`) and acme/ops on ops, inserted directly (registration is covered by slice 1).
- * The three secondary users are inserted with the fixture password hash and the member baseline;
- * they log in through the real endpoint (three logins, within the 5/min login throttle).
+ * All users reuse the fixture password hash and receive the member baseline; root also receives
+ * the first registrant's owner binding. They log in through the real endpoint (four logins,
+ * within the 5/min login throttle). Dedicated auth tests cover registration and production hashing.
  *
  * Permissions P1 US-002: the project grants are role bindings, not legacy membership rows. They are
  * written before either user's first project request, so the effective-key cache is still cold.
@@ -68,10 +69,13 @@ export interface FleetHttpWorld {
 export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], prisma: PrismaClient): Promise<FleetHttpWorld> {
   const tokens = {} as Record<Who, string>;
   const ids = {} as Record<Who, string>;
-  tokens.root = data<{ accessToken: string }>(
-    await request(server).post('/api/auth/register').send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201),
-  ).accessToken;
-  ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+  const root = await prisma.user.create({
+    data: { email: 'root@koda.test', name: 'Root', passwordHash: TEST_PASSWORD_HASH },
+  });
+  await grantBaseline(prisma, { type: 'USER', id: root.id });
+  await grantRole(prisma, { type: 'USER', id: root.id }, 'owner', null);
+  ids.root = root.id;
+  tokens.root = await loginToken(server, 'root@koda.test');
   const asRoot = { Authorization: `Bearer ${tokens.root}` };
   for (const slug of ['web', 'ops']) {
     await request(server).post('/api/projects').set(asRoot).send({ name: slug, slug, key: slug.toUpperCase() }).expect(201);

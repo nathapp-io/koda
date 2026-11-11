@@ -11,9 +11,10 @@ import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 
 (canRunDbTests() ? describe : describe.skip)('Approval request REST cancellation', () => {
@@ -48,11 +49,9 @@ import { canRunDbTests } from '../../helpers/test-environment';
   beforeEach(async () => {
     resetThrottle(app); labels.reset();
     await db.approvalDecision.deleteMany(); await db.approvalRequest.deleteMany(); await db.approvalPolicy.deleteMany();
-    const createUser = async () => {
-      const email = `${randomUUID()}@koda.test`;
-      const res = await request(server()).post('/api/admin/users').set('Authorization', `Bearer ${world.tokens.root}`).send({ email, name: 'Approver', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-      return { id: data<{ id: string }>(res).id, token: await loginToken(server(), email) };
-    };
+    const createUser = () => createMemberWithToken(server(), db, {
+      email: `${randomUUID()}@koda.test`, name: 'Approver',
+    });
     const approver = await createUser(); const outsider = await createUser();
     approverToken = approver.token; outsiderToken = outsider.token;
     agent = await seedFleetHttpAgent(server(), world.tokens.root);

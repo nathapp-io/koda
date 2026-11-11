@@ -34,7 +34,8 @@ import type {
   UserPrincipal,
 } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
@@ -123,15 +124,16 @@ describeIntegration('US-002 project membership gate (PG)', () => {
    * `User.role = 'ADMIN'` as the route used to.
    */
   const createUser = async (who: string, admin = false): Promise<string> => {
-    const created = await request(server).post('/api/admin/users').set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD }).expect(201);
-    const id = data<{ id: string }>(created).id;
+    resetThrottle(app);
+    const member = await createMemberWithToken(server, prisma, { email: `${who}@koda.test`.toLowerCase(), name: who });
+    const id = member.id;
     ids[who] = id;
-    if (admin) await grantRole(prisma, { type: 'USER', id }, 'admin');
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
-    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
-    // baseline production writes for every user it creates.
-    await grantBaseline(prisma, { type: 'USER', id });
+    tokens[who] = member.token;
+    if (admin) {
+      await grantRole(prisma, { type: 'USER', id }, 'admin');
+      resetThrottle(app);
+      tokens[who] = await loginToken(server, `${who}@koda.test`);
+    }
     return id;
   };
 

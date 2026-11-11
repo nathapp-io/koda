@@ -11,7 +11,8 @@ import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { ContextBuilderService } from '../../../src/context/context-builder.service';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const refusalMessage = (namespace: string): string => {
@@ -66,13 +67,10 @@ describeIntegration('US-003 context route permissions', () => {
     tokens.root = data<{ accessToken: string }>(root).accessToken;
 
     for (const who of ['viewer', 'developer', 'custom', 'outsider']) {
-      await request(server).post('/api/admin/users').set(auth('root'))
-        .send({ email: `context-${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-      userIds[who] = (await db.user.findUniqueOrThrow({
-        where: { email: `context-${who}@koda.test` }, select: { id: true },
-      })).id;
       resetThrottle(app);
-      tokens[who] = await loginToken(server, `context-${who}@koda.test`);
+      const member = await createMemberWithToken(server, db, { email: `context-${who}@koda.test`.toLowerCase(), name: who });
+      userIds[who] = member.id;
+      tokens[who] = member.token;
     }
 
     const project = await request(server).post('/api/projects').set(auth('root'))

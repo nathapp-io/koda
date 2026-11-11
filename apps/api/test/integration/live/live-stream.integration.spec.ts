@@ -78,7 +78,6 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
       if (saved === undefined) delete process.env.LIVE_HEARTBEAT_MS;
       else process.env.LIVE_HEARTBEAT_MS = saved;
     }
-    await app.listen(0, '127.0.0.1');
     server = app.getHttpServer();
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     relay = app.get(OutboxRelay);

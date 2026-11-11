@@ -12,7 +12,9 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { JwtStrategyProvider } from '@nathapp/nestjs-auth';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { fixtureDb } from '../../helpers/action-context';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -41,9 +43,10 @@ describeIntegration('project-role permissions (#144)', () => {
   };
 
   const createUser = async (who: string) => {
-    const res = await asRoot('post', '/api/admin/users', { email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-    ids[who] = data<{ id: string }>(res).id;
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
+    resetThrottle(app);
+    const member = await createMemberWithToken(server, fixtureDb(app), { email: `${who}@koda.test`.toLowerCase(), name: who });
+    ids[who] = member.id;
+    tokens[who] = member.token;
   };
   /** US-004 (P1l): the members route takes a role key; the caller-role labels map to the seeded keys. */
   const ROLE_KEY: Record<Role, string> = { ADMIN: 'project-admin', DEVELOPER: 'developer', VIEWER: 'viewer' };

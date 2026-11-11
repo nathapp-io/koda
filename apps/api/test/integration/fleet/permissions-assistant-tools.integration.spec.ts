@@ -23,7 +23,8 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { enrollRunner } from '../../helpers/fleet-fixtures';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -81,11 +82,9 @@ describeIntegration('assistant tools check their key (US-004)', () => {
 
   const createUser = async (who: string): Promise<void> => {
     resetThrottle(app);
-    ids[who] = data<{ id: string }>(await as('root', 'post', '/api/admin/users', {
-      email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER',
-    }).expect(201)).id;
-    resetThrottle(app);
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
+    const member = await createMemberWithToken(server, prisma, { email: `${who}@koda.test`.toLowerCase(), name: who });
+    ids[who] = member.id;
+    tokens[who] = member.token;
   };
 
   /** The binding that is the caller's only source in the project: a fixture grant, so it writes as the seeder. */

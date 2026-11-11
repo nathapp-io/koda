@@ -19,7 +19,8 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
@@ -74,14 +75,10 @@ describeIntegration('member and invite route keys (US-008)', () => {
    * longer needs a global admin (US-006 removed the AC-12 case that did).
    */
   const createUser = async (who: string): Promise<void> => {
-    const created = await request(server)
-      .post('/api/admin/users')
-      .set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
-      .expect(201);
-    userIds[who] = data<{ id: string }>(created).id;
     resetThrottle(app);
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
+    const member = await createMemberWithToken(server, db, { email: `${who}@koda.test`.toLowerCase(), name: who });
+    userIds[who] = member.id;
+    tokens[who] = member.token;
   };
 
   /** The binding that is the caller's only source in p1. */
