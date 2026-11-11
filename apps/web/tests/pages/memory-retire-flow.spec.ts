@@ -14,7 +14,7 @@ import { h, nextTick } from 'vue'
 import type { VNodeChild } from 'vue'
 import { loadSfc, mountSfc, webFile } from '../helpers/mount-sfc'
 import type { Mounted } from '../helpers/mount-sfc'
-import { i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
+import { enI18n, i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import { projectPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
@@ -82,6 +82,11 @@ interface SetupOptions {
   memory?: unknown[]
   project?: () => Promise<unknown>
   post?: (path: string, body: Record<string, unknown>) => Promise<unknown>
+  /**
+   * The i18n the dialog gets. The page keeps the key-echo stub (its assertions compare against keys);
+   * a test that needs to read the row label the dialog is bound to passes `enI18n()` here.
+   */
+  dialogI18n?: unknown
 }
 
 function setup(options: SetupOptions = {}) {
@@ -134,7 +139,7 @@ function setup(options: SetupOptions = {}) {
       LoadingState,
       FormField: loadSfc(formFieldFile),
       FormMessage: loadSfc(formMessageFile),
-      MemoryRetireDialog: loadSfc(dialogFile, { useI18n: () => i18nStub() }),
+      MemoryRetireDialog: loadSfc(dialogFile, { useI18n: () => options.dialogI18n ?? i18nStub() }),
     },
     alias: { '~/composables/useMemory': memoryExports, '~/composables/useApi': apiModule },
     globals: {
@@ -167,6 +172,19 @@ function buttonByText(app: Mounted, text: string) {
 /** The dialog's confirm button, or `undefined` when the dialog is closed. */
 function confirmButton(app: Mounted) {
   return buttonByText(app, t('memory.retire.confirm'))
+}
+
+/** Everything the open dialog renders; empty when the dialog is closed. */
+function dialogText(app: Mounted): string {
+  const dialog = app.one('[data-stub="dialog"]')
+  return dialog ? app.textOf(dialog) : ''
+}
+
+/** The Retire action of the one row rendering `subject` (rows are otherwise alike). */
+function rowRetireAction(app: Mounted, subject: string) {
+  const row = app.find('tr').find((candidate) => app.textOf(candidate).includes(subject))
+  expect(row).toBeDefined()
+  return app.find('button', row).find((candidate) => app.textOf(candidate) === t('memory.retire.action'))
 }
 
 /** Clicks the row's Retire action and waits for the dialog to render. */
@@ -316,6 +334,48 @@ describe('US-004 Memory retire flow', () => {
     await submit(x.app)
     expect(x.memoryRequests).toHaveLength(2)
     expect(x.memoryRequests[1]).toEqual({ status: 'active' })
+    x.app.unmount()
+  })
+
+  /**
+   * Branch fix M1. The dialog is bound to one row (`retireTarget`), and the in-flight settle clears
+   * that binding. A second row's Retire used to replace the binding, so when the first request
+   * settled it closed the second row's dialog as well. Opening is now refused while a retire is in
+   * flight, and the settle clears the binding only when it still belongs to the row it retired.
+   */
+  test('M1: another row cannot take the dialog over while a retire is in flight', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const x = setup({
+      kind: 'DECISION',
+      dialogI18n: enI18n(),
+      memory: [memoryAnswer([
+        memoryItem('DECISION', { id: 'm1', subject: 'first decision' }),
+        memoryItem('DECISION', { id: 'm2', subject: 'second decision' }),
+      ])],
+      post: () => new Promise((resolve) => { release = resolve }),
+    })
+    await flush()
+
+    const first = rowRetireAction(x.app, 'first decision')
+    ;(first?.props.onClick as (() => void) | undefined)?.()
+    await flush()
+    await submit(x.app)
+    expect(x.posts).toEqual([{ path: '/memory/m1/retire', body: {} }])
+    expect(dialogText(x.app)).toContain('first decision')
+
+    // The other row's action cannot retarget the dialog: the row that owns it is still waiting.
+    const second = rowRetireAction(x.app, 'second decision')
+    expect(second).toBeDefined()
+    ;(second?.props.onClick as (() => void) | undefined)?.()
+    await flush()
+    expect(dialogText(x.app)).toContain('first decision')
+    expect(dialogText(x.app)).not.toContain('second decision')
+
+    // Settling the first request closes the dialog it owns — and only that one.
+    release({ id: 'm1', status: 'retired' })
+    await flush()
+    expect(confirmButton(x.app)).toBeUndefined()
+    expect(x.posts).toHaveLength(1)
     x.app.unmount()
   })
 })

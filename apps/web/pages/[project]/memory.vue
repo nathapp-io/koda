@@ -64,8 +64,19 @@ function toggleNote(itemId: string) {
   else expandedNotes.add(itemId)
 }
 
+/**
+ * The dialog belongs to one row at a time. While a retire request is in flight the busy row's
+ * request is the only one that can settle, so another row cannot take the dialog over: otherwise
+ * the in-flight request's settle would clear the target and close the other row's dialog too.
+ */
 function openRetire(item: MemoryItem) {
+  if (retireBusy.value) return
   retireTarget.value = item
+}
+
+/** Closes the dialog only if it still belongs to the row whose request just settled. */
+function closeRetire(item: MemoryItem) {
+  if (retireTarget.value?.id === item.id) retireTarget.value = null
 }
 
 async function confirmRetire(reason: string) {
@@ -82,7 +93,7 @@ async function confirmRetire(reason: string) {
     }
     else return
 
-    retireTarget.value = null
+    closeRetire(item)
     if (outcome.kind === 'pending') {
       toast.success(t('memory.retire.pending'))
     }
