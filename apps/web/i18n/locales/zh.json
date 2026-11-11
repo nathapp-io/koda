@@ -506,6 +506,14 @@
       "kind": "类型",
       "confidence": "置信度",
       "status": "状态"
+    },
+    "retire": {
+      "title": "退役记忆项",
+      "item": "即将退役：{itemLabel}",
+      "reason": "原因（可选）",
+      "reasonPlaceholder": "为什么要退役此记忆项？",
+      "reasonTooLong": "原因不能超过 500 个字符。",
+      "confirm": "退役"
     }
   },
   "codeIntel": {

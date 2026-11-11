@@ -506,6 +506,14 @@
       "kind": "Kind",
       "confidence": "Confidence",
       "status": "Status"
+    },
+    "retire": {
+      "title": "Retire memory item",
+      "item": "You are retiring: {itemLabel}",
+      "reason": "Reason (optional)",
+      "reasonPlaceholder": "Why is this memory item being retired?",
+      "reasonTooLong": "Reason must be 500 characters or fewer.",
+      "confirm": "Retire"
     }
   },
   "codeIntel": {
