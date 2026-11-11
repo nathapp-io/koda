@@ -22,6 +22,9 @@ function mountMemory(items: ReturnType<typeof rows>, keys: string[] = []) {
     },
     alias: {
       '~/composables/useMemory': { useMemory: () => memory, watchDebouncedMemorySearch: () => undefined },
+      // US-004's setup-time project lookup: this spec only cares which rows show the action, so the
+      // lookup resolves null and the retire flow itself is covered by memory-retire-flow.spec.ts.
+      '~/composables/useProjectRef': { useProjectRef: () => ({ id: ref(null), load: async () => null }) },
       '~/composables/useApi': { extractApiError: (error: unknown) => String(error) },
       '~/composables/usePermissions': { useProjectPermissions: () => projectPermissionsStub(keys) },
     },
