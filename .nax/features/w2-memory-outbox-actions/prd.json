@@ -1,0 +1,416 @@
+{
+  "project": "koda",
+  "feature": "w2-memory-outbox-actions",
+  "branchName": "feat/w2-memory-outbox-actions",
+  "createdAt": "2026-11-11T00:00:00.000Z",
+  "updatedAt": "2026-11-11T15:52:01.022Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add approval-aware memory retire calls",
+      "description": "**Goal** — Add the existing decision and note retire calls to useMemory without changing its reads or pagination.\n\n**Motivation** — A wrong or stale memory item keeps reaching agents through retrieval.\n\n**Approach** — Add `retireDecision` and `retireNote` to `useMemory`, each telling a 202 approval summary apart from a completed retire by the `permissionKey` marker, and export `RetireOutcome`.\n\n`useMemory(slug)` in `apps/web/composables/useMemory.ts`.\nBaseline: returns `{ items, isLoading, error, hasMore, kindFilter, statusFilter, textFilter, loadMemory, applyFilters, loadMore, ... }`.\nTarget: additionally returns `retireDecision(id: string, reason?: string): Promise<RetireOutcome>` and `retireNote(id: string, projectId: string, reason?: string): Promise<RetireOutcome>`, where `RetireOutcome = { kind: 'retired' } | { kind: 'pending'; request: ApprovalRequestSummary }` is exported from the same file. The reason is sent trimmed; a reason that is empty after trimming is left out of the body.\n\n`useProviderCredentials` (`apps/web/composables/useProviderCredentials.ts`) is the pattern for an approval-gated write: `isPendingAnswer(data)` checks `'permissionKey' in data` and the composable returns `{ kind: 'pending', request }` for a 202 summary. `ApprovalRequestSummary` is exported from `apps/web/lib/approval-requests.ts`.\n\nUse POST /memory/:id/retire with the optional reason body for decisions and POST /memory/notes/:id/retire with projectId and optional reason for notes. The existing API wrapper unwraps item/approval envelopes. Detect the marker with a null-safe object guard, preserve the pending request, and propagate the same rejection. Do not patch rows or reload in these helpers; US-004 owns the refresh. Retain all existing return bindings and use the existing dynamic-path convention. Write focused Jest tests in tests/composables/useMemory-retire.spec.ts while preserving the read/filter/paging suites.\n\n**Scope** — In: additive helper methods, exported outcome and request serialization. Out: dialog (US-002), visibility (US-003), page flow/project lookup (US-004), Outbox (US-005–007), and new memory write routes.\n\n**Interface** —\n```typescript\nretireDecision(id: string, reason?: string): Promise<RetireOutcome>\nretireNote(id: string, projectId: string, reason?: string): Promise<RetireOutcome>\n```\n`RetireOutcome = { kind: 'retired' } | { kind: 'pending'; request: ApprovalRequestSummary }`",
+      "acceptanceCriteria": [
+        "[unit] useMemory('sb').retireDecision('m1', 'obsolete') sends POST /memory/m1/retire with body { reason: 'obsolete' }.",
+        "[unit] useMemory('sb').retireDecision('m1', '   ') sends POST /memory/m1/retire with body {}.",
+        "[unit] useMemory('sb').retireNote('n1', 'p1', 'dup') sends POST /memory/notes/n1/retire with body { projectId: 'p1', reason: 'dup' }.",
+        "[unit] useMemory('sb').retireNote('n1', 'p1', '') sends POST /memory/notes/n1/retire with body { projectId: 'p1' }.",
+        "[unit] retireDecision resolves { kind: 'retired' } when the POST answers an item with no permissionKey field.",
+        "[unit] retireNote resolves { kind: 'pending', request } with request equal to the answer when the POST answers an object that has a permissionKey field.",
+        "[unit] retireDecision rejects with the same error when the POST rejects.",
+        "[unit] Given loadMemory() received records [m1] with hasNext: true, when loadMore() receives records [m2], items.value equals [m1, m2], preserving the existing append behavior after the retire methods are added."
+      ],
+      "tags": [
+        "web",
+        "memory",
+        "composable",
+        "approvals"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two additive API-forwarding methods and one test file reuse existing serialization and response-shape patterns; this story does not evaluate permission grants or enforce approval policy."
+      },
+      "contextFiles": [
+        "apps/web/composables/useMemory.ts",
+        "apps/web/composables/useProviderCredentials.ts",
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/tests/composables/useMemory.spec.ts",
+        "apps/web/composables/useApi.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/composables/useMemory-retire.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "retireDecision('m1', '  obsolete  ') sends a body whose reason equals 'obsolete'.",
+        "retireNote('n1', 'p1', '  dup  ') sends a body whose reason equals 'dup'.",
+        "retireDecision resolves { kind: 'pending', request } when its POST answers an approval summary with permissionKey.",
+        "retireNote resolves { kind: 'retired' } when its POST answers an item without permissionKey.",
+        "retireNote rejects with the same error when its POST rejects."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Build the memory retire reason dialog",
+      "description": "**Goal** — Create a reusable retirement confirmation dialog with an optional reason and parent-controlled busy state.\n\n**Motivation** — A wrong or stale memory item keeps reaching agents through retrieval.\n\n**Approach** — `apps/web/components/memory/MemoryRetireDialog.vue`: a Shadcn `Dialog` with an optional reason `Textarea` validated by a vee-validate + zod schema (`reason` at most 500 characters, message key `memory.retire.reasonTooLong`). Props `open: boolean`, `itemLabel: string`, `busy: boolean`. Emits `confirm(reason: string)` and `update:open(value: boolean)`. The confirm button (label `memory.retire.confirm`) is disabled while `busy` is true; the cancel button (label `common.cancel`) emits `update:open` with `false`.\n\nRetire reason over 500 characters | Inline zod message `memory.retire.reasonTooLong`; no `confirm` emitted.\n\nReset the reason across closing and reopening so a later row does not inherit a draft. Render itemLabel as text. Mirror AddSkillSourceDialog's useForm/toTypedSchema/resetForm pattern, but emit rather than performing the request. Add the `memory.retire.*` dialog keys to `en.json` and `zh.json`; US-003 owns action and US-004 owns done/pending.\n\nPage specs mount the real `MemoryRetireDialog` through `loadSfc` with the Shadcn form components, as `tests/components/add-skill-source-dialog.spec.ts` does; the dialog is not stubbed.\n\nCreate tests/components/memory-retire-dialog.spec.ts with real FormField/FormMessage and mounted form interaction, not the inert harness form bindings. Verify reason emission, inline validation, no emission on invalid submission, busy disabling, cancel and draft reset.\n\n**Scope** — In: component, dialog locale keys and form behavior. Out: API methods (US-001), row gates (US-003), lookup/toasts/reload/page integration (US-004), and Outbox (US-005–007).\n\n**Interface** — Props `open: boolean`, `itemLabel: string`, `busy: boolean`. Emits `confirm(reason: string)` and `update:open(value: boolean)`.",
+      "acceptanceCriteria": [
+        "[unit] Mounting MemoryRetireDialog with open: true, typing obsolete into the reason field and clicking the memory.retire.confirm button emits confirm with 'obsolete'.",
+        "[unit] Mounting MemoryRetireDialog with a 501-character reason and clicking memory.retire.confirm renders the memory.retire.reasonTooLong text.",
+        "[unit] Mounting MemoryRetireDialog with a 501-character reason and clicking memory.retire.confirm emits no confirm event.",
+        "[unit] Mounting MemoryRetireDialog with busy: true renders the memory.retire.confirm button disabled.",
+        "[unit] Clicking the common.cancel button in MemoryRetireDialog emits update:open with false.",
+        "[unit] Typing old into the reason field, setting open to false and then back to true renders the reason field empty."
+      ],
+      "tags": [
+        "web",
+        "memory",
+        "dialog",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard localized form component and mounted tests using existing dependencies; no authentication, permission evaluation or API request."
+      },
+      "contextFiles": [
+        "apps/web/components/AddSkillSourceDialog.vue",
+        "apps/web/tests/components/add-skill-source-dialog.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/helpers/fleet-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/memory/MemoryRetireDialog.vue",
+        "apps/web/tests/components/memory-retire-dialog.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Confirming MemoryRetireDialog with an empty reason emits confirm with ''.",
+        "Confirming MemoryRetireDialog with exactly 500 characters emits confirm with that reason."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Show eligible memory retire row actions",
+      "description": "**Goal** — Add the Memory table's trailing action column with permission-aware retirement visibility.\n\n**Motivation** — The Memory page shows it, but removing it needs `koda memory` from a terminal.\n\n**Approach** — Add the trailing column to `memory.vue` with a Retire button on each `active` DECISION row when the project permission set `has('memory.decision.retire')`, and on each `active` NOTE row when it `has('memory.create')` or `hasOwn('memory.create')`. No other row gets the button. Add `memory.retire.action` to `en.json` and `zh.json`.\n\nRetire is offered only for rows of kind `DECISION` or `NOTE` with status `active`. These are the only kinds the API can retire (`POST /memory/:id/retire` answers 422 for any non-decision; `POST /memory/notes/:id/retire` answers 422 for any non-note). Retiring FACT, PREFERENCE, CONSTRAINT or INCIDENT_PATTERN rows needs a new API route and is out of scope.\n\nThe DECISION gate reads only `memory.decision.retire`. The API also runs a `memory.update` replace check (`MemoryWriteService.retireDecision` calls `writeGuard.mayReplace`), so a caller holding the retire key without `memory.update` sees the button and gets a 403 toast. `web.md` allows this: a gate only hides a control, and every refusal is surfaced with `extractApiError()`.\n\n`memory.vue` imports every Vue function it uses (`ref`, `computed`, `reactive`) from `vue` explicitly, as it already does for `reactive`: the `tests/pages/memory-mount.spec.ts` sandbox does not provide Nuxt auto-imports.\n\nPages import the feature's composables explicitly rather than relying on Nuxt auto-import: `memory.vue` adds `useMemory` to its existing `import { ... } from '~/composables/useMemory'` and imports `useProjectRef` from `~/composables/useProjectRef`; `outbox.vue` imports `useAdminOutbox` from `~/composables/useAdminOutbox`. `mountSfc` (`tests/helpers/mount-sfc.ts`) injects only its fixed `NUXT_AUTO_IMPORTS` list, which holds none of the three. The `memory-mount.spec.ts` sandbox still rewrites the `useMemory(` call site.\n\nThis story introduces canRetire(item) and useProjectPermissions(slug); US-004 adds useProjectRef, handlers and dialog integration. The page spec this story creates mounts the page with a `useProjectRef` double whose `load` resolves `null` (passed through `mountSfc`'s `alias` for `~/composables/useProjectRef`), so the setup-time `useProjectRef` call US-004 adds needs no change to it. Do not add a dependency on US-002.\n\nModify tests/pages/memory-mount.spec.ts to stub useProjectPermissions with an empty PermissionSet. Modify tests/pages/memory.spec.ts createRenderContext() to add canRetire returning false. Every existing assertion stays as it is. Create tests/pages/memory-retire-visibility.spec.ts with mounted row-local assertions using projectPermissionsStub, including own-only NOTE creation rights. Preserve existing table fields, filters, note expansion and Load more.\n\n**Scope** — In: eligibility, trailing column, action translation and existing render-harness compatibility. Out: helper implementation (US-001), dialog (US-002), click/confirm lookup and workflow (US-004), additional memory kinds and a memory.update visibility requirement.\n\n**Interface** — `canRetire(item)` (row eligibility). `useProjectPermissions(slug)` exposes `permissions`, a computed `PermissionSet` with `has(key)` and `hasOwn(key)`.",
+      "acceptanceCriteria": [
+        "[integration] Mounting /[project]/memory with an active DECISION row and a project permission set holding memory.decision.retire renders a memory.retire.action button in that row.",
+        "[integration] Mounting the Memory page with an active DECISION row and a permission set without memory.decision.retire renders no memory.retire.action button in that row.",
+        "[integration] Mounting the Memory page with an active NOTE row and a permission set whose hasOwn('memory.create') is true and has('memory.create') is false renders a memory.retire.action button in that row.",
+        "[integration] Mounting the Memory page with an active FACT row and every memory permission granted renders no memory.retire.action button in that row.",
+        "[integration] Mounting the Memory page with a superseded DECISION row and every memory permission granted renders no memory.retire.action button in that row.",
+        "[integration] On the Memory page without retire permissions, expanding NOTE row n1 renders its object text PRIVATE_NOTE_BODY, preserving the existing note-body expansion behavior."
+      ],
+      "tags": [
+        "web",
+        "memory",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Additive page and localization work with legacy harness adjustments; project and own-scoped permission gates require the access-control security override."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/memory.vue",
+        "apps/web/tests/pages/memory-mount.spec.ts",
+        "apps/web/tests/pages/memory.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/helpers/permission-nav.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/memory-retire-visibility.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Mounting the Memory page with an active NOTE row and project memory.create renders a memory.retire.action button in that row.",
+        "Mounting the Memory page with an active NOTE row and neither memory.create nor memory.create.own renders no memory.retire.action button in that row.",
+        "Mounting the Memory page with an active PREFERENCE, CONSTRAINT or INCIDENT_PATTERN row and every memory permission granted renders no memory.retire.action button in that row.",
+        "Mounting the Memory page with a rejected NOTE row and every memory permission granted renders no memory.retire.action button in that row."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/memory-mount.spec.ts",
+          "reason": "the sandbox that runs `memory.vue`'s script provides only the globals the read-only page called; the page now also calls `useProjectPermissions`, so the sandbox stubs it with an empty `PermissionSet`. Every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/memory.spec.ts",
+          "reason": "`createRenderContext()` is a closed, hand-built binding set that SSR-renders the real `memory.vue` template; the template now calls `canRetire(item)` for each row, so the context gains `canRetire` returning `false` (no row eligible). Every existing assertion stays as it is."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Integrate the Memory page retire workflow",
+      "description": "**Goal** — Connect row actions to the real dialog, project resolution and approval-aware retire outcomes.\n\n**Motivation** — The Memory page shows it, but removing it needs `koda memory` from a terminal.\n\n**Approach** — Clicking Retire opens `MemoryRetireDialog` for that row. Confirming a DECISION calls `retireDecision`; confirming a NOTE first resolves the project id with `useProjectRef(slug).load()` and calls `retireNote`. Handle the retired, pending and rejected outcomes as the Failure Handling table states. Add `memory.retire.done` and `memory.retire.pending` to `en.json` and `zh.json`.\n\nAfter a successful retire the page calls `applyFilters()` from `useMemory` (which resets to page 1 and reloads) rather than patching the row locally, so the current status filter decides whether the row stays visible. `loadMemory()` is not used for this: it keeps the current page and would collapse a list grown by \"Load more\" to that one page.\n\n`memory.vue` names its new bindings `canRetire(item)` (row eligibility), `retireTarget` (the row being retired, or `null` when the dialog is closed), `retireBusy` (true while a retire request is in flight), `openRetire(item)` and `confirmRetire(reason)`. It passes `retireBusy` to the dialog's `busy` prop.\n\n`useProjectRef(slug)` (`apps/web/composables/useProjectRef.ts`) resolves a slug to the project id with `GET /projects/:slug`; `load()` returns the id and throws on failure.\n\n`memory.vue` imports every Vue function it uses (`ref`, `computed`, `reactive`) from `vue` explicitly, as it already does for `reactive`: the `tests/pages/memory-mount.spec.ts` sandbox does not provide Nuxt auto-imports.\n\nPages import the feature's composables explicitly rather than relying on Nuxt auto-import: `memory.vue` adds `useMemory` to its existing `import { ... } from '~/composables/useMemory'` and imports `useProjectRef` from `~/composables/useProjectRef`; `outbox.vue` imports `useAdminOutbox` from `~/composables/useAdminOutbox`. `mountSfc` (`tests/helpers/mount-sfc.ts`) injects only its fixed `NUXT_AUTO_IMPORTS` list, which holds none of the three. The `memory-mount.spec.ts` sandbox still rewrites the `useMemory(` call site.\n\nFailure handling:\n- Retire POST rejected (403, 404, 409, 422, 400, network) | Toast `extractApiError(err)`; dialog stays open; list not reloaded.\n- Retire answered 202 | Toast `memory.retire.pending`; dialog closes; list not reloaded.\n- `GET /projects/:slug` fails while retiring a NOTE | Toast `extractApiError(err)`; no retire POST is sent.\nCompleted retire calls toast.success with memory.retire.done, closes the dialog and invokes applyFilters. Release retireBusy when the attempt settles; leave US-003's visibility gates unchanged. Never infer a local post-retire status.\n\nPage specs that assert the `ApiError` branch pass `alias: { '~/composables/useApi': apiModule }` to `mountSfc`, as `tests/components/add-skill-source-dialog.spec.ts` does, so the page and the test share one `ApiError` class.\n\nPage specs mount the real `MemoryRetireDialog` through `loadSfc` with the Shadcn form components, as `tests/components/add-skill-source-dialog.spec.ts` does; the dialog is not stubbed.\n\nModify the existing memory-mount sandbox to provide useProjectRef with load resolving null, handling its explicit imported-module seam if necessary. Extend tests/pages/memory.spec.ts createRenderContext() with retireTarget null, retireBusy false and no-op openRetire/confirmRetire. Every existing assertion stays as it is. Preserve the upstream visibility spec's lookup double. Create tests/pages/memory-retire-flow.spec.ts; drive real page row clicks and dialog submission through actual useMemory methods to assert POSTs. Use deferred requests for busy assertions and Load more before testing the reset-to-page-one refresh. Parameterize rejection tests across the table's statuses and network failures.\n\n**Scope** — In: page handlers, dialog binding, NOTE lookup, feedback, refresh and harness compatibility. Out: replacing US-001 contracts, changing US-002 validation, widening US-003 gates, Outbox, other memory kinds and API changes.\n\n**Interface** — `retireDecision(id: string, reason?: string): Promise<RetireOutcome>`; `retireNote(id: string, projectId: string, reason?: string): Promise<RetireOutcome>`; `RetireOutcome = { kind: 'retired' } | { kind: 'pending'; request: ApprovalRequestSummary }`. Dialog props `open: boolean`, `itemLabel: string`, `busy: boolean`; emits `confirm(reason: string)` and `update:open(value: boolean)`.",
+      "acceptanceCriteria": [
+        "[integration] On the Memory page, clicking memory.retire.action on DECISION row m1 and confirming the dialog with reason obsolete sends POST /memory/m1/retire with body { reason: 'obsolete' }.",
+        "[integration] On the Memory page for slug sb, clicking memory.retire.action on NOTE row n1 and confirming sends POST /memory/notes/n1/retire with projectId equal to the id that GET /projects/sb answered.",
+        "[integration] When GET /projects/sb rejects during a NOTE retire, the page calls toast.error with the extractApiError text of that rejection.",
+        "[integration] When GET /projects/sb rejects during a NOTE retire, the page sends no POST /memory/notes/n1/retire.",
+        "[integration] When the retire POST answers an item with no permissionKey, the page calls toast.success with memory.retire.done.",
+        "[integration] On the Memory page after Load more fetched page 2, a retire whose POST answers an item with no permissionKey sends GET /projects/sb/memory without a current query parameter (page 1, through applyFilters).",
+        "[integration] When the retire POST answers an object with a permissionKey field, the page calls the toast with memory.retire.pending.",
+        "[integration] When the retire POST answers an object with a permissionKey field, the page sends no further GET /projects/sb/memory.",
+        "[integration] When the retire POST answers an object with a permissionKey field, the memory.retire.confirm button is no longer rendered (the dialog closed).",
+        "[integration] When the retire POST rejects with an ApiError whose message is Decision is not active, the page calls toast.error with Decision is not active.",
+        "[integration] When the retire POST rejects, the memory.retire.confirm button is still rendered (the dialog stays open).",
+        "[integration] When the retire POST rejects, the page sends no further GET /projects/sb/memory.",
+        "[integration] When the retire POST answers an item with no permissionKey, the memory.retire.confirm button is no longer rendered (the dialog closed).",
+        "[integration] While the retire POST has not yet settled, the memory.retire.confirm button is disabled.",
+        "[integration] When a retire completes while statusFilter is 'active', the refresh GET /projects/sb/memory retains query status: 'active', preserving the existing selected status filter."
+      ],
+      "tags": [
+        "web",
+        "memory",
+        "approvals",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Page-local orchestration composes existing project lookup, upstream write helpers and dialog contracts without a new abstraction; the permission-gated mutation flow and approval/refusal handling retain the security override."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/memory.vue",
+        "apps/web/components/memory/MemoryRetireDialog.vue",
+        "apps/web/composables/useProjectRef.ts",
+        "apps/web/tests/components/add-skill-source-dialog.spec.ts",
+        "apps/web/tests/helpers/permission-nav.ts",
+        "apps/web/tests/pages/memory-retire-visibility.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/memory-retire-flow.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "After a retire POST rejects, the memory.retire.confirm button becomes enabled again.",
+        "Cancelling the Memory retire dialog sends no retire POST."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/memory-mount.spec.ts",
+          "reason": "the page now also calls `useProjectRef`, so the sandbox stubs it with a `load` resolving `null`. Every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/memory.spec.ts",
+          "reason": "the template now binds `retireTarget`, `retireBusy`, `openRetire` and `confirmRetire`, so `createRenderContext()` gains them with inert defaults (`retireTarget` `null`, `retireBusy` `false`, no-op handlers). Every existing assertion stays as it is."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Add the status-filtered Outbox admin page",
+      "description": "**Goal** — Provide a bounded Outbox inventory at /admin/outbox with explicit status selection and admin error states.\n\n**Motivation** — A failed outbox delivery (`status: dead`) is invisible in the web app.\n\n**Approach** — Add `useAdminOutbox` with `load` and the `status` filter, and the `/admin/outbox` page listing events for the chosen status with the `outbox.showing` count, the `adminOnly` state on a 403 and the `outbox.error` state otherwise. Add the `outbox.*` page keys to `en.json` and `zh.json`. The page spec this story creates mounts the page with `useGlobalPermissions` stubbed by `globalPermissionsStub()` with no keys, so the Retry gate US-007 adds needs no change to it.\n\nThe Outbox page opens on status `dead`, the status a human acts on. The API's own default is `pending`; the page always sends `status` explicitly. The status control is a native `<select>` (as on the Memory page) offering exactly four options in this order: `dead`, `pending`, `processing`, `published`.\n\nThe outbox list is capped at 100 rows by the API (`LIST_LIMIT`) and has no paging. The page shows the en text `Showing {count} of {total}` (key `outbox.showing`) above the rows. It does not page.\n\nThe outbox `payload` and `headers` fields are never rendered. They can carry event data the admin page has no need to show.\n\nThe Outbox page detects a refused list the way `apps/web/pages/admin/slos.vue` does: `err instanceof ApiError && err.code === 403` sets an `adminOnly` state; any other error toasts.\n\n`GET /admin/outbox?status=<pending|processing|published|dead>` (`apps/api/src/outbox/admin.controller.ts` `getOutbox`). Permission `outbox.read` (global). Answers a bare object `{ items: OutboxEventDomain[]; total: number }` with no `{ ret, data }` envelope; `unwrap` in `apps/web/composables/useApi.ts` passes a non-envelope answer through unchanged.\n\n`OutboxEventDomain` (`apps/api/src/outbox/domain/outbox-event.domain.ts`): `id`, `projectId`, `type`, `eventId`, `payload`, `headers`, `status`, `attempts`, `nextAttemptAt`, `leaseUntil`, `owner`, `lastError`, `publishedAt`, `createdAt`, `updatedAt` (dates arrive as ISO strings).\n\n`apps/web/composables/useAdminOutbox.ts`: `useAdminOutbox()` returns `{ items, total, isLoading, error, status, load, retry }`. `status` is a ref with initial value `'dead'`. `load()` sends `GET /admin/outbox` with query `{ status: status.value }`. `retry(id: string): Promise<OutboxRetryOutcome>`, where `OutboxRetryOutcome = { kind: 'retried' } | { kind: 'pending'; request: ApprovalRequestSummary }` is exported from the same file.\n\nThe quoted interface is the final feature target: US-005 implements the read subset; US-007 adds retry and OutboxRetryOutcome. Load on mount and when the select changes. Follow slos.vue's default-layout and latestRequestId sequencing pattern so obsolete responses or errors do not replace current status state. Expose read errors and propagate the current failure to the page rather than making a failed request appear empty. Render type, eventId, attempts and lastError as text, never payload/headers.\n\nFailure handling:\n- Outbox list GET rejects with `ApiError` code 403 | Page renders `outbox.adminOnly`; no toast.\n- Outbox list GET fails otherwise | Toast `extractApiError(err)`; page renders `outbox.error`.\n\nPages import the feature's composables explicitly rather than relying on Nuxt auto-import: `memory.vue` adds `useMemory` to its existing `import { ... } from '~/composables/useMemory'` and imports `useProjectRef` from `~/composables/useProjectRef`; `outbox.vue` imports `useAdminOutbox` from `~/composables/useAdminOutbox`. `mountSfc` (`tests/helpers/mount-sfc.ts`) injects only its fixed `NUXT_AUTO_IMPORTS` list, which holds none of the three. The `memory-mount.spec.ts` sandbox still rewrites the `useMemory(` call site.\n\nPage specs that assert the `ApiError` branch pass `alias: { '~/composables/useApi': apiModule }` to `mountSfc`, as `tests/components/add-skill-source-dialog.spec.ts` does, so the page and the test share one `ApiError` class.\n\nCreate tests/composables/useAdminOutbox.spec.ts and tests/pages/admin-outbox.spec.ts. Use the mounted page to assert filter requests, required row text, secret-payload exclusion, actual English showing-count interpolation and quiet 403 versus other error feedback. Keep globalPermissionsStub() with no keys for compatibility with downstream Retry gating.\n\n**Scope** — In: read composable/page, explicit filter, bounded count, safe rows, states and page translations. Out: navigation (US-006), retry methods/buttons/outcomes (US-007), paging, payload/headers display and API changes.\n\n**Interface** — `useAdminOutbox()` returns `{ items, total, isLoading, error, status, load, retry }` at feature completion; this story supplies the read subset. `status` initially equals `'dead'`; `load()` sends query `{ status: status.value }`.",
+      "acceptanceCriteria": [
+        "[unit] useAdminOutbox().load() with the initial status sends GET /admin/outbox with query { status: 'dead' }.",
+        "[unit] After load() receives { items: [row], total: 7 }, items.value equals [row].",
+        "[unit] After load() receives { items: [row], total: 7 }, total.value equals 7.",
+        "[integration] Changing the status select on /admin/outbox to pending sends GET /admin/outbox with query { status: 'pending' }.",
+        "[integration] A listed row renders the event's type text.",
+        "[integration] A listed row renders the event's eventId text.",
+        "[integration] A listed row renders the event's attempts count.",
+        "[integration] A listed row renders the event's lastError text.",
+        "[integration] A listed row whose payload is '{\"secret\":\"s3\"}' renders no s3 text anywhere on the page.",
+        "[integration] With 2 rows listed and total 7, the page rendered with the en locale shows Showing 2 of 7.",
+        "[integration] When GET /admin/outbox rejects with an ApiError whose code is 403, the page renders the outbox.adminOnly text.",
+        "[integration] When GET /admin/outbox rejects with an ApiError whose code is 403, the page does not call toast.error.",
+        "[integration] When GET /admin/outbox rejects with an ApiError whose code is 500, the page calls toast.error with that error's extractApiError text.",
+        "[integration] When GET /admin/outbox rejects with an ApiError whose code is 500, the page renders the outbox.error text."
+      ],
+      "tags": [
+        "web",
+        "outbox",
+        "admin",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New page/composable follows established list and admin patterns; global authorization refusal handling and sensitive-field exclusion use strict security-isolated tests."
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/slos.vue",
+        "apps/web/tests/pages/admin-slos-mount.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/components/add-skill-source-dialog.spec.ts",
+        "apps/web/composables/useApi.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useAdminOutbox.ts",
+        "apps/web/pages/admin/outbox.vue",
+        "apps/web/tests/composables/useAdminOutbox.spec.ts",
+        "apps/web/tests/pages/admin-outbox.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A listed row whose headers contain 'secret-header-value' renders no secret-header-value text anywhere on the page.",
+        "When GET /admin/outbox rejects with Error('Network unavailable'), the page calls toast.error with 'Network unavailable'.",
+        "When GET /admin/outbox rejects with Error('Network unavailable'), the page renders outbox.error.",
+        "When a dead-status response arrives after a newer pending-status response, rendered rows remain the pending-status response's rows."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Add permission-gated Outbox admin navigation",
+      "description": "**Goal** — Link the Outbox page from the Admin sidebar when the caller holds outbox.read.\n\n**Motivation** — A failed outbox delivery (`status: dead`) is invisible in the web app.\n\n**Approach** — `apps/web/layouts/default.vue`.\nBaseline: the Admin block lists Users, Roles, Approval policies, Audit, then the fleet links.\nTarget: a computed `canReadOutbox = computed(() => globalPermissions.value.has('outbox.read'))` and an Outbox link (`/admin/outbox`, label `nav.outbox`) directly after the Audit link, shown when `canReadOutbox` is true; `showAdminNav` also turns true for `canReadOutbox` alone.\n\n`adminNavFlags` and `ADMIN_NAV_KEYS` in `apps/web/tests/helpers/permission-nav.ts`.\nBaseline: flags and keys for the ten existing admin links.\nTarget: `ADMIN_NAV_KEYS` gains `'outbox.read'` after `'audit.read'`, and `adminNavFlags` returns `canReadOutbox: held.has('outbox.read')`.\n\nThe Outbox nav link uses the lucide icon `Send`, added to the layout's existing `lucide-vue-next` import.\n\nAdd `nav.outbox` to `en.json` and `zh.json`. Keep nav links inline and preserve all other project/workspace/admin source ordering. Gate on the global permission, never a role name. No Command Palette entry is added.\n\n`apps/web/tests/layouts/default-permission-nav.spec.ts` — the `ADMIN_LINKS` table gains a row pairing the href /admin/outbox with the key outbox.read so the existing every-link and no-link tests cover the new link, and a describe block holds this story's ACs. Every existing assertion stays as it is.\n\n`apps/web/tests/helpers/permission-nav.ts` — `ADMIN_NAV_KEYS` gains `'outbox.read'` after `'audit.read'` and `adminNavFlags` returns `canReadOutbox`, so the fleet, skills and flows nav specs that spread `adminNavFlags` keep a complete binding set for the layout. Existing keys and flags stay as they are.\n\nExtend real-setup SSR layout tests for label/href, absence without permission, Admin-section visibility with this permission alone, and relative Audit/Outbox/Fleet ordering. Read the UX master-plan constraints before editing navigation; do not refactor unrelated shell structure.\n\n**Scope** — In: sidebar gate/link/icon, section visibility, shared test flags, nav translation and layout assertions. Out: list/page implementation (US-005), retry actions (US-007), Command Palette entry and unrelated layout redesign.\n\n**Interface** — `canReadOutbox = computed(() => globalPermissions.value.has('outbox.read'))`; `adminNavFlags` returns `canReadOutbox: held.has('outbox.read')`; link href `/admin/outbox`, label `nav.outbox`.",
+      "acceptanceCriteria": [
+        "[integration] The default layout rendered with global permission outbox.read shows a link to /admin/outbox labelled nav.outbox.",
+        "[integration] The default layout rendered without outbox.read shows no link to /admin/outbox.",
+        "[integration] The default layout whose only global permission is outbox.read shows the nav.sectionAdmin label.",
+        "[integration] The default layout rendered with audit.read, outbox.read and fleet.dashboard.read places the /admin/outbox link after the /admin/audit link and before the /admin/fleet link.",
+        "[integration] The default layout rendered with global user.read and without outbox.read still renders the /admin/users link, preserving the existing Users permission gate."
+      ],
+      "tags": [
+        "web",
+        "outbox",
+        "navigation",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small inline navigation change affects shared SSR flag fixtures and localization; the global permission gate invokes the security override."
+      },
+      "contextFiles": [
+        "apps/web/layouts/default.vue",
+        "apps/web/tests/layouts/default-permission-nav.spec.ts",
+        "apps/web/tests/helpers/permission-nav.ts",
+        "docs/ux/redesign/MASTER-PLAN.md"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/layouts/default-permission-nav.spec.ts",
+          "reason": "the `ADMIN_LINKS` table gains a row pairing the href /admin/outbox with the key outbox.read so the existing every-link and no-link tests cover the new link, and a describe block holds this story's ACs. Every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/helpers/permission-nav.ts",
+          "reason": "`ADMIN_NAV_KEYS` gains `'outbox.read'` after `'audit.read'` and `adminNavFlags` returns `canReadOutbox`, so the fleet, skills and flows nav specs that spread `adminNavFlags` keep a complete binding set for the layout. Existing keys and flags stay as they are."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Retry eligible Outbox events from the admin page",
+      "description": "**Goal** — Add approval-aware retry actions to eligible Outbox rows using the existing route and row identifier.\n\n**Motivation** — Nothing shows that events are stuck, and resetting one needs `koda admin`.\n\n**Approach** — Add `retry` to `useAdminOutbox` and a Retry button (label `outbox.retry.action`) on each `dead` or `pending` row when the caller holds global `outbox.retry`. Retry posts the row's `id`. Handle the retried, pending and rejected outcomes as the Failure Handling table states. Add `outbox.retry.*` keys to `en.json` and `zh.json`.\n\n`POST /admin/outbox/:eventId/retry` (`retryOutboxEvent`). Permission `outbox.retry` (global). Approval-gated: answers `200` with an empty body, or `202` with an `ApprovalRequestSummary`. Refusals: 403, 404, 409 (status is `processing` or `published`, message `Outbox event is <status>; only dead or pending events can be retried`). **The path parameter is the row's `id`, not its `eventId` field**: `OutboxAdminService.retry` looks the row up with `outboxRepo.findById(eventId)`, which queries `outboxEvent.findUnique({ where: { id } })`.\n\n`useProviderCredentials` (`apps/web/composables/useProviderCredentials.ts`) is the pattern for an approval-gated write: `isPendingAnswer(data)` checks `'permissionKey' in data` and the composable returns `{ kind: 'pending', request }` for a 202 summary. `ApprovalRequestSummary` is exported from `apps/web/lib/approval-requests.ts`.\n\n`apps/web/composables/useAdminOutbox.ts`: `useAdminOutbox()` returns `{ items, total, isLoading, error, status, load, retry }`. `status` is a ref with initial value `'dead'`. `load()` sends `GET /admin/outbox` with query `{ status: status.value }`. `retry(id: string): Promise<OutboxRetryOutcome>`, where `OutboxRetryOutcome = { kind: 'retried' } | { kind: 'pending'; request: ApprovalRequestSummary }` is exported from the same file.\n\nUse a null-safe permissionKey marker check so empty success returns { kind: 'retried' }. Preserve pending request objects and propagate rejections. The page uses useGlobalPermissions().permissions.has('outbox.retry'), not role names or inferred outbox.read rights. For completed retry, toast.success with outbox.retry.done and call load with the current status; never optimistically patch rows. Processing and published rows receive no Retry button.\n\nFailure handling:\n- Retry POST rejected (403, 404, 409, network) | Toast `extractApiError(err)`; list not reloaded.\n- Retry answered 202 | Toast `outbox.retry.pending`; list not reloaded.\n\nPage specs that assert the `ApiError` branch pass `alias: { '~/composables/useApi': apiModule }` to `mountSfc`, as `tests/components/add-skill-source-dialog.spec.ts` does, so the page and the test share one `ApiError` class.\n\nPreserve the US-005 read/filter/count/error behavior and its no-permission page harness. Create tests/composables/useAdminOutbox-retry.spec.ts and tests/pages/admin-outbox-retry.spec.ts. Extend upstream page tests only as necessary without weakening assertions. Mounted page tests must click row actions and exercise the actual retry helper to prove POST routing with distinct id row-1 and eventId evt-9. Test empty success, pending summaries, global key visibility and refusal messages; parameterize rejection cases across the failure table. Do not disable Retry while its request is in flight.\n\n**Scope** — In: retry helper/outcome, row gate, current-filter refresh, feedback and retry locale keys. Out: rebuilding US-005 reads/page, US-006 navigation, bulk retry, in-flight disabling, payload/headers display and API changes.\n\n**Interface** —\n```typescript\nretry(id: string): Promise<OutboxRetryOutcome>\n```\n`OutboxRetryOutcome = { kind: 'retried' } | { kind: 'pending'; request: ApprovalRequestSummary }`",
+      "acceptanceCriteria": [
+        "[unit] useAdminOutbox().retry('row-1') sends POST /admin/outbox/row-1/retry.",
+        "[unit] retry resolves { kind: 'retried' } when the POST answers an empty body.",
+        "[unit] retry resolves { kind: 'pending', request } with request equal to the answer when the POST answers an object that has a permissionKey field.",
+        "[integration] On /admin/outbox with global outbox.retry, a dead row renders an outbox.retry.action button.",
+        "[integration] On /admin/outbox with global outbox.retry and the status filter set to pending, a pending row renders an outbox.retry.action button.",
+        "[integration] On /admin/outbox without outbox.retry, a dead row renders no outbox.retry.action button.",
+        "[integration] On /admin/outbox with outbox.retry and the status filter set to published, a published row renders no outbox.retry.action button.",
+        "[integration] Clicking outbox.retry.action on a row with id row-1 and eventId evt-9 sends POST /admin/outbox/row-1/retry.",
+        "[integration] When the retry POST answers an empty body, the page calls toast.success with outbox.retry.done.",
+        "[integration] When the retry POST answers an empty body, the page sends GET /admin/outbox again with query { status: 'dead' } (the current status).",
+        "[integration] When the retry POST answers an object with a permissionKey field, the page calls the toast with outbox.retry.pending.",
+        "[integration] When the retry POST answers an object with a permissionKey field, the page sends no further GET /admin/outbox.",
+        "[integration] When the retry POST rejects with an ApiError whose message is Outbox event is processing; only dead or pending events can be retried, the page calls toast.error with that message.",
+        "[integration] When the retry POST rejects, the page sends no further GET /admin/outbox.",
+        "[integration] Given no global permission keys and a successful list response containing a row of type ticket_event, /admin/outbox still renders ticket_event, preserving the read-only page behavior introduced by US-005."
+      ],
+      "tags": [
+        "web",
+        "outbox",
+        "admin",
+        "approvals",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends an established page/composable with one approval-aware mutation; global retry access, identifier safety and refusal handling invoke strict security isolation."
+      },
+      "contextFiles": [
+        "apps/web/composables/useAdminOutbox.ts",
+        "apps/web/pages/admin/outbox.vue",
+        "apps/web/tests/pages/admin-outbox.spec.ts",
+        "apps/web/tests/components/add-skill-source-dialog.spec.ts",
+        "apps/web/tests/helpers/permission-nav.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/composables/useAdminOutbox-retry.spec.ts",
+        "apps/web/tests/pages/admin-outbox-retry.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "On /admin/outbox with global outbox.retry and the status filter set to processing, a processing row renders no outbox.retry.action button.",
+        "When retry succeeds while the selected status is pending, the refresh GET sends query { status: 'pending' }.",
+        "retry rejects with the same error when the POST rejects."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Architecture and discovery: The codebase-memory MCP tools are unavailable in this session, so discovery used direct repository reads and text search. This is an additive enhancement to the existing Nuxt 4 SSR/Vue application, not Next.js despite the detected stack summary. apps/web/package.json:5-18 defines Nuxt build/dev/typecheck and Jest/Playwright scripts; apps/web/package.json:27-40 includes the existing Nuxt, Vue, vee-validate, zod and Shadcn dependencies. Follow the hand-written composable/API-proxy architecture in .nax/mono/apps/web/context.md:52-64; no generated client, dependency addition, API contract change, OpenAPI regeneration, database migration, CLI change or runner change is needed. All seven stories remain scoped to apps/web with the specified dependency graph. US-001, US-002 and US-005 can begin independently; US-003 follows US-001; US-004 integrates US-001/002/003; US-006 and US-007 independently extend US-005. Shared locale edits require additive merges, not extra dependencies.\n\nMemory implementation: apps/web/composables/useMemory.ts:4-14 defines MemoryItem, including kind, status and scope. buildMemoryQuery at :48-57 omits current for page one and sends later page numbers as current. useMemory at :74-164 owns read state, filters and paging, with latestRequestId sequencing at :83-138. applyFilters at :142-145 resets to page one; loadMore at :147-154 appends via loadMemory, whose failure path preserves previous appended rows and restores the page. Keep those existing contracts and behavior unchanged. The only production consumer found for this composable is apps/web/pages/[project]/memory.vue:14-25; other useMemory references are tests. useMemoryWriteMode and SettingsMemoryCard are separate features. Add mutation helpers without optimistic row updates or implicit reloads; US-004 owns the refresh.\n\nMemory page impact: apps/web/pages/[project]/memory.vue:1-5 currently imports reactive and watchDebouncedMemorySearch, but calls useMemory through auto-import. Its existing error wrapper at :30-44 surfaces extractApiError through toast, and its six-column table at :109-139 preserves note expansion, user-scope labels and read-only field display. US-003 adds the trailing action column and canRetire(item); US-004 adds retireTarget, retireBusy, openRetire(item), confirmRetire(reason), project lookup and the actual dialog. Explicitly import ref/computed/reactive from Vue when used, useMemory from its existing feature import, and useProjectRef from its own module. Keep existing filters, debounced search, loading/error states and Load more behavior. After a completed retire, call applyFilters rather than loadMemory so a list expanded through page two resets correctly. Pending approval closes the dialog without a read; a rejected mutation keeps it open without a read.\n\nExisting API contracts, read-only references: apps/api/src/memory/memory.controller.ts:58-75 implements POST /memory/:id/retire, and :85-105 implements POST /memory/notes/:id/retire. Both are approval-gated and return an item or ApprovalRequestSummary through the existing response envelope. Optional reasons are bounded to 500 in apps/api/src/memory/dto/retire-decision.dto.ts:4-9 and apps/api/src/memory/dto/retire-note.dto.ts:15-28. DECISION visibility follows memory.decision.retire only; NOTE follows memory.create or its own-scoped grant. The API still performs replacement and ownership checks in apps/api/src/memory/memory-write.service.ts:234-245,250-300,342-359. Do not duplicate these checks or add memory.update to button visibility. NOTE confirmation resolves the current project's id through useProjectRef(slug).load(), which returns Promise<string | null> and propagates failures (apps/web/composables/useProjectRef.ts:18-29). A rejected lookup prevents POST; visibility-only harnesses intentionally provide a lookup resolving null without confirming.\n\nOne discovered spec/code discrepancy: the spec describes a retired item becoming superseded, but the checked-out service documents rejected at apps/api/src/memory/memory-write.service.ts:344-346. Do not change the API or locally assign either status. The specified applyFilters reload delegates actual status and current-filter visibility to the server, and no feature AC requires a local terminal-status assignment.\n\nApproval and transport patterns: apps/web/composables/useApi.ts:42-62 unwraps ret/data envelopes and passes bare responses through unchanged; :253-257 supplies get/post, with an empty default POST body. Detect pending answers using a null-safe object check and the permissionKey marker, as isPendingAnswer does in apps/web/composables/useProviderCredentials.ts:60-63, rather than inspecting HTTP status. Reuse ApprovalRequestSummary from apps/web/lib/approval-requests.ts:42-63. Both write outcome unions preserve the original pending request. Empty Outbox success must not cause an object-marker check to throw. Write helpers propagate the same rejection; pages use ApiError.code and extractApiError from apps/web/composables/useApi.ts:20-40,71-98. Use the existing apiPath dynamic-segment convention already imported by useMemory and useProjectRef. Trim retire reasons in the composable and omit blank trimmed reasons.\n\nOutbox implementation: Neither useAdminOutbox.ts nor pages/admin/outbox.vue exists at discovery time. The API already supports the list and retry routes with global outbox.read/outbox.retry respectively (apps/api/src/outbox/admin.controller.ts:25-57). The list is a bare { items, total }, defaults to pending and caps rows at 100 (apps/api/src/outbox/outbox-admin.service.ts:8-25). The web must explicitly request dead initially, use a native select with dead/pending/processing/published in that design order, display Showing {count} of {total}, and never introduce paging. The required row text is type, eventId, attempts and lastError. OutboxEventDomain fields are documented in apps/api/src/outbox/domain/outbox-event.domain.ts:1-17; dates cross the wire as ISO strings. Never render payload or headers, including hidden detail views, and render returned text through interpolation.\n\nCritical retry identifier seam: the route parameter is misleadingly named eventId, but OutboxAdminService.retry calls findById at apps/api/src/outbox/outbox-admin.service.ts:33-39, and apps/api/src/outbox/prisma-outbox.repository.ts:75-77 queries where: { id }. POST the row.id, never the displayed external row.eventId. Only dead or pending rows qualify; processing/published and concurrent state changes can produce 409 (outbox-admin.service.ts:38-51). Completed retry toasts done and reloads the current status. A pending approval or refusal does not reload. Bulk retry and disabling Retry in flight are excluded. US-005 establishes the read composable/page; US-007 adds retry and its exported outcome without replacing read behavior.\n\nAdmin read pattern and concurrency: apps/web/pages/admin/slos.vue:60-99 demonstrates latestRequestId sequencing, quiet adminOnly classification for err instanceof ApiError && err.code === 403, and extracted-error toasts otherwise. The new list must expose loading/error state, propagate current read failures for classification, and ignore obsolete filter responses and obsolete errors. Do not hide load failures as empty results. Keep read-error handling separate from completed mutation handling so a failed refresh does not imply an already-completed mutation was refused.\n\nPermissions and navigation: useProjectPermissions and useGlobalPermissions expose computed PermissionSet values and fail closed while pending or failed (apps/web/composables/usePermissions.ts:47-85). hasOwn promotes a .own entry while has does not (apps/web/lib/permissions.ts:18-42). Use permission keys, never role names. The layout's global booleans and showAdminNav are at apps/web/layouts/default.vue:51-81. Add canReadOutbox, include it in showAdminNav, and add the inline Send-icon link immediately after Audit (:249) and before Fleet Overview (:251). Preserve other source order and inline links. apps/web/tests/helpers/permission-nav.ts:65-78,110-125 mirrors keys and booleans; extend it without deleting existing entries. Consumers include default-fleet-nav.spec.ts:4,58, default-skills-nav.spec.ts:4,52, flows-nav.spec.ts:8,49, threads-nav.spec.ts:8,128 and project-agents-nav.spec.ts:4,27. The real-setup layout test's ADMIN_LINKS table is apps/web/tests/layouts/default-permission-nav.spec.ts:24-35; extend that table and add the feature assertions without weakening existing tests. docs/ux/redesign/MASTER-PLAN.md:31-40 requires inline navigation, order preservation and same-PR UX bookkeeping. Keep any required repository-level PR bookkeeping coordinated separately rather than adding a story or widening these fixed apps/web workdirs. The feature explicitly excludes a Command Palette entry despite the general navigation guidance.\n\nLocalization and UI: Update both apps/web/i18n/locales/en.json and zh.json additively. Existing memory namespaces begin at :481 and relevant nav labels occur at :67-76 in both. No outbox or memory.retire namespace currently exists. US-002 owns dialog keys, US-003 action, US-004 done/pending, US-005 page keys, US-006 nav.outbox, and US-007 retry keys. Use existing token classes and Shadcn primitives, not raw component colors or new UI dependencies.\n\nTests and compatibility: These integration-labelled criteria are mounted web page/API seams, not new API/Postgres integration suites. Existing apps/web/tests/composables/useMemory.spec.ts:37-165 covers read/filter/error behavior, with later suites covering search, pagination, stale requests and append recovery. apps/web/tests/pages/memory-mount.spec.ts:55-78 rewrites the useMemory call and :114-137 builds a closed VM sandbox. US-003 adds an empty useProjectPermissions stub; US-004 adds a useProjectRef double whose load resolves null, including an imported-module alias/rewire if needed. Every existing assertion remains unchanged. The SSR createRenderContext in apps/web/tests/pages/memory.spec.ts:482-514 gains canRetire returning false in US-003, then retireTarget null, retireBusy false and inert openRetire/confirmRetire in US-004.\n\nNew tests use mountSfc (apps/web/tests/helpers/mount-sfc.ts:24-74). Its fixed NUXT_AUTO_IMPORTS list at :126-151 includes permission hooks but not useMemory/useProjectRef/useAdminOutbox, so page imports must be explicit. Pass project lookup doubles through alias. ApiError page tests must pass alias: { '~/composables/useApi': apiModule } so instanceof sees the same class as the test. Mount the real MemoryRetireDialog through loadSfc with actual FormField/FormMessage, following apps/web/tests/components/add-skill-source-dialog.spec.ts:25-66. uiStubs has inert form bindings, so using them alone cannot prove validation or reason entry. Use an open-aware primitive or page conditional rendering so closed-dialog assertions do not inspect still-rendered stub slots. AddSkillSourceDialog's form/reset pattern is at apps/web/components/AddSkillSourceDialog.vue:45-99. Both feature seams must be proven by clicking the mounted page row action and asserting the actual helper's POST, not by stubbing the helper outcome. Test unresolved POSTs for busy state and load page two before asserting retire's reset-to-page-one GET.\n\nFailure handling and completion: The original 64 ACs remain under their seven original stories. Parameterize existing rejection assertions across retire 400/403/404/409/422/network and retry 403/404/409/network; NOTE lookup failure must prevent POST. Pending outcomes do not reload; memory pending closes its dialog. Outbox list 403 is quiet adminOnly and other failures toast/error. Overlong reasons produce inline validation without confirm. US-003 through US-007 retain three-session-tdd for permission-gated surfaces and authorization/refusal integration. US-001 uses tdd-simple because it only forwards API bodies and classifies returned data, without evaluating permission grants or enforcing an approval policy; US-002 also uses tdd-simple for the presentation-only form. All stories are medium: even US-004 composes existing/upstream contracts in one page and needs no new architectural abstraction. Optional additional edges are suggestedCriteria, not new mandatory ACs. No tests or shell commands were executed during drafting. Use the existing Jest/component/page suites and normal app scripts; generated .nax acceptance is excluded from Jest and runs separately with bun test as documented in .nax/mono/apps/web/context.md:87-96. Do not copy/edit generated acceptance files or change test exclusions. Delivery is additive web assets against existing routes, with no data backfill or migration. Completion requires the two actions, their navigation and localized feedback, intact read-only regressions, safe payload boundaries, correct row-id retry routing and approval/refusal behavior owned by the API.\n\nRefinement audit: All 64 explicit spec criteria were compared individually in story order. US-001 criteria 1-7, US-002 1-6, US-003 1-5, US-004 1-14, US-005 1-14, US-006 1-4 and US-007 1-14 remain the first corresponding acceptanceCriteria entries, unchanged in meaning and story assignment. Qualifiers retained include page 1 through applyFilters in US-004.6, dialog-closed/open parentheticals in US-004.9/.11/.13, the same error/request identity in US-001.6/.7 and US-007.3, and the current-status qualifier in US-007.10. Every criterion is observable through request spies, returned values, error identity, emitted events, rendered text or disabled state. No deprecated file-content AC tags occur in this spec. Each story already has a negative path: US-001.7; US-002.2/.3; US-003.2/.4/.5; US-004.3/.4/.10-.12; US-005.11-.14; US-006.2; US-007.6/.7/.13/.14. All eight failure-table rows are covered by these preserved criteria. The current refinement request additionally requires explicit backward-compatibility criteria, so five source-grounded regression anchors are appended after the original criteria in US-001, US-003, US-004, US-006 and US-007; there are now 69 mandatory criteria. These anchors protect append behavior, note expansion, selected filters, existing Users navigation and the upstream read-only Outbox page. They are audit-added regressions, not misattributed original spec criteria; all other optional hardening remains suggestedCriteria. All eleven feature exclusions remain verbatim in outOfScope; there are no story-local out-of-scope blocks to hoist. Story ids, workdirs and binding dependencies are unchanged and every referenced dependency exists. Context lists stay within five entries and include every critical spec recommendation; US-004 prioritizes the page, upstream dialog, project lookup, real-form mount example and permission doubles, while its upstream visibility test remains an explicitly named regression surface in the description. All created files remain expectedFiles rather than same-story contextFiles. No description/AC contradiction was found in the retire/retry routes, payloads, empty-body handling, permission scopes, pending branches or refresh rules. No tests, JSON parser or shell commands were executed during this read/edit-only audit.",
+  "outOfScope": [
+    "Retiring memory items of kind FACT, PREFERENCE, CONSTRAINT or INCIDENT_PATTERN: the API has no route for it.",
+    "Any change under `apps/api`, `apps/cli` or `apps/runner`: every route this feature calls already exists.",
+    "Editing, recording or extracting memory from the web (`POST /memory`, `POST /memory/decisions`, `POST /memory/extract`).",
+    "Hiding the DECISION or NOTE Retire button from a caller who lacks `memory.update`: the API's 403 is toasted instead.",
+    "An AC pinning the order of the Outbox status options: the order is stated in Design only.",
+    "Rendering an outbox event's `payload` or `headers`.",
+    "Paging the outbox list past the API's 100-row cap.",
+    "Bulk retry of several outbox events at once.",
+    "Disabling a Retry button while its request is in flight.",
+    "A Command Palette entry for the Outbox page.",
+    "Project webhooks CRUD, knowledge-base import and evaluation, code-intel reindex and context query web UIs (the other W2 gaps found by the 2026-11-11 route audit)."
+  ],
+  "routingProfile": "native-codex-ds"
+}
