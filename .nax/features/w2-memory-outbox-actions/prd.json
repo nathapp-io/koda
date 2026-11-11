@@ -3,7 +3,7 @@
   "feature": "w2-memory-outbox-actions",
   "branchName": "feat/w2-memory-outbox-actions",
   "createdAt": "2026-11-11T00:00:00.000Z",
-  "updatedAt": "2026-11-11T16:13:54.882Z",
+  "updatedAt": "2026-11-11T16:18:14.521Z",
   "userStories": [
     {
       "id": "US-001",
@@ -81,14 +81,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard localized form component and mounted tests using existing dependencies; no authentication, permission evaluation or API request."
+        "reasoning": "Standard localized form component and mounted tests using existing dependencies; no authentication, permission evaluation or API request.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/AddSkillSourceDialog.vue",
@@ -108,7 +111,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "89415c4916b9314a2f7a524b8b93b0a8fb0e29bc"
     },
     {
       "id": "US-003",
