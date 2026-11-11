@@ -124,6 +124,7 @@ async function mountMemoryPage(opts: MountOptions) {
     useRoute: () => ({ params: { project: slug }, path: `/${slug}/memory` }),
     useI18n: () => ({ t: (k: string) => k, locale: { value: 'en' } }),
     useAppToast: () => toastInstance,
+    useProjectPermissions: () => ({ permissions: { has: () => false, hasOwn: () => false } }),
     definePageMeta: () => {},
     onMounted: (fn: () => unknown) => { fn() },
     useApi: () => ({

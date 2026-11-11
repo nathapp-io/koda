@@ -508,6 +508,7 @@
       "status": "状态"
     },
     "retire": {
+      "action": "退役",
       "title": "退役记忆项",
       "item": "即将退役：{itemLabel}",
       "reason": "原因（可选）",

@@ -508,6 +508,7 @@
       "status": "Status"
     },
     "retire": {
+      "action": "Retire",
       "title": "Retire memory item",
       "item": "You are retiring: {itemLabel}",
       "reason": "Reason (optional)",

@@ -2,7 +2,7 @@
 import { reactive } from 'vue'
 import { Brain } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
-import { watchDebouncedMemorySearch } from '~/composables/useMemory'
+import { useMemory, watchDebouncedMemorySearch } from '~/composables/useMemory'
 
 definePageMeta({ layout: 'default' })
 
@@ -10,6 +10,7 @@ const route = useRoute()
 const slug = route.params.project as string
 const { t } = useI18n()
 const toast = useAppToast()
+const { permissions } = useProjectPermissions(slug)
 
 const {
   items,
@@ -43,6 +44,13 @@ const expandedNotes = reactive(new Set<string>())
 watchDebouncedMemorySearch(textFilter, () => {
   void withToastError(applyFilters)
 })
+
+function canRetire(item: { kind: string; status: string }) {
+  if (item.status !== 'active') return false
+  if (item.kind === 'DECISION') return permissions.value.has('memory.decision.retire')
+  if (item.kind === 'NOTE') return permissions.value.has('memory.create') || permissions.value.hasOwn('memory.create')
+  return false
+}
 
 function toggleNote(itemId: string) {
   if (expandedNotes.has(itemId)) expandedNotes.delete(itemId)
@@ -116,6 +124,7 @@ function formatConfidence(value: number) {
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('memory.columns.kind') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('memory.columns.confidence') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('memory.columns.status') }}</th>
+            <th class="px-4 py-3 text-left font-medium text-muted-foreground" />
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -136,6 +145,9 @@ function formatConfidence(value: number) {
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.kind }}</span></td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ formatConfidence(item.confidence) }}</td>
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.status }}</span></td>
+            <td class="px-4 py-3">
+              <Button v-if="canRetire(item)" variant="outline" size="sm">{{ t('memory.retire.action') }}</Button>
+            </td>
           </tr>
         </tbody>
       </table>

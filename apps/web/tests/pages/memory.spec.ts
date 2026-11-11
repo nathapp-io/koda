@@ -503,6 +503,7 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     loadMoreAndToast: jest.fn().mockResolvedValue(undefined),
 
     formatConfidence: (v: number) => v.toFixed(2),
+    canRetire: () => false,
     KIND_OPTIONS: ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'],
     STATUS_OPTIONS: ['', 'active', 'superseded', 'rejected'],
 
