@@ -873,6 +873,15 @@
       "memoryGrowthRate": "Memory growth rate"
     }
   },
+  "outbox": {
+    "title": "Outbox",
+    "empty": "No events match this status.",
+    "error": "Could not load outbox events.",
+    "adminOnly": "The outbox is available to administrators only.",
+    "showing": "Showing {count} of {total}",
+    "status": { "label": "Status", "dead": "Dead", "pending": "Pending", "processing": "Processing", "published": "Published" },
+    "columns": { "type": "Type", "eventId": "Event ID", "attempts": "Attempts", "lastError": "Last error" }
+  },
   "home": {
     "subtitle": "What needs you across your projects",
     "needsYou": "Needs you",
