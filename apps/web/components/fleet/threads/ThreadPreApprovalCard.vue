@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { useThreadPreApproval } from '~/composables/useThreadPreApproval'
 import { usd } from '~/lib/fleet-analytics-format'
-import { buildPreApprovalSchema } from '~/lib/fleet-flow-start-form'
+import { buildPreApprovalSchema, FLOW_COST_CAP_MAX_USD, FLOW_COST_CAP_MIN_USD, FLOW_COST_CAP_STEP_USD } from '~/lib/fleet-flow-start-form'
 import type { ThreadDetailDto } from '~/lib/thread-types'
 
 const props = defineProps<{ slug: string; thread: ThreadDetailDto }>()
@@ -64,7 +64,7 @@ const visible = computed(() =>
     </template>
     <template v-else>
       <Label for="thread-preapproval-cap">{{ t('fleet.flows.preapproval.cap') }}</Label>
-      <Input id="thread-preapproval-cap" v-model="cap" type="number" data-testid="preapproval-cap-input" />
+      <Input id="thread-preapproval-cap" v-model="cap" type="number" :min="FLOW_COST_CAP_MIN_USD" :max="FLOW_COST_CAP_MAX_USD" :step="FLOW_COST_CAP_STEP_USD" data-testid="preapproval-cap-input" />
       <p v-if="validationError" role="alert">{{ validationError }}</p>
       <Button type="button" data-testid="preapproval-set" :disabled="writing" @click="onSet">
         {{ t('fleet.flows.preapproval.set') }}

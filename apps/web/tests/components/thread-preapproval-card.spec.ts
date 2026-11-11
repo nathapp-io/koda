@@ -64,4 +64,15 @@ describe('ThreadPreApprovalCard', () => {
     expect(button ? mounted.textOf(button) : '').toBe('Clear')
     mounted.unmount()
   })
+
+  test('#434: cap input is labelled and declares the API bounds', async () => {
+    const mounted = await mountCard(thread())
+    const input = mounted.one('input')
+    expect(input?.props.id).toBe('thread-preapproval-cap')
+    expect(mounted.find('label').some(n => n.props.for === 'thread-preapproval-cap')).toBe(true)
+    expect(input?.props.min).toBe(0.0001)
+    expect(input?.props.max).toBe(1000)
+    expect(input?.props.step).toBe(0.0001)
+    mounted.unmount()
+  })
 })

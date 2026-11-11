@@ -3,7 +3,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import { computed, ref, watch } from 'vue'
 import { flowStartRows } from '~/lib/fleet-flow-start'
-import { buildFlowStartSchema, firstFlowStartIssue } from '~/lib/fleet-flow-start-form'
+import { buildFlowStartSchema, firstFlowStartIssue, FLOW_COST_CAP_MAX_USD, FLOW_COST_CAP_MIN_USD, FLOW_COST_CAP_STEP_USD } from '~/lib/fleet-flow-start-form'
 import type { FlowStartRow, FlowStartFormValues } from '~/lib/fleet-flow-start-form'
 import { defaultFlowRoles, tickHint } from '~/lib/fleet-flow-start-defaults'
 import { toFlowStartBody } from '~/lib/fleet-flow-start-body'
@@ -18,6 +18,9 @@ interface EditRow { id: number; feature: string; specPath: string; dependsOn: nu
 const props = defineProps<{ open: boolean; thread: import('~/lib/thread-types').ThreadDetailDto; viewerId: string }>()
 const emit = defineEmits<{ (event: 'update:open', value: boolean): void; (event: 'submit', body: unknown): void }>()
 const { t } = useI18n()
+const COST_CAP_MIN = FLOW_COST_CAP_MIN_USD
+const COST_CAP_MAX = FLOW_COST_CAP_MAX_USD
+const COST_CAP_STEP = FLOW_COST_CAP_STEP_USD
 const schema = buildFlowStartSchema(t)
 const { setFieldValue, values } = useForm<FlowStartFormValues>({
   validationSchema: toTypedSchema(schema),
@@ -87,8 +90,8 @@ function addRow(): void { rows.value.push({ id: nextRowId++, feature: '', specPa
       <DialogHeader><DialogTitle>{{ t('fleet.flows.start.title') }}</DialogTitle></DialogHeader>
       <form data-testid="flow-start-form" class="space-y-4" @submit.prevent="submit">
       <div v-for="(row, index) in rows" :key="row.id" data-testid="flow-start-row" class="space-y-3 rounded-md border border-border p-3">
-        <div class="space-y-1"><Label>{{ t('fleet.flows.start.feature') }}</Label><input :value="row.feature" data-testid="flow-start-feature" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.feature = ($event.target as HTMLInputElement).value; changed()"></div>
-        <div class="space-y-1"><Label>{{ t('fleet.flows.start.specPath') }}</Label><input :value="row.specPath" data-testid="flow-start-spec-path" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.specPath = ($event.target as HTMLInputElement).value; changed()"></div>
+        <div class="space-y-1"><Label :for="`flow-start-feature-${index}`">{{ t('fleet.flows.start.feature') }}</Label><input :id="`flow-start-feature-${index}`" :value="row.feature" data-testid="flow-start-feature" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.feature = ($event.target as HTMLInputElement).value; changed()"></div>
+        <div class="space-y-1"><Label :for="`flow-start-spec-path-${index}`">{{ t('fleet.flows.start.specPath') }}</Label><input :id="`flow-start-spec-path-${index}`" :value="row.specPath" data-testid="flow-start-spec-path" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @input="row.specPath = ($event.target as HTMLInputElement).value; changed()"></div>
         <div v-if="index > 0" data-testid="flow-start-dependency-row" :data-feature="row.feature" class="space-y-2">
           <label v-for="earlier in rows.slice(0, index)" :key="earlier.id" class="flex items-center gap-2 text-sm">
             <input type="checkbox" data-testid="flow-start-dependency" :value="earlier.feature" :checked="row.dependsOn.includes(earlier.id)" @change="toggleDependency(index, earlier.id, ($event.target as HTMLInputElement).checked); changed()">
@@ -97,9 +100,9 @@ function addRow(): void { rows.value.push({ id: nextRowId++, feature: '', specPa
         </div>
         <Button type="button" data-testid="flow-start-remove-row" @click="removeRow(index); changed()">{{ t('fleet.flows.start.removeRow') }}</Button>
       </div>
-      <div class="space-y-1"><Label>{{ t('fleet.flows.start.reviewer') }}</Label><input :value="values.roles.reviewer" data-testid="flow-start-reviewer" @input="setFieldValue('roles.reviewer', ($event.target as HTMLInputElement).value); changed()"></div>
-      <div class="space-y-1"><Label>{{ t('fleet.flows.start.supervisor') }}</Label><input :value="values.roles.supervisor" data-testid="flow-start-supervisor" @input="setFieldValue('roles.supervisor', ($event.target as HTMLInputElement).value); changed()"></div>
-      <div class="space-y-1"><Label>{{ t('fleet.flows.start.costCap') }}</Label><input type="number" :value="values.costCapUsd" data-testid="flow-start-cost-cap" @input="setFieldValue('costCapUsd', ($event.target as HTMLInputElement).value); changed()"></div>
+      <div class="space-y-1"><Label for="flow-start-reviewer">{{ t('fleet.flows.start.reviewer') }}</Label><Input id="flow-start-reviewer" :value="values.roles.reviewer" data-testid="flow-start-reviewer" @input="setFieldValue('roles.reviewer', ($event.target as HTMLInputElement).value); changed()" /></div>
+      <div class="space-y-1"><Label for="flow-start-supervisor">{{ t('fleet.flows.start.supervisor') }}</Label><Input id="flow-start-supervisor" :value="values.roles.supervisor" data-testid="flow-start-supervisor" @input="setFieldValue('roles.supervisor', ($event.target as HTMLInputElement).value); changed()" /></div>
+      <div class="space-y-1"><Label for="flow-start-cost-cap">{{ t('fleet.flows.start.costCap') }}</Label><Input id="flow-start-cost-cap" type="number" :min="COST_CAP_MIN" :max="COST_CAP_MAX" :step="COST_CAP_STEP" :value="values.costCapUsd" data-testid="flow-start-cost-cap" @input="setFieldValue('costCapUsd', ($event.target as HTMLInputElement).value); changed()" /></div>
       <p data-testid="flow-start-tick-hint" class="text-sm text-muted-foreground">{{ t(`fleet.flows.start.tick.${hint}`) }}</p>
       <p v-if="error" role="alert" class="text-sm text-status-rejected">{{ error }}</p>
       <Button type="submit" data-testid="flow-start-submit">{{ t('fleet.flows.start.submit') }}</Button>

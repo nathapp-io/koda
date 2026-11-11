@@ -27,3 +27,39 @@ describe('US-006 ThreadStartFlowDialog rows',()=>{
  test('AC-13..14 reset on reopen and forward close',async()=>{const app=mount();click(app.one('[data-testid="flow-start-add-row"]'));app.setProps({open:false});await settle();app.setProps({open:true});await settle();expect(rows(app)).toHaveLength(2);app.find('[data-stub="dialog"]')[0]?.props['onUpdate:open']?.(false);expect(app.emitted('update:open')).toEqual([[false]]);app.unmount()})
  test('AC-15 failed publish does not add published paths',()=>{const app=mount(thread({lastWrite:{kind:'publish_failed',paths:['.nax/features/f-clamp/spec.md']}}));expect(rows(app)).toHaveLength(1);app.unmount()})
 })
+describe('#434 ThreadStartFlowDialog accessible names',()=>{
+ const labels=(app: ReturnType<typeof mount>)=>app.find('[data-stub="label"]').filter(n=>n.props.for!==undefined)
+ const labelFor=(app: ReturnType<typeof mount>, id: string)=>labels(app).find(n=>n.props.for===id)
+ test('every named field has a label whose for matches the input id, unique per row',()=>{
+  const app=mount()
+  const rowNodes=rows(app)
+  expect(rowNodes).toHaveLength(2)
+  const ids: string[]=[]
+  for(const [index,row] of rowNodes.entries()){
+   for(const testid of ['flow-start-feature','flow-start-spec-path']){
+    const id=input(app,row,testid)?.props.id
+    expect(typeof id).toBe('string')
+    expect(labelFor(app,String(id))).toBeDefined()
+    ids.push(String(id))
+    expect(String(id)).toContain(String(index))
+   }
+  }
+  for(const testid of ['flow-start-reviewer','flow-start-supervisor','flow-start-cost-cap']){
+   const id=app.one(`[data-testid="${testid}"]`)?.props.id
+   expect(typeof id).toBe('string')
+   expect(labelFor(app,String(id))).toBeDefined()
+   ids.push(String(id))
+  }
+  expect(new Set(ids).size).toBe(ids.length)
+  app.unmount()
+ })
+ test('cost cap declares the API bounds: min 0.0001, max 1000, step 0.0001',()=>{
+  const app=mount()
+  const cap=app.one('[data-testid="flow-start-cost-cap"]')
+  expect(cap?.props.type).toBe('number')
+  expect(cap?.props.min).toBe(0.0001)
+  expect(cap?.props.max).toBe(1000)
+  expect(cap?.props.step).toBe(0.0001)
+  app.unmount()
+ })
+})
