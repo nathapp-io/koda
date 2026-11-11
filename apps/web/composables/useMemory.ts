@@ -1,5 +1,20 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+
+export type RetireOutcome =
+  | { kind: 'retired' }
+  | { kind: 'pending'; request: ApprovalRequestSummary }
+
+function isPendingAnswer(data: unknown): data is ApprovalRequestSummary {
+  return data !== null && typeof data === 'object' && 'permissionKey' in data
+}
+
+function retireOutcome(data: unknown): RetireOutcome {
+  return isPendingAnswer(data)
+    ? { kind: 'pending', request: data }
+    : { kind: 'retired' }
+}
 
 export interface MemoryItem {
   id: string
@@ -135,6 +150,24 @@ export function useMemory(slug: string) {
     }
   }
 
+  async function retireDecision(id: string, reason?: string): Promise<RetireOutcome> {
+    const trimmedReason = reason?.trim()
+    const data = await $api.post<unknown>(
+      apiPath`/memory/${id}/retire`,
+      trimmedReason ? { reason: trimmedReason } : {},
+    )
+    return retireOutcome(data)
+  }
+
+  async function retireNote(id: string, projectId: string, reason?: string): Promise<RetireOutcome> {
+    const trimmedReason = reason?.trim()
+    const data = await $api.post<unknown>(
+      apiPath`/memory/notes/${id}/retire`,
+      { projectId, ...(trimmedReason ? { reason: trimmedReason } : {}) },
+    )
+    return retireOutcome(data)
+  }
+
   async function applyFilters() {
     page.value = 1
     await loadMemory()
@@ -162,5 +195,7 @@ export function useMemory(slug: string) {
     loadMemory,
     applyFilters,
     loadMore,
+    retireDecision,
+    retireNote,
   }
 }
