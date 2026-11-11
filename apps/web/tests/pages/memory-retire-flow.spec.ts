@@ -30,7 +30,10 @@ describe('US-004 Memory retire flow', () => {
     const post = jest.fn(async () => ({})); const x = setup('DECISION', post); await flush()
     x.app.find('button').find(b => x.app.textOf(b) === 'memory.retire.action')?.props.onClick?.()
     await flush()
-    const field = x.app.find('[data-testid="memory-retire-reason"]')[0]; (field?.props['onUpdate:modelValue'] as (v: string) => void)('obsolete')
+    expect(x.app.one('form')).toBeDefined()
+    const field = x.app.find('[data-testid="memory-retire-reason"]')[0]
+    expect(field).toBeDefined()
+    ;(field?.props['onUpdate:modelValue'] as (v: string) => void)('obsolete')
     await submit(x.app); await flush()
     expect(post).toHaveBeenCalledWith('/memory/m1/retire', { reason: 'obsolete' })
     expect(x.toasts.successes).toEqual(['memory.retire.done'])
