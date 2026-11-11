@@ -7,6 +7,7 @@ import 'reflect-metadata';
 import { EXCEPTION_FILTERS_METADATA, FILTER_CATCH_EXCEPTIONS } from '@nestjs/common/constants';
 import { Controller, Get, type ArgumentsHost } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import request from 'supertest';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { getSchemaPath } from '@nestjs/swagger';
@@ -116,7 +117,7 @@ describe('@ApprovalGated()', () => {
 
   it('REG-1: redeem-gated validation errors retain their HTTP 400 response', async () => {
     const module = await Test.createTestingModule({ controllers: [ValidationProbe] }).compile();
-    const app = module.createNestApplication(new FastifyAdapter());
+    const app = AppFactory.useApp(module.createNestApplication(new FastifyAdapter()));
     try {
       await app.init();
       // supertest binds fastify.server directly, bypassing fastify.listen(); boot

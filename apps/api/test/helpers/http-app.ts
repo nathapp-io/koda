@@ -10,9 +10,8 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { AppModule } from '../../src/app.module';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
+import { FastifyRuntimePlugin } from '../../src/common/bootstrap/fastify-runtime.plugin';
 import { createFastifyAdapter } from '../../src/common/fastify-adapter';
-import { registerRawBodyHook } from '../../src/common/hooks/raw-body.hook';
-import { registerBundleContentParser, registerLogContentParser } from '../../src/common/hooks/bundle-content-parser';
 import { TEST_PASSWORD } from './test-credentials';
 
 export { TEST_PASSWORD, TEST_PASSWORD_HASH } from './test-credentials';
@@ -30,16 +29,16 @@ export { TEST_PASSWORD, TEST_PASSWORD_HASH } from './test-credentials';
  * `preParsingHookRunner` (`preParsing` is undefined) and the socket hangs.
  */
 export async function initFastifyApp(app: NathApplication): Promise<void> {
-  const fastify = app.getHttpAdapter().getInstance();
-  // Production bootstrap (main.ts) installs these before init(): mirror it so
-  // HTTP-level tests exercise the same Fastify pipeline. Express passed any
-  // content type through, but Fastify answers 415 unless a parser is
-  // registered, and webhook HMAC verification needs the captured rawBody.
-  registerRawBodyHook(fastify);
-  registerBundleContentParser(fastify);
-  registerLogContentParser(fastify);
+  // Same bootstrap sequence as main.ts: install Koda's Fastify runtime steps
+  // (rawBody capture, upload content-type parsers) as a bootstrap plugin, then
+  // ready() → init(). `ready()` installs plugins before any route context is
+  // built — Fastify freezes hooks and parsers per route — and the explicit
+  // fastify.ready() at the end boots Fastify for supertest, which binds the
+  // raw fastify.server directly and skips fastify.listen().
+  app.usePlugin(new FastifyRuntimePlugin());
+  await app.ready();
   await app.init();
-  await fastify.ready();
+  await app.getHttpAdapter().getInstance().ready();
 }
 
 export interface HttpAppOptions {

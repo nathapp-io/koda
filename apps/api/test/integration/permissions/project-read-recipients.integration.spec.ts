@@ -1,7 +1,7 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
-import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../../src/app.module';
 import { NotificationEligibility } from '../../../src/notifications/notification-eligibility';
@@ -19,7 +19,7 @@ const mention = (id: string) => `@[user](user:${id})`;
 
 describeIntegration('project.read notification recipients (PG)', () => {
   let moduleRef: TestingModule;
-  let app: INestApplication;
+  let app: NathApplication;
   let db: PrismaClient;
   let membership: MembershipService;
   let eligibility: NotificationEligibility;
@@ -44,7 +44,7 @@ describeIntegration('project.read notification recipients (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication(new FastifyAdapter());
+    app = AppFactory.useApp(moduleRef.createNestApplication(new FastifyAdapter()));
     await app.init();
     db = fixtureDb(app);
     membership = app.get(MembershipService);

@@ -7,8 +7,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/email/email-schedule.integration.spec.ts
  */
 import { randomUUID } from 'crypto';
-import { INestApplication } from '@nestjs/common';
 import { TestingModule, Test } from '@nestjs/testing';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../../src/app.module';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -40,7 +40,7 @@ interface SeedRow {
 
 describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
   let nest: TestingModule;
-  let app: INestApplication;
+  let app: NathApplication;
   let prisma: PrismaClient;
   let service: EmailScheduleService;
   let scheduler: EmailScheduleService;
@@ -91,7 +91,7 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
   beforeAll(async () => {
     await resetDb();
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    const created = nest.createNestApplication(new FastifyAdapter());
+    const created = AppFactory.useApp(nest.createNestApplication(new FastifyAdapter()));
     await created.init();
     app = created;
     prisma = fixtureDb(created);

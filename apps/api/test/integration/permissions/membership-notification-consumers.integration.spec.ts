@@ -19,8 +19,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
  *      bun run test:scoped test/integration/permissions/membership-notification-consumers.integration.spec.ts
  */
 import { randomUUID } from 'crypto';
-import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../../src/app.module';
 import { EmailContentBuilder } from '../../../src/email/email-content.builder';
@@ -50,7 +50,7 @@ const WEB_PUBLIC_URL = 'https://koda.test';
 
 describeIntegration('notification, mention and email consumers read bindings (US-005, PG)', () => {
   let nest: TestingModule;
-  let app: INestApplication;
+  let app: NathApplication;
   let prisma: PrismaClient;
   let writer: NotificationWriter;
   let mentions: TicketMentionResolver;
@@ -143,7 +143,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
     process.env['WEB_PUBLIC_URL'] = WEB_PUBLIC_URL;
     await resetDb();
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = nest.createNestApplication(new FastifyAdapter());
+    app = AppFactory.useApp(nest.createNestApplication(new FastifyAdapter()));
     await app.init();
     prisma = fixtureDb(app);
     writer = app.get(NotificationWriter);

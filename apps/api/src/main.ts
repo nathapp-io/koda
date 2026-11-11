@@ -1,11 +1,9 @@
 import { AppFactory } from '@nathapp/nestjs-app';
 import { Logger } from '@nathapp/nestjs-logging';
-import { HttpAdapterHost } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 import { APP_CFG, IAppConfig } from './config/app.config';
-import { registerRawBodyHook } from './common/hooks/raw-body.hook';
-import { registerBundleContentParser, registerLogContentParser } from './common/hooks/bundle-content-parser';
+import { FastifyRuntimePlugin } from './common/bootstrap/fastify-runtime.plugin';
 import { createFastifyAdapter } from './common/fastify-adapter';
 
 async function bootstrap() {
@@ -15,11 +13,9 @@ async function bootstrap() {
 
   app.useLogger(app.get(Logger));
 
-  const { httpAdapter } = app.get(HttpAdapterHost);
-  const fastify = httpAdapter.getInstance();
-  registerRawBodyHook(fastify);
-  registerBundleContentParser(fastify);
-  registerLogContentParser(fastify);
+  // App-specific Fastify wiring (rawBody capture, upload content parsers) is a
+  // bootstrap plugin so the HTTP test harness runs the exact same steps.
+  app.usePlugin(new FastifyRuntimePlugin());
 
   // H2: the throttler guard's IP tracker (getClientIp) only honours forwarded
   // headers when trust proxy is configured via configureTrustProxy(). Trust the
@@ -50,6 +46,12 @@ async function bootstrap() {
       description: 'Dev ticket tracker API',
       version: '1.0.0',
     });
+
+  // Install bootstrap plugins before the server starts (the documented
+  // @nathapp/nestjs-app sequence: register plugins, `ready()`, then `start()`).
+  // Must also precede `init()`: Fastify freezes hooks/content-type parsers
+  // when a route's context is built.
+  await app.ready();
 
   await app.start(port, host);
 }

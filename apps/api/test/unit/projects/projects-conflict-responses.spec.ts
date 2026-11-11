@@ -17,9 +17,10 @@ import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-g
  * The routes are mounted without the `/api` global prefix here; the prefix is
  * added by `AppFactory` in the DB-backed e2e suite (`test/e2e/api-endpoint`).
  */
-import { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
+import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import request from 'supertest';
 import { GlobalExceptionsFilter } from '@nathapp/nestjs-common';
 import { ProjectsController } from '../../../src/projects/projects.controller';
@@ -76,8 +77,8 @@ const adminPrincipal: KodaPrincipal = {
 };
 
 describe('US-004: project conflict responses', () => {
-  let app: INestApplication;
-  let httpServer: ReturnType<INestApplication['getHttpServer']>;
+  let app: NathApplication;
+  let httpServer: ReturnType<NathApplication['getHttpServer']>;
 
   const projectRepo = {
     findBySlug: vi.fn(),
@@ -132,7 +133,7 @@ describe('US-004: project conflict responses', () => {
       ],
     }).compile();
 
-    app = moduleRef.createNestApplication(new FastifyAdapter());
+    app = AppFactory.useApp(moduleRef.createNestApplication(new FastifyAdapter()));
     app.useGlobalFilters(new GlobalExceptionsFilter(app.get(HttpAdapterHost)));
     // Stands in for the global CombinedAuthGuard: the migrated routes read `request.user`, which the
     // permission keys need to resolve. Without it every case would answer 403 before the conflict.
