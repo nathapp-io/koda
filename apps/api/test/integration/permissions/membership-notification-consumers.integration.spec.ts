@@ -21,6 +21,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../../src/app.module';
 import { EmailContentBuilder } from '../../../src/email/email-content.builder';
 import type { EmailScheduleRow } from '../../../src/email/schedule/email-schedule.types';
@@ -142,7 +143,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
     process.env['WEB_PUBLIC_URL'] = WEB_PUBLIC_URL;
     await resetDb();
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = nest.createNestApplication();
+    app = nest.createNestApplication(new FastifyAdapter());
     await app.init();
     prisma = fixtureDb(app);
     writer = app.get(NotificationWriter);

@@ -3,6 +3,7 @@ import { KbDocumentDeletion } from '../../../src/rag/kb-document-deletion.servic
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { RagController } from '../../../src/rag/rag.controller';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
@@ -103,7 +104,7 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
       ],
     }).compile();
 
-    app = module.createNestApplication();
+    app = module.createNestApplication(new FastifyAdapter());
     await app.init();
     ragService = module.get(RagService);
   });

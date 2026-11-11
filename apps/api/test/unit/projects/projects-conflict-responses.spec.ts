@@ -30,6 +30,7 @@ import { PrismaProjectRepository } from '../../../src/projects/prisma-project.re
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { RagService } from '../../../src/rag/rag.service';
 import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
 import { AgentsService } from '../../../src/agents/agents.service';
@@ -131,7 +132,7 @@ describe('US-004: project conflict responses', () => {
       ],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication(new FastifyAdapter());
     app.useGlobalFilters(new GlobalExceptionsFilter(app.get(HttpAdapterHost)));
     // Stands in for the global CombinedAuthGuard: the migrated routes read `request.user`, which the
     // permission keys need to resolve. Without it every case would answer 403 before the conflict.

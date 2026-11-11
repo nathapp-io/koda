@@ -2,6 +2,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../../src/app.module';
 import { NotificationEligibility } from '../../../src/notifications/notification-eligibility';
 import type { NotificationDraft } from '../../../src/notifications/notification.types';
@@ -43,7 +44,7 @@ describeIntegration('project.read notification recipients (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication(new FastifyAdapter());
     await app.init();
     db = fixtureDb(app);
     membership = app.get(MembershipService);

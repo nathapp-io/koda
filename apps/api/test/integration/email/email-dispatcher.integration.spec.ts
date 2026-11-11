@@ -8,6 +8,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { NOTIFY_SERVICE } from '@nathapp/nestjs-notify';
 import { AppModule } from '../../../src/app.module';
 import { EmailDispatcher } from '../../../src/email/email-dispatcher';
@@ -46,7 +47,7 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     process.env.WEB_PUBLIC_URL = 'https://koda.example.com';
     await resetDb();
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = nest.createNestApplication();
+    app = nest.createNestApplication(new FastifyAdapter());
     await app.init();
     prisma = fixtureDb(app);
     writer = app.get(NotificationWriter);

@@ -9,6 +9,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { TestingModule, Test } from '@nestjs/testing';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../../src/app.module';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { EmailScheduleService } from '../../../src/email/schedule/email-schedule.service';
@@ -90,7 +91,7 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
   beforeAll(async () => {
     await resetDb();
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    const created = nest.createNestApplication();
+    const created = nest.createNestApplication(new FastifyAdapter());
     await created.init();
     app = created;
     prisma = fixtureDb(created);

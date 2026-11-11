@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from '../../src/app.module';
 
 describe('Tickets E2E', () => {
@@ -10,7 +11,7 @@ describe('Tickets E2E', () => {
       imports: [AppModule],
     }).compile();
 
-    app = module.createNestApplication();
+    app = module.createNestApplication(new FastifyAdapter());
     await app.init();
   });
 
