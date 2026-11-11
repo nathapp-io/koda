@@ -7,7 +7,8 @@ definePageMeta({ layout: 'default' })
 
 const { t } = useI18n()
 const toast = useAppToast()
-const { items, total, isLoading, error, status, load } = useAdminOutbox()
+const { items, total, isLoading, error, status, load, retry } = useAdminOutbox()
+const { permissions: globalPermissions } = useGlobalPermissions()
 const adminOnly = ref(false)
 let latestRequestId = 0
 
@@ -30,6 +31,25 @@ async function reload(): Promise<void> {
 function onStatusChange(value: string): void {
   status.value = value as OutboxStatus
   void reload()
+}
+
+function canRetry(item: { status: OutboxStatus }): boolean {
+  return globalPermissions.value.has('outbox.retry') && (item.status === 'dead' || item.status === 'pending')
+}
+
+async function retryEvent(id: string): Promise<void> {
+  try {
+    const outcome = await retry(id)
+    if (outcome.kind === 'pending') {
+      toast.success(t('outbox.retry.pending'))
+      return
+    }
+    toast.success(t('outbox.retry.done'))
+    await reload()
+  }
+  catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
 }
 
 onMounted(() => { void reload() })
@@ -73,6 +93,7 @@ onMounted(() => { void reload() })
             <th class="p-3">{{ t('outbox.columns.eventId') }}</th>
             <th class="p-3">{{ t('outbox.columns.attempts') }}</th>
             <th class="p-3">{{ t('outbox.columns.lastError') }}</th>
+            <th class="p-3" />
           </tr></thead>
           <tbody>
             <tr v-for="item in items" :key="item.id" class="border-b border-border last:border-0">
@@ -80,6 +101,11 @@ onMounted(() => { void reload() })
               <td class="p-3">{{ item.eventId }}</td>
               <td class="p-3">{{ item.attempts }}</td>
               <td class="p-3">{{ item.lastError ?? '—' }}</td>
+              <td class="p-3">
+                <button v-if="canRetry(item)" type="button" class="text-sm text-primary hover:underline" @click="retryEvent(item.id)">
+                  {{ t('outbox.retry.action') }}
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>

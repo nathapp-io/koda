@@ -1,4 +1,11 @@
 import { ref } from 'vue'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+
+export type OutboxRetryOutcome = { kind: 'retried' } | { kind: 'pending'; request: ApprovalRequestSummary }
+
+function isPendingAnswer(data: unknown): data is ApprovalRequestSummary {
+  return data !== null && typeof data === 'object' && 'permissionKey' in data
+}
 
 export type OutboxStatus = 'dead' | 'pending' | 'processing' | 'published'
 
@@ -34,6 +41,11 @@ export function useAdminOutbox() {
   const status = ref<OutboxStatus>('dead')
   let latestRequestId = 0
 
+  async function retry(id: string): Promise<OutboxRetryOutcome> {
+    const data = await $api.post<ApprovalRequestSummary | void>(`/admin/outbox/${encodeURIComponent(id)}/retry`)
+    return isPendingAnswer(data) ? { kind: 'pending', request: data } : { kind: 'retried' }
+  }
+
   async function load(): Promise<void> {
     const requestId = ++latestRequestId
     isLoading.value = true
@@ -54,5 +66,5 @@ export function useAdminOutbox() {
     }
   }
 
-  return { items, total, isLoading, error, status, load }
+  return { items, total, isLoading, error, status, load, retry }
 }

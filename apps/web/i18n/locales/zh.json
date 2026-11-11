@@ -881,7 +881,8 @@
     "adminOnly": "发件箱仅对管理员开放。",
     "showing": "显示 {count} / {total}",
     "status": { "label": "状态", "dead": "已终止", "pending": "待处理", "processing": "处理中", "published": "已发布" },
-    "columns": { "type": "类型", "eventId": "事件 ID", "attempts": "尝试次数", "lastError": "上次错误" }
+    "columns": { "type": "类型", "eventId": "事件 ID", "attempts": "尝试次数", "lastError": "上次错误" },
+    "retry": { "action": "重试", "done": "发件箱事件已安排重试。", "pending": "重试申请已提交审批。" }
   },
   "home": {
     "subtitle": "跨项目的待办一览",
