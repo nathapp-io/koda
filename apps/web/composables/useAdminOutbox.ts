@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 
 export type OutboxRetryOutcome = { kind: 'retried' } | { kind: 'pending'; request: ApprovalRequestSummary }
@@ -42,7 +43,7 @@ export function useAdminOutbox() {
   let latestRequestId = 0
 
   async function retry(id: string): Promise<OutboxRetryOutcome> {
-    const data = await $api.post<ApprovalRequestSummary | void>(`/admin/outbox/${encodeURIComponent(id)}/retry`)
+    const data = await $api.post<ApprovalRequestSummary | void>(apiPath`/admin/outbox/${id}/retry`)
     return isPendingAnswer(data) ? { kind: 'pending', request: data } : { kind: 'retried' }
   }
 
