@@ -74,6 +74,7 @@
     "users": "用户",
     "roles": "角色",
     "audit": "审计日志",
+    "outbox": "发件箱",
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
     "fleetJobs": "Fleet 任务",

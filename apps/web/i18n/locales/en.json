@@ -74,6 +74,7 @@
     "users": "Users",
     "roles": "Roles",
     "audit": "Audit log",
+    "outbox": "Outbox",
     "fleetRunners": "Runners",
     "fleetRepos": "Repos",
     "fleetJobs": "Fleet jobs",
