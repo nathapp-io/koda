@@ -75,7 +75,8 @@ RUN --mount=type=secret,id=TURBO_TOKEN \
 # devDependencies are deleted from the manifests and the lock is re-saved (--lockfile-only
 # drops their entries and keeps every other resolution) before the frozen install:
 # `--production` alone still installs a devDependency that a production package lists as
-# an optional peer (@prisma/client -> prisma CLI + typescript, ~230 MB).
+# an optional peer (@prisma/client -> prisma CLI + typescript, ~230 MB). Bun bug, open:
+# https://github.com/oven-sh/bun/issues/26837 - drop the strip + re-lock once it is fixed.
 FROM base AS runtime-deps
 WORKDIR /app
 ARG BUILD_APP=api
