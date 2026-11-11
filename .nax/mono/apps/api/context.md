@@ -180,6 +180,8 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 - nax's agent shell may withhold host Postgres/Docker. Do not weaken assertions to make it pass: keep the shared DB gate and verify DB behavior in host quality/acceptance runs. Without the sandbox marker, unavailable Postgres still fails loudly
 - a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped` outside the sandbox, not just compile or skip
 - every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode test runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
+- DB-mode Vitest runs stay serial and reuse the app module graph in batches of at most 25 files (`db-shared-*` projects), with a fresh worker between batches to bound heap growth. Specs that mock modules stay in `db-isolated`. The root project's global setup provisions/locks the database once and returns the cleanup for the whole command
+- `bootHttpApp` owns one listener on port 0 at `127.0.0.1` until `app.close()`. Use its existing server/address for Supertest and streaming clients; do not call `listen()` again. Keeping the listener open avoids per-request port churn and intercepted HTTP responses. Fastify injection-only suites can pass `listen: false` to retain their socket-free contract
 
 ### nax acceptance tests
 

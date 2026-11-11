@@ -20,6 +20,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -83,15 +84,15 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
    * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
    */
   const createUser = async (who: string, admin = false): Promise<void> => {
-    const created = await asRoot('post', '/api/admin/users', {
-      email: `${who}@koda.test`,
-      name: who,
-      password: TEST_PASSWORD,
-    }).expect(201);
-    userIds[who] = data<{ id: string }>(created).id;
-    if (admin) await bindGlobal(who, 'admin');
     resetThrottle(app);
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
+    const member = await createMemberWithToken(server, db, { email: `${who}@koda.test`.toLowerCase(), name: who });
+    userIds[who] = member.id;
+    tokens[who] = member.token;
+    if (admin) {
+      await bindGlobal(who, 'admin');
+      resetThrottle(app);
+      tokens[who] = await loginToken(server, `${who}@koda.test`);
+    }
   };
 
   /** The binding that is the caller's only source in p1. */

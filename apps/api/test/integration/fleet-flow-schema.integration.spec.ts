@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { canRunDbTests } from '../helpers/test-environment';
 import { resetDb } from '../helpers/reset-db';
+import { applyMigration, scratchSchemaBefore } from '../helpers/migration-schema';
 import { createTestPrismaClient } from '../helpers/test-prisma';
 import type { PrismaClient } from '../../src/generated/prisma/client';
 import { insertRunner, seedFleetBase } from '../helpers/fleet-fixtures';
@@ -55,26 +55,42 @@ describeDb('FleetFlow schema defaults and constraints', () => {
   });
 
   it('AC-10: migration preserves an existing published thread', async () => {
-    const runner = await insertRunner(prisma);
-    const original = await prisma.chatThread.create({
-      data: {
-        projectId, repoId, runnerId: runner.id, title: 'Published', createdById: 'creator',
-        backend: {}, skills: [], publishedSha: 'published-sha', specPublished: true, maxCostUsd: '12.3456',
-      },
-    });
+    const migration = '20261125090000_fleet_flows';
+    const scratch = await scratchSchemaBefore(
+      process.env.DATABASE_URL as string, `flow_schema_${randomUUID().replaceAll('-', '')}`, migration,
+    );
+    try {
+      // Use the actual pre-migration schema; current Prisma reads would select columns
+      // that did not exist yet. Keep all migration DDL away from the shared test schema.
+      await scratch.db.$executeRaw`
+        INSERT INTO "Project" ("id", "name", "slug", "key", "updatedAt")
+        VALUES ('project', 'Project', 'project', 'PROJ', now())`;
+      await scratch.db.$executeRaw`
+        INSERT INTO "FleetRepo" ("id", "projectId", "provider", "owner", "name", "defaultBranch", "createdById")
+        VALUES ('repo', 'project', 'github', 'acme', 'app', 'main', 'creator')`;
+      const runner = await insertRunner(scratch.db);
+      await scratch.db.$executeRaw`
+        INSERT INTO "ChatThread" (
+          "id", "projectId", "repoId", "runnerId", "title", "createdById", "backend", "skills",
+          "publishedSha", "specPublished", "maxCostUsd"
+        ) VALUES ('thread', 'project', 'repo', ${runner.id}, 'Published', 'creator', '{}', '[]',
+                  'published-sha', true, 12.3456)`;
 
-    // Recreate the pre-US-002 database shape around the published row, then apply the actual additive migration.
-    await prisma.$executeRawUnsafe('DROP TABLE "FleetFlowFeature" CASCADE');
-    await prisma.$executeRawUnsafe('DROP TABLE "FleetFlow" CASCADE');
-    await prisma.$executeRawUnsafe('ALTER TABLE "ChatThread" DROP COLUMN "preApproval"');
-    const migrationPath = resolve(__dirname, '../../../../apps/api/prisma/migrations/20261125090000_fleet_flows/migration.sql');
-    const statements = readFileSync(migrationPath, 'utf8').split(';').map((statement) => statement.trim()).filter(Boolean);
-    for (const statement of statements) await prisma.$executeRawUnsafe(statement);
-
-    const migrated = await prisma.chatThread.findUniqueOrThrow({ where: { id: original.id } });
-    expect(migrated).toMatchObject({
-      publishedSha: 'published-sha', specPublished: true, runnerId: runner.id, preApproval: null,
-    });
-    expect(migrated.maxCostUsd.toString()).toBe('12.3456');
-  });
+      await applyMigration(scratch.db, migration);
+      const [migrated] = await scratch.db.$queryRaw<Array<{
+        publishedSha: string; specPublished: boolean; runnerId: string; preApproval: unknown; maxCostUsd: string;
+      }>>`SELECT "publishedSha", "specPublished", "runnerId", "preApproval", "maxCostUsd"::text AS "maxCostUsd"
+          FROM "ChatThread" WHERE "id" = 'thread'`;
+      expect(migrated).toMatchObject({
+        publishedSha: 'published-sha', specPublished: true, runnerId: runner.id, preApproval: null,
+      });
+      expect(migrated.maxCostUsd).toBe('12.3456');
+      const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'FleetFlow' AND column_name = 'setSha'`;
+      expect(columns).toEqual([{ column_name: 'setSha' }]);
+    } finally {
+      await scratch.drop();
+    }
+  }, 120_000);
 });

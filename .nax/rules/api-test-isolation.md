@@ -38,6 +38,7 @@ const ragConfig = { lancedbPath: './lancedb', inMemoryOnly: false };
 
 ## Ports
 - Test servers listen on port 0 and read the bound port from `server.address()`. Never a fixed number
+- `bootHttpApp` binds once to `127.0.0.1` and owns the listener until `app.close()`. Reuse its server for Supertest and streaming clients; do not call `listen()` again. An unbound server makes Supertest open/close a listener per request, which can expose requests to host proxy interception. Pass `listen: false` only for Fastify injection-only suites that require no listening socket
 
 ## Environment variables
 - Restore every `process.env` change. A delete counts: deleting a value loaded from `.env.test`
@@ -53,8 +54,9 @@ const ragConfig = { lancedbPath: './lancedb', inMemoryOnly: false };
   `calls[0]` of a logger spy
 
 ## DB specs share a module cache
-- In DB mode (`KODA_DB_TESTS=1`), integration and e2e specs run in the `db-shared` Vitest project
-  with `isolate: false`: modules load once and stay loaded for the following files. A spec that calls
+- In DB mode (`KODA_DB_TESTS=1`), integration and e2e specs run in `db-shared-*` Vitest projects
+  with `isolate: false`: modules load once per batch of at most 25 files, then a fresh worker starts.
+  Batches stay serial and share one root-owned database setup/teardown. A spec that calls
   `vi.mock`, `vi.doMock`, `vi.unmock` or `vi.resetModules` is detected and moved to `db-isolated`
   automatically (`test/vitest-db-projects.ts`)
 - So module-level state in a DB spec, or in code it imports, outlives the file: close every Nest app

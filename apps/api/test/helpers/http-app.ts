@@ -43,6 +43,8 @@ export async function initFastifyApp(app: NathApplication): Promise<void> {
 
 export interface HttpAppOptions {
   registrationEnabled: boolean;
+  /** Set false only for Fastify inject tests that require no listening socket. Defaults to true. */
+  listen?: boolean;
   /**
    * `KODA_OWNER_EMAIL` for this boot (permissions P1a US-004): a string sets it, `null`/unset deletes
    * it, so a suite never inherits an owner email from the machine it runs on.
@@ -77,6 +79,10 @@ export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication
       app.useSwaggerUI({ name: 'Koda API', description: 'Integration-test API', version: '1.0.0' });
     }
     await initFastifyApp(app);
+    // Own one loopback listener until app.close(): Supertest otherwise opens and
+    // closes an unspecified-address listener per request, exposing port churn to
+    // host proxy interception (intermittent 401/407 responses outside the API).
+    if (opts.listen !== false) await app.listen(0, '127.0.0.1');
     const close = app.close.bind(app);
     app.close = async () => {
       try { return await close(); }

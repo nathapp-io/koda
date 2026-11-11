@@ -55,7 +55,7 @@ describeIntegration('fleet thread approval decision HTTP boundary (PG, US-008)',
 
   beforeAll(async () => {
     await resetDb();
-    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null, listen: false });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
     app.get<IFleetConfig>(FLEET_CFG).threadsEnabled = true;

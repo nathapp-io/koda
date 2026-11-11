@@ -22,7 +22,8 @@ import { AuthService } from '../../../src/auth/auth.service';
 import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -84,15 +85,12 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
   };
 
   const createUser = async (who: string): Promise<void> => {
-    const created = await asRoot('post', '/api/admin/users', {
-      email: `${who}@koda.test`,
-      name: who,
-      password: TEST_PASSWORD,
-      role: 'MEMBER',
-    }).expect(201);
-    userIds[who] = data<{ id: string }>(created).id;
     resetThrottle(app);
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
+    const member = await createMemberWithToken(server, db, {
+      email: `${who}@koda.test`.toLowerCase(), name: who,
+    });
+    userIds[who] = member.id;
+    tokens[who] = member.token;
   };
 
   /** The binding that is the caller's only source in p1. */

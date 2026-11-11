@@ -42,7 +42,6 @@ describeDb('Content thread events over HTTP (PG, US-006)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    await app.listen(0, '127.0.0.1');
     server = app.getHttpServer();
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     prisma = fixtureDb(app);

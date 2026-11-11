@@ -4,9 +4,10 @@ import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { fixtureDb } from '../../helpers/action-context';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 
 (canRunDbTests() ? describe : describe.skip)('Approval counts and job filtering through HTTP', () => {
@@ -42,12 +43,9 @@ import { canRunDbTests } from '../../helpers/test-environment';
     }
     a = randomUUID(); b = randomUUID();
     for (const [id, slug] of [[a, 'a-proj'], [b, 'b-proj']]) await db.project.create({ data: { id, slug, key: id, name: slug } });
-    const createUser = async () => {
-      const email = `${randomUUID()}@koda.test`;
-      const res = await request(server()).post('/api/admin/users').set('Authorization', `Bearer ${world.tokens.root}`)
-        .send({ email, name: 'Counts reader', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-      return { id: data<{ id: string }>(res).id, token: await loginToken(server(), email) };
-    };
+    const createUser = () => createMemberWithToken(server(), db, {
+      email: `${randomUUID()}@koda.test`, name: 'Counts reader',
+    });
     const approver = await createUser();
     approverToken = approver.token;
     outsiderToken = (await createUser()).token;

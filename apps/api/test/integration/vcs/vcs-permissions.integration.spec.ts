@@ -5,7 +5,8 @@ import type { NathApplication } from '@nathapp/nestjs-app';
 import { APPROVAL_REDEEM_HEADER } from '../../../src/approvals/route/approval-gated.decorator';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -50,10 +51,8 @@ describeIntegration('VCS permission keys over HTTP (binding-only principals)', (
       ['admin', 'project-admin'], ['developer', 'developer'], ['viewer', 'viewer'], ['outsider', null],
     ] as const) {
       resetThrottle(app);
-      await request(server).post('/api/admin/users').set(auth('root'))
-        .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-      tokens[who] = await loginToken(server, `${who}@koda.test`);
-      const user = await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } });
+      const user = await createMemberWithToken(server, prisma, { email: `${who}@koda.test`.toLowerCase(), name: who });
+      tokens[who] = user.token;
       // User creation also grants the global member role; remove it so this
       // fixture exercises only the explicit project binding (or no binding).
       await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: user.id } });

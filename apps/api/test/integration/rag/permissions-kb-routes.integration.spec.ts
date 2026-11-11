@@ -26,7 +26,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { RagService } from '../../../src/rag/rag.service';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { createMemberWithToken } from '../../helpers/user-fixtures';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -81,15 +82,9 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
 
   const createUser = async (who: string): Promise<void> => {
     resetThrottle(app);
-    const created = await as('root', 'post', '/api/admin/users', {
-      email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER',
-    }).expect(201);
-    ids[who] = data<{ id: string }>(created).id;
-    resetThrottle(app);
-    tokens[who] = await loginToken(server, `${who}@koda.test`);
-    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
-    // baseline production writes for every user it creates.
-    await grantBaseline(prisma, { type: 'USER', id: ids[who] });
+    const member = await createMemberWithToken(server, prisma, { email: `${who}@koda.test`.toLowerCase(), name: who });
+    ids[who] = member.id;
+    tokens[who] = member.token;
   };
 
   /** The binding that is the caller's only source in p1. */

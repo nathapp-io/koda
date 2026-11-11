@@ -16,7 +16,7 @@ import { PermissionService } from '../../../src/permissions/permission.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp } from '../../helpers/http-app';
+import { bootHttpApp, TEST_PASSWORD_HASH } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetBase, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
@@ -74,6 +74,17 @@ describeIntegration('fleet fixtures grant through bindings (PG, US-002)', () => 
     ]);
     expect(await roleKeysIn(user(world.ids.dev), world.projectId)).toEqual(['developer']);
     expect(await roleKeysIn(user(world.ids.viewer), world.projectId)).toEqual(['viewer']);
+  });
+
+  it('seeds root with the reusable hash, owner and member bindings, and a working login token', async () => {
+    const root = await prisma.user.findUniqueOrThrow({ where: { id: world.ids.root } });
+    expect(root.passwordHash).toBe(TEST_PASSWORD_HASH);
+    const bindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: root.id, projectId: null },
+      include: { role: { select: { key: true } } },
+    });
+    expect(bindings.map(({ role }) => role.key).sort()).toEqual(['member', 'owner']);
+    await request(app.getHttpServer()).get('/api/auth/me').set(as('root')).expect(200);
   });
 
   it('AC-3: seedFleetBase gives its admin a global admin binding and the ADMIN mirror', async () => {
