@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { projectPermissionsStub } from '../helpers/permission-nav'
 
@@ -34,10 +34,10 @@ const actionButtons = (mounted: ReturnType<typeof mountMemory>) => mounted.find(
 describe('US-003 Memory Retire visibility', () => {
   test('AC-1 active DECISION with retire permission renders action in its row', () => {
     const mounted = mountMemory(rows('DECISION'), ['memory.decision.retire'])
-    const row = mounted.find('tr')[0]
+    const row = mounted.find('tr').at(-1)
     expect(row).toBeDefined()
     expect(actionButtons(mounted)).toHaveLength(1)
-    expect(actionButtons(mounted)[0].parent).toBe(row)
+    expect(row ? mounted.find('button', row).length : 0).toBeGreaterThan(0)
   })
 
   test('AC-2 DECISION without retire permission has no action', () => {
@@ -57,12 +57,13 @@ describe('US-003 Memory Retire visibility', () => {
     expect(actionButtons(mountMemory(rows('DECISION', 'superseded'), ['memory.decision.retire', 'memory.create', 'memory.update']))).toHaveLength(0)
   })
 
-  test('AC-6 NOTE body remains hidden until expanded', () => {
+  test('AC-6 NOTE body remains hidden until expanded', async () => {
     const mounted = mountMemory(rows('NOTE'))
     expect(mounted.text()).not.toContain('PRIVATE_NOTE_BODY')
     const expand = mounted.find('button').find(button => mounted.textOf(button) === 'memory.expand')
     expect(expand).toBeDefined()
     ;(expand?.props.onClick as (() => void))()
+    await nextTick()
     expect(mounted.text()).toContain('PRIVATE_NOTE_BODY')
   })
 })

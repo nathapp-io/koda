@@ -28,6 +28,10 @@ export interface FakeNode {
   children: FakeNode[]
   text: string
   parent: FakeNode | null
+  addEventListener: (type: string, listener: (...args: unknown[]) => void) => void
+  removeEventListener: (type: string, listener: (...args: unknown[]) => void) => void
+  readonly options: FakeNode[]
+  value: string
 }
 
 export interface MountOptions {
@@ -72,7 +76,19 @@ export interface Mounted {
   unmount: () => void
 }
 
-const node = (tag: string, text = ''): FakeNode => ({ tag, props: {}, children: [], text, parent: null })
+const node = (tag: string, text = ''): FakeNode => ({
+  tag,
+  props: {},
+  children: [],
+  text,
+  parent: null,
+  // Native v-model directives attach listeners even though the custom renderer does not dispatch DOM events.
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  get options() { return this.children.filter((child) => child.tag === 'option') },
+  get value() { return String(this.props.value ?? '') },
+  set value(value: string) { this.props.value = value },
+})
 
 /**
  * All the text under `n`, comments excluded. A node's own `text` is only set by `setText`, so an
