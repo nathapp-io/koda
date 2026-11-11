@@ -14,6 +14,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { createFastifyAdapter } from '../../../src/common/fastify-adapter';
+import { initFastifyApp } from '../../helpers/http-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
@@ -54,7 +56,7 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
 
     await resetDb();
 
-    app = await AppFactory.create(AppModule);
+    app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter());
 
     const combinedGuard = app.get(CombinedAuthGuard);
     app.setJwtAuthGuard(combinedGuard);
@@ -65,7 +67,7 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
       .useAppGlobalFilters()
       .useAppGlobalGuards();
 
-    await app.init();
+    await initFastifyApp(app);
     httpServer = app.getHttpServer();
 
     // Register admin user

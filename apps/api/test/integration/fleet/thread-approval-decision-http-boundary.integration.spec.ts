@@ -55,8 +55,7 @@ describeIntegration('fleet thread approval decision HTTP boundary (PG, US-008)',
 
   beforeAll(async () => {
     await resetDb();
-    // `adapter: 'fastify'` is production's adapter, parameter limit included.
-    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null, adapter: 'fastify' });
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
     app.get<IFleetConfig>(FLEET_CFG).threadsEnabled = true;

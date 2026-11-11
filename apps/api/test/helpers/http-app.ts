@@ -11,14 +11,39 @@ import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { AppModule } from '../../src/app.module';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { createFastifyAdapter } from '../../src/common/fastify-adapter';
+import { registerRawBodyHook } from '../../src/common/hooks/raw-body.hook';
+import { registerBundleContentParser, registerLogContentParser } from '../../src/common/hooks/bundle-content-parser';
 import { TEST_PASSWORD } from './test-credentials';
 
 export { TEST_PASSWORD, TEST_PASSWORD_HASH } from './test-credentials';
 
+/**
+ * Finish booting a Fastify-backed Nest application created with
+ * `AppFactory.createFastifyApp`/`createFastifyAdapter`.
+ *
+ * `app.init()` registers every route but does NOT boot Fastify: the `preReady`
+ * phase — the only moment route contexts receive their hook arrays
+ * (`preParsing`, `preValidation`, ...) — runs on `ready()` or `listen()`.
+ * Production boots inside `fastify.listen()` and `fastify.inject()` boots on
+ * demand, but supertest binds the raw `fastify.server` directly and skips both.
+ * Without this explicit `ready()`, the first supertest request crashes in
+ * `preParsingHookRunner` (`preParsing` is undefined) and the socket hangs.
+ */
+export async function initFastifyApp(app: NathApplication): Promise<void> {
+  const fastify = app.getHttpAdapter().getInstance();
+  // Production bootstrap (main.ts) installs these before init(): mirror it so
+  // HTTP-level tests exercise the same Fastify pipeline. Express passed any
+  // content type through, but Fastify answers 415 unless a parser is
+  // registered, and webhook HMAC verification needs the captured rawBody.
+  registerRawBodyHook(fastify);
+  registerBundleContentParser(fastify);
+  registerLogContentParser(fastify);
+  await app.init();
+  await fastify.ready();
+}
+
 export interface HttpAppOptions {
   registrationEnabled: boolean;
-  /** Opt into production's Fastify adapter, including socket-free Fastify.inject tests. */
-  adapter?: 'fastify' | 'express';
   /**
    * `KODA_OWNER_EMAIL` for this boot (permissions P1a US-004): a string sets it, `null`/unset deletes
    * it, so a suite never inherits an owner email from the machine it runs on.
@@ -46,15 +71,13 @@ export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication
   if (opts.ownerEmail) process.env.KODA_OWNER_EMAIL = opts.ownerEmail;
   else delete process.env.KODA_OWNER_EMAIL;
   try {
-    const app = opts.adapter === 'fastify'
-      ? await AppFactory.createFastifyApp(AppModule, createFastifyAdapter())
-      : await AppFactory.create(AppModule);
+    const app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter());
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     if (opts.swagger) {
       app.useSwaggerUI({ name: 'Koda API', description: 'Integration-test API', version: '1.0.0' });
     }
-    await app.init();
+    await initFastifyApp(app);
     const close = app.close.bind(app);
     app.close = async () => {
       try { return await close(); }

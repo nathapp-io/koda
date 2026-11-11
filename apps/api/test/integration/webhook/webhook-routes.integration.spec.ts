@@ -17,6 +17,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { createFastifyAdapter } from '../../../src/common/fastify-adapter';
+import { initFastifyApp } from '../../helpers/http-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
@@ -74,10 +76,10 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
 
     await resetDb();
 
-    app = await AppFactory.create(AppModule);
+    app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter());
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
-    await app.init();
+    await initFastifyApp(app);
     httpServer = app.getHttpServer();
     prisma = fixtureDb(app);
 

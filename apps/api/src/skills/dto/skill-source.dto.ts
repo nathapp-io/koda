@@ -72,6 +72,10 @@ export class CreateSkillSourceDto {
   @Validate(NoControlCharactersConstraint)
   declare ref: string;
   @ApiProperty({ description: 'Empty string or slash-separated safe directory path', maxLength: 200 })
-  @IsString() @MaxLength(200) @Matches(/^(?:[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)?$/) @Matches(/^(?!.*(?:^|\/)\.\.?($|\/)).*$/)
+  // Explicit message: class-validator's default message embeds the regex source,
+  // and this pattern contains `|`. nestjs-i18n's validation-error formatter splits
+  // constraint messages on `|` and JSON.parses the tail, which throws on the raw
+  // regex and turned a 400 into a 500 (express happened to swallow it, fastify does not).
+  @IsString() @MaxLength(200) @Matches(/^(?:[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)?$/) @Matches(/^(?!.*(?:^|\/)\.\.?($|\/)).*$/, { message: 'path must be empty or slash-separated segments of [A-Za-z0-9_.-] without relative segments' })
   declare path: string;
 }

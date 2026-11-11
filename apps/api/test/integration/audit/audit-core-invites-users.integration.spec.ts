@@ -43,7 +43,7 @@ describeIntegration('audited invites, public registration and admin users', () =
   };
   beforeAll(async () => {
     await resetDb();
-    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null, adapter: 'fastify' });
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
     const root = await api<{ accessToken: string; user: { id: string } }>('POST', '/api/auth/register', 201,

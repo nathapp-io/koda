@@ -12,6 +12,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { createFastifyAdapter } from '../../src/common/fastify-adapter';
+import { initFastifyApp } from '../helpers/http-app';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { resetDb } from '../helpers/reset-db';
 
@@ -36,7 +38,7 @@ describeIntegration('US-002: Empty Description Support', () => {
 
     await resetDb();
 
-    app = await AppFactory.create(AppModule);
+    app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter());
     const combinedGuard = app.get(CombinedAuthGuard);
     app.setJwtAuthGuard(combinedGuard);
     app
@@ -45,7 +47,7 @@ describeIntegration('US-002: Empty Description Support', () => {
       .useAppGlobalFilters()
       .useAppGlobalGuards();
 
-    await app.init();
+    await initFastifyApp(app);
     httpServer = app.getHttpServer();
 
     const registerRes = await request(httpServer)

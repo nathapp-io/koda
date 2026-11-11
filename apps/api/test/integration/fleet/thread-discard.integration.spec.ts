@@ -3,6 +3,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { createFastifyAdapter } from '../../../src/common/fastify-adapter';
+import { initFastifyApp } from '../../helpers/http-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
@@ -25,10 +27,10 @@ describeDb('US-004 thread discard', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
     await resetDb();
-    app = await AppFactory.create(AppModule, { abortOnError: false });
+    app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter());
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
-    await app.init();
+    await initFastifyApp(app);
     httpServer = app.getHttpServer();
     db = fixtureDb(app);
     world = await seedFleetHttpWorld(httpServer, db);

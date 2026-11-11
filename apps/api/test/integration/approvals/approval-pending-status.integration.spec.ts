@@ -58,7 +58,7 @@ describeIntegration('approval pending status on Fastify (US-004)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null, adapter: 'fastify' });
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
     app.get(ApprovalCommandRegistry).register(configurableTestCommand('label.delete').command);
