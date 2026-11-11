@@ -12,8 +12,7 @@ COPY apps/${BUILD_APP}/package.json /tmp/app-pkg.json
 
 # Remove .version fields to avoid cache invalidation
 RUN jq 'del(.version)' /tmp/package.json > /tmp/deps.json && \
-    jq 'del(.version)' /tmp/app-pkg.json > /tmp/app-deps.json && \
-    jq 'del(.version, .devDependencies)' /tmp/app-pkg.json > /tmp/app-runtime-deps.json
+    jq 'del(.version)' /tmp/app-pkg.json > /tmp/app-deps.json
 
 
 # Prune dependencies using Turbo
@@ -65,32 +64,52 @@ RUN --mount=type=secret,id=TURBO_TOKEN \
     bun run db:generate && \
     bun run build
 
+# Production dependencies, installed from the pruned workspace manifests AND its lockfile,
+# so the image ships exactly the versions (and root `overrides`) CI tested. A standalone
+# install of a package that is not in the lock resolves ranges fresh and once shipped a
+# second @nathapp/nestjs-tenant copy that broke Nest DI at boot (#437).
+# Isolated layout, as in CI: a hoisted install of the same lock nests @nestjs/core 11 under
+# @nestjs/throttler (its peer range stops at ^11), which the isolated store resolves to the
+# app's Nest 12. The store is /app/node_modules/.bun; the app's links live in
+# apps/<app>/node_modules, renamed to apps/runtime (same depth, so the relative links hold).
+# devDependencies are deleted from the manifests and the lock is re-saved (--lockfile-only
+# drops their entries and keeps every other resolution) before the frozen install:
+# `--production` alone still installs a devDependency that a production package lists as
+# an optional peer (@prisma/client -> prisma CLI + typescript, ~230 MB).
+FROM base AS runtime-deps
+WORKDIR /app
+ARG BUILD_APP=api
+
+COPY --from=prune /app/out/json/ .
+COPY --from=builder /app/apps/${BUILD_APP}/scripts/check-runtime-deps.ts /tmp/check-runtime-deps.ts
+
+RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
+    for f in package.json apps/*/package.json packages/*/package.json; do \
+      [ -f "$f" ] || continue; \
+      bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('$f','utf8'));delete p.devDependencies;fs.writeFileSync('$f',JSON.stringify(p,null,2))"; \
+    done && \
+    bun install --lockfile-only && \
+    bun install --frozen-lockfile --production --linker isolated && \
+    bun /tmp/check-runtime-deps.ts /app/node_modules && \
+    mv apps/${BUILD_APP} apps/runtime && \
+    find node_modules apps/runtime/node_modules -maxdepth 2 -type l | while read -r link; do \
+      case "$(readlink "$link")" in */.bun/*) ;; */apps/*|*/packages/*) rm "$link" || exit 1 ;; esac; \
+    done && \
+    rm -rf node_modules/.bun/@lancedb+lancedb-linux-*-gnu@* && \
+    find node_modules apps/runtime/node_modules -type l -name 'lancedb-linux-*-gnu' -delete && \
+    find node_modules -type f -name '*.map' -delete && \
+    find node_modules -type f -path '*/@prisma/client/runtime/*' \
+      \( -name 'edge*' -o -name 'react-native*' -o -name 'index-browser*' -o -name '*.mjs' \
+         -o \( -name 'query_compiler_*' ! -name 'query_compiler_fast_bg.postgresql*' \) \) \
+      -delete
+
 # Final image
 FROM base
 WORKDIR /app/
 ARG BUILD_APP=api
 
-COPY --from=builder /app/bun.lock ./bun.lock
-COPY --from=deps /tmp/app-runtime-deps.json ./apps/runtime/package.json
-COPY --from=builder /app/apps/${BUILD_APP}/scripts/check-runtime-deps.ts /tmp/check-runtime-deps.ts
-
-# Install only production dependencies for the runtime app package.
-# This install resolves `~` ranges fresh, so fail the build when a Nest/nathapp
-# package lands twice at different versions (the API cannot boot, #437).
-RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
-    cd /app/apps/runtime && \
-    bun install --frozen-lockfile --production && \
-    bun /tmp/check-runtime-deps.ts /app/apps/runtime/node_modules && \
-    rm /tmp/check-runtime-deps.ts && \
-    rm -rf /app/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
-           /app/apps/runtime/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
-           /app/apps/runtime/node_modules/@lancedb/lancedb-linux-x64-gnu && \
-    find /app/apps/runtime/node_modules -type f -name '*.map' -delete && \
-    find /app/apps/runtime/node_modules/@prisma/client/runtime -type f \
-      \( -name 'edge*' -o -name 'react-native*' -o -name 'index-browser*' -o -name '*.mjs' \
-         -o \( -name 'query_compiler_*' ! -name 'query_compiler_fast_bg.postgresql*' \) \) \
-      -delete
-
+COPY --from=runtime-deps /app/node_modules ./node_modules
+COPY --from=runtime-deps /app/apps/runtime/node_modules ./apps/runtime/node_modules
 COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 
 # Prisma runtime assets for in-container migration commands:

@@ -1,10 +1,12 @@
 /**
  * Build guard: fail when a DI-relevant package is installed more than once.
  *
- * The production image installs runtime deps with its own `bun install --production`,
- * which resolves `~` ranges fresh at build time. A package that pins a sibling exactly
- * (nestjs-notify 1.3.1 depends on nestjs-tenant "1.3.1") then gets a nested second copy
- * when koda pins another version. Nest DI tokens are classes, so two copies of a
+ * A package that pins a sibling exactly (nestjs-notify 1.3.1 depends on nestjs-tenant
+ * "1.3.1") gets a nested second copy when koda pins another version; the image once
+ * shipped that from an install that ignored the lockfile. The lockfile itself can also
+ * carry a second copy (a nested entry, or one version under two Bun peer hashes), and a
+ * hoisted install nests one for a peer range that excludes ours. Nest DI tokens are
+ * classes, so two copies of a
  * provider class mean "Nest can't resolve dependencies" at boot (#437). That holds for two
  * copies of the SAME version too (nested twice, or two Bun peer hashes), so the guard
  * counts copies on disk, not versions. Fix a hit by aligning koda's version with the
