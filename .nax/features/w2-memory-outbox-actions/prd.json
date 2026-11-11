@@ -3,7 +3,7 @@
   "feature": "w2-memory-outbox-actions",
   "branchName": "feat/w2-memory-outbox-actions",
   "createdAt": "2026-11-11T00:00:00.000Z",
-  "updatedAt": "2026-11-11T16:31:47.050Z",
+  "updatedAt": "2026-11-11T17:05:12.069Z",
   "userStories": [
     {
       "id": "US-001",
@@ -213,14 +213,17 @@
         "US-002",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Page-local orchestration composes existing project lookup, upstream write helpers and dialog contracts without a new abstraction; the permission-gated mutation flow and approval/refusal handling retain the security override."
+        "reasoning": "Page-local orchestration composes existing project lookup, upstream write helpers and dialog contracts without a new abstraction; the permission-gated mutation flow and approval/refusal handling retain the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/memory.vue",
@@ -251,7 +254,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "28f8d477cab8c47894bb247552a179ea3eb9bd30"
     },
     {
       "id": "US-005",
