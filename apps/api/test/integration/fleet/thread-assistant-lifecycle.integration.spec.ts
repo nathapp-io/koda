@@ -12,7 +12,7 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { LogStore, LOG_STORE, logKey } from '../../../src/fleet/logs/log-store';
 import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingestor';
@@ -47,7 +47,9 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     // POST /fleet/runner/enroll is throttled to 10 per minute per route, so one runner serves every case.
     runner = await enrollRunner(server, world.tokens.root, 'lifecycle-runner');
     // A send refuses an offline runner or one below protocol v4, so the shared runner is online and current.
-    await prisma.runner.update({ where: { id: runner.runnerId }, data: { protocolVersion: 4, lastSeenAt: new Date(), enabled: true, capacity: 1 } });
+    await prisma.runner.update({ where: { id: runner.runnerId }, data: { protocolVersion: 4, lastSeenAt: new Date(), enabled: true, capacity: 1,
+      // #436: a send that queues a turn is judged against the fleet, so the shared runner must host the fixture threads.
+      capabilities: { ...FLEET_CAPS, projectThreads: true, threadBackends: { native: ['m1'], acp: [] } } as object } });
   });
   afterAll(async () => {
     try {

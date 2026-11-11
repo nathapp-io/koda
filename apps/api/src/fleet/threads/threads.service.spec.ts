@@ -51,7 +51,7 @@ describe('ThreadsService.prepareSendMessage', () => {
     expect(brief.resolveRepoContext).toHaveBeenCalledExactlyOnceWith('r1');
     expect(threads.sendMessage).not.toHaveBeenCalled();
     await mutate();
-    expect(threads.sendMessage).toHaveBeenCalledExactlyOnceWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: 'ctx', canOperate: true });
+    expect(threads.sendMessage).toHaveBeenCalledExactlyOnceWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: 'ctx', canOperate: true, assertServed: expect.any(Function) });
     expect(brief.resolveRepoContext).toHaveBeenCalledOnce();
   });
 });
@@ -511,7 +511,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
     expect(findAnchor).toHaveBeenCalledWith('p1');
     expect(resolveRepoContext).toHaveBeenCalledTimes(1);
     expect(resolveRepoContext).toHaveBeenCalledWith('r-anchor');
-    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION, canOperate: false });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION, canOperate: false, assertServed: expect.any(Function) });
     expect(order).toEqual(['resolve:r-anchor', `send:${SECTION}`]);
   });
 
@@ -753,5 +753,56 @@ describe('ThreadsService.assertModeServed (US-001)', () => {
     const { service, threadServeMisfit } = build({ get: vi.fn().mockResolvedValue({ ...record, kind: 'PROJECT' }) });
     await expect(service.assertModeServed('p1', 't1', 'ask')).resolves.toBeUndefined();
     expect(threadServeMisfit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #436: a message that would queue a new turn on a thread whose backend, kind or mode no enabled thread-capable runner
+ * serves any more is refused with the same 409 create uses. The service hands the repository the judge; the repository
+ * runs it after the duplicate check (so a retry answers the original message) and before anything is written.
+ */
+describe('ThreadsService.sendMessage serve check (#436)', () => {
+  const stored = { ...record, kind: 'REPO' as const, mode: 'ask' as const, backend: { kind: 'native' as const, model: 'gone/model' } };
+  const message = { id: 'm1', seq: 1 } as unknown as ChatMessageRecord;
+
+  const build = (misfit: string | null) => {
+    const threadServeMisfit = vi.fn(async () => misfit);
+    const sendMessage = vi.fn(async (input: { assertServed?: (need: unknown) => Promise<void> }) => {
+      // The repository's own order: the judge runs on the stored thread's need before the write.
+      await input.assertServed?.({ backend: stored.backend, kind: stored.kind, mode: stored.mode });
+      return { message, jobId: 'j1', deduplicated: false };
+    });
+    const service = new ThreadsService(
+      { get: vi.fn(async () => stored), sendMessage, threadServeMisfit } as unknown as ChatThreadRepository,
+      { findAnchor: vi.fn() } as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      {} as unknown as FleetJobsService, briefStub(), new AfterCommitService(), permissionStub(),
+    );
+    return { service, sendMessage, threadServeMisfit };
+  };
+  const send = (service: ThreadsService) => service.sendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' });
+
+  it('refuses with the create 409 when no runner serves the thread backend', async () => {
+    const { service, threadServeMisfit } = build('thread_backend');
+    await expect(send(service)).rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.model', value: 'gone/model' } });
+    expect(threadServeMisfit).toHaveBeenCalledWith({ backend: stored.backend, kind: 'REPO', mode: 'ask' });
+  });
+
+  it('refuses with the mode cause when no runner hosts the stored mode', async () => {
+    const { service } = build('thread_modes');
+    await expect(send(service)).rejects.toMatchObject({ code: 409, prefix: 'threads.modeUnavailable', args: { mode: 'ask' } });
+  });
+
+  it('sends when a runner serves the thread', async () => {
+    const { service, sendMessage } = build(null);
+    await expect(send(service)).resolves.toMatchObject({ jobId: 'j1', deduplicated: false });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends when no thread-capable runner is enrolled (the repository judge answers null: nothing to judge)', async () => {
+    const { service, threadServeMisfit } = build(null);
+    await expect(send(service)).resolves.toMatchObject({ deduplicated: false });
+    expect(threadServeMisfit).toHaveBeenCalledTimes(1);
   });
 });

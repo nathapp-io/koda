@@ -274,7 +274,7 @@ export class ThreadsService {
     // run inside it. A missing thread skips the resolution entirely: the repository answers its own not-found.
     const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
     const repoContext = thread ? await this.projectBrief.resolveRepoContext(await this.repoIdForThread(projectId, thread)) : undefined;
-    return () => this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext, canOperate });
+    return () => this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext, canOperate, assertServed: need => this.assertThreadServed(need) });
   }
 
   /**

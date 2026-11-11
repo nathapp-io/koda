@@ -53,6 +53,13 @@ type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRe
 /** A runner row that stored no capabilities hosts nothing: every thread rule misfits on it. */
 const NO_CAPABILITIES = { threadBackends: undefined } as unknown as RunnerCapabilities;
 
+/** #436: what hosting this stored thread needs from the fleet: its backend, its kind and its mode. */
+const serveNeedOf = (thread: { kind: string | null; mode: string | null; backend: unknown }): ThreadServeNeed => ({
+  backend: thread.backend as ThreadBackend,
+  kind: mapThreadKind(thread.kind),
+  mode: (thread.mode ?? 'read') as ThreadMode,
+});
+
 /** Shared visibility fence, applied before and after acquiring mutation locks. */
 const scopeWhere = (scope: ThreadScope): Prisma.ChatThreadWhereInput => scope.kind === 'project'
   ? { projectId: scope.projectId, kind: { not: 'WORKSPACE' } }
@@ -522,7 +529,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return result;
   }
 
-  async sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+  async sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean; assertServed?: (need: ThreadServeNeed) => Promise<void> }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
     // Permissions P1 US-002: ownership comes from the keys. An any-row `thread.message.send` holder sends into
     // another creator's thread; a `.own` holder (or the unchanged workspace callers, which pass no flag) keeps the
     // creator compare.
@@ -556,6 +563,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // Permissions P1 US-002: input that steers a live turn comes from the turn's requester, and this refusal
         // runs before the sequence is allocated so a refused send writes nothing at all.
         this.assertOwnLiveSession(currentAfterLock, input.userId);
+        // #436: a send that would queue a new turn is refused when no runner can host the thread's backend, mode or kind.
+        // Like every refusal above it runs before the sequence is allocated, so a refused send writes nothing.
+        const feedsLiveSession = currentAfterLock?.state === 'RUNNING' && Boolean(currentAfterLock.runnerId);
+        if (input.assertServed && !feedsLiveSession) await input.assertServed(serveNeedOf(thread));
 
         // A completed out-of-band message can sit at or above the counter, so the shared allocator takes the higher.
         const seq = await allocateThreadSeq(this.prisma.client, thread.id);

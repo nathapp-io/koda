@@ -65,7 +65,7 @@ describe('workspace turn boundaries', () => {
     );
     const principal: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@test.com' };
     await service.sendMessage(principal, 't', { text: 'hi', clientMessageId: 'cm' });
-    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'workspace', userId: 'u' }, threadId: 't', userId: 'u', text: 'hi', clientMessageId: 'cm', repoContext: undefined });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'workspace', userId: 'u' }, threadId: 't', userId: 'u', text: 'hi', clientMessageId: 'cm', repoContext: undefined, assertServed: expect.any(Function) });
   });
   /** US-003: an agent may send into its own workspace thread; the scope and the fence use its id. */
   it('sends as an agent principal through the same workspace scope', async () => {
@@ -79,6 +79,6 @@ describe('workspace turn boundaries', () => {
     );
     const agent: AgentPrincipal = { actorType: 'agent', id: 'ag', slug: 'ag', status: 'ACTIVE', agentRoles: [], capabilities: [] };
     await service.sendMessage(agent, 't', { text: 'hi', clientMessageId: 'cm' });
-    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'workspace', userId: 'ag' }, threadId: 't', userId: 'ag', text: 'hi', clientMessageId: 'cm', repoContext: undefined });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'workspace', userId: 'ag' }, threadId: 't', userId: 'ag', text: 'hi', clientMessageId: 'cm', repoContext: undefined, assertServed: expect.any(Function) });
   });
 });
