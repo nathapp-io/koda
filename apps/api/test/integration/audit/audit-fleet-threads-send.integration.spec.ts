@@ -28,7 +28,7 @@ describeDb('fleet thread message and handoff audit HTTP', () => {
   } });
   const runner = () => db.runner.create({ data: {
     name: `thread-send-audit-${++seq}`, apiKeyHash: `thread-send-audit-hash-${seq}`, os: 'linux', arch: 'x64', labels: [], capacity: 2,
-    capabilities: { ...FLEET_CAPS, threadWrite: true }, daemonVersion: '0.1.0', protocolVersion: 4,
+    capabilities: { ...FLEET_CAPS, threadWrite: true, projectThreads: true, workspaceThreads: true, threadBackends: { native: ['m1'], acp: [] } }, daemonVersion: '0.1.0', protocolVersion: 4,
     bootId: `thread-send-audit-boot-${seq}`, enabled: true, lastSeenAt: new Date(), createdById: world.ids.root,
   } });
   const liveSession = async (threadId: string, runnerId: string) => {

@@ -3,6 +3,9 @@ import { FEATURE_RE } from '~/lib/fleet-dispatch'
 
 export const FLOW_MAX_FEATURES = 20
 export const FLOW_COST_CAP_MAX_USD = 1000
+/** The API accepts a cap greater than 0 with at most four decimals: the smallest valid value is one step. */
+export const FLOW_COST_CAP_STEP_USD = 0.0001
+export const FLOW_COST_CAP_MIN_USD = FLOW_COST_CAP_STEP_USD
 export const FLOW_ROLE_RE = /^[A-Za-z0-9._:/\x5b\x5d=,-]{1,200}$/
 export const FLOW_SPEC_PATH_MAX = 300
 

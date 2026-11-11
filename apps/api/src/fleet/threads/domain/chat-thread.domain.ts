@@ -126,6 +126,8 @@ export interface ThreadServeNeed {
   runnerId?: string | null;
   /** Judge the mode rule only, so a backend change on the runner never refuses a mode change. */
   modesOnly?: true;
+  /** #436: a disabled `runnerId` runner is unserved whatever it offers (a send's turn is never placed on one). */
+  enabledOnly?: true;
 }
 
 /**
@@ -182,7 +184,12 @@ export interface ChatThreadRepository {
   pendingActions(scope: ThreadScope, threadId: string): Promise<ChatThreadPendingAction[]>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
-  sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
+  /**
+   * #436: `assertServed`, when given, judges the stored thread (backend, kind, mode) before a send that would queue a
+   * new turn writes anything, and only after the duplicate check, so a retry of an accepted message still answers the
+   * original. A send that feeds a live session is never judged: that session is already hosted.
+   */
+  sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean; assertServed?: (need: ThreadServeNeed) => Promise<void> }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   publish(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string | null }>;
   discard(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;

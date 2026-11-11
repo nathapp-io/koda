@@ -141,26 +141,31 @@ describeDb('workspace turns and archive', () => {
     expect(res.body.message).toBe('Thread not found');
     expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).status).toBe('ACTIVE');
   });
-  it.each([false, true])('workspace placement AC-10/11: workspaceThreads=%s', async (workspaceThreads) => {
+  it('workspace placement AC-10: workspaceThreads=false refuses the send (#436) instead of queueing an unplaceable turn', async () => {
     // US-001: the thread is created before the runners change, so the create is not judged against the runner
-    // that cannot host it — the placement assertion below is what this case is about.
+    // that cannot host it. #436: the send is, so it answers 409 and writes no job.
     const thread = await create();
     await prisma.runner.updateMany({ data: { enabled: false } });
-    const runner = await insertRunner(prisma, { capabilities: { ...FLEET_CAPS, projectThreads: true, workspaceThreads, threadBackends: { native: ['m1'], acp: [] } } });
+    const runner = await insertRunner(prisma, { capabilities: { ...FLEET_CAPS, projectThreads: true, workspaceThreads: false, threadBackends: { native: ['m1'], acp: [] } } });
+    await prisma.runner.update({ where: { id: runner.id }, data: { protocolVersion: 4, threadCapacity: 2 } });
+    try {
+      await send(thread.id).expect(409);
+      expect(await prisma.fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+    } finally { await prisma.runner.update({ where: { id: runner.id }, data: { enabled: false } }); }
+  });
+  it('workspace placement AC-11: workspaceThreads=true places the job on the runner', async () => {
+    const thread = await create();
+    await prisma.runner.updateMany({ data: { enabled: false } });
+    const runner = await insertRunner(prisma, { capabilities: { ...FLEET_CAPS, projectThreads: true, workspaceThreads: true, threadBackends: { native: ['m1'], acp: [] } } });
     await prisma.runner.update({ where: { id: runner.id }, data: { protocolVersion: 4, threadCapacity: 2 } });
     try {
       const result = data<{ jobId: string }>(await send(thread.id).expect(201));
       // The send's dispatch places the job, so a direct call runs as the sender.
-      const placement = await withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(PlacementService).placeJob(result.jobId));
+      await withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(PlacementService).placeJob(result.jobId));
       const job = await prisma.fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
-      if (!workspaceThreads) {
-        expect(job.state).toBe('QUEUED');
-        expect(placement.misfits).toContainEqual(expect.objectContaining({ runnerId: runner.id, reason: 'workspace_threads' }));
-      } else {
-        expect(job).toMatchObject({ state: 'ASSIGNED', runnerId: runner.id });
-        const command = await prisma.fleetCommand.findFirstOrThrow({ where: { jobId: job.id, type: 'ASSIGN' } });
-        expect(command.payload).toMatchObject({ thread: { kind: 'WORKSPACE' } });
-      }
+      expect(job).toMatchObject({ state: 'ASSIGNED', runnerId: runner.id });
+      const command = await prisma.fleetCommand.findFirstOrThrow({ where: { jobId: job.id, type: 'ASSIGN' } });
+      expect(command.payload).toMatchObject({ thread: { kind: 'WORKSPACE' } });
     } finally { await prisma.runner.update({ where: { id: runner.id }, data: { enabled: false } }); }
   });
 

@@ -53,6 +53,15 @@ type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRe
 /** A runner row that stored no capabilities hosts nothing: every thread rule misfits on it. */
 const NO_CAPABILITIES = { threadBackends: undefined } as unknown as RunnerCapabilities;
 
+/** #436: what hosting this stored thread needs: its backend, kind and mode, on its pinned runner when it has one. */
+const serveNeedOf = (thread: { kind: string | null; mode: string | null; backend: unknown; runnerId: string | null }): ThreadServeNeed => ({
+  backend: thread.backend as ThreadBackend,
+  kind: mapThreadKind(thread.kind),
+  mode: (thread.mode ?? 'read') as ThreadMode,
+  runnerId: thread.runnerId,
+  enabledOnly: true,
+});
+
 /** Shared visibility fence, applied before and after acquiring mutation locks. */
 const scopeWhere = (scope: ThreadScope): Prisma.ChatThreadWhereInput => scope.kind === 'project'
   ? { projectId: scope.projectId, kind: { not: 'WORKSPACE' } }
@@ -82,22 +91,25 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    *
    * A `runnerId` narrows the judgement to that runner alone (any `enabled` value — a thread's own runner is judged
    * even when it is disabled, because every later turn is pinned to it), and `modesOnly` judges the mode rule alone,
-   * so a backend the runner no longer offers never refuses a mode change.
+   * so a backend the runner no longer offers never refuses a mode change. #436: a send also sets `enabledOnly`, so a
+   * disabled pinned runner is unserved; a `runnerId` naming no runner row is judged against the fleet.
    *
    * #399: with no thread-capable runner enrolled, the fleet is not set up yet and there is nothing to judge against;
    * the thread is accepted and queues as before. Stored capabilities were validated by parseCapabilities at enroll/sync.
    */
   async threadServeMisfit(need: ThreadServeNeed): Promise<ThreadCapabilityMisfit | null> {
-    const runners = await this.prisma.client.runner.findMany({
-      where: need.runnerId
-        ? { id: need.runnerId }
-        : { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } },
-      select: { capabilities: true },
+    const select = { capabilities: true, enabled: true } as const;
+    // #436: a pinned thread's turn is placed on its own runner alone; a runner that no longer exists pins nothing.
+    const pinned = need.runnerId ? await this.prisma.client.runner.findMany({ where: { id: need.runnerId }, select }) : [];
+    const runners = pinned.length > 0 ? pinned : await this.prisma.client.runner.findMany({
+      where: { enabled: true, protocolVersion: { gte: THREAD_MIN_PROTOCOL_VERSION } }, select,
     });
     if (runners.length === 0) return null;
     let furthest: ThreadCapabilityMisfit | null = null;
     for (const runner of runners) {
       const capabilities = (runner.capabilities as unknown as RunnerCapabilities | null) ?? NO_CAPABILITIES;
+      // A disabled pinned runner is the same cause as one that dropped the backend: nothing enabled offers it.
+      if (need.enabledOnly && !runner.enabled && pinned.length > 0) return 'thread_backend';
       const misfit = need.modesOnly
         ? threadModeMisfit(need.mode, capabilities)
         : threadCapabilityMisfit({ backend: need.backend, kind: need.kind, mode: need.mode, enabled: true, action: 'SESSION' }, capabilities);
@@ -522,7 +534,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return result;
   }
 
-  async sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+  async sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean; assertServed?: (need: ThreadServeNeed) => Promise<void> }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
     // Permissions P1 US-002: ownership comes from the keys. An any-row `thread.message.send` holder sends into
     // another creator's thread; a `.own` holder (or the unchanged workspace callers, which pass no flag) keeps the
     // creator compare.
@@ -556,6 +568,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // Permissions P1 US-002: input that steers a live turn comes from the turn's requester, and this refusal
         // runs before the sequence is allocated so a refused send writes nothing at all.
         this.assertOwnLiveSession(currentAfterLock, input.userId);
+        // #436: a send that would queue a new turn is refused when no runner can host the thread's backend, mode or kind.
+        // Like every refusal above it runs before the sequence is allocated, so a refused send writes nothing.
+        const feedsLiveSession = currentAfterLock?.state === 'RUNNING' && Boolean(currentAfterLock.runnerId);
+        if (input.assertServed && !feedsLiveSession) await input.assertServed(serveNeedOf(thread));
 
         // A completed out-of-band message can sit at or above the counter, so the shared allocator takes the higher.
         const seq = await allocateThreadSeq(this.prisma.client, thread.id);

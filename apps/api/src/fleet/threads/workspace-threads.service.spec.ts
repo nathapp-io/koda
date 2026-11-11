@@ -359,3 +359,43 @@ describe('workspace read, cap and command scope', () => {
     });
   });
 });
+
+/** #436: a workspace message that would queue a new turn is refused when no runner serves the stored thread. */
+describe('WorkspaceThreadsService.sendMessage serve check (#436)', () => {
+  const stored = { id: 't1', kind: 'WORKSPACE' as const, projectId: 'p1', createdById: 'u', mode: 'read' as const, backend: { kind: 'native' as const, model: 'gone/model' } };
+  const message = { id: 'm1', seq: 1 };
+  const principal: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@example.com' };
+
+  const build = (misfit: string | null) => {
+    const threadServeMisfit = vi.fn(async () => misfit);
+    const sendMessage = vi.fn(async (input: { assertServed?: (need: unknown) => Promise<void> }) => {
+      await input.assertServed?.({ backend: stored.backend, kind: stored.kind, mode: stored.mode });
+      return { message, jobId: 'j1', deduplicated: false };
+    });
+    const service = new WorkspaceThreadsService(
+      { get: vi.fn(async () => stored), sendMessage, threadServeMisfit } as unknown as ChatThreadRepository,
+      {} as IFleetRepoRepository, {} as SkillsService, { threadsEnabled: true } as IFleetConfig,
+      { findAllForPrincipal: vi.fn(async () => [{ id: 'p1' }]) } as unknown as ProjectsService,
+      {} as ProjectAccessService, { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(),
+    );
+    return { service, sendMessage, threadServeMisfit };
+  };
+  const send = (service: WorkspaceThreadsService) => service.sendMessage(principal, 't1', { text: 'hi', clientMessageId: 'c1' });
+
+  it('refuses with the create 409 when no runner serves the thread backend', async () => {
+    const { service, threadServeMisfit } = build('thread_backend');
+    await expect(send(service)).rejects.toMatchObject({ code: 409, prefix: 'threads.backendUnavailable', args: { field: 'backend.model', value: 'gone/model' } });
+    expect(threadServeMisfit).toHaveBeenCalledWith({ backend: stored.backend, kind: 'WORKSPACE', mode: 'read' });
+  });
+
+  it('refuses with the hosting-capability cause when no runner hosts workspace threads', async () => {
+    const { service } = build('workspace_threads');
+    await expect(send(service)).rejects.toMatchObject({ code: 409, prefix: 'threads.workspaceThreadsUnavailable' });
+  });
+
+  it('sends when a runner serves the thread, and when no thread-capable runner is enrolled (judge answers null)', async () => {
+    const { service, sendMessage } = build(null);
+    await expect(send(service)).resolves.toMatchObject({ jobId: 'j1' });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+});

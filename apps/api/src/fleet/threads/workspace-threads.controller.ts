@@ -110,6 +110,7 @@ export class WorkspaceThreadsController {
   @ApiResponse({ status: 201, type: SendMessageResultDto })
   @ApiResponse({ status: 200, type: SendMessageResultDto })
   @ApiResponse({ status: 403, description: 'thread.workspace.message.send is missing, or thread.create is refused in the home project' })
+  @ApiResponse({ status: 409, description: 'threads.backendUnavailable (or the hosting-capability or mode cause) when no enabled thread-capable runner serves the thread any more, before anything is written' })
   @ApprovalGated()
   async send(@Param('id') id: string, @Body() dto: SendMessageDto, @Principal() principal: UserPrincipal | AgentPrincipal, @Res({ passthrough: true }) response: { status: (code: number) => unknown }) {
     const outcome = await this.routeGate.run<{ message: Awaited<ReturnType<WorkspaceThreadsService['sendMessage']>>['message']; jobId: string | null; deduplicated: boolean }>({

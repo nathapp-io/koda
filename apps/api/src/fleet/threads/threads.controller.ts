@@ -302,7 +302,7 @@ export class ThreadsController {
   @ApiResponse({ status: 201, type: SendMessageResultDto })
   @ApiResponse({ status: 200, type: SendMessageResultDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.message.send nor created the thread' })
-  @ApiResponse({ status: 409, description: 'threads.sessionOtherPrincipal when another principal started the live session' })
+  @ApiResponse({ status: 409, description: 'threads.sessionOtherPrincipal when another principal started the live session; threads.backendUnavailable (or the hosting-capability or mode cause) when no enabled thread-capable runner serves the thread any more, before anything is written' })
   @ApprovalGated()
   async sendMessage(    @Param('id') id: string,
     @Body() dto: SendMessageDto,

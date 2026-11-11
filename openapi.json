@@ -12146,6 +12146,9 @@
           },
           "403": {
             "description": "thread.workspace.message.send is missing, or thread.create is refused in the home project"
+          },
+          "409": {
+            "description": "threads.backendUnavailable (or the hosting-capability or mode cause) when no enabled thread-capable runner serves the thread any more, before anything is written"
           }
         },
         "security": [
@@ -13463,7 +13466,7 @@
             "description": "The caller neither holds thread.message.send nor created the thread"
           },
           "409": {
-            "description": "threads.sessionOtherPrincipal when another principal started the live session"
+            "description": "threads.sessionOtherPrincipal when another principal started the live session; threads.backendUnavailable (or the hosting-capability or mode cause) when no enabled thread-capable runner serves the thread any more, before anything is written"
           }
         },
         "security": [

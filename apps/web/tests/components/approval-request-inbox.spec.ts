@@ -4,6 +4,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { loadSfc, mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
+import { APPROVAL_LIST_DEADLINE_MS } from '../../composables/useApprovalInbox'
 import type { ApprovalRequestDetail, ApprovalRequestSummary } from '../../lib/approval-requests'
 import type { LiveApprovalRequestEvent, ProjectEventHandlers } from '../../lib/project-event-stream'
 
@@ -658,5 +659,141 @@ describe('ApprovalRequestInbox — failures', () => {
     expect(m.app.textOf(m.byId('approvals-inbox-stale')[0])).toBe(T.t('approvals.inbox.stale'))
     expect(m.toast.errors).toEqual([])
     m.app.unmount()
+  })
+})
+
+/** A promise the test settles by hand: the way to hold one request open while another one lands. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined
+  let reject: (reason: unknown) => void = () => undefined
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+describe('ApprovalRequestInbox — a load can never spin forever (#435)', () => {
+  test('a first load that never answers ends in the error state with a retry, not in Loading', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
+    const get = jest.fn(() => new Promise<never>(() => undefined))
+    const m = mountInbox({ get })
+    await m.settle()
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(1)
+    jest.advanceTimersByTime(APPROVAL_LIST_DEADLINE_MS + 1)
+    await m.settle()
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(0)
+    expect(m.byId('approvals-inbox-load-failed')).toHaveLength(1)
+    expect(m.byId('approvals-inbox-retry')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('Retry shows Loading again and then the rows', async () => {
+    let attempt = 0
+    const second = deferred<ReturnType<typeof pageOf>>()
+    const get = jest.fn(async () => {
+      attempt += 1
+      if (attempt === 1) throw new ApiError(500, 'boom')
+      return second.promise
+    })
+    const m = mountInbox({ get })
+    await m.settle()
+    expect(m.byId('approvals-inbox-load-failed')).toHaveLength(1)
+    ;(m.byId('approvals-inbox-retry')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(1)
+    expect(m.byId('approvals-inbox-load-failed')).toHaveLength(0)
+    second.resolve(pageOf([row('r1')]))
+    await m.settle()
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(0)
+    expect(m.byId('approval-request-row-r1')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('a retry that never answers ends in the error state again', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
+    let attempt = 0
+    const get = jest.fn(() => {
+      attempt += 1
+      return attempt === 1 ? Promise.reject(new ApiError(500, 'boom')) : new Promise<never>(() => undefined)
+    })
+    const m = mountInbox({ get })
+    await m.settle()
+    ;(m.byId('approvals-inbox-retry')[0].props.onClick as () => void)()
+    await m.settle()
+    jest.advanceTimersByTime(APPROVAL_LIST_DEADLINE_MS + 1)
+    await m.settle()
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(0)
+    expect(m.byId('approvals-inbox-retry')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('an initial load that answers after a live refresh does not overwrite the newer rows', async () => {
+    const first = deferred<ReturnType<typeof pageOf>>()
+    let call = 0
+    const get = jest.fn(async () => {
+      call += 1
+      return call === 1 ? first.promise : pageOf([row('fresh')])
+    })
+    const m = mountInbox({ get })
+    await m.settle()
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
+    m.live()?.onApprovalRequest?.(liveEvent('e1'))
+    jest.advanceTimersByTime(300)
+    await m.settle()
+    expect(m.byId('approval-request-row-fresh')).toHaveLength(1)
+    first.resolve(pageOf([]))
+    await m.settle()
+    expect(m.byId('approval-request-row-fresh')).toHaveLength(1)
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('an initial load that fails after a live refresh landed does not mark the list stale', async () => {
+    const first = deferred<ReturnType<typeof pageOf>>()
+    let call = 0
+    const get = jest.fn(async () => {
+      call += 1
+      return call === 1 ? first.promise : pageOf([row('fresh')])
+    })
+    const m = mountInbox({ get })
+    await m.settle()
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
+    m.live()?.onApprovalRequest?.(liveEvent('e1'))
+    jest.advanceTimersByTime(300)
+    await m.settle()
+    first.reject(new ApiError(500, 'boom'))
+    await m.settle()
+    expect(m.byId('approvals-inbox-stale')).toHaveLength(0)
+    expect(m.byId('approval-request-row-fresh')).toHaveLength(1)
+    expect(m.toast.errors).toEqual([])
+    m.app.unmount()
+  })
+
+  test('a superseded tab load never replaces the rows of the tab on screen', async () => {
+    const pendingTab = deferred<ReturnType<typeof pageOf>>()
+    let call = 0
+    const get = jest.fn(async () => {
+      call += 1
+      return call === 1 ? pendingTab.promise : pageOf([row('all-row', { status: 'approved' })])
+    })
+    const m = mountInbox({ get })
+    await m.settle()
+    ;(m.byId('approvals-inbox-tab-all')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(m.byId('approval-request-row-all-row')).toHaveLength(1)
+    pendingTab.resolve(pageOf([row('pending-row')]))
+    await m.settle()
+    expect(m.byId('approval-request-row-pending-row')).toHaveLength(0)
+    expect(m.byId('approval-request-row-all-row')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('a load that times out after the page was left does not toast or write state', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] })
+    const get = jest.fn(() => new Promise<never>(() => undefined))
+    const m = mountInbox({ get })
+    await m.settle()
+    m.app.unmount()
+    jest.advanceTimersByTime(APPROVAL_LIST_DEADLINE_MS + 1)
+    await m.settle()
+    expect(m.toast.errors).toEqual([])
   })
 })

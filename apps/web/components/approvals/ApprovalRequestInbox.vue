@@ -21,7 +21,7 @@
     <LoadingState v-else-if="pending" />
     <div v-else-if="loadFailed" class="space-y-3">
       <p class="text-sm text-status-rejected" data-testid="approvals-inbox-load-failed">{{ t('approvals.inbox.loadFailed') }}</p>
-      <Button variant="outline" size="sm" data-testid="approvals-inbox-retry" @click="reload()">{{ t('common.retry') }}</Button>
+      <Button variant="outline" size="sm" data-testid="approvals-inbox-retry" @click="retry()">{{ t('common.retry') }}</Button>
     </div>
     <template v-else>
       <p v-if="stale" class="text-sm text-muted-foreground" data-testid="approvals-inbox-stale">{{ t('approvals.inbox.stale') }}</p>
@@ -332,13 +332,21 @@ async function cancel(id: string): Promise<void> {
   }
 }
 
+/** The newest `reload` call: an older one that settles late must not touch what the newer one shows. */
+let latestReloadId = 0
+/** Set on leave: a deadline that fires later must not toast on, or write state for, a page that is gone. */
+let unmounted = false
+
 async function reload(): Promise<void> {
+  const id = ++latestReloadId
   try {
     await list(tab.value === 'pending' ? { tab: 'pending', projectId } : { tab: 'all', page: page.value, projectId })
+    if (id !== latestReloadId || unmounted) return
     loaded.value = true
     loadFailed.value = false
     stale.value = false
   } catch (err: unknown) {
+    if (id !== latestReloadId || unmounted) return
     if (isForbidden(err)) {
       // A refusal is not a transient failure: nothing to poll for.
       forbidden.value = true
@@ -352,9 +360,17 @@ async function reload(): Promise<void> {
     }
     return
   } finally {
-    pending.value = false
+    // Only the newest call may end the loading state, and every call ends: `list` has a deadline.
+    if (id === latestReloadId && !unmounted) pending.value = false
   }
   await reconcileOpenRow()
+}
+
+/** Retry from the error state: back to Loading until this attempt answers or runs out of time. */
+async function retry(): Promise<void> {
+  loadFailed.value = false
+  pending.value = true
+  await reload()
 }
 
 async function toggle(id: string): Promise<void> {
@@ -409,6 +425,7 @@ onMounted(() => {
   if (openId.value !== null) void loadDetail(openId.value)
 })
 onBeforeUnmount(() => {
+  unmounted = true
   polling.stop()
   liveReload.cancel()
 })

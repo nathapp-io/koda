@@ -26,7 +26,7 @@ describeIntegration('gated project thread message route', () => {
   const thread = async () => {
     const runner = await db.runner.create({ data: {
       name: `message-runner-${++n}`, apiKeyHash: `message-hash-${n}`, os: 'linux', arch: 'x64', labels: [], capacity: 2,
-      capabilities: { ...FLEET_CAPS, threadWrite: true }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `message-boot-${n}`,
+      capabilities: { ...FLEET_CAPS, threadWrite: true, projectThreads: true, threadBackends: { native: ['m1'], acp: [] } }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `message-boot-${n}`,
       enabled: true, lastSeenAt: new Date(), createdById: world.ids.root,
     } });
     return db.chatThread.create({ data: {

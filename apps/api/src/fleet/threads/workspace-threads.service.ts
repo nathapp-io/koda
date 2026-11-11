@@ -193,7 +193,7 @@ export class WorkspaceThreadsService {
     if (!reachable.some(project => project.id === thread.projectId) || !await this.canHost(thread.projectId, principal)) {
       throw new ForbiddenAppException({}, 'permissions');
     }
-    return this.threads.sendMessage({ scope: { kind: 'workspace', userId: principal.id }, threadId: id, userId: principal.id, text: input.text, clientMessageId: input.clientMessageId, repoContext: undefined });
+    return this.threads.sendMessage({ scope: { kind: 'workspace', userId: principal.id }, threadId: id, userId: principal.id, text: input.text, clientMessageId: input.clientMessageId, repoContext: undefined, assertServed: need => this.assertThreadServed(need) });
   }
 
   async archive(principal: UserPrincipal | AgentPrincipal, id: string): Promise<void> {
