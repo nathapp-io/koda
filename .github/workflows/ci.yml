@@ -400,8 +400,11 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
+      # No --with-deps: it runs apt-get, and an Ubuntu mirror DNS outage on the runner failed this job before any
+      # test ran (PR #439). The ubuntu-24.04 image ships Google Chrome, so Chromium's system libraries are present;
+      # the browser itself downloads from Playwright's CDN. A missing library fails the browser launch loudly.
       - name: Install Playwright Chromium
-        run: cd apps/web && bunx playwright install --with-deps chromium
+        run: cd apps/web && bunx playwright install chromium
 
       - name: Playwright
         run: cd apps/web && bun run test:e2e
