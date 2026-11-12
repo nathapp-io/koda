@@ -3,7 +3,7 @@
   "feature": "web-ux-audit-fixes",
   "branchName": "feat/web-ux-audit-fixes",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T03:45:04.661Z",
+  "updatedAt": "2026-11-12T03:57:32.422Z",
   "userStories": [
     {
       "id": "US-001",
@@ -314,14 +314,17 @@
         "loading"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three bounded source changes use existing Vue refs and helpers, but permission/access-control presentation triggers the security override and strict test/implementation isolation."
+        "reasoning": "Three bounded source changes use existing Vue refs and helpers, but permission/access-control presentation triggers the security override and strict test/implementation isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/dispatch.vue",
@@ -363,7 +366,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "97a8d190303b844b770d16c0e7704c33ebe1959f"
     },
     {
       "id": "US-006",
