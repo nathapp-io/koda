@@ -2,6 +2,8 @@ import { describe, expect, test, jest } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
 
 type LocaleValue = string | { [key: string]: LocaleValue }
@@ -57,13 +59,15 @@ describe('flow detail readable labels', () => {
     expect(header.mock.calls[0]?.[0]).toMatchObject({ title: 'f17-min3', subtitle: expect.not.stringContaining('flow-id') })
     expect(mounted.text()).toContain(translate('fleet.flows.detail.id'))
     expect(mounted.text()).toContain('flow-id')
-    expect(mounted.text()).toContain(new Date('2026-01-02T03:04:05.000Z').toLocaleString())
+    await nextTick()
+    expect(mounted.text()).toContain(formatDateTime('2026-01-02T03:04:05.000Z', undefined))
     mounted.unmount()
   })
   test('uses fallback title when there are no features and formats recorded date', async () => {
     const { mounted, header } = await mountPage(flow({ approval: { mode: 'REQUEST', approverId: null, approvedAt: '2026-01-02T03:04:05.000Z', approvalRequestId: null } }))
     expect(header.mock.calls[0]?.[0]).toMatchObject({ title: translate('fleet.flows.detail.title') })
-    expect(mounted.text()).toContain(new Date('2026-01-02T03:04:05.000Z').toLocaleString())
+    await nextTick()
+    expect(mounted.text()).toContain(formatDateTime('2026-01-02T03:04:05.000Z', undefined))
     mounted.unmount()
   })
   test('labels flow jobs with localized command and state and preserves unknown command', async () => {

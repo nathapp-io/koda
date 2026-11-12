@@ -5,6 +5,7 @@ import { useNotifications } from '~/composables/useNotifications'
 import { useUserEvents } from '~/composables/useUserEvents'
 import { createDebouncer } from '~/lib/debounce'
 import { isInAppPath, notificationDetail, notificationText } from '~/lib/notifications'
+import { useLocalDates } from '~/lib/local-dates'
 import type { NotificationDto, NotificationPage } from '~/lib/notification-types'
 
 definePageMeta({ layout: 'default' })
@@ -12,6 +13,7 @@ definePageMeta({ layout: 'default' })
 /** Fleet S4a §5: the full inbox, newest first, with an unread filter. */
 const i18n = useI18n()
 const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const { list, markRead, markAllRead, unreadCount } = useNotifications()
 
@@ -110,7 +112,7 @@ onBeforeUnmount(() => liveReload.cancel())
             <span class="block text-sm" :class="item.readAt ? '' : 'font-medium'">{{ notificationText(item, i18n) }}</span>
             <span v-if="notificationDetail(item, i18n)" class="block truncate text-xs text-muted-foreground">{{ notificationDetail(item, i18n) }}</span>
           </span>
-          <time class="shrink-0 text-xs text-muted-foreground" :datetime="item.createdAt">{{ new Date(item.createdAt).toLocaleString() }}</time>
+          <time class="shrink-0 text-xs text-muted-foreground" :datetime="item.createdAt">{{ dates.dateTime(item.createdAt) }}</time>
         </button>
       </li>
     </ul>

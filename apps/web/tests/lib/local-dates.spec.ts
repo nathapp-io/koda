@@ -1,0 +1,129 @@
+import { expect, test } from '@jest/globals'
+import { computed, createSSRApp, createRenderer, h, nextTick, ref } from 'vue'
+import { renderToString } from 'vue/server-renderer'
+import { formatDate, formatDateTime } from '../../lib/format-date-time'
+import { useLocalDates } from '../../lib/local-dates'
+
+const iso = '2026-11-10T14:07:45.657Z'
+type Node = { tag: string; props: Record<string, unknown>; children: Array<Node | string> }
+const renderer = createRenderer<Node, Node>({
+  createElement: tag => ({ tag, props: {}, children: [] }),
+  createText: text => text,
+  createComment: text => text,
+  setText: (node, text) => { Object.assign(node, { text }) },
+  setElementText: (node, text) => { node.children = [text] },
+  patchProp: (node, key, _old, value) => { node.props[key] = value },
+  insert: (child, parent, anchor) => {
+    const at = anchor ? parent.children.indexOf(anchor) : -1
+    if (at < 0) parent.children.push(child)
+    else parent.children.splice(at, 0, child)
+  },
+  remove: (child, parent) => { if (!parent) return; const at = parent.children.indexOf(child); if (at >= 0) parent.children.splice(at, 1) },
+  parentNode: () => null,
+  nextSibling: () => null,
+})
+function component(format: 'dateTime' | 'date' = 'dateTime') {
+  return { setup() { const dates = useLocalDates({ locale: ref('en') }); return () => h('time', { datetime: iso }, dates[format](iso)) } }
+}
+test('formats date-only values and leaves invalid input unchanged', async () => {
+  const value = formatDate(iso, 'en')
+  expect(value).toContain('Nov')
+  expect(value).toContain('2026')
+  expect(value).not.toMatch(/14:07|02:07|T14/)
+  expect(formatDate('not-a-date', 'en')).toBe('not-a-date')
+})
+test('renders an empty SSR time then fills viewer-local text after mount', async () => {
+  expect(await renderToString(createSSRApp(component()))).toBe(`<time datetime="${iso}"></time>`)
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  const app = renderer.createApp(component())
+  app.mount(root)
+  const time = root.children[0] as Node
+  expect(time.children.join('')).toBe('')
+  await nextTick()
+  expect(time.children.join('')).toBe(formatDateTime(iso, 'en'))
+  app.unmount()
+})
+test('returns missing and invalid values before and after mount for both formats', async () => {
+  let dates: ReturnType<typeof useLocalDates> | undefined
+  const initial: string[] = []
+  const app = renderer.createApp({ setup() {
+    dates = useLocalDates(undefined)
+    return () => {
+      if (!dates) throw new Error('local dates not initialized')
+      const current = dates
+      initial.splice(0, initial.length,
+        current.dateTime(null), current.dateTime(undefined), current.dateTime(''),
+        current.date(null), current.date(undefined), current.date(''),
+        current.dateTime('not-a-date'), current.date('not-a-date'))
+      return h('div')
+    }
+  } })
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  app.mount(root)
+  const localDates = dates
+  if (!localDates) throw new Error('local dates not initialized')
+  expect(initial.slice(0, 6)).toEqual(['-', '-', '-', '-', '-', '-'])
+  expect(initial.slice(6)).toEqual(['', ''])
+  await nextTick()
+  for (const missing of [null, undefined, ''] as const) {
+    expect(localDates.dateTime(missing)).toBe('-')
+    expect(localDates.date(missing)).toBe('-')
+  }
+  expect(localDates.dateTime('not-a-date')).toBe('not-a-date')
+  expect(localDates.date('not-a-date')).toBe('not-a-date')
+  app.unmount()
+})
+
+test.each([undefined, { locale: { value: 42 } }, { locale: {} }, { locale: { value: '' } }])('uses runtime locale when locale is missing or not a non-empty string (%p)', async (i18n) => {
+  let dateTime: ((value: string) => string) | undefined
+  const app = renderer.createApp({ setup() { dateTime = useLocalDates(i18n).dateTime; return () => h('div') } })
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  app.mount(root)
+  await nextTick()
+  expect(dateTime?.(iso)).toBe(formatDateTime(iso, undefined))
+  app.unmount()
+})
+
+test('re-reads the locale while formatting, so a language switch updates the same mount', async () => {
+  // LanguageSwitcher calls setLocale in place (no_prefix routing, no reload), so a locale snapshotted
+  // in setup would keep formatting in the initial language. The computed stands for consumers such as
+  // the timeline's `rows`, which format inside a computed rather than in the template.
+  const locale = ref('en')
+  const app = renderer.createApp({ setup() {
+    const dates = useLocalDates({ locale })
+    const dayRow = computed(() => dates.date(iso))
+    return () => h('div', [
+      h('time', { datetime: iso }, dates.dateTime(iso)),
+      h('span', dates.date(iso)),
+      h('em', dayRow.value),
+    ])
+  } })
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  app.mount(root)
+  await nextTick()
+  const div = root.children[0] as Node
+  const [time, span, em] = [div.children[0] as Node, div.children[1] as Node, div.children[2] as Node]
+  expect([time.children.join(''), span.children.join(''), em.children.join('')])
+    .toEqual([formatDateTime(iso, 'en'), formatDate(iso, 'en'), formatDate(iso, 'en')])
+  locale.value = 'zh'
+  await nextTick()
+  expect([time.children.join(''), span.children.join(''), em.children.join('')])
+    .toEqual([formatDateTime(iso, 'zh'), formatDate(iso, 'zh'), formatDate(iso, 'zh')])
+  app.unmount()
+})
+
+test('formats date-only values after mount and handles absent/invalid dates', async () => {
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  const app = renderer.createApp(component('date'))
+  app.mount(root)
+  const time = root.children[0] as Node
+  await nextTick()
+  expect(time.children.join('')).toBe(formatDate(iso, 'en'))
+  app.unmount()
+  const invalid = renderer.createApp({ setup() { const dates = useLocalDates(undefined); return () => h('div', [dates.dateTime('not-a-date'), '|', dates.date(null)]) } })
+  const otherRoot: Node = { tag: 'root', props: {}, children: [] }
+  invalid.mount(otherRoot)
+  expect((otherRoot.children[0] as Node).children.join('')).toBe('|-')
+  await nextTick()
+  invalid.unmount()
+})

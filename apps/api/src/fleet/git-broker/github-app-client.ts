@@ -401,19 +401,35 @@ export class GitHubAppClient {
     return files.every((file) => own.paths.includes(String(obj(file).filename)) && obj(file).status === 'modified');
   }
 
+  private parseTree(body: unknown): { entries: ForgeTreeEntry[]; truncated: boolean } {
+    const tree = obj(body).tree;
+    if (!Array.isArray(tree)) throw new RepoCheckException('provider_error');
+    const entries = tree.flatMap((raw): ForgeTreeEntry[] => {
+      const e = obj(raw);
+      if ((e.type !== 'blob' && e.type !== 'tree') || typeof e.path !== 'string' || typeof e.sha !== 'string') return [];
+      return [{ path: e.path, type: e.type, sha: e.sha, size: typeof e.size === 'number' ? e.size : null }];
+    });
+    return { entries, truncated: obj(body).truncated === true };
+  }
+
   /** Fleet S3 §4.1: a tree by commit or tree SHA. Entries other than blob/tree (submodules) are dropped. */
   async getTree(token: string, owner: string, name: string, treeish: string, recursive: boolean): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }> {
     const query = recursive ? '?recursive=1' : '';
     const res = await this.http.request('GET', `${this.api}${this.repoPath(owner, name)}/git/trees/${encodeURIComponent(treeish)}${query}`, this.headers(token));
     if (res.status !== 200) throw new RepoCheckException('provider_error');
-    const body = obj(res.body);
-    if (!Array.isArray(body.tree)) throw new RepoCheckException('provider_error');
-    const entries = body.tree.flatMap((raw): ForgeTreeEntry[] => {
-      const e = obj(raw);
-      if ((e.type !== 'blob' && e.type !== 'tree') || typeof e.path !== 'string' || typeof e.sha !== 'string') return [];
-      return [{ path: e.path, type: e.type, sha: e.sha, size: typeof e.size === 'number' ? e.size : null }];
-    });
-    return { entries, truncated: body.truncated === true };
+    return this.parseTree(res.body);
+  }
+
+  /** The tree at `<commitSha>:<dirPath>` (one request). Null when the forge answers 404 or 422. */
+  async getSubtree(
+    token: string, owner: string, name: string, commitSha: string, dirPath: string, recursive: boolean,
+  ): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean } | null> {
+    const query = recursive ? '?recursive=1' : '';
+    const treeish = encodeURIComponent(`${commitSha}:${dirPath}`);
+    const res = await this.http.request('GET', `${this.api}${this.repoPath(owner, name)}/git/trees/${treeish}${query}`, this.headers(token));
+    if (res.status === 404 || res.status === 422) return null;
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    return this.parseTree(res.body);
   }
 
   /** US-004: replace one file through GitHub's contents API, creating a commit on the requested branch. */

@@ -30,13 +30,16 @@ import { bundleExpiredByLogs, logAttemptEpochs } from '~/lib/fleet-job-logs-link
 import type { FleetJobLogListDto } from '~/lib/fleet-log-types'
 import { ticketsQueryValue } from '~/lib/fleet-ticket-links'
 import { STATUS_DOT, TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
+import { useLocalDates } from '~/lib/local-dates'
 
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const slug = route.params.project as string
 const jobId = route.params.id as string
-const { t, te } = useI18n()
+const i18n = useI18n()
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const auth = useAuth()
 const jobsApi = useFleetJobs(slug)
@@ -270,7 +273,7 @@ const regenerate = (body: { prTitle: string; prBody: string }): Promise<void> =>
   await navigateTo(`/${slug}/fleet/jobs/${created.job.id}`)
 })
 
-const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocaleString() : '-')
+const formatTime = (iso: string | null): string => dates.dateTime(iso)
 </script>
 
 <template>

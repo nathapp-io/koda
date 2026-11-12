@@ -1,4 +1,6 @@
 import { describe, expect, test, jest } from '@jest/globals'
+import { nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ApiError } from '~/composables/useApi'
@@ -184,7 +186,8 @@ describe('fleet flow detail page (US-006)', () => {
     expect(mounted.text()).toContain('THREAD')
     expect(mounted.text()).toContain('review-model')
     expect(mounted.text()).toContain('supervisor-model')
-    expect(mounted.text()).toContain(new Date('2026-01-02T03:04:05.000Z').toLocaleString())
+    await nextTick()
+    expect(mounted.text()).toContain(formatDateTime('2026-01-02T03:04:05.000Z', undefined))
     mounted.unmount()
   })
 

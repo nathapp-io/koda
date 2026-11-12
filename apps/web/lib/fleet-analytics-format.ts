@@ -43,10 +43,6 @@ export function ingestVariant(status: string): BadgeVariant {
   return INGEST_VARIANTS.get(status) ?? 'outline'
 }
 
-export function timeText(iso: string | null | undefined): string {
-  return iso ? new Date(iso).toLocaleString() : '-'
-}
-
 /** The bundle files ingest could not fully read (`deleted` is the delete-on-demand marker, D384). */
 export function skippedFiles(files: Readonly<Record<string, string>>): string {
   return Object.entries(files)

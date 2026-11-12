@@ -10,6 +10,7 @@ import type { VNodeChild } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
 import { permissionSet } from '~/lib/permissions'
+import { formatDateTime } from '~/lib/format-date-time'
 import enJson from '../../i18n/locales/en.json'
 import zhJson from '../../i18n/locales/zh.json'
 
@@ -113,6 +114,14 @@ function mountPage(get: Get, query: Record<string, unknown> = {}) {
 
 describe('admin audit page (Permissions P2 US-004)', () => {
   afterEach(() => jest.clearAllMocks())
+
+  test('AC-5 formats createdAt with the shared local date helper', async () => {
+    const createdAt = '2026-11-10T14:07:45.657Z'
+    const p = mountPage(reference([{ ...ENTRY, createdAt }]))
+    await p.settle()
+    expect(p.rowText()).toContain(formatDateTime(createdAt, 'en'))
+    p.app.unmount()
+  })
 
   test('AC-1: mounting with an empty query asks for the first page of 50 entries', async () => {
     const p = mountPage(reference())

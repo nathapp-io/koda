@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import type { NotificationDto, NotificationPage } from '~/lib/notification-types'
+import { formatDateTime } from '~/lib/format-date-time'
 
 const page = webFile('pages', 'notifications.vue')
 const row = (id: string, readAt: string | null = null): NotificationDto => ({
@@ -43,6 +44,16 @@ function mountPage(list: jest.Mock, opts: { markRead?: jest.Mock; markAllRead?: 
 }
 
 describe('/notifications (S4a §5)', () => {
+  test('AC-1/2 keeps the datetime attribute and formats the row with the shared local date helper', async () => {
+    const createdAt = '2026-11-10T14:07:45.657Z'
+    const p = mountPage(jest.fn(async () => pageOf([{ ...row('1'), createdAt }])))
+    await p.settle()
+    const time = p.app.find('time')[0]
+    expect(time.props.datetime).toBe(createdAt)
+    expect(p.app.textOf(time)).toBe(formatDateTime(createdAt, 'en'))
+    p.app.unmount()
+  })
+
   test('loads page 1 of everything on mount', async () => {
     const list = jest.fn(async () => pageOf([row('1'), row('2', '2026-10-08T01:00:00.000Z')]))
     const p = mountPage(list)

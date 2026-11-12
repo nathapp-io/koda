@@ -1,5 +1,8 @@
 <script setup lang="ts">
-const { locale } = useI18n()
+import { useLocalDates } from '~/lib/local-dates'
+
+const i18n = useI18n()
+const dates = useLocalDates(i18n)
 
 defineProps<{
   id: string
@@ -36,7 +39,7 @@ const similarityConfig = {
       <!-- Meta -->
       <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
         <span class="rounded border border-border px-1.5 py-0.5">{{ source }}</span>
-        <span>{{ new Date(createdAt).toLocaleDateString(locale) }}</span>
+        <span>{{ dates.date(createdAt) }}</span>
       </div>
     </div>
   </div>

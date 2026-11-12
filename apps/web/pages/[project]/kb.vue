@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
+import { useLocalDates } from '~/lib/local-dates'
 
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const slug = route.params.project as string
 const { $api } = useApi()
-const { t, locale } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 
 // ─── Search ──────────────────────────────────────────────────────────────────
@@ -70,9 +73,7 @@ function truncate(str: string, len: number) {
 }
 
 function formatDate(dateStr: string) {
-  // Pass the active i18n locale so server- and client-rendered dates agree
-  // (matches tickets/[ref].vue which uses the same pattern).
-  return new Date(dateStr).toLocaleDateString(locale.value)
+  return dates.date(dateStr)
 }
 
 function onDocumentAdded() {

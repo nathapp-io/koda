@@ -5,11 +5,14 @@ import { useThreadPreApproval } from '~/composables/useThreadPreApproval'
 import { usd } from '~/lib/fleet-analytics-format'
 import { buildPreApprovalSchema, FLOW_COST_CAP_MAX_USD, FLOW_COST_CAP_MIN_USD, FLOW_COST_CAP_STEP_USD } from '~/lib/fleet-flow-start-form'
 import type { ThreadDetailDto } from '~/lib/thread-types'
+import { useLocalDates } from '~/lib/local-dates'
 
 const props = defineProps<{ slug: string; thread: ThreadDetailDto }>()
 const emit = defineEmits<{ (event: 'changed'): void }>()
 const { permissions } = useProjectPermissions(props.slug)
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const { set, clear } = useThreadPreApproval(props.slug)
 const cap = ref<number | string>('')
@@ -57,7 +60,7 @@ const visible = computed(() =>
     <h2 class="text-lg font-semibold">{{ t('fleet.flows.preapproval.title') }}</h2>
     <template v-if="thread.preApproval">
       <p>{{ t('fleet.flows.preapproval.cap') }}: {{ usd(thread.preApproval.costCapUsd) }}</p>
-      <p>{{ t('fleet.flows.preapproval.setAt') }}: {{ new Date(thread.preApproval.at).toLocaleString() }}</p>
+      <p>{{ t('fleet.flows.preapproval.setAt') }}: {{ dates.dateTime(thread.preApproval.at) }}</p>
       <Button type="button" variant="outline" data-testid="preapproval-clear" :disabled="writing" @click="onClear">
         {{ t('fleet.flows.preapproval.clear') }}
       </Button>

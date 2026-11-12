@@ -1,5 +1,7 @@
 import { describe, expect, it } from '@jest/globals'
-import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
+import { mountSfc, webFile, type FakeNode } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
 
 const file = (name: string): string => webFile('components', 'fleet', 'analytics', name)
@@ -23,6 +25,29 @@ describe('FleetAnalyticsStoryTable', () => {
 })
 
 describe('FleetAnalyticsJobTable', () => {
+  it('AC-6 and AC-7: formats the finish time after mount and keeps its dash for a null finish', async () => {
+    const at = '2026-11-10T14:07:45.657Z'
+    const app = mount('JobTable.vue', {
+      slug: 'koda', testid: 'jobs',
+      rows: [
+        { jobId: 'finished', command: 'RUN', featureName: 'alpha', state: 'COMPLETED', costUsd: '0.1', ledgerCostUsd: null, driftUsd: null, finishedAt: at },
+        { jobId: 'unfinished', command: 'RUN', featureName: 'beta', state: 'RUNNING', costUsd: '0.1', ledgerCostUsd: null, driftUsd: null, finishedAt: null },
+      ],
+    })
+    await nextTick()
+    // Finish time is the last cell. The ledger and drift cells of these rows also read '-', so a
+    // row-level text assertion would pass without the finish cell rendering anything.
+    const finishCell = (row: FakeNode): string => {
+      const cells = app.find('td', row)
+      const last = cells[cells.length - 1]
+      if (last === undefined) throw new Error('job row has no cells')
+      return app.textOf(last)
+    }
+    const [finished, unfinished] = byId(app, 'jobs-row')
+    expect(finishCell(finished)).toBe(formatDateTime(at, undefined))
+    expect(finishCell(unfinished)).toBe('-')
+  })
+
   it('shows cost, ledger and drift as given and a dash before ingest', () => {
     const app = mount('JobTable.vue', {
       slug: 'koda', testid: 'jobs',

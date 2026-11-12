@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals'
-import { axisUsd, bucketLabel, ingestVariant, pct, skippedFiles, timeText, tokenText, usd } from '~/lib/fleet-analytics-format'
+import { axisUsd, bucketLabel, ingestVariant, pct, skippedFiles, tokenText, usd } from '~/lib/fleet-analytics-format'
 
 describe('usd (A7, D391)', () => {
   it('prefixes the API string unchanged and dashes a missing value', () => {
@@ -58,9 +58,4 @@ describe('ingest helpers', () => {
     expect(skippedFiles({ cost: 'done' })).toBe('')
   })
 
-  it('dashes a missing time', () => {
-    expect(timeText(null)).toBe('-')
-    expect(timeText(undefined)).toBe('-')
-    expect(timeText('2026-10-05T12:00:00.000Z')).not.toBe('-')
-  })
 })
