@@ -15,11 +15,11 @@ const items = [
   { id: 'unknown-status', subject: 'deploy', predicate: 'status', object: 'open', kind: 'FACT', confidence: 1, status: 'active' },
 ]
 
-function mountMemory() {
+function mountMemory(applyFilters = async () => undefined) {
   const memory = {
     items: ref(items), isLoading: ref(false), error: ref(null), hasMore: ref(false),
     kindFilter: ref(''), statusFilter: ref(''), textFilter: ref(''),
-    loadMemory: async () => undefined, applyFilters: async () => undefined, loadMore: async () => undefined,
+    loadMemory: async () => undefined, applyFilters, loadMore: async () => undefined,
   }
   return mountSfc(page, {
     globals: {
@@ -78,6 +78,26 @@ describe('Memory readable labels', () => {
     expect(label?.props.for).toBeTruthy()
     expect(select?.props.id).toBeTruthy()
   })
+  test('memory filters and search use the shared 40px control classes', () => {
+    const mounted = mountMemory()
+    for (const id of ['memory-kind-filter', 'memory-status-filter']) {
+      expect(String(mounted.find('select').find((node) => node.props.id === id)?.props.class)).toContain('h-10')
+    }
+    const search = mounted.find('input').find((node) => node.props.type === 'search')
+    expect(String(search?.props.class)).toContain('h-10')
+    expect(String(search?.props.class)).toContain('border-input')
+    mounted.unmount()
+  })
+
+  test('kind-filter change invokes applyFilters once', () => {
+    const applyFilters = jest.fn(async () => undefined)
+    const mounted = mountMemory(applyFilters)
+    const select = mounted.find('select').find((node) => node.props.id === 'memory-kind-filter')
+    ;(select?.props.onChange as () => void)()
+    expect(applyFilters).toHaveBeenCalledTimes(1)
+    mounted.unmount()
+  })
+
   test('kind and subject translations exist in both locales', () => {
     const en = require('../../i18n/locales/en.json') as { memory: { kinds: Record<string, string>; subject: Record<string, string> } }
     const zh = require('../../i18n/locales/zh.json') as { memory: { kinds: Record<string, string>; subject: Record<string, string> } }

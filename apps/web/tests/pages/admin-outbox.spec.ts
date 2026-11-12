@@ -28,6 +28,14 @@ function mountOutbox(get: jest.Mock) {
 }
 
 describe('/admin/outbox', () => {
+  test('status filter uses the shared 40px control class and keeps w-fit', () => {
+    const { app } = mountOutbox(jest.fn(async () => ({ items: [], total: 0 })))
+    const classes = String(app.one('select')?.props.class)
+    expect(classes).toContain('h-10')
+    expect(classes).toContain('w-fit')
+    app.unmount()
+  })
+
   test('AC-4: changing status select requests pending events', async () => {
     const get = jest.fn(async () => ({ items: [], total: 0 }))
     const { app } = mountOutbox(get)

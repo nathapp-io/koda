@@ -82,7 +82,7 @@ onMounted(() => { void reload() })
           id="notification-email-master"
           data-testid="notification-email-master"
           type="checkbox"
-          class="h-4 w-4 accent-primary"
+          class="h-5 w-5 accent-primary"
           :checked="view.emailEnabled"
           :disabled="!view.emailAvailable"
           @change="onEmailEnabledToggle($event)"
@@ -94,30 +94,30 @@ onMounted(() => { void reload() })
           <span class="block text-sm font-medium">{{ t(`notifications.categories.${row.category}.label`) }}</span>
           <span class="block text-xs text-muted-foreground">{{ t(`notifications.categories.${row.category}.description`) }}</span>
         </label>
-        <span class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        <label :for="`notification-pref-${row.category}`" class="flex min-h-11 shrink-0 items-center gap-2 text-xs text-muted-foreground sm:min-h-0">
           {{ t('notifications.preferences.inApp') }}
           <input
             :id="`notification-pref-${row.category}`"
             type="checkbox"
-            class="h-4 w-4 accent-primary"
+            class="h-5 w-5 accent-primary"
             :checked="row.inApp"
             :data-testid="`notification-pref-${row.category}`"
             @change="onToggle(row.category, $event)"
           >
-        </span>
-        <span class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        </label>
+        <label :for="`notification-pref-email-${row.category}`" class="flex min-h-11 shrink-0 items-center gap-2 text-xs text-muted-foreground sm:min-h-0">
           {{ t('notifications.preferences.email') }}
           <input
             :id="`notification-pref-email-${row.category}`"
             :data-testid="`notification-pref-email-${row.category}`"
             :aria-label="t('notifications.preferences.emailFor', { category: t(`notifications.categories.${row.category}.label`) })"
             type="checkbox"
-            class="h-4 w-4 accent-primary"
+            class="h-5 w-5 accent-primary"
             :checked="row.email"
             :disabled="!view.emailAvailable || !view.emailEnabled"
             @change="onEmailToggle(row.category, $event)"
           >
-        </span>
+        </label>
       </li>
     </ul>
     </div>

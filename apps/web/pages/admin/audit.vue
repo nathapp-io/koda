@@ -349,7 +349,7 @@ watch(filterKey, () => { void reload() })
               <TableCell class="w-8 align-top">
                 <button
                   type="button"
-                  class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  class="inline-flex h-11 w-11 items-center justify-center rounded text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
                   data-testid="audit-expand"
                   :aria-expanded="expandedEntryId === entry.id ? 'true' : 'false'"
                   :aria-label="t('admin.audit.expand')"
