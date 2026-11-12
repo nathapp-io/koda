@@ -6,6 +6,7 @@ import AssigneePicker from '~/components/AssigneePicker.vue'
 import { extractApiError } from '~/composables/useApi'
 import { safeHref } from '~/lib/safe-url'
 import { apiPath } from '~/lib/api-path'
+import { useLocalDates } from '~/lib/local-dates'
 
 type TicketType = 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION'
 type TicketPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
@@ -88,7 +89,9 @@ const emit = defineEmits<{
 }>()
 
 const { $api } = useApi()
-const { t, locale } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 
 const PR_STATE_CLASS: Record<string, string> = {
@@ -103,14 +106,6 @@ const panelClass = 'rounded-lg border bg-card overflow-hidden'
 const panelHeadingClass = 'flex items-center justify-between gap-2 border-b px-3.5 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
 const panelBodyClass = 'flex flex-col gap-2.5 p-3.5'
 const summaryChevronClass = 'h-4 w-4 lg:hidden'
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(locale.value, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
 
 function extractIssueNumber(url: string): string | null {
   const parts = url.split('/')
@@ -330,7 +325,7 @@ async function removeLink(linkId: string) {
 
         <div class="flex items-center justify-between gap-2 border-t pt-2.5">
           <span class="text-xs text-muted-foreground">{{ t('tickets.detail.created') }}</span>
-          <span class="text-sm font-medium">{{ formatDate(ticket.createdAt) }}</span>
+          <span class="text-sm font-medium">{{ dates.date(ticket.createdAt) }}</span>
         </div>
 
         <div v-if="ticket.gitRefFile" class="flex items-center justify-between gap-2 border-t pt-2.5">

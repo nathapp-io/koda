@@ -2,6 +2,7 @@
 import { computed, ref as vueRef, onBeforeUnmount } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, STATUS_DOT, PRIORITY_DOT, typeChipClass } from '~/lib/ticket-chips'
+import { useLocalDates } from '~/lib/local-dates'
 
 type TicketType = 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION'
 type TicketPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
@@ -35,20 +36,14 @@ const emit = defineEmits<{
   (e: 'save'): void
 }>()
 
-const { t, locale } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 
 const chipClass = TICKET_CHIP_CLASS
 const dotClass = TICKET_DOT_CLASS
 
 const typeClass = computed(() => typeChipClass(props.ticket.type))
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(locale.value, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
 
 const copied = vueRef(false)
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
@@ -84,7 +79,7 @@ onBeforeUnmount(() => {
         <Copy v-else class="h-3.5 w-3.5" aria-hidden="true" />
       </Button>
       <span aria-hidden="true">·</span>
-      <span>{{ t('tickets.detail.opened', { date: formatDate(ticket.createdAt) }) }}</span>
+      <span>{{ t('tickets.detail.opened', { date: dates.date(ticket.createdAt) }) }}</span>
     </div>
 
     <div class="mt-1 flex items-start justify-between gap-3">
