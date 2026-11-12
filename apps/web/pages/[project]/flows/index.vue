@@ -4,11 +4,14 @@ import { extractApiError } from '~/composables/useApi'
 import { useFleetFlows } from '~/composables/useFleetFlows'
 import { flowStateKey, type FleetFlowPage } from '~/lib/fleet-flows'
 import { formatUsd } from '~/lib/fleet-jobs'
+import { useLocalDates } from '~/lib/local-dates'
 
 definePageMeta({ layout: 'default' })
 const route = useRoute()
 const slug = route.params.project as string
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const flows = useFleetFlows(slug)
 const result = ref<FleetFlowPage | null>(null)
@@ -43,7 +46,7 @@ onMounted(() => { void load(1) })
             <td><NuxtLink :to="`/${slug}/flows/${flow.id}`" class="inline-flex min-h-11 items-center sm:min-h-0">{{ flowStateKey(flow.state) ? t(flowStateKey(flow.state)!) : flow.state }}</NuxtLink></td>
             <td>{{ flow.features.map(feature => feature.feature).join(', ') }}</td>
             <td>{{ formatUsd(flow.spentUsd) }} / {{ formatUsd(flow.costCapUsd) }}</td>
-            <td>{{ flow.createdAt }}</td>
+            <td><time :datetime="flow.createdAt">{{ dates.dateTime(flow.createdAt) }}</time></td>
           </tr></tbody>
         </table>
       </div>
