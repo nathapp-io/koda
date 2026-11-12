@@ -55,7 +55,7 @@ Principles:
 | 7 | Fleet threads list and navigation | **Done** — US-004 (project threads list, role-gated creation link, sidebar/palette/breadcrumb navigation) |
 | 8 | Project settings Knowledge tab | **Done** — fleet-s5b US-007 (fourth settings tab `knowledge` with `SettingsKnowledgeCard`: repository index state, ADMIN re-index and corpus patterns editor) |
 | 9 | Fleet flows and admin Outbox navigation | **Done** — US-012 (project Flows link and list/detail breadcrumbs); US-006 (permission-gated `/admin/outbox` link) |
-| 10 | Audit polish (live koda-wk audit 2026-11-12) | **Done** — feat/web-ux-audit-polish: avatar fallback fill, `--link` token, fleet job state dots, readable board/activity labels, member-name fallback, table no-wrap, mobile header actions |
+| 10 | Audit polish (live koda-wk audit 2026-11-12) | **Done** — feat/web-ux-audit-polish: avatar fallback fill, `--link` token, fleet job state dots, readable board/activity labels, member-name fallback, table no-wrap, mobile header actions; nax feature `web-ux-audit-fixes` (#441, R2-1..R2-7, R1-15, R1-17..R1-20) merged and live on koda-wk `849f7eb6` 2026-11-12, tracked in [`AUDIT-2026-11.md`](./AUDIT-2026-11.md) |
 
 ## 4b. Effort estimate (2026-10-05, a guess from file sizes, not measured)
 
