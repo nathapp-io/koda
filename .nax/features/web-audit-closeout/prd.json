@@ -1,0 +1,364 @@
+{
+  "project": "koda",
+  "feature": "web-audit-closeout",
+  "branchName": "feat/web-audit-closeout",
+  "createdAt": "2026-11-12T00:00:00.000Z",
+  "updatedAt": "2026-11-12T12:16:44.479Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add mount-gated viewer-local dates to ticket components",
+      "description": "**Goal** — Add the shared date-only formatter and mount-gated viewer-local date helper, then migrate the three ticket-page components.\n\n**Motivation** — The viewer sees the UTC time, then the local one.\n\n**Approach** — Ruling (owner, 2026-11-12): times render in the viewer's zone, filled in after load; the server renders the `<time datetime>` element with no text.\n\n`lib/format-date-time.ts` keeps `formatDateTime(iso, locale)` and gains:\n\n```ts\n/** \"Nov 10, 2026\": year numeric, month short, day numeric. An invalid date returns the input unchanged. */\nexport function formatDate(iso: string, locale: string | undefined): string\n```\n\nNew `lib/local-dates.ts`. It is a composable but lives in `lib/` on purpose: an explicit import, not a Nuxt auto-import, so every existing `mountSfc` harness mounts its consumers without a new global.\n\nThe helper holds one `mounted` ref per call, set in `onMounted`. The server render never runs `onMounted`, and the client's hydration render runs before it, so both render `''`; Vue then re-renders with the local text. A component mounted later (client navigation) shows the text after one tick. The `-` for a missing value is the same on both sides, so it renders immediately.\n\nEvery site below switches to `useLocalDates(i18n)` and to one of the two formats: `dateTime` where it shows a time today, `date` where it shows only a date. A site that destructures `useI18n()` today keeps one `const i18n = useI18n()`, destructures what it still uses from it, passes `i18n` to `useLocalDates`, and drops locals that become unused (`locale`, `commentLocale`, `activeLocale`, `localTime`).\n\n| Story | File | Today | After |\n|:--|:--|:--|:--|\n| US-001 | `components/CommentThread.vue` | `formatDateTime(comment.createdAt, commentLocale())` | `dates.dateTime(comment.createdAt)` |\n| US-001 | `components/TicketHeader.vue` | local `formatDate` (`toLocaleDateString`, short) | `dates.date(...)` |\n| US-001 | `components/TicketProperties.vue` | local `formatDate` (same) | `dates.date(...)` |\n\nRead-only (verified, unchanged):\n- `lib/format-date-time.ts` `formatDateTime(iso, locale)`: `toLocaleString(locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })`, returns `iso` for an invalid date.\n- `tests/helpers/mount-sfc.ts` mounts a real SFC through a custom renderer; `~/...` imports resolve to the real files under `apps/web` and share the test's one Vue runtime; Nuxt auto-imports come from `globals`. `app.mount` runs `onMounted` synchronously, and the re-render it triggers flushes on the next tick, so one `await nextTick()` shows the local text.\n- `tests/components/comment-thread-time.spec.ts` is the CommentThread mount harness to reuse (i18n stub with a `locale` ref). `tests/layouts/default-fleet-nav.spec.ts` already loads `vue/server-renderer` under Jest.\n\nFailure handling: `useLocalDates` gets an invalid date string -> `''` before mount; after mount the string unchanged (as `formatDateTime` does). `useLocalDates` gets null, undefined or '' -> Returns `-` before and after mount. i18n object without a string `locale.value` -> Formats with the runtime default locale.\n\nCreate tests/lib/local-dates.spec.ts with real h()-based SSR and custom-renderer mounts. Add formatDate cases to tests/lib/format-date-time.spec.ts; existing formatDateTime cases stay. In tests/components/comment-thread-time.spec.ts, the text now appears after one tick: the existing assertions move after await nextTick(), with an empty first-render assertion before it. Mount TicketHeader and TicketProperties to exercise the new export through real consumers. Preserve CommentThread's time element, datetime ISO and comment-time identifier.\n\n**Scope** — In: lib/format-date-time.ts, new lib/local-dates.ts, CommentThread.vue, TicketHeader.vue, TicketProperties.vue and their behavioral tests. Out: the nine fleet/KB component sites in US-002; the seven page migrations, timeText removal and static guard in US-003; the GitHub reader optimization in US-004. No ticket workflow or permission changes. Relative times (\"3 min ago\") and a per-user time-zone setting are not added.\n\n**Interface** —\n```ts\nimport { onMounted, ref } from 'vue'\nimport { formatDate, formatDateTime } from '~/lib/format-date-time'\n\nexport interface LocalDates {\n  /** '' until the calling component has mounted; then formatDateTime in the viewer's zone. null/undefined/'' -> '-'. */\n  dateTime(iso: string | null | undefined): string\n  /** Same gating; then formatDate. null/undefined/'' -> '-'. */\n  date(iso: string | null | undefined): string\n}\n\n/** Call in a component's setup. `i18n` is the object useI18n() returned; its `locale.value` is read when it is a non-empty string, else the runtime default locale is used. */\nexport function useLocalDates(i18n: { locale?: { value?: unknown } } | undefined): LocalDates\n```",
+      "acceptanceCriteria": [
+        "[unit] formatDate('2026-11-10T14:07:45.657Z', 'en') returns date-only text including Nov and 2026 and excluding 14:07, 02:07 and T14.",
+        "[unit] formatDate('not-a-date', 'en') returns 'not-a-date'.",
+        "[unit] In tests/lib/local-dates.spec.ts, when an h()-based component calls useLocalDates({ locale: ref('en') }) in setup and renders h('time', { datetime: iso }, dates.dateTime(iso)) for iso '2026-11-10T14:07:45.657Z', renderToString from vue/server-renderer over createSSRApp(component) returns a time element with that datetime attribute and no text.",
+        "[unit] In tests/lib/local-dates.spec.ts, when the same dateTime component is mounted through a Vue.createRenderer recorder using the node and text recorders of tests/helpers/mount-sfc.ts, copied or exported, its time text is '' immediately after mount returns.",
+        "[unit] When that dateTime component has mounted and await nextTick() completes, its time text equals formatDateTime('2026-11-10T14:07:45.657Z', 'en').",
+        "[unit] When a variant renders dates.date('2026-11-10T14:07:45.657Z'), after mount and await nextTick() its text equals formatDate('2026-11-10T14:07:45.657Z', 'en').",
+        "[unit] useLocalDates dateTime/date return '-' for each of null, undefined and '' before mount.",
+        "[unit] useLocalDates dateTime/date return '-' for each of null, undefined and '' after mount.",
+        "[unit] useLocalDates dateTime/date return '' for 'not-a-date' before mount.",
+        "[unit] useLocalDates dateTime/date return 'not-a-date' for 'not-a-date' after mount.",
+        "[unit] When useLocalDates receives { locale: { value: 42 } } or undefined as its i18n argument, after mount dateTime('2026-11-10T14:07:45.657Z') returns formatDateTime('2026-11-10T14:07:45.657Z', undefined).",
+        "[unit] When useLocalDates receives { locale: {} } or { locale: { value: '' } }, after mount dateTime('2026-11-10T14:07:45.657Z') returns formatDateTime('2026-11-10T14:07:45.657Z', undefined), selecting the runtime default locale.",
+        "[unit] When CommentThread is mounted using the comment-thread-time harness with locale ref 'en' and a comment createdAt '2026-11-10T14:07:45.657Z', immediately after mountSfc returns its comment-time node is a time element with datetime '2026-11-10T14:07:45.657Z', preserving the existing semantic time markup.",
+        "[unit] When that CommentThread mountSfc call returns, the comment-time text is ''.",
+        "[unit] When that CommentThread mount uses locale ref 'en', after await nextTick() comment-time text equals formatDateTime('2026-11-10T14:07:45.657Z', 'en').",
+        "[unit] When that CommentThread mount uses locale ref 'zh', after await nextTick() comment-time text equals formatDateTime('2026-11-10T14:07:45.657Z', 'zh').",
+        "[unit] When TicketHeader is mounted with ticket.createdAt '2026-11-10T14:07:45.657Z' and an i18n locale ref 'en', it does not render formatDate('2026-11-10T14:07:45.657Z', 'en') immediately after mount.",
+        "[unit] When that TicketHeader mount completes await nextTick(), it renders formatDate('2026-11-10T14:07:45.657Z', 'en').",
+        "[unit] When TicketProperties is mounted with ticket.createdAt '2026-11-10T14:07:45.657Z' and an i18n locale ref 'en', it does not render formatDate('2026-11-10T14:07:45.657Z', 'en') immediately after mount.",
+        "[unit] When that TicketProperties mount completes await nextTick(), it renders formatDate('2026-11-10T14:07:45.657Z', 'en')."
+      ],
+      "tags": [
+        "web",
+        "vue",
+        "ssr",
+        "dates",
+        "audit"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small onMounted/ref helper and additive formatter use standard Vue patterns in three ticket consumers; existing SSR and custom-renderer harnesses support direct failing tests without an architectural change."
+      },
+      "contextFiles": [
+        "apps/web/lib/format-date-time.ts",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/components/TicketHeader.vue",
+        "apps/web/components/TicketProperties.vue",
+        "apps/web/tests/components/comment-thread-time.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/local-dates.ts",
+        "apps/web/tests/lib/local-dates.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/format-date-time.ts",
+          "reason": "adds `formatDate`."
+        },
+        {
+          "path": "apps/web/tests/lib/format-date-time.spec.ts",
+          "reason": "adds the `formatDate` cases; existing `formatDateTime` cases stay."
+        },
+        {
+          "path": "apps/web/components/CommentThread.vue",
+          "reason": "formats its dates with `useLocalDates`."
+        },
+        {
+          "path": "apps/web/components/TicketHeader.vue",
+          "reason": "formats its dates with `useLocalDates`."
+        },
+        {
+          "path": "apps/web/components/TicketProperties.vue",
+          "reason": "formats its dates with `useLocalDates`."
+        },
+        {
+          "path": "apps/web/tests/components/comment-thread-time.spec.ts",
+          "reason": "the text now appears after one tick: the existing assertions move after `await nextTick()`, and AC US-001-6 asserts the empty first render."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Migrate fleet and KB component dates to the shared helper",
+      "description": "**Goal** — Use mount-gated viewer-local dates in the nine fleet and KB component sites while preserving existing missing/invalid activity semantics.\n\n**Motivation** — Several use the bare `toLocaleString()` (numeric date with seconds) while others use the short form, so the app shows two date styles.\n\n**Approach** — The helper holds one `mounted` ref per call, set in `onMounted`. The server render never runs `onMounted`, and the client's hydration render runs before it, so both render `''`; Vue then re-renders with the local text. A component mounted later (client navigation) shows the text after one tick. The `-` for a missing value is the same on both sides, so it renders immediately.\n\nEvery site below switches to `useLocalDates(i18n)` and to one of the two formats: `dateTime` where it shows a time today, `date` where it shows only a date. A site that destructures `useI18n()` today keeps one `const i18n = useI18n()`, destructures what it still uses from it, passes `i18n` to `useLocalDates`, and drops locals that become unused (`locale`, `commentLocale`, `activeLocale`, `localTime`).\n\n| Story | File | Today | After |\n|:--|:--|:--|:--|\n| US-002 | `components/KbResultCard.vue` | `new Date(createdAt).toLocaleDateString(locale)` | `dates.date(createdAt)` |\n| US-002 | `components/fleet/BudgetTable.vue` | `new Date(policy.pausedAt).toLocaleString()` | `dates.dateTime(policy.pausedAt)` |\n| US-002 | `components/fleet/FleetJobTimeline.vue` | `new Date(event.createdAt).toLocaleString()` in the `rows` computed | `dates.dateTime(event.createdAt)` |\n| US-002 | `components/fleet/EnrollmentTokenDialog.vue` | `new Date(created.expiresAt).toLocaleString()` | `dates.dateTime(created.expiresAt)` |\n| US-002 | `components/fleet/threads/ThreadPreApprovalCard.vue` | `new Date(thread.preApproval.at).toLocaleString()` | `dates.dateTime(thread.preApproval.at)` |\n| US-002 | `components/fleet/threads/ThreadListTable.vue` | `activityText`: `timeText(value)` behind a finite-date guard, else `-` | `activityText` moves into setup after `useLocalDates`, keeps its finite-date guard and calls `dates.dateTime(value)` only for a valid date, else `-` |\n| US-002 | `components/fleet/analytics/JobTable.vue` | `timeText(row.finishedAt)` | `dates.dateTime(row.finishedAt)` |\n| US-002 | `components/fleet/analytics/IngestTable.vue` | `timeText(row.updatedAt)` | `dates.dateTime(row.updatedAt)` |\n| US-002 | `components/fleet/analytics/StoryTable.vue` | `timeText(row.completedAt)` | `dates.dateTime(row.completedAt)` |\n\nNew `lib/local-dates.ts`. It is a composable but lives in `lib/` on purpose: an explicit import, not a Nuxt auto-import, so every existing `mountSfc` harness mounts its consumers without a new global.\n\nUse the module produced by US-001; do not recreate it. `timeText` stays exported until US-003 (the flows page still uses it). The helper's general invalid input contract is unchanged, but ThreadListTable must continue returning '-' for an invalid or absent lastActivityAt through its finite-date guard. Keep computed timeline formatting reactive to mounted state and locale.\n\nRead-only (verified, unchanged): `tests/helpers/mount-sfc.ts` mounts a real SFC through a custom renderer; `~/...` imports resolve to the real files under `apps/web` and share the test's one Vue runtime; Nuxt auto-imports come from `globals`. `app.mount` runs `onMounted` synchronously, and the re-render it triggers flushes on the next tick, so one `await nextTick()` shows the local text.\n\nUpdate tests/components/KbResultCard.spec.ts: the source assertion `toLocaleDateString(\\s*locale` (line 122) becomes an assertion that the card imports `useLocalDates` from the local-dates lib module. Update tests/components/thread-preapproval-card.spec.ts: it expects `new Date(at).toLocaleString()`; it now expects `formatDateTime(at, <the stub's locale or undefined>)` after `await nextTick()`. Update tests/components/fleet-budget-table.spec.ts: the paused-row test (line 131) asserts synchronously after mount; it becomes async and awaits `nextTick()` before the assertion. Extend existing component harnesses for ThreadListTable, JobTable and FleetJobTimeline. The shared enI18n test helper has no locale ref, so use undefined in expected formatDateTime unless the mount explicitly supplies a locale.\n\n**Scope** — In: the nine component migrations and their existing tests. Out: creating or changing the US-001 date-helper contract or ticket migration; all US-003 page migrations, timeText removal and the static guard; US-004 GitHub optimization. Permission and token behavior in pre-approval/enrollment components stays unchanged.\n\n**Interface** — consumed from US-001:\n```ts\nexport interface LocalDates {\n  /** '' until the calling component has mounted; then formatDateTime in the viewer's zone. null/undefined/'' -> '-'. */\n  dateTime(iso: string | null | undefined): string\n  /** Same gating; then formatDate. null/undefined/'' -> '-'. */\n  date(iso: string | null | undefined): string\n}\n\n/** Call in a component's setup. `i18n` is the object useI18n() returned; its `locale.value` is read when it is a non-empty string, else the runtime default locale is used. */\nexport function useLocalDates(i18n: { locale?: { value?: unknown } } | undefined): LocalDates\n```",
+      "acceptanceCriteria": [
+        "[unit] When ThreadPreApprovalCard is mounted with preApproval.at '2026-01-02T03:04:05.000Z', after await nextTick() its text contains formatDateTime('2026-01-02T03:04:05.000Z', the stub locale or undefined).",
+        "[unit] When ThreadListTable is mounted with a thread whose lastActivityAt is 'not-a-date', its last-activity cell renders '-', preserving the existing finite-date guard.",
+        "[unit] When ThreadListTable is mounted with a thread whose lastActivityAt is null, its last-activity cell renders '-'.",
+        "[unit] When ThreadListTable is mounted with lastActivityAt '2026-11-10T14:07:45.657Z', after await nextTick() that last-activity cell renders formatDateTime('2026-11-10T14:07:45.657Z', the stub locale or undefined).",
+        "[unit] When BudgetTable is mounted with a paused policy whose pausedAt is '2026-10-02T03:04:05.000Z', after await nextTick() that row's text contains formatDateTime('2026-10-02T03:04:05.000Z', the stub locale or undefined).",
+        "[unit] When JobTable is mounted with a row whose finishedAt is '2026-11-10T14:07:45.657Z', after await nextTick() that row renders formatDateTime('2026-11-10T14:07:45.657Z', the stub locale or undefined).",
+        "[unit] When JobTable is mounted with a row whose finishedAt is null, that row renders '-' for its finish time.",
+        "[unit] When FleetJobTimeline is mounted with one event whose createdAt is '2026-11-10T14:07:45.657Z', after await nextTick() that row's text contains formatDateTime('2026-11-10T14:07:45.657Z', the stub locale or undefined)."
+      ],
+      "tags": [
+        "web",
+        "vue",
+        "fleet",
+        "kb",
+        "dates"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The nine component edits repeat the already-tested helper integration; existing mount harnesses cover the computed timeline and finite-date guard without new abstractions or changes to token/permission logic."
+      },
+      "contextFiles": [
+        "apps/web/lib/local-dates.ts",
+        "apps/web/lib/fleet-analytics-format.ts",
+        "apps/web/components/fleet/threads/ThreadListTable.vue",
+        "apps/web/tests/components/thread-preapproval-card.spec.ts",
+        "apps/web/tests/components/fleet-budget-table.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/KbResultCard.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/BudgetTable.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/FleetJobTimeline.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/EnrollmentTokenDialog.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadPreApprovalCard.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadListTable.vue",
+          "reason": "formats its dates with `useLocalDates`, keeping its finite-date guard (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/analytics/JobTable.vue",
+          "reason": "formats its dates with `useLocalDates` instead of `timeText` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/analytics/IngestTable.vue",
+          "reason": "formats its dates with `useLocalDates` instead of `timeText` (Design table)."
+        },
+        {
+          "path": "apps/web/components/fleet/analytics/StoryTable.vue",
+          "reason": "formats its dates with `useLocalDates` instead of `timeText` (Design table)."
+        },
+        {
+          "path": "apps/web/tests/components/KbResultCard.spec.ts",
+          "reason": "the source assertion `toLocaleDateString(\\s*locale` (line 122) becomes an assertion that the card imports `useLocalDates` from the local-dates lib module."
+        },
+        {
+          "path": "apps/web/tests/components/thread-preapproval-card.spec.ts",
+          "reason": "it expects `new Date(at).toLocaleString()`; it now expects `formatDateTime(at, <the stub's locale or undefined>)` after `await nextTick()`."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-budget-table.spec.ts",
+          "reason": "the paused-row test (line 131) asserts synchronously after mount; it becomes async and awaits `nextTick()` before the assertion."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Migrate page dates and prevent runtime-zone formatting regressions",
+      "description": "**Goal** — Migrate the seven remaining page sites, remove timeText after its last consumer, and enforce the shared mount-gated formatting boundary.\n\n**Motivation** — They are clean today only because their data loads on the client; any of them that moves to a server fetch would mismatch the same way.\n\n**Approach** — The helper holds one `mounted` ref per call, set in `onMounted`. The server render never runs `onMounted`, and the client's hydration render runs before it, so both render `''`; Vue then re-renders with the local text. A component mounted later (client navigation) shows the text after one tick. The `-` for a missing value is the same on both sides, so it renders immediately.\n\nEvery site below switches to `useLocalDates(i18n)` and to one of the two formats: `dateTime` where it shows a time today, `date` where it shows only a date. A site that destructures `useI18n()` today keeps one `const i18n = useI18n()`, destructures what it still uses from it, passes `i18n` to `useLocalDates`, and drops locals that become unused (`locale`, `commentLocale`, `activeLocale`, `localTime`).\n\n| Story | File | Today | After |\n|:--|:--|:--|:--|\n| US-003 | `pages/notifications.vue` | `new Date(item.createdAt).toLocaleString()` inside `<time :datetime>` | `dates.dateTime(item.createdAt)` |\n| US-003 | `pages/admin/audit.vue` | `localTime(iso)` (`toLocaleString(activeLocale)`) | `dates.dateTime(iso)` |\n| US-003 | `pages/[project]/timeline.vue` | local `formatDate` (`toLocaleString`, short with time) | keeps a local `formatDate(dateStr)` that returns `dates.dateTime(dateStr)`, so the template and `tests/pages/timeline.spec.ts` (which compiles the template with its own `formatDate`) are unchanged |\n| US-003 | `pages/[project]/kb.vue` | local `formatDate` (`toLocaleDateString(locale.value)`) | `dates.date(...)` |\n| US-003 | `pages/[project]/fleet/index.vue` | `new Date(job.queuedAt).toLocaleString()` | `dates.dateTime(job.queuedAt)` |\n| US-003 | `pages/[project]/fleet/jobs/[id]/index.vue` | `formatTime` (`toLocaleString()`, `-` for null; Queued, Started, Finished, Last heartbeat, cancel-requested text) | `dates.dateTime(iso)` |\n| US-003 | `pages/[project]/flows/[id].vue` | `timeText(...)` for Created and Approved | `dates.dateTime(...)` |\n\nUS-003 then removes `timeText` from `lib/fleet-analytics-format.ts` (its last consumer is gone). Removal gate: `bun run type-check` in `apps/web` fails if any consumer still imports it.\n\nStatic gate (not an AC): US-003 adds `tests/lib/no-runtime-zone-dates.spec.ts`, which scans every `.vue` and `.ts` file under `apps/web/components`, `pages`, `layouts`, `composables` and `lib` (tests excluded) and fails, naming each file, on a match for `/\\.toLocale(Date|Time)?String\\(/` outside `lib/format-date-time.ts`, or on an import whose path ends in `/format-date-time` in any file other than `lib/local-dates.ts`. It keeps new sites from returning to the runtime zone.\n\n`lib/fleet-schedules.ts` is unchanged: it formats with an explicit `timeZone`, the same on both sides.\n\nConsume the existing explicitly imported helper from US-001; no new Nuxt globals. The helper returns invalid strings unchanged after mount and '-' immediately for missing values, using runtime default locale if i18n.locale.value is not a non-empty string. Preserve notifications' time/datetime markup, the timeline template/wrapper seam and all existing page fetching, permissions and conditional rows.\n\nModify tests/lib/fleet-analytics-format.spec.ts to remove the timeText cases; the other cases stay. Update tests/pages/fleet-flow-detail.spec.ts and tests/pages/flow-detail-readable.spec.ts: each expects `new Date(...).toLocaleString()`; it now expects `formatDateTime(..., <the stub's locale or undefined>)` after `await nextTick()`. Extend existing notifications, job-detail, audit and flow page mounts to exercise the real helper. Client-loaded records may require existing promise-settle helpers as well as nextTick. The static guard and type-check are validation requirements, not additional acceptance criteria.\n\n**Scope** — In: the seven page migrations, removing timeText and its tests/imports, and the static guard. Out: redoing the US-001 ticket/helper implementation or US-002 component migrations; the US-004 GitHub reader changes. `lib/fleet-schedules.ts` (explicit time zone) and its default-zone helper for the schedule form are unchanged. `lib/fleet-log-view.ts` `logTime` (log line times from `getHours()`) is unchanged: job logs load on the client only.\n\n**Interface** — consumed from US-001:\n```ts\nexport interface LocalDates {\n  /** '' until the calling component has mounted; then formatDateTime in the viewer's zone. null/undefined/'' -> '-'. */\n  dateTime(iso: string | null | undefined): string\n  /** Same gating; then formatDate. null/undefined/'' -> '-'. */\n  date(iso: string | null | undefined): string\n}\n\n/** Call in a component's setup. `i18n` is the object useI18n() returned; its `locale.value` is read when it is a non-empty string, else the runtime default locale is used. */\nexport function useLocalDates(i18n: { locale?: { value?: unknown } } | undefined): LocalDates\n```",
+      "acceptanceCriteria": [
+        "[unit] When pages/notifications.vue is mounted with one record whose createdAt is '2026-11-10T14:07:45.657Z', after await nextTick() that row's time element retains datetime '2026-11-10T14:07:45.657Z'.",
+        "[unit] When that notifications page record is rendered after await nextTick(), its time text equals formatDateTime('2026-11-10T14:07:45.657Z', the stub locale or undefined).",
+        "[unit] When pages/[project]/fleet/jobs/[id]/index.vue is mounted with a RUNNING job whose lastHeartbeatAt is null and queuedAt is '2026-11-10T14:07:45.657Z', Last heartbeat reads '-' immediately after mount.",
+        "[unit] When that RUNNING job mount completes await nextTick(), Queued reads formatDateTime('2026-11-10T14:07:45.657Z', the stub locale or undefined).",
+        "[unit] When pages/admin/audit.vue is mounted with an entry whose createdAt is '2026-11-10T14:07:45.657Z', after await nextTick() that row renders formatDateTime('2026-11-10T14:07:45.657Z', the stub locale or undefined).",
+        "[unit] When pages/[project]/flows/[id].vue is mounted with a flow whose createdAt is '2026-01-02T03:04:05.000Z', after await nextTick() Created renders formatDateTime('2026-01-02T03:04:05.000Z', the stub locale or undefined)."
+      ],
+      "tags": [
+        "web",
+        "vue",
+        "ssr",
+        "dates",
+        "audit",
+        "notifications"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Seven page edits reuse the established helper and existing page harnesses; removing timeText and adding a filesystem guard are straightforward, with the timeline wrapper retained and access policy untouched."
+      },
+      "contextFiles": [
+        "apps/web/lib/local-dates.ts",
+        "apps/web/lib/fleet-analytics-format.ts",
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/tests/pages/notifications-page.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/no-runtime-zone-dates.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/notifications.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/pages/admin/audit.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/pages/[project]/timeline.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/pages/[project]/kb.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/index.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "formats its dates with `useLocalDates` (Design table)."
+        },
+        {
+          "path": "apps/web/pages/[project]/flows/[id].vue",
+          "reason": "formats its dates with `useLocalDates` instead of `timeText` (Design table)."
+        },
+        {
+          "path": "apps/web/lib/fleet-analytics-format.ts",
+          "reason": "removes `timeText` (no consumer is left)."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-analytics-format.spec.ts",
+          "reason": "removes the `timeText` cases; the other cases stay."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-flow-detail.spec.ts",
+          "reason": "it expects `new Date(...).toLocaleString()`; it now expects `formatDateTime(..., <the stub's locale or undefined>)` after `await nextTick()`."
+        },
+        {
+          "path": "apps/web/tests/pages/flow-detail-readable.spec.ts",
+          "reason": "it expects `new Date(...).toLocaleString()`; it now expects `formatDateTime(..., <the stub's locale or undefined>)` after `await nextTick()`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "List GitHub nax files with one direct subtree request",
+      "description": "**Goal** — Add GitHubAppClient.getSubtree and replace the GitHub reader's two tree requests with a direct commit:.nax subtree request.\n\n**Motivation** — `GithubFleetRepoFilesReader.list` runs mint token -> branch head -> root tree -> `.nax` tree, one after another.\n\n**Approach** — R2-21: fewer GitHub calls, D468 (fresh token per request, no caching) unchanged.\n\n`GitHubAppClient` gains the interface below. It requests `GET /repos/{owner}/{name}/git/trees/{encodeURIComponent(commitSha + ':' + dirPath)}` (plus `?recursive=1` when `recursive`) and parses the body exactly as `getTree` does (share the parser).\n\n`GithubFleetRepoFilesReader.list` becomes: token -> `getBranchHead` -> `getSubtree(token, owner, name, baseSha, '.nax', true)`. null -> `{ baseSha, defaultBranch, files: [] }`; truncated -> `ForgeErrorException`; otherwise the entries, prefixed `.nax/`, through `toNaxEntries`. Three sequential GitHub requests instead of four; the token is still minted per request (D468). `read` is unchanged.\n\nRead-only (verified, unchanged):\n- `apps/api/src/fleet/git-broker/github-app-client.ts` `getTree(token, owner, name, treeish, recursive)` URL-encodes `treeish`, maps any non-200 and a body without a `tree` array to `RepoCheckException('provider_error')`; `getBranchHead` maps 404 to `repo_not_found`. `getTree` is also used by `src/fleet/knowledge/knowledge-repo-indexer.ts` and stays unchanged.\n- `apps/api/test/helpers/fake-forge.ts` routes on the raw request path (a literal `%3A` path matches) and records the query string separately.\n- `apps/api/src/fleet/repo-config/fleet-repo-files.reader.ts` `toNaxEntries` filters and sorts entries; `forgeCall` maps `RepoCheckException` to 409/502.\n- `apps/api/test/integration/fleet/fleet-repo-config-api.integration.spec.ts` drives the real `GithubFleetRepoFilesReader` against the fake forge: it routes `git/trees/${HEAD}` and `git/trees/naxTree`, and its VIEWER test expects 2 listed files. The other nax-files integration specs spy on `reader.list` and are unaffected.\n\nFailure handling:\n| Case | Behaviour |\n|:--|:--|\n| `.nax` missing at the head commit (404) | `list` returns no files, as today. The branch head was just read with the same token, so a 404 on the subtree is taken to mean \"no `.nax`\", not a lost repo. |\n| `.nax` is a file (422) | `list` returns no files, as today (the old code ignored a non-tree `.nax`). |\n| Tree request fails otherwise, or returns a body without `tree` | 502 (`ForgeErrorException`), as today. |\n| `.nax` tree truncated | 502, as today. |\n\nShare only the tree parser: keep getTree's external request/status behavior unchanged, including non-200 errors. The parser still drops entries other than blob/tree and entries without string path/sha, maps missing numeric size to null, and treats only truncated === true as truncated. getSubtree's 404/422-to-null semantics must not leak to getTree/getBranchHead. Use the existing FleetHttpClient and existing error/allowlist helpers. Do not log or persist minted tokens, change installation-token scope, or use the job/epoch broker cache.\n\nExtend src/fleet/git-broker/github-app-client.spec.ts in the `.nax reads (fleet S3 §4.1)` describe with the getSubtree cases. In src/fleet/repo-config/fleet-repo-files.reader.spec.ts the GithubFleetRepoFilesReader stub gains getSubtree; the four list cases that stubbed getTree (default, no .nax, truncated, allowlist) now stub getSubtree. Keep a getTree spy for the no-root-request assertion. In test/integration/fleet/fleet-repo-config-api.integration.spec.ts, the fake forge's two tree routes (the head commit's root tree and the naxTree subtree) are replaced by one route for the head commit followed by %3A.nax, returning the .nax entries (paths relative to .nax). Exercise the existing VIEWER GET route with the real reader; isolate recorded requests before the no-root-request assertion. Preserve existing file-read, permissions and forge-error regressions. Run the DB-backed integration on a host with test Postgres outside the sandbox; retain canRunDbTests gating and do not count skips as verification.\n\n**Scope** — In: GitHubAppClient.getSubtree and shared parsing, GithubFleetRepoFilesReader.list, client/reader unit cases and the existing real-reader route integration fixture. Out: US-001/002/003 web date changes. The installation token and the nax-files list are not cached (D468 stays); the GitLab reader is unchanged (one `listTree` call already). read, getTree's public behavior, knowledge indexing, controller contracts and permission policy are unchanged. Live checks of the hydration warnings and the nax-files timing happen in the post-merge sweep on koda-wk.\n\n**Interface** —\n```ts\n/**\n * The tree at `<commitSha>:<dirPath>` (one request). null when the forge answers 404 or 422. Other non-200, or a\n * 200 body without a `tree` array -> RepoCheckException('provider_error'), as getTree.\n */\nasync getSubtree(token: string, owner: string, name: string, commitSha: string, dirPath: string, recursive: boolean): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean } | null>\n```",
+      "acceptanceCriteria": [
+        "[unit] When getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', true) calls the fake forge, its request record has path '/repos/acme/app/git/trees/c0ffee1%3A.nax' and query 'recursive=1'.",
+        "[unit] When getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', true) receives HTTP 200 with body { tree: [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }], truncated: true }, it returns { entries: [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }], truncated: true }.",
+        "[unit] When getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', false) calls the fake forge, its request record has path '/repos/acme/app/git/trees/c0ffee1%3A.nax' and no query.",
+        "[unit] getSubtree returns null when the forge answers 404.",
+        "[unit] getSubtree returns null when the forge answers 422.",
+        "[unit] getSubtree rejects with RepoCheckException whose reason is 'provider_error' when the forge answers 500.",
+        "[unit] getSubtree rejects with RepoCheckException whose reason is 'provider_error' when the forge answers 200 with a body that has no tree array.",
+        "[unit] Given GH for owner 'acme', name 'app', defaultBranch 'trunk', getBranchHead returning 'c0ffee1', minted token 'ghs_t', and getSubtree returning one context.md blob of size 9 and sha 'k' with truncated false, GithubFleetRepoFilesReader.list(GH) resolves to { baseSha: 'c0ffee1', defaultBranch: 'trunk', files: [{ path: '.nax/context.md', size: 9, blobSha: 'k', group: 'context' }] }.",
+        "[unit] When list(GH) runs with that successful subtree fixture, it calls mintInstallationToken exactly once.",
+        "[unit] When list(GH) runs with that successful subtree fixture, it calls getSubtree exactly once with ('ghs_t', 'acme', 'app', 'c0ffee1', '.nax', true).",
+        "[unit] When list(GH) runs with that successful subtree fixture, it never calls getTree.",
+        "[unit] Given getBranchHead returns 'c0ffee1' and getSubtree resolves null, list(GH) resolves to { baseSha: 'c0ffee1', defaultBranch: 'trunk', files: [] }.",
+        "[unit] Given getSubtree resolves { truncated: true, entries: [] }, list(GH) rejects with ForgeErrorException (502), as today.",
+        "[unit] Given githubInstallationId is null, list(GH) rejects with RepoUnreachableException.",
+        "[unit] Given githubInstallationId is null, list(GH) makes no GitHub call.",
+        "[unit] Given getSubtree returns rules/my rule.md, rules/规则.md and rules/ok.md blobs, list(GH) lists only '.nax/rules/ok.md'.",
+        "[integration] Given the fake forge serves git/trees/<HEAD>%3A.nax with paths relative to .nax and has no root-tree route, a VIEWER's GET /api/projects/web/fleet/repos/<repoId>/nax-files returns 200 with baseSha <HEAD> and file/group pairs [['.nax/rules/testing.md', 'rules'], ['.nax/context.md', 'context']], preserving the existing two-file allowlist response.",
+        "[integration] When that VIEWER nax-files route request completes against the real GithubFleetRepoFilesReader, the fake forge has received no request for git/trees/<HEAD> alone.",
+        "[unit] Given the branch head was successfully read with the same fresh token and the subtree request answers 404, list returns no files, as today, rather than treating the missing .nax as a lost repo.",
+        "[unit] Given the subtree request answers 422 because .nax is a file, list returns no files, as today (the old code ignored a non-tree .nax).",
+        "[unit] Given the subtree request fails with a non-200 status other than 404 or 422, list rejects with ForgeErrorException (502), as today.",
+        "[unit] Given the subtree request answers 200 with a body without a tree array, list rejects with ForgeErrorException (502), as today."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "github",
+        "performance",
+        "tokens"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing source modules need a standard HTTP method/parser extraction and a shorter reader sequence, supported by existing fake-forge tests; installation-token freshness and the VIEWER route require the strict security strategy despite moderate implementation complexity."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+        "apps/api/src/fleet/repo-config/github-fleet-repo-files.reader.ts",
+        "apps/api/src/fleet/repo-config/fleet-repo-files.reader.spec.ts",
+        "apps/api/test/integration/fleet/fleet-repo-config-api.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.ts",
+          "reason": "adds `getSubtree`, sharing the tree parser with `getTree`."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+          "reason": "adds the `getSubtree` cases in the `.nax reads` describe."
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/github-fleet-repo-files.reader.ts",
+          "reason": "`list` uses `getSubtree`."
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/fleet-repo-files.reader.spec.ts",
+          "reason": "the `GithubFleetRepoFilesReader` stub gains `getSubtree`; the four `list` cases that stubbed `getTree` (default, no `.nax`, truncated, allowlist) now stub `getSubtree`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-repo-config-api.integration.spec.ts",
+          "reason": "the fake forge's two tree routes (the head commit's root tree and the naxTree subtree) are replaced by one route for the head commit followed by %3A.nax, returning the `.nax` entries (paths relative to `.nax`)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Feature intent and completion: close the implementation gaps behind audit R2-25 and R2-21, not redesign the UI. Viewer-local date text must be absent during SSR and the initial client render and appear after mount, while missing values immediately remain '-'. The GitHub nax-files list must use one direct recursive subtree request after token mint and branch-head resolution, reducing four sequential GitHub calls to three without caching or changing the API response contract. Live timing and hydration-warning confirmation belong to the post-merge koda-wk sweep, not implementation acceptance. No numerical latency target beyond eliminating the root-tree request is specified.\n\nDiscovery and architecture: codebase-memory MCP is unavailable in this tool session; direct file reads and targeted text searches were used instead, rooted at the supplied execution worktree. The supplied automated context incorrectly labels apps/web as Next.js: apps/web/package.json:5 and :33 identify Nuxt build and Nuxt 4.6.4, with Vue at :39, Jest at :64 and nuxt typecheck at :13. Follow .nax/mono/apps/web/context.md:9 (UI client over API) and :19 (Nuxt SSR), retaining the existing root-level pages/components layout and explicit imports. apps/api is the NestJS/Fastify system of record; .nax/mono/apps/api/context.md:9 requires the nathapp-nestjs-patterns skill before writing NestJS code. Generated AGENTS.md and generated clients must not be edited. This feature changes neither controller/DTO contracts nor persistence; no Prisma migration, OpenAPI regeneration or CLI regeneration is expected.\n\nUS-001 implementation seam: apps/web/lib/format-date-time.ts:1 currently exports only formatDateTime; :3 returns invalid ISO input unchanged and :4-10 uses runtime-zone toLocaleString with numeric year, short month, numeric day and two-digit hour/minute. Keep that existing formatter intact and add formatDate with the same invalid-input behavior and date-only options. Add apps/web/lib/local-dates.ts with explicit Vue onMounted/ref imports, one mounted ref per useLocalDates invocation, and dateTime/date closures that read mounted and i18n.locale.value during rendering. Missing values are checked before mount gating. Nonempty string locale values are accepted; absent, empty or non-string values select undefined. Do not capture the locale or mounted state into a nonreactive formatted constant. No explicit UTC zone, global mounted state, per-user timezone, or server-local text fallback is wanted. apps/web/components/CommentThread.vue:9 directly imports formatDateTime, :30-31 creates locale/commentLocale, :39 loads SSR-capable useAsyncData, and :141 renders semantic time with datetime and comment-time test id. Preserve that time element, ISO attribute and SSR data loading, replacing only its text path and obsolete locale/unref imports. apps/web/components/TicketHeader.vue:38 and :45-52 and apps/web/components/TicketProperties.vue:91 and :107-114 contain the date-only local formatters; all their date-only uses should become dates.date. TicketProperties also sorts commits by timestamps at :161-164; sorting is not date display and must remain unchanged. Existing permission-dependent controls, ticket actions and links are not part of this change.\n\nUS-001 tests: apps/web/tests/lib/format-date-time.spec.ts:4-15 covers valid and invalid dateTime inputs; retain these cases and add formatDate cases. apps/web/tests/components/comment-thread-time.spec.ts:8-14 mounts real CommentThread with locale refs for en/zh but asserts synchronously today; insert the initial-empty assertion before nextTick and move formatted-text assertions after it. Reuse that file or existing ticket component test files for TicketHeader/TicketProperties mount cases rather than adding unspecified test files. apps/web/tests/helpers/mount-sfc.ts:83-96 defines recorder nodes, :102-114 exports textOf, :116-138 defines its custom renderer, and :209-230 resolves real ~/lib modules while returning the same Vue runtime for imports. onMounted runs synchronously in mount but its reactive rerender flushes on nextTick. The new helper must explicitly import Vue APIs and live in lib rather than Nuxt auto-imported composables, otherwise existing harnesses would need new globals. SSR assertions must use h/createSSRApp and vue/server-renderer, not a source-grep proxy; first-render and after-tick assertions must not share a harness that settles before returning.\n\nUS-002 migration: modify exactly the nine component sites identified in the description, retaining date-only KB display and using dateTime for all time-bearing rows and messages. apps/web/components/fleet/threads/ThreadListTable.vue:3-8 imports timeText and guards invalid or absent lastActivityAt with Number.isFinite; :20 initializes i18n and :69 renders activityText. Move activityText below useLocalDates in setup and preserve its guard, since invalid activity dates must stay '-' rather than expose raw invalid text after mount. apps/web/components/fleet/FleetJobTimeline.vue:42-47 formats within a rows computed; calling dates.dateTime there must establish reactive dependencies so mount triggers updated row text. Analytics JobTable.vue:2/:36, IngestTable.vue:2/:40 and StoryTable.vue:2/:32 consume timeText alongside independent formatting exports; remove only timeText imports and preserve money/status formatting. Keep timeText exported during this story because pages/[project]/flows/[id].vue:10/:184/:199 remains a downstream consumer until US-003. apps/web/tests/components/thread-preapproval-card.spec.ts:16-29 already waits nextTick in its async mount wrapper and :60 asserts the old bare toLocaleString; change that expectation to formatDateTime. apps/web/tests/components/fleet-budget-table.spec.ts:131-136 checks paused text synchronously and must become async. apps/web/tests/components/KbResultCard.spec.ts:118-122 has a source assertion for toLocaleDateString(locale); replace it with the specified local-dates import assertion. Existing thread-list-table.spec.ts and thread-list-table-workspace.spec.ts can host last-activity regression cases. Important locale seam: apps/web/tests/helpers/fleet-harness.ts:207 declares enI18n with t/te only, not locale. Consumers using that stub should expect formatDateTime(iso, undefined), unless the particular mount explicitly supplies a locale ref. Avoid assuming the helper name enI18n implies an 'en' locale ref. Date changes must not alter pre-approval permissions, budget action permissions, or backend business rules.\n\nUS-003 migration and enforcement: migrate the seven pages named in the description, including every queued/started/finished/heartbeat/cancel-requested display on the job detail. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:273 defines formatTime with '-' for null; :327 and :363-366 identify its consumers. Preserve conditional visibility and immediate null heartbeat display while routing text through dates.dateTime. pages/notifications.vue:113 already has semantic time/datetime and must retain it. pages/admin/audit.vue:20-21 already keeps the i18n object, :116-124 computes activeLocale/localTime with invalid-string passthrough, and :363 displays that function; remove only obsolete date formatting locals, not filters, admin-only handling or data loading. pages/[project]/timeline.vue:11-12 keeps i18n and :60-68 defines formatDate; retain that wrapper name and template calls so tests/pages/timeline.spec.ts can continue compiling its template with its own formatDate. pages/[project]/kb.vue:75 is date-only and pages/[project]/fleet/index.vue:198 displays queued time. lib/fleet-analytics-format.ts:46-48 is the old timeText export; remove it only after component and page consumers have migrated. Other helpers in this module, including UTC analytics buckets at :21-27 and money at :3-6, remain unchanged. tests/lib/fleet-analytics-format.spec.ts:2/:62-64 must lose only timeText import/cases. tests/pages/fleet-flow-detail.spec.ts:187 and tests/pages/flow-detail-readable.spec.ts:60/:66 assert old toLocaleString and need helper-based expectations after nextTick. tests/pages/notifications-page.spec.ts:24-47 supplies the real page mount seam and asynchronous settle; load promises still need settling in addition to Vue ticks before row assertions. Existing admin-audit.spec.ts and sibling admin-audit-* tests provide audit mounts.\n\nStatic guard is a testStrategy/design deliverable, explicitly not an acceptance criterion: new tests/lib/no-runtime-zone-dates.spec.ts recursively scans .vue/.ts in components/pages/layouts/composables/lib, excluding tests, and reports every offending filename for the exact runtime-locale-method regex outside lib/format-date-time.ts or a direct import ending /format-date-time anywhere other than lib/local-dates.ts. Tests may import the pure formatter to build expectations because tests are outside the scan. The gate only becomes green after US-003, so do not introduce it in US-001/002. Type-check in apps/web is the removal gate for timeText and must remain a quality gate, not an AC. lib/fleet-schedules.ts:205-213 uses Intl.DateTimeFormat with explicit timeZone and UTC fallback and must remain unchanged; its default-zone helpers at :55-76 are also excluded from feature work. lib/fleet-log-view.ts logTime and relative-time logic are not migration targets.\n\nUS-004 implementation and downstream impact: apps/api/src/fleet/repo-config/github-fleet-repo-files.reader.ts:12-15 rejects a null installation before minting and mints once per list/read request. :17-26 currently performs branch head, root getTree, then subtree getTree, applies the truncated check and prefixes .nax/ before toNaxEntries. Replace only list's discovery sequence with getSubtree(token, owner, name, baseSha, '.nax', true); read at :30-33 is unchanged. apps/api/src/fleet/git-broker/github-app-client.ts:342-349 maps branch 404 to repo_not_found and :406-422 implements getTree. Extract/share its successful tree parser without changing getTree's status semantics: tree must be an array, only blob/tree with string path and sha survive, numeric size or null, truncated exactly true. getSubtree must encode commitSha + ':' + dirPath as one path segment, allow 404/422 as null only in the new method, and preserve all other provider_error behavior. Do not weaken getTree globally: apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts:111 still calls it recursively. apps/api/src/fleet/repo-config/fleet-repo-files.reader.ts:23-30 filters/sorts allowed blobs in rules/context/config/profiles/constitution group order and :45-54 maps RepoCheckException provider_error/provider_unreachable to ForgeErrorException (502), other forge access errors to RepoUnreachableException (409). Preserve those mappings and allowlist rather than reimplement them. project-repo-config.controller.ts:31-40 routes GET nax-files to ConfigJobsService.listFiles; config-jobs.service.ts:47-48 delegates to the reader, while :76/:90 also use list to obtain baseSha for config-job submission. Thus response shape, baseSha correctness and token freshness matter beyond the page. No controller changes are necessary.\n\nUS-004 testing: src/fleet/git-broker/github-app-client.spec.ts:397-438 contains .nax reads against the fake forge and existing getTree parser regressions. Extend it with encoded subtree path/query, parsed entries/truncation and status/body cases, retaining getTree tests. src/fleet/repo-config/fleet-repo-files.reader.spec.ts:56-109 has four list cases based on a two-stage getTree stub; add getSubtree, simplify those list stubs, retain getTree as a negative-call spy, and leave read/GitLab/router tests unchanged. Null-installation no-call assertions must isolate or clear earlier calls. test/integration/fleet/fleet-repo-config-api.integration.spec.ts:49-64 configures two old tree routes, :78-82 checks the VIEWER response and sorted two-file allowlist, and :92-102 anchors access/errors. Replace the two tree routes with a literal HEAD%3A.nax route returning paths relative to .nax; record no request to HEAD alone and preserve permissions/error regressions. test/helpers/fake-forge.ts:28-34 keeps raw encoded path and query separate, so assert %3A in path and recursive=1 in query rather than a decoded colon or query-bearing route key. Clear or scope recorded requests for each integration assertion: the existing beforeEach clears routes but not requests. Integration must exercise the real reader, not spy reader.list.\n\nRisks and rollout: blank date text before mount is deliberate; do not substitute UTC, a placeholder for valid dates, ClientOnly wrappers that lose datetime, or hydration-warning suppression. Locale reads must remain reactive and computed timeline rows must invalidate after mount. Invalid input normally reappears unchanged after mount, except ThreadListTable's existing invalid-date guard. Standardizing bare toLocaleString to the short dateTime format intentionally removes seconds and numeric-only dates; update exact-output regressions without changing translation keys or unrelated UI text. Preserve semantic datetime attributes, allowlists, sorting, errors and access checks. A subtree 404 means missing .nax only after the same request token successfully reads branch head; do not reuse that interpretation for getTree/getBranchHead or other repo access errors. Fresh token means once per incoming list request, not minting separately for each GitHub HTTP call. Tokens remain ephemeral and unlogged. US-004 uses three-session-tdd because token freshness and the VIEWER route are security-sensitive seams; the web stories change formatting only and do not change permission behavior. Execute US-001 -> US-002 -> US-003; US-004 is independent. No data migration or backfill is needed. Run package Jest/type-check and API unit/scoped integration checks as normal pipeline stages. API Vitest uses vi, not jest, and DB/host cases use the shared canRunDbTests gate. The existing integration spec at :1/:19-20 is already gated; outside NAX_SANDBOXED=1, run bun run test:scoped test/integration/fleet/fleet-repo-config-api.integration.spec.ts with test Postgres/Docker available. Skips in a sandbox are not verification, and separate worktrees need private test databases/containers. Do not edit generated acceptance files. The audit tracker update is manual branch work, not a fifth story.\n\nRefine-pass preservation audit (numbers on the right are one-based acceptanceCriteria positions within the same story, not new story IDs): all 26 original spec ACs are retained, with compound assertions split rather than discarded. US-001-1 date-only formatting -> 1; US-001-2 invalid formatDate passthrough -> 2; US-001-3 h/createSSRApp/renderToString empty semantic time -> 3; US-001-4 custom recorder empty-first/dateTime/date after tick -> 4-6, retaining the copied-or-exported mount-sfc recorder qualification; US-001-5 null/undefined/empty and invalid input before/after mount plus non-string/undefined locale fallback -> 7-11; US-001-6 CommentThread time/datetime/initial empty -> 13-14; US-001-7 en/zh mounted text -> 15-16; US-001-8 both ticket components absent-before/formatted-after -> 17-20. Position 12 makes the failure-table locale fallback concrete for missing/empty locale values. US-002-1 pre-approval time -> 1; US-002-2 invalid/null/valid last activity -> 2-4; US-002-3 paused policy time -> 5; US-002-4 finished/null JobTable rows -> 6-7; US-002-5 computed timeline event time -> 8. US-003-1 notification datetime/text -> 1-2; US-003-2 missing heartbeat and queued time -> 3-4; US-003-3 audit entry time -> 5; US-003-4 flow Created time -> 6. US-004-1 encoded recursive request and parsed return -> 1-2; US-004-2 nonrecursive request -> 3; US-004-3 both null statuses -> 4-5; US-004-4 status/body provider_error exceptions -> 6-7; US-004-5 list result, single mint, exact single subtree call and no getTree -> 8-11; US-004-6 null subtree response -> 12; US-004-7 truncated rejection and null-installation rejection/no calls -> 13-15; US-004-8 filename allowlist -> 16; US-004-9 real-reader VIEWER route response and absent root-tree request -> 17-18, retaining the no-root-tree-route fixture qualification.\n\nFailure-table audit: invalid date -> US-001 positions 9-10; missing value -> US-001 positions 7-8; missing/non-string locale -> US-001 positions 11-12; subtree 404 -> US-004 position 19, retaining same-token successful branch lookup and no-lost-repo interpretation; subtree 422 -> position 20, retaining the old non-tree .nax parenthetical; other tree failures/malformed tree -> positions 21-22, retaining 502 as today; truncated tree -> position 13, retaining 502 as today. Every story already has a negative path: invalid dates in US-001, invalid/null activity in US-002, null heartbeat in US-003, and forge/installation failures in US-004. No unrelated negative cases or quality-gate ACs were added. Existing semantic datetime markup, finite-date rejection, null placeholders, file allowlisting and exception mappings remain regression anchors.\n\nRefine-pass fit/scope audit: all five spec-recommended context paths are retained for each story. local-dates.ts is an upstream output, never a context file of its own creating story; US-003 can read it through its transitive US-001 dependency. The three new files remain assigned only to their specified creating stories. The binding four IDs, workdirs and dependency arrays remain exactly unchanged; no dependency is removed merely because US-003 also directly consumes the US-001 helper. All seven feature-level exclusions remain verbatim in outOfScope: schedule helpers, logTime, relative/user-zone features, caching/GitLab, R1-14, manual audit tracker, and post-merge live checks. Nearby schedule/log exclusions are echoed in US-003, relative/user-zone exclusions in US-001, and caching/GitLab/live-check exclusions in US-004. Scope wording includes helper extraction, migration tests and the static guard where applicable; it excludes only other stories or explicitly deferred work. Routine Vue migration breadth alone does not justify complex routing: use medium/tdd-simple for the web stories and medium/three-session-tdd for the token-sensitive API story. The re-read sources confirm the existing helper/parser and mount harness seams, so no new dependency, generated client, global harness auto-import or data migration is needed.",
+  "outOfScope": [
+    "`lib/fleet-schedules.ts` (explicit time zone) and its default-zone helper for the schedule form are unchanged.",
+    "`lib/fleet-log-view.ts` `logTime` (log line times from `getHours()`) is unchanged: job logs load on the client only.",
+    "Relative times (\"3 min ago\") and a per-user time-zone setting are not added.",
+    "The installation token and the nax-files list are not cached (D468 stays); the GitLab reader is unchanged (one `listTree` call already).",
+    "R1-14 (not reproduced) stays open.",
+    "The audit tracker (`docs/ux/redesign/AUDIT-2026-11.md`) is updated by hand on this branch, not by a story.",
+    "Live checks of the hydration warnings and the nax-files timing happen in the post-merge sweep on koda-wk."
+  ],
+  "routingProfile": "native-claude-ds"
+}
