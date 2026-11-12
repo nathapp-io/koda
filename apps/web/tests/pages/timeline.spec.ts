@@ -500,6 +500,11 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     applyAndToast: jest.fn().mockResolvedValue(undefined),
     loadMoreAndToast: jest.fn().mockResolvedValue(undefined),
 
+    // Readable Timeline labels
+    eventTypeLabel: (code: string) => code,
+    actorName: (id: string) => id,
+    humanizeCode: (code: string) => code,
+
     // Utility
     formatDate: (d: string) => d,
     EVENT_TYPES: ['', 'ticket_event', 'agent_event', 'decision_event'],

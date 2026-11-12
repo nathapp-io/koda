@@ -141,7 +141,7 @@ const NUXT_AUTO_IMPORTS = [
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectMembers',
   // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).
   'useNuxtData',
-  'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
+  'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useTimelineEvents', 'useFleetJobLogs',
   'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
   // The personal thread pages (US-005/US-006) auto-import these two; tests override them through globals.
   'useWorkspaceThreads', 'useWorkspaceThread',
