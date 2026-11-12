@@ -50,8 +50,7 @@ describeIntegration('fleet repo config API (PG)', () => {
     forge.routes.clear();
     forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 201, body: { token: 'ghs_1', expires_at: '2099-01-01T00:00:00Z' } }));
     forge.routes.set('GET /repos/acme/app/git/ref/heads/trunk', () => ({ status: 200, body: { object: { sha: HEAD } } }));
-    forge.routes.set(`GET /repos/acme/app/git/trees/${HEAD}`, () => ({ status: 200, body: { truncated: false, tree: [{ path: '.nax', type: 'tree', sha: 'naxTree' }] } }));
-    forge.routes.set('GET /repos/acme/app/git/trees/naxTree', () => ({
+    forge.routes.set(`GET /repos/acme/app/git/trees/${HEAD}%3A.nax`, () => ({
       status: 200,
       body: { truncated: false, tree: [
         { path: 'context.md', type: 'blob', sha: 'k'.repeat(40), size: 9 },
@@ -76,9 +75,12 @@ describeIntegration('fleet repo config API (PG)', () => {
   });
 
   it('lets a VIEWER list the allowlisted files at the default-branch head (no .env, no feature files)', async () => {
+    forge.requests.length = 0;
     const list = data<{ baseSha: string; files: Array<{ path: string; group: string }> }>(await request(server).get(`${base()}/nax-files`).set(auth('viewer')).expect(200));
     expect(list.baseSha).toBe(HEAD);
     expect(list.files.map((f) => [f.path, f.group])).toEqual([['.nax/rules/testing.md', 'rules'], ['.nax/context.md', 'context']]);
+    expect(forge.requests.some((r) => r.path === `/repos/acme/app/git/trees/${HEAD}`)).toBe(false);
+    expect(forge.requests.some((r) => r.path === `/repos/acme/app/git/trees/${HEAD}%3A.nax`)).toBe(true);
   });
 
   it('reads one file for a VIEWER and refuses a non-allowlisted path with 400', async () => {

@@ -419,6 +419,38 @@ describe('GitHubAppClient', () => {
       expect(forge.requests.at(-1)?.path).toBe('/repos/acme/app/git/trees/t1');
     });
 
+    describe('getSubtree', () => {
+      const path = '/repos/acme/app/git/trees/c0ffee1%3A.nax';
+      const tree = [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }];
+
+      it('AC-1/2: requests the encoded commit subtree recursively and parses its body', async () => {
+        forge.routes.set(`GET ${path}`, () => ({ status: 200, body: { tree, truncated: true } }));
+        await expect(client.getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', true)).resolves.toEqual({
+          entries: [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }], truncated: true,
+        });
+        expect(forge.requests.at(-1)).toMatchObject({ path, query: 'recursive=1' });
+      });
+
+      it('AC-3: omits the query when not recursive', async () => {
+        forge.routes.set(`GET ${path}`, () => ({ status: 200, body: { tree: [] } }));
+        await client.getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', false);
+        expect(forge.requests.at(-1)).toMatchObject({ path, query: '' });
+      });
+
+      it.each([404, 422])('AC-4/5: returns null for %s', async (status) => {
+        forge.routes.set(`GET ${path}`, () => ({ status, body: {} }));
+        await expect(client.getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', true)).resolves.toBeNull();
+      });
+
+      it.each([
+        { status: 500, body: {} },
+        { status: 200, body: { notTree: [] } },
+      ])('AC-6/7: maps other errors or malformed bodies to provider_error: %j', async (reply) => {
+        forge.routes.set(`GET ${path}`, () => reply);
+        await expect(client.getSubtree('t', 'acme', 'app', 'c0ffee1', '.nax', true)).rejects.toMatchObject({ reason: 'provider_error' });
+      });
+    });
+
     it('reads a file at a ref, decoding base64', async () => {
       forge.routes.set('GET /repos/acme/app/contents/.nax/rules/a.md', () => ({ status: 200, body: { type: 'file', sha: 'b1', size: 5, encoding: 'base64', content: b64('hello') } }));
       const file = await client.getFile('t', 'acme', 'app', '.nax/rules/a.md', 'c0ffee1');

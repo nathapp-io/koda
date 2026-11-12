@@ -61,9 +61,8 @@ describe('GithubFleetRepoFilesReader', () => {
   const github = {
     mintInstallationToken: vi.fn(async () => ({ token: 'ghs_t', expiresAt: new Date() })),
     getBranchHead: vi.fn(async () => 'c0ffee1'),
-    getTree: vi.fn(async (_t: string, _o: string, _n: string, treeish: string) => treeish === 'c0ffee1'
-      ? { truncated: false, entries: [{ path: '.nax', type: 'tree', sha: 'naxTree', size: null }, { path: 'src', type: 'tree', sha: 'x', size: null }] }
-      : { truncated: false, entries: [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }, { path: 'features/x/prd.json', type: 'blob', sha: 'f', size: 1 }] }),
+    getTree: vi.fn(),
+    getSubtree: vi.fn(async () => ({ truncated: false, entries: [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }, { path: 'features/x/prd.json', type: 'blob', sha: 'f', size: 1 }] })),
     getFile: vi.fn(async () => ({ sha: 'k', size: 2, content: Buffer.from('hi') })),
   };
   const reader = new GithubFleetRepoFilesReader(github as never);
@@ -73,19 +72,25 @@ describe('GithubFleetRepoFilesReader', () => {
     await expect(reader.list(GH)).resolves.toEqual({ baseSha: 'c0ffee1', defaultBranch: 'trunk', files: [{ path: '.nax/context.md', size: 9, blobSha: 'k', group: 'context' }] });
     expect(github.mintInstallationToken).toHaveBeenCalledTimes(1);
     expect(github.mintInstallationToken).toHaveBeenCalledWith(BigInt(77), 'app');
-    expect(github.getTree).toHaveBeenLastCalledWith('ghs_t', 'acme', 'app', 'naxTree', true);
+    expect(github.getSubtree).toHaveBeenCalledExactlyOnceWith('ghs_t', 'acme', 'app', 'c0ffee1', '.nax', true);
+    expect(github.getTree).not.toHaveBeenCalled();
   });
 
   it('returns no files when the repo has no .nax dir', async () => {
-    github.getTree.mockResolvedValueOnce({ truncated: false, entries: [] });
+    github.getSubtree.mockResolvedValueOnce(null);
     await expect(reader.list(GH)).resolves.toEqual({ baseSha: 'c0ffee1', defaultBranch: 'trunk', files: [] });
   });
 
   it('refuses a truncated .nax tree (502) and a repo without an installation (409)', async () => {
-    github.getTree.mockResolvedValueOnce({ truncated: false, entries: [{ path: '.nax', type: 'tree', sha: 'n', size: null }] })
-      .mockResolvedValueOnce({ truncated: true, entries: [] });
+    github.getSubtree.mockResolvedValueOnce({ truncated: true, entries: [] });
     await expect(reader.list(GH)).rejects.toBeInstanceOf(ForgeErrorException);
+    github.mintInstallationToken.mockClear();
+    github.getBranchHead.mockClear();
+    github.getSubtree.mockClear();
     await expect(reader.list({ ...GH, githubInstallationId: null })).rejects.toBeInstanceOf(RepoUnreachableException);
+    expect(github.mintInstallationToken).not.toHaveBeenCalled();
+    expect(github.getBranchHead).not.toHaveBeenCalled();
+    expect(github.getSubtree).not.toHaveBeenCalled();
   });
 
   it('reads one file at a ref; a missing file is 404', async () => {
@@ -96,8 +101,7 @@ describe('GithubFleetRepoFilesReader', () => {
   });
 
   it('leaves out files whose names fall outside the allowlist (spaces, non-ASCII) and lists the rest', async () => {
-    github.getTree
-      .mockResolvedValueOnce({ truncated: false, entries: [{ path: '.nax', type: 'tree', sha: 'naxTree', size: null }] })
+    github.getSubtree
       .mockResolvedValueOnce({ truncated: false, entries: [
         { path: 'rules/my rule.md', type: 'blob', sha: 's1', size: 1 },
         { path: 'rules/规则.md', type: 'blob', sha: 's2', size: 1 },

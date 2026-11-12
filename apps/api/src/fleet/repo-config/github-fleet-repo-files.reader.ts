@@ -18,10 +18,8 @@ export class GithubFleetRepoFilesReader implements FleetRepoFilesReader {
     return forgeCall(async () => {
       const token = await this.token(repo);
       const baseSha = await this.github.getBranchHead(token, repo.owner, repo.name, repo.defaultBranch);
-      const root = await this.github.getTree(token, repo.owner, repo.name, baseSha, false);
-      const nax = root.entries.find((e) => e.path === '.nax' && e.type === 'tree');
-      if (!nax) return { baseSha, defaultBranch: repo.defaultBranch, files: [] };
-      const sub = await this.github.getTree(token, repo.owner, repo.name, nax.sha, true);
+      const sub = await this.github.getSubtree(token, repo.owner, repo.name, baseSha, '.nax', true);
+      if (!sub) return { baseSha, defaultBranch: repo.defaultBranch, files: [] };
       if (sub.truncated) throw new ForgeErrorException();
       return { baseSha, defaultBranch: repo.defaultBranch, files: toNaxEntries(sub.entries.map((e) => ({ ...e, path: `.nax/${e.path}` }))) };
     });
