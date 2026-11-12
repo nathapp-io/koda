@@ -16,7 +16,7 @@
     <button
       v-if="notifications.supported.value"
       type="button"
-      class="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+      class="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:h-9 sm:w-9"
       :aria-label="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
       :title="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
       :aria-pressed="notifications.enabled.value"

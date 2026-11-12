@@ -40,7 +40,7 @@ onMounted(() => { void load(1) })
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm"><thead><tr><th>{{ t('fleet.flows.list.state') }}</th><th>{{ t('fleet.flows.list.features') }}</th><th>{{ t('fleet.flows.list.spend') }}</th><th>{{ t('fleet.flows.list.createdAt') }}</th></tr></thead>
           <tbody><tr v-for="flow in result.records" :key="flow.id" data-testid="fleet-flow-row">
-            <td><NuxtLink :to="`/${slug}/flows/${flow.id}`">{{ flowStateKey(flow.state) ? t(flowStateKey(flow.state)!) : flow.state }}</NuxtLink></td>
+            <td><NuxtLink :to="`/${slug}/flows/${flow.id}`" class="inline-flex min-h-11 items-center sm:min-h-0">{{ flowStateKey(flow.state) ? t(flowStateKey(flow.state)!) : flow.state }}</NuxtLink></td>
             <td>{{ flow.features.map(feature => feature.feature).join(', ') }}</td>
             <td>{{ formatUsd(flow.spentUsd) }} / {{ formatUsd(flow.costCapUsd) }}</td>
             <td>{{ flow.createdAt }}</td>
