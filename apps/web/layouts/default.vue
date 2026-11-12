@@ -122,7 +122,7 @@ const breadcrumbItems = computed(() => {
     settings: 'nav.settings',
   }
   const projectPage = path.slice(`/${project}/`.length)
-  const projectPageLeaf = projectPageLeaves[projectPage]
+  const projectPageLeaf = Object.hasOwn(projectPageLeaves, projectPage) ? projectPageLeaves[projectPage] : undefined
   if (projectPageLeaf) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t(projectPageLeaf) }]
   }

@@ -45,6 +45,12 @@ describe('default layout project breadcrumb leaves', () => {
     ])
   })
 
+  test.each(['toString', '__proto__', 'constructor', 'hasOwnProperty'])('does not treat inherited map keys as page leaves: %s', (page) => {
+    expect(breadcrumbItemsFor(`/web/${page}`, { project: 'web' })).toEqual([
+      { label: 'Koda', to: '/' }, { label: 'web' },
+    ])
+  })
+
   test('preserves flows and project root breadcrumbs', () => {
     expect(breadcrumbItemsFor('/web/flows', { project: 'web' })).toEqual([
       { label: 'Koda', to: '/' }, { label: 'web', to: '/web' }, { label: 'nav.flows' },
