@@ -205,7 +205,11 @@ harnesses to reuse are in `tests/pages/admin-audit-detail.spec.ts`, `tests/compo
 
 ### Modifies
 
-None. Checked against the current specs: `tests/components/thread-action-bar.spec.ts` finds reasons by the kept `data-testid` and pins no element tag or sibling order; `tests/components/fleet-native-select.spec.ts` pins no class; `tests/pages/accessible-names.spec.ts` and `tests/pages/notification-settings-page.spec.ts` find the checkboxes by the kept `data-testid` and the email `aria-label` is kept; no spec pins the breadcrumb, button, audit expand, approval toggle or flow link classes being changed.
+**US-003**
+
+- `apps/web/tests/components/fleet-native-select.spec.ts` — the test `the SFC imports nothing but vue (the mount helper only provides vue)` asserts NativeSelect.vue has no import other than `vue`; NativeSelect now imports FILTER_CONTROL_CLASS from the new lib form-control module (tilde alias), and mountSfc resolves tilde-alias imports to real files, so the test now allows exactly vue and that one module and still rejects any other import (rename it to say so).
+
+No other existing spec needs a change. Checked against the current specs: `tests/components/thread-action-bar.spec.ts` finds reasons by the kept `data-testid` and pins no element tag or sibling order; `tests/components/fleet-native-select.spec.ts` pins no class; `tests/pages/accessible-names.spec.ts` and `tests/pages/notification-settings-page.spec.ts` find the checkboxes by the kept `data-testid` and the email `aria-label` is kept; no spec pins the breadcrumb, button, audit expand, approval toggle or flow link classes being changed.
 
 ### Seams
 
