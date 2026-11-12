@@ -20,7 +20,7 @@ const { permissions } = useProjectPermissions(slug)
 const canRead = computed(() => permissions.value.has('approval.policy.read'))
 const canManage = computed(() => permissions.value.has('approval.policy.manage'))
 const base: PolicyBase = { kind: 'project', slug }
-const { policies, keys, pending, list, loadKeys, remove } = useApprovalPolicies(base)
+const { policies, keys, list, loadKeys, remove } = useApprovalPolicies(base)
 
 const loaded = ref(false)
 const loadFailed = ref(false)
@@ -95,7 +95,8 @@ async function onDelete(policy: ApprovalPolicy): Promise<void> {
       {{ t('approvals.policies.forbidden') }}
     </p>
     <template v-else>
-      <LoadingState v-if="pending && !loaded" />
+      <!-- Not `pending`: on the server no load has started yet, so only "first load not finished" renders the same branch on the server and the hydrating client (R2-15). -->
+      <LoadingState v-if="!loaded && !loadFailed && !incomplete" />
       <div v-else-if="incomplete" class="space-y-3">
         <p class="text-sm text-muted-foreground" data-testid="policies-incomplete">
           {{ t('approvals.policies.incomplete') }}

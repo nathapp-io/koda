@@ -23,6 +23,54 @@ async function mountCard(keys: readonly string[] = ['project.credential.read', '
 const node = (app: Mounted, id: string) => app.find(`[data-testid="${id}"]`)[0]
 afterEach(() => { get.mockReset().mockImplementation(async (path: string): Promise<unknown> => path.endsWith('/fleet/repos') ? { records: [{ id: 'r1', owner: 'acme', name: 'app' }] } : { records: [row(), row({ id: 'c2', scope: 'REPO', repoId: 'r1', name: 'Repo key' })] }); post.mockReset().mockImplementation(async (_path: string, _body?: unknown): Promise<unknown> => row()); patch.mockReset().mockImplementation(async (_path: string, _body?: unknown): Promise<unknown> => row()); remove.mockReset().mockImplementation(async (_path: string): Promise<unknown> => ({})); toast.errors.length = 0 })
 
+/**
+ * web-ssr-data-loading US-002 (R2-15): the card shows its loading text until its first load settles,
+ * whatever `vault.pending` says (on the server no load has started and pending is false).
+ */
+describe('web-ssr-data-loading US-002: provider keys card first load', () => {
+  function vaultStub(load: () => Promise<void>) {
+    const { ref } = require('vue') as typeof import('vue')
+    return {
+      useProviderCredentials: () => ({
+        credentials: ref([]), pending: ref(false), current: ref(1), total: ref(0), hasNext: ref(false), hasPrev: ref(false),
+        load, create: jest.fn(), rotate: jest.fn(), setDisabled: jest.fn(), remove: jest.fn(),
+      }),
+    }
+  }
+  function mountWithVault(load: () => Promise<void>, keys: readonly string[] = ['project.credential.read']): Mounted {
+    return mountSfc(cardFile, { props: { slug: 'web' }, components: uiStubs, alias: { '~/composables/useApi': apiModule, '~/composables/useProviderCredentials': vaultStub(load) }, globals: { useApi: () => ({ $api: { get, post, patch, delete: remove } }), useI18n: () => i18nStub(), useAppToast: () => toast, useProjectPermissions: () => projectPermissionsStub(keys) } })
+  }
+
+  test('a successful first load removes the loading text', async () => {
+    const app = mountWithVault(async () => undefined)
+    await flush()
+    expect(app.text()).not.toContain('common.loading')
+    app.unmount()
+  })
+
+  test('without the read permission the card shows the no-permission text, never the loading text', async () => {
+    const app = mountWithVault(() => new Promise<void>(() => undefined), [])
+    await flush()
+    expect(app.text()).toContain('fleet.providerKeys.noReadPermission')
+    expect(app.text()).not.toContain('common.loading')
+    app.unmount()
+  })
+
+  test('AC-9: before the first load settles, with pending false, the card shows the loading text', async () => {
+    const app = mountWithVault(() => new Promise<void>(() => undefined))
+    await flush()
+    expect(app.text()).toContain('common.loading')
+    app.unmount()
+  })
+
+  test('AC-10 (regression guard): once a rejected first load settles, the loading text is gone', async () => {
+    const app = mountWithVault(async () => { throw new Error('vault down') })
+    await flush()
+    expect(app.text()).not.toContain('common.loading')
+    app.unmount()
+  })
+})
+
 describe('US-013 SettingsProviderKeysCard', () => {
   test('AC-1: displays project and repo credentials using their scope/repository grouping', async () => {
     const app = await mountCard()

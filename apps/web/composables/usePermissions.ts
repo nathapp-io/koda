@@ -57,7 +57,9 @@ function usePermissionsFor(key: string, project: string | null): Permissions {
       // A malformed answer closes every gate instead of unlocking anything.
       return Array.isArray(keys) ? [...keys] : []
     },
-    { default: () => [] },
+    // 'defer': a second same-key instance in one render reuses the read in flight instead of
+    // aborting it and starting another (Nuxt's default 'cancel'), so one render reads each scope once.
+    { default: () => [], dedupe: 'defer' },
   )
 
   return {
@@ -67,7 +69,9 @@ function usePermissionsFor(key: string, project: string | null): Permissions {
       pending.value || error.value ? EMPTY_PERMISSIONS : permissionSet(data.value ?? [])),
     pending,
     error,
-    refresh: async () => { await refresh() },
+    // A manual re-read (after a role change, say) must not reuse an older read still in flight, so it
+    // overrides the 'defer' the initial fetch uses.
+    refresh: async () => { await refresh({ dedupe: 'cancel' }) },
   }
 }
 

@@ -120,6 +120,52 @@ describe('US-006 AC-6: the global scope asks with no query, under its own key', 
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// web-ssr-data-loading US-001 — same-key reads share one request (R2-20)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Nuxt's default `dedupe: 'cancel'` makes every same-key `useAsyncData` instance in one server render
+ * abort the read in flight and start another, so the API counts 3-8 `/me/permissions` per page.
+ * `'defer'` makes later instances reuse the read in flight.
+ */
+describe('web-ssr-data-loading US-001: permission reads dedupe by deferring', () => {
+  const optionsOf = (key: string): Record<string, unknown> | undefined =>
+    asyncCalls.find((call) => call.key === key)?.options as Record<string, unknown> | undefined
+
+  test('AC-1: useGlobalPermissions asks useAsyncData to defer to a read in flight', async () => {
+    install(async () => ({ scope: 'global', projectSlug: null, keys: [] }))
+
+    useGlobalPermissions()
+    await settle()
+
+    expect(optionsOf('permissions-global')?.dedupe).toBe('defer')
+  })
+
+  test('AC-2: useProjectPermissions asks useAsyncData to defer to a read in flight', async () => {
+    install(async () => ({ scope: 'project', projectSlug: 'web', keys: [] }))
+
+    useProjectPermissions('web')
+    await settle()
+
+    expect(optionsOf('permissions-project-web')?.dedupe).toBe('defer')
+  })
+
+  test('a manual refresh re-reads even while a read is in flight (it overrides defer with cancel)', async () => {
+    const refreshArgs: unknown[] = []
+    globals.useApi = () => ({ $api: { get: jest.fn(async () => ({ keys: [] })) } })
+    globals.useAsyncData = (key: string, run: () => Promise<unknown>, options?: Record<string, unknown>) => {
+      const { data, pending, error } = fakeAsyncData(key, run as () => Promise<string[]>, options as { default?: () => string[] })
+      return { data, pending, error, refresh: async (opts?: unknown) => { refreshArgs.push(opts) } }
+    }
+
+    const { refresh } = useGlobalPermissions()
+    await refresh()
+
+    expect(refreshArgs).toEqual([{ dedupe: 'cancel' }])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // US-006 AC-12 — a pending fetch fails closed too
 // ─────────────────────────────────────────────────────────────────────────────
 
