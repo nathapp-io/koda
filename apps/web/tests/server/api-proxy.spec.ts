@@ -42,15 +42,16 @@ describe('api proxy headers (#304)', () => {
     expect(proxyHeaders('203.0.113.7', 'application/json, text/event-stream')).toEqual({
       accept: 'application/json, text/event-stream',
       'x-client-ip': '203.0.113.7',
+      'x-forwarded-for': '203.0.113.7',
     })
   })
 
   it('omits Accept when the client sent none', () => {
-    expect(proxyHeaders('203.0.113.7', undefined)).toEqual({ 'x-client-ip': '203.0.113.7' })
+    expect(proxyHeaders('203.0.113.7', undefined)).toEqual({ 'x-client-ip': '203.0.113.7', 'x-forwarded-for': '203.0.113.7' })
   })
 
   it('keeps the fail-closed client IP placeholder', () => {
-    expect(proxyHeaders(undefined, 'application/json')).toEqual({ accept: 'application/json', 'x-client-ip': '0.0.0.0' })
+    expect(proxyHeaders(undefined, 'application/json')).toEqual({ accept: 'application/json', 'x-client-ip': '0.0.0.0', 'x-forwarded-for': '0.0.0.0' })
   })
 
   it('the catch-all proxy sends these headers', () => {

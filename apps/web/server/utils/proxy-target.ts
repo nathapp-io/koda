@@ -18,7 +18,8 @@ export function resolveProxyTarget(path: string, config: { apiInternalUrl: strin
  * Headers for the runtime /api proxy. h3 `proxyRequest` drops the client's
  * `accept` (its ignoredHeaders set), but content-negotiating routes need it:
  * POST /api/mcp answers 406 without `application/json, text/event-stream` (#304).
- * The client IP is applied last so a browser-sent x-client-ip is always overridden.
+ * The client IP headers are applied last, so a browser-sent x-client-ip or
+ * x-forwarded-for is always overridden (#445).
  */
 export function proxyHeaders(clientIp: string | undefined, accept: string | undefined): Record<string, string> {
   return {

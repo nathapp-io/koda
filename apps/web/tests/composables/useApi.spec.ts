@@ -347,6 +347,37 @@ describe('H9: useApi routes server-side calls through useRequestFetch', () => {
     expect(headers['x-client-ip']).toBe('203.0.113.20')
   })
 
+  test('server-side request names the browser in x-forwarded-for, which a caller cannot override (#445)', async () => {
+    const requestFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = makeFetchMock()
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1', { headers: { 'x-forwarded-for': '6.6.6.6' } })
+
+    const [, calledOpts] = requestFetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['x-forwarded-for']).toBe('203.0.113.20')
+  })
+
+  test('client-side request still sends no x-forwarded-for (the /api proxy sets it)', async () => {
+    const clientFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = false
+    g.$fetch = clientFetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1')
+
+    const [, calledOpts] = clientFetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['x-forwarded-for']).toBeUndefined()
+  })
+
   test('client-side request sends no x-client-ip (the /api proxy sets it)', async () => {
     const clientFetchMock = makeFetchMock()
     g.__JEST_IS_SERVER__ = false
