@@ -6,6 +6,7 @@ import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
 
 type LocaleValue = string | { [key: string]: LocaleValue }
 const en = JSON.parse(readFileSync(join(__dirname, '../../i18n/locales/en.json'), 'utf8')) as LocaleValue
+const zh = JSON.parse(readFileSync(join(__dirname, '../../i18n/locales/zh.json'), 'utf8')) as LocaleValue
 const localeValue = (key: string): LocaleValue | undefined => key.split('.').reduce<LocaleValue | undefined>((value, part) => typeof value === 'object' ? value[part] : undefined, en)
 const translate = (key: string): string => {
   const value = localeValue(key)
@@ -41,7 +42,16 @@ const mountPage = async (current: FleetFlowDto, overviewValue = overview()) => {
   return { mounted, header }
 }
 
+const valueAt = (locale: LocaleValue, key: string): string | undefined => {
+  const value = key.split('.').reduce<LocaleValue | undefined>((current, part) => typeof current === 'object' ? current[part] : undefined, locale)
+  return typeof value === 'string' ? value : undefined
+}
+
 describe('flow detail readable labels', () => {
+  test('AC-13 has a non-empty flow ID label in both locales', () => {
+    expect(valueAt(en, 'fleet.flows.detail.id')?.trim()).toBeTruthy()
+    expect(valueAt(zh, 'fleet.flows.detail.id')?.trim()).toBeTruthy()
+  })
   test('uses feature names as title, removes id from subtitle, and displays id/date details', async () => {
     const { mounted, header } = await mountPage(flow({ features: [{ feature: 'f17-min3', specPath: '', branch: null, dependsOn: [], state: 'COMPLETED', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null }] }))
     expect(header.mock.calls[0]?.[0]).toMatchObject({ title: 'f17-min3', subtitle: expect.not.stringContaining('flow-id') })

@@ -44,7 +44,7 @@ function onAnswered(pending?: boolean): void { emit('answered', pending) }
       <p class="text-sm"><span class="text-muted-foreground">{{ t('fleet.flows.feature.branch') }}</span> {{ featureBranch(flow, feature) }}</p>
       <p v-if="feature.dependsOn.length" class="text-sm"><span class="text-muted-foreground">{{ t('fleet.flows.feature.dependsOn') }}</span> {{ feature.dependsOn.join(', ') }}</p>
       <p v-if="feature.prNumber" class="text-sm">
-        <span class="text-muted-foreground">{{ t('fleet.flows.feature.pullRequest') }} </span>
+        <span class="text-muted-foreground">{{ t('fleet.flows.feature.pullRequest') }}{{ ' ' }}</span>
         <a v-if="pullRequestUrl" :href="pullRequestUrl" target="_blank" rel="noopener noreferrer" class="underline">#{{ feature.prNumber }}</a>
         <span v-else>#{{ feature.prNumber }}</span>
       </p>
