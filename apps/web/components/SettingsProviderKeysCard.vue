@@ -65,11 +65,16 @@ async function loadRepositories(): Promise<void> {
   }
   repos.value = all
 }
+/**
+ * The loading text shows until the first load settles, not while `vault.pending` is true: on the server no
+ * load has started, so `pending` alone renders a different branch there than on the hydrating client (R2-15).
+ */
+const firstLoadSettled = ref(false)
 async function load(targetPage?: number): Promise<void> {
   if (!canRead.value) return
   try {
     await Promise.all([vault.load(targetPage), loadRepositories()])
-  } catch (err) { toast.error(extractApiError(err)) }
+  } catch (err) { toast.error(extractApiError(err)) } finally { firstLoadSettled.value = true }
 }
 watch(canRead, (allowed) => { if (allowed) void load() }, { immediate: true })
 function report(err: unknown) { toast.error(extractApiError(err)) }
@@ -120,7 +125,7 @@ async function remove(row: ProviderCredentialRow) {
   <section class="rounded-md border border-border p-6 space-y-5" data-testid="provider-keys-card">
     <header><h2 class="text-lg font-semibold">{{ t('fleet.providerKeys.projectTitle') }}</h2><p class="text-sm text-muted-foreground">{{ t('fleet.providerKeys.projectDescription') }}</p></header>
     <div v-if="pendingNotice" role="status" class="rounded-md border border-amber-500/50 p-3 text-sm">{{ t('fleet.providerKeys.pending') }}</div>
-    <div v-if="vault.pending.value && vault.credentials.value.length === 0" class="text-sm text-muted-foreground">{{ t('common.loading') }}</div>
+    <div v-if="canRead && !firstLoadSettled" class="text-sm text-muted-foreground">{{ t('common.loading') }}</div>
     <div v-else-if="!canRead" class="text-sm text-muted-foreground">{{ t('fleet.providerKeys.noReadPermission') }}</div>
     <template v-else>
       <div v-if="projects.length" class="space-y-2"><h3 class="font-medium">{{ t('fleet.providerKeys.projectScope') }}</h3><CredentialRows :rows="projects" :saving="saving" :can-update="can('project.credential.update')" :can-delete="can('project.credential.delete')" @rotate="rotate" @disable="setDisabled($event, true)" @enable="setDisabled($event, false)" @remove="remove" /></div>
