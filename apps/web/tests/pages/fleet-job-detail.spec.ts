@@ -301,6 +301,8 @@ interface EnginePageOver {
   /** Request ids whose detail read fails. */
   failing?: readonly string[]
   optionsSettled?: boolean
+  optionsSettledRef?: { value: boolean }
+  optionsLoad?: () => Promise<void>
   resolvedRepoName?: string
 }
 
@@ -360,8 +362,8 @@ function mountEnginePage(over: EnginePageOver) {
         cancel: jest.fn(), requeue: jest.fn(), downloadBundle: jest.fn(),
       }),
       useFleetDispatchOptions: () => ({
-        settled: ref(over.optionsSettled ?? true),
-        load: jest.fn(async () => undefined),
+        settled: over.optionsSettledRef ?? ref(over.optionsSettled ?? true),
+        load: over.optionsLoad ?? jest.fn(async () => undefined),
         repoName: (id: string) => over.resolvedRepoName ?? id,
         runnerName: (id: string | null) => id,
       }),
@@ -383,6 +385,20 @@ function mountEnginePage(over: EnginePageOver) {
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
 
 describe('job detail option-name loading', () => {
+  test('an options rejection settles the page and displays the raw assigned runner id', async () => {
+    const settled = ref(false)
+    const rejectLoad = jest.fn(async () => {
+      settled.value = true
+      throw new Error('options unavailable')
+    })
+    const m = mountEnginePage({ job: jobFixture({ runnerId: 'runner-rejected' }), records: [], optionsSettled: false, optionsLoad: rejectLoad, optionsSettledRef: settled })
+    await m.settle()
+    expect(rejectLoad).toHaveBeenCalledTimes(1)
+    expect(settled.value).toBe(true)
+    const runner = m.byId('fleet-job-runner')[0]
+    expect(runner && m.app.textOf(runner)).toBe('runner-rejected')
+    m.app.unmount()
+  })
   test('uses common loading for unresolved repo and assigned runner names', async () => {
     const m = mountEnginePage({ job: jobFixture({ repoId: 'repo-raw', runnerId: 'runner-raw' }), records: [], optionsSettled: false })
     await m.settle()
