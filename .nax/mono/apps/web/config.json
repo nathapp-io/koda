@@ -2,6 +2,7 @@
   "quality": {
     "commands": {
       "build": "bun run build",
+      "testScoped": "bunx jest {{files}} --forceExit --passWithNoTests",
       "typecheck": "bun run type-check",
       "lint": "bun run lint:json-error"
     }
