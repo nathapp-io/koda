@@ -3,7 +3,7 @@
   "feature": "web-ux-audit-fixes",
   "branchName": "feat/web-ux-audit-fixes",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T03:25:59.791Z",
+  "updatedAt": "2026-11-12T03:37:19.830Z",
   "userStories": [
     {
       "id": "US-001",
@@ -182,14 +182,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A small pure helper and bounded presentation changes across the page, existing feature section and locale keys; existing permission/workflow behavior is untouched."
+        "reasoning": "A small pure helper and bounded presentation changes across the page, existing feature section and locale keys; existing permission/workflow behavior is untouched.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/flows/[id].vue",
@@ -216,7 +219,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d43056f1a548e9c8454eb54911b53e64d6b5812f"
     },
     {
       "id": "US-004",
