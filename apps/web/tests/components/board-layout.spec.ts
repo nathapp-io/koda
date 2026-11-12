@@ -91,11 +91,18 @@ function mountNeedsYou(needsYou: HomeNeedsYou) {
 }
 
 describe('US-007 board and dashboard layout', () => {
-  test('AC-1 Import Issue is outline; AC-2 New Ticket keeps the default variant', () => {
+  test('AC-1 Import Issue is outline', () => {
     const app = mountProjectPage()
-    const buttons = app.find('button')
-    expect(buttons.find(button => app.textOf(button) === 'Import Issue')?.props['data-variant']).toBe('outline')
-    expect(buttons.find(button => app.textOf(button) === 'New Ticket')?.props['data-variant']).toBeUndefined()
+    const importButton = app.find('button').find(button => app.textOf(button) === 'Import Issue')
+    expect(importButton?.props['data-variant']).toBe('outline')
+    app.unmount()
+  })
+
+  test('AC-2 New Ticket keeps the default variant', () => {
+    const app = mountProjectPage()
+    const newTicketButton = app.find('button').find(button => app.textOf(button) === 'New Ticket')
+    expect(newTicketButton).toBeDefined()
+    expect(newTicketButton?.props['data-variant']).toBeUndefined()
     app.unmount()
   })
 
