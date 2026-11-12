@@ -1,6 +1,7 @@
 import { describe, test, expect, jest, afterEach } from '@jest/globals'
 import { nextTick } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { formatDateTime } from '~/lib/format-date-time'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
 import type { ToastRecorder } from '../helpers/fleet-harness'
@@ -129,6 +130,16 @@ describe('US-007: the knowledge state', () => {
     expect(text).toContain('3')
     expect(text).toContain('9')
     expect(text).toContain('clone failed')
+    app.unmount()
+  })
+
+  test('the finished time is formatted in the viewer zone, never raw ISO', async () => {
+    get.mockImplementation(async () => answer({ repos: [repo] }))
+    const app = await mountCard()
+
+    const text = app.textOf(byId(app, 'knowledge-repo-r1') as FakeNode)
+    expect(text).toContain(formatDateTime('2026-10-16T10:00:00.000Z', undefined))
+    expect(text).not.toContain('2026-10-16T10:00:00.000Z')
     app.unmount()
   })
 

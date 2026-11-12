@@ -1,4 +1,6 @@
 import { describe, expect, test, jest } from '@jest/globals'
+import { nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder } from '../helpers/fleet-harness'
 import type { FleetFlowDto, FleetFlowPage } from '~/lib/fleet-flows'
@@ -22,6 +24,13 @@ describe('project fleet flows list', () => {
     const next = m.mounted.find('button').find(b => b.props['data-testid'] === 'flows-next')
     await (next?.props.onClick as () => Promise<void>)(); expect(m.list).toHaveBeenLastCalledWith(2)
     expect(m.mounted.find('button').find(b => b.props['data-testid'] === 'flows-prev')?.props.disabled).toBe(true)
+    m.mounted.unmount()
+  })
+  test('created time is formatted in the viewer zone, never raw ISO', async () => {
+    const m = await mountList(page([flow('f1')]))
+    await nextTick()
+    expect(m.mounted.text()).toContain(formatDateTime('2026-01-01T00:00:00.000Z', undefined))
+    expect(m.mounted.text()).not.toContain('2026-01-01T00:00:00.000Z')
     m.mounted.unmount()
   })
   test('a later list failure clears previously displayed rows', async () => {

@@ -2,6 +2,7 @@
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
+import { useLocalDates } from '~/lib/local-dates'
 
 interface KnowledgeRepoState {
   repoId: string
@@ -28,7 +29,9 @@ interface KnowledgeState {
 const props = defineProps<{ slug: string }>()
 
 const { $api } = useApi()
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 
 // Permissions P1 US-007: editing the document patterns needs `fleet.knowledge.patterns.update` and
@@ -173,7 +176,7 @@ const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '')
             {{ t('knowledge.repos.skipped') }}: {{ repo.skippedCount }}
           </p>
           <p v-if="repo.finishedAt" class="text-xs text-muted-foreground">
-            {{ t('knowledge.repos.finishedAt') }}: {{ repo.finishedAt }}
+            {{ t('knowledge.repos.finishedAt') }}: <time :datetime="repo.finishedAt">{{ dates.dateTime(repo.finishedAt) }}</time>
           </p>
           <p v-if="repo.lastError" class="text-xs text-status-rejected">
             {{ t('knowledge.repos.lastError') }}: {{ repo.lastError }}

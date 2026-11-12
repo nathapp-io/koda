@@ -32,4 +32,19 @@ describe('runtime-zone date formatting boundary', () => {
     }
     expect(violations).toEqual([])
   })
+
+  test('templates never print a timestamp field raw', () => {
+    // AuditEntryDetail shows the full ISO timestamp on purpose (audit-entry-detail AC-5).
+    const allowed = new Set(['components/audit/AuditEntryDetail.vue'])
+    const rawTimestamp = /\{\{\s*[\w.?]+(?:At|Date|Time)\s*\}\}/
+    const violations: string[] = []
+    for (const directory of ['components', 'pages', 'layouts']) {
+      for (const file of sourceFiles(path.join(webRoot, directory))) {
+        const relative = path.relative(webRoot, file).split(path.sep).join('/')
+        if (!relative.endsWith('.vue') || allowed.has(relative)) continue
+        if (rawTimestamp.test(readFileSync(file, 'utf8'))) violations.push(relative)
+      }
+    }
+    expect(violations).toEqual([])
+  })
 })
