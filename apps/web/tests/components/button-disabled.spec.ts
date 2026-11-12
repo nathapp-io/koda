@@ -63,8 +63,13 @@ describe('disabled button styling and thread action reasons', () => {
     expect(reason?.tag).toBe('p')
     expect(String(reason?.props.class).split(/\s+/)).toEqual(expect.arrayContaining(['text-xs', 'text-muted-foreground']))
     expect(button?.parent).toBe(reason?.parent)
-    expect(button?.parent?.props.class).toContain('flex-col')
-    expect(button?.parent?.children.indexOf(button!)).toBeLessThan(button?.parent?.children.indexOf(reason!) ?? -1)
+    const wrapper = button?.parent
+    expect(wrapper).toBeDefined()
+    if (wrapper === undefined || button === undefined || reason === undefined) {
+      throw new Error('Expected blocked Publish button and reason to share a wrapper')
+    }
+    expect(wrapper.props.class).toContain('flex-col')
+    expect(wrapper.children.indexOf(button)).toBeLessThan(wrapper.children.indexOf(reason))
     app.unmount()
   })
 
