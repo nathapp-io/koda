@@ -13,7 +13,11 @@ const renderer = createRenderer<Node, Node>({
   setText: (node, text) => { Object.assign(node, { text }) },
   setElementText: (node, text) => { node.children = [text] },
   patchProp: (node, key, _old, value) => { node.props[key] = value },
-  insert: (child, parent, anchor) => { const at = anchor ? parent.children.indexOf(anchor) : -1; at < 0 ? parent.children.push(child) : parent.children.splice(at, 0, child) },
+  insert: (child, parent, anchor) => {
+    const at = anchor ? parent.children.indexOf(anchor) : -1
+    if (at < 0) parent.children.push(child)
+    else parent.children.splice(at, 0, child)
+  },
   remove: (child, parent) => { if (!parent) return; const at = parent.children.indexOf(child); if (at >= 0) parent.children.splice(at, 1) },
   parentNode: () => null,
   nextSibling: () => null,
