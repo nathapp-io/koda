@@ -3,7 +3,7 @@
   "feature": "web-page-polish",
   "branchName": "feat/web-page-polish",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T10:09:33.755Z",
+  "updatedAt": "2026-11-12T10:19:15.387Z",
   "userStories": [
     {
       "id": "US-001",
@@ -174,14 +174,17 @@
         "destructive-action"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard component extraction and heading changes move an existing mutation flow unchanged; no authorization or API semantics change."
+        "reasoning": "Standard component extraction and heading changes move an existing mutation flow unchanged; no authorization or API semantics change.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/settings.vue",
@@ -204,7 +207,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "00838c45182082382407aed81ecce9853b4460fd"
     },
     {
       "id": "US-004",
