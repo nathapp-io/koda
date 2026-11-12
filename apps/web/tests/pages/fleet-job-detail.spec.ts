@@ -200,7 +200,7 @@ describe('config jobs (S3 §6)', () => {
 
 const g = globalThis as Record<string, unknown>
 
-const jobFixture = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
+export const jobFixture = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   fixReady: null,
   id: 'j1',
   projectId: 'p1',
@@ -295,7 +295,7 @@ const approvalsPage = (records: ApprovalRequestSummary[]) => ({
 
 const inert = (name: string) => defineComponent({ name, setup: () => () => null })
 
-interface EnginePageOver {
+export interface EnginePageOver {
   job?: FleetJobDto
   records: ApprovalRequestSummary[]
   /** Request ids whose detail read fails. */
@@ -310,7 +310,7 @@ interface EnginePageOver {
  * Mounts the real job page. `useFleetJobs` and the presentation components are doubled, but the page
  * runs the real `useApprovalInbox`, so the engine request and the rows it renders are the ones under test.
  */
-function mountEnginePage(over: EnginePageOver) {
+export function mountEnginePage(over: EnginePageOver) {
   const job = over.job ?? jobFixture()
   const get = jest.fn(async (path: string) => {
     if (path === '/approvals') return approvalsPage(over.records)
