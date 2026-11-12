@@ -126,6 +126,7 @@ async function mountMemoryPage(opts: MountOptions) {
     useI18n: () => ({ t: (k: string) => k, te: () => false, locale: { value: 'en' } }),
     useAppToast: () => toastInstance,
     useProjectPermissions: () => ({ permissions: { has: () => false, hasOwn: () => false } }),
+    useProjectAgentNames: () => ({ agents: [], load: async () => undefined, nameOf: () => null }),
     definePageMeta: () => {},
     onMounted: (fn: () => unknown) => { fn() },
     useApi: () => ({
