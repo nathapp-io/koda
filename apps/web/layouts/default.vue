@@ -113,6 +113,20 @@ const breadcrumbItems = computed(() => {
 
   const projectBase = { label: project, to: `/${project}` }
 
+  const projectPageLeaves: Record<string, string> = {
+    approvals: 'nav.approvals',
+    'approval-policies': 'nav.approvalPolicies',
+    timeline: 'nav.timeline',
+    memory: 'nav.memory',
+    'code-intel': 'nav.codeIntel',
+    settings: 'nav.settings',
+  }
+  const projectPage = path.slice(`/${project}/`.length)
+  const projectPageLeaf = projectPageLeaves[projectPage]
+  if (projectPageLeaf) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t(projectPageLeaf) }]
+  }
+
   if (path === `/${project}`) {
     return [{ label: 'Koda', to: '/' }, { label: project }]
   }
