@@ -430,6 +430,7 @@
       "unassign": "取消指派"
     },
     "assignee": {
+      "change": "更改",
       "searchPlaceholder": "搜索人员或代理",
       "group": {
         "people": "人员",

@@ -262,7 +262,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
   <div>
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
-    <div v-else-if="ticket" class="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+    <div v-else-if="ticket" class="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr] lg:items-start">
       <div class="min-w-0 space-y-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
         <div
           v-if="ticketDeleted"

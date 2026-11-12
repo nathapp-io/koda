@@ -430,6 +430,7 @@
       "unassign": "Unassign"
     },
     "assignee": {
+      "change": "Change",
       "searchPlaceholder": "Search people or agents",
       "group": {
         "people": "People",

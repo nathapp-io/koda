@@ -140,9 +140,8 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
         safeHref: (value: string) => value,
       },
     })
-    // contract drift: drain the initial `fetchAssignees('')` microtask before
-    // asserting on the rendered option — the spec asserts on DOM state after
-    // an async fetch resolves.
+    // Open the collapsed picker before asserting on an async-loaded option.
+    ;(app.one('[data-testid="assignee-change"]')?.props.onClick as () => void)()
     await flush()
     const choice = app.one(`[data-testid="assignee-option-${id}"]`)
     expect(choice).toBeDefined()
@@ -174,7 +173,8 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
         useI18n: () => ({ ...enI18n(), locale: ref('en') }), useAppToast: () => ({ success: jest.fn(), error: toastError }),
       },
     })
-    // See AC3/AC4: drain the initial fetch before asserting on DOM.
+    // The picker is intentionally hidden until the user asks to change assignment.
+    ;(app.one('[data-testid="assignee-change"]')?.props.onClick as () => void)()
     await flush()
     const choice = app.one('[data-testid="assignee-option-u1"]')
     expect(choice).toBeDefined()

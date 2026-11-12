@@ -6,6 +6,8 @@ import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
 import { splitMentions } from '~/lib/mentions'
+import { formatDateTime } from '~/lib/format-date-time'
+import { unref } from 'vue'
 
 interface Comment {
   id: string
@@ -25,7 +27,8 @@ const emit = defineEmits<{
 }>()
 
 const { $api } = useApi()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const commentLocale = () => unref(locale)
 const toast = useAppToast()
 // S4a: chips show the member's current name; a former member keeps the token's label.
 const memberNames = useProjectMemberNames(props.projectSlug)
@@ -135,7 +138,7 @@ async function deleteComment(comment: Comment) {
           >
             {{ t(`comments.types.${comment.type}`) }}
           </span>
-          <span class="text-xs text-muted-foreground">{{ comment.createdAt }}</span>
+          <time class="text-xs text-muted-foreground" :datetime="comment.createdAt" data-testid="comment-time">{{ formatDateTime(comment.createdAt, commentLocale()) }}</time>
         </div>
 
         <div v-if="editingId === comment.id" class="space-y-2">

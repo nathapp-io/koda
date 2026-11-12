@@ -74,7 +74,7 @@ describe('TicketFleetRuns (C9 §4, D461)', () => {
       links: [{ url: pr, linkType: 'pr', prState: 'merged' }],
     })
     await wait()
-    expect(app.textOf(inRow(app, 'j1', 'ticket-fleet-run-command')[0])).toBe('RUN')
+    expect(app.textOf(inRow(app, 'j1', 'ticket-fleet-run-command')[0])).toBe('Run')
     expect(inRow(app, 'j1', 'fleet-job-state')[0].props['data-state']).toBe('COMPLETED')
     expect(inRow(app, 'j1', 'ticket-fleet-run-link')[0].props.to).toBe('/web/fleet/jobs/j1')
     expect(app.textOf(inRow(app, 'j1', 'ticket-fleet-run-branch')[0])).toBe('feat/x (abcdef1)')
