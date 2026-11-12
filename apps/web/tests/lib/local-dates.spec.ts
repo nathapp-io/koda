@@ -1,5 +1,5 @@
 import { expect, test } from '@jest/globals'
-import { createSSRApp, createRenderer, h, nextTick, ref } from 'vue'
+import { computed, createSSRApp, createRenderer, h, nextTick, ref } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { formatDate, formatDateTime } from '../../lib/format-date-time'
 import { useLocalDates } from '../../lib/local-dates'
@@ -81,6 +81,34 @@ test.each([undefined, { locale: { value: 42 } }, { locale: {} }, { locale: { val
   app.mount(root)
   await nextTick()
   expect(dateTime?.(iso)).toBe(formatDateTime(iso, undefined))
+  app.unmount()
+})
+
+test('re-reads the locale while formatting, so a language switch updates the same mount', async () => {
+  // LanguageSwitcher calls setLocale in place (no_prefix routing, no reload), so a locale snapshotted
+  // in setup would keep formatting in the initial language. The computed stands for consumers such as
+  // the timeline's `rows`, which format inside a computed rather than in the template.
+  const locale = ref('en')
+  const app = renderer.createApp({ setup() {
+    const dates = useLocalDates({ locale })
+    const dayRow = computed(() => dates.date(iso))
+    return () => h('div', [
+      h('time', { datetime: iso }, dates.dateTime(iso)),
+      h('span', dates.date(iso)),
+      h('em', dayRow.value),
+    ])
+  } })
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  app.mount(root)
+  await nextTick()
+  const div = root.children[0] as Node
+  const [time, span, em] = [div.children[0] as Node, div.children[1] as Node, div.children[2] as Node]
+  expect([time.children.join(''), span.children.join(''), em.children.join('')])
+    .toEqual([formatDateTime(iso, 'en'), formatDate(iso, 'en'), formatDate(iso, 'en')])
+  locale.value = 'zh'
+  await nextTick()
+  expect([time.children.join(''), span.children.join(''), em.children.join('')])
+    .toEqual([formatDateTime(iso, 'zh'), formatDate(iso, 'zh'), formatDate(iso, 'zh')])
   app.unmount()
 })
 
