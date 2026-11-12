@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { clientIpHeaders, resolveClientIp, UNKNOWN_CLIENT_IP } from '~/server/utils/client-ip'
+import { clientIpHeaders, UNKNOWN_CLIENT_IP } from '~/server/utils/client-ip'
+import { resolveClientIp } from '~/server/utils/client-ip-resolve'
 
 /**
  * The API trusts the web container as a proxy and reads the client IP from
@@ -50,6 +51,11 @@ describe('clientIpHeaders', () => {
 
 describe('wiring', () => {
   const read = (...p: string[]) => readFileSync(path.join(__dirname, '..', '..', ...p), 'utf-8')
+
+  test('the module useApi shares with the browser imports no Node built-in (the dev client crashed on node:net)', () => {
+    expect(read('composables', 'useApi.ts')).toMatch(/from '~\/server\/utils\/client-ip'/)
+    expect(read('server', 'utils', 'client-ip.ts')).not.toMatch(/(from|import|require)\s*\(?\s*['"](node:|net['"])/)
+  })
 
   test('server middleware stores the resolved client IP on every event', () => {
     expect(read('server', 'middleware', 'client-ip.ts')).toMatch(

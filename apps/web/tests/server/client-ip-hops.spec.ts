@@ -1,4 +1,4 @@
-import { parseTrustedProxyHops, resolveClientIp } from '~/server/utils/client-ip'
+import { parseTrustedProxyHops, resolveClientIp } from '~/server/utils/client-ip-resolve'
 
 /**
  * #444 #445: with N trusted reverse proxies in front of this server, the client is the N-th

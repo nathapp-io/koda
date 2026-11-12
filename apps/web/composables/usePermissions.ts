@@ -41,6 +41,29 @@ export interface Permissions {
   refresh: () => Promise<void>
 }
 
+/** The slice of the Nuxt app `getCachedData` reads. */
+interface CacheSource {
+  isHydrating?: boolean
+  payload: { data: Record<string, unknown> }
+}
+
+/**
+ * One `/me/permissions` read per scope per server render. Vue SSR awaits a parent's serverPrefetch
+ * before rendering its children, so a child instance of the same key (CommandPalette inside the layout)
+ * starts after the parent's read has resolved, when 'defer' has nothing in flight to share; Nuxt then
+ * fetches again unless getCachedData answers. Only an initial fetch is served from the payload: on the
+ * server it reuses what this render already fetched (the payload is per request), and while hydrating it
+ * reads the server's answer as Nuxt does by default. A client navigation and every refresh, hydrating or
+ * not, read fresh keys. Nuxt skips its purge for a custom getCachedData, so a stale entry may outlive an
+ * unmount; it is never read, because the client reads the payload only while hydrating a fresh server
+ * render. (No static.data fallback: these keys are per user and never prerendered.)
+ */
+export function permissionsCachedData(key: string, nuxtApp: CacheSource, ctx: { cause: string }): PermissionKeys | undefined {
+  if (ctx.cause !== 'initial') return undefined
+  if (nuxtApp.isHydrating || import.meta.server) return nuxtApp.payload.data[key] as PermissionKeys | undefined
+  return undefined
+}
+
 /**
  * Reads `/me/permissions` for one scope. `project` null means the global scope, which is the same
  * route without the query — the API answers global keys when no project is named.
@@ -57,9 +80,13 @@ function usePermissionsFor(key: string, project: string | null): Permissions {
       // A malformed answer closes every gate instead of unlocking anything.
       return Array.isArray(keys) ? [...keys] : []
     },
-    // 'defer': a second same-key instance in one render reuses the read in flight instead of
-    // aborting it and starting another (Nuxt's default 'cancel'), so one render reads each scope once.
-    { default: () => [], dedupe: 'defer' },
+    {
+      default: () => [],
+      // 'defer': a second same-key instance reuses a read still in flight instead of aborting it and
+      // starting another (Nuxt's default 'cancel').
+      dedupe: 'defer',
+      getCachedData: permissionsCachedData,
+    },
   )
 
   return {

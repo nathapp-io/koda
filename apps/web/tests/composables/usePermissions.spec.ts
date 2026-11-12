@@ -150,6 +150,79 @@ describe('web-ssr-data-loading US-001: permission reads dedupe by deferring', ()
     expect(optionsOf('permissions-project-web')?.dedupe).toBe('defer')
   })
 
+  describe('getCachedData: one read per scope per server render', () => {
+    /**
+     * Vue SSR awaits a parent's serverPrefetch before rendering its children, so a child instance of the
+     * same key (CommandPalette inside the layout) starts after the parent's read has resolved; Nuxt then
+     * calls initialFetch() again and, with the default getCachedData, reads a second time. Serving the
+     * value this render already fetched from the payload makes that child reuse it.
+     */
+    type CacheFn = (key: string, nuxtApp: unknown, ctx: { cause: string }) => unknown
+    const cacheOf = (key: string): CacheFn => optionsOf(key)?.getCachedData as CacheFn
+    const app = (data: Record<string, unknown>, isHydrating = false) => ({ isHydrating, payload: { data }, static: { data: {} } })
+
+    afterEach(() => { globals.__JEST_IS_SERVER__ = false })
+
+    async function setup(): Promise<CacheFn> {
+      install(async () => ({ scope: 'global', projectSlug: null, keys: [] }))
+      useGlobalPermissions()
+      await settle()
+      return cacheOf('permissions-global')
+    }
+
+    test('server, initial fetch: returns the keys this render already fetched', async () => {
+      const cache = await setup()
+      globals.__JEST_IS_SERVER__ = true
+      expect(cache('permissions-global', app({ 'permissions-global': ['user.read'] }), { cause: 'initial' })).toEqual(['user.read'])
+    })
+
+    test('server, initial fetch with nothing fetched yet: undefined, so the first instance reads', async () => {
+      const cache = await setup()
+      globals.__JEST_IS_SERVER__ = true
+      expect(cache('permissions-global', app({}), { cause: 'initial' })).toBeUndefined()
+    })
+
+    test('server, manual refresh: undefined, so a refresh always re-reads', async () => {
+      const cache = await setup()
+      globals.__JEST_IS_SERVER__ = true
+      expect(cache('permissions-global', app({ 'permissions-global': ['user.read'] }), { cause: 'refresh:manual' })).toBeUndefined()
+    })
+
+    test('client hydrating: returns the server payload, as Nuxt does by default', async () => {
+      const cache = await setup()
+      expect(cache('permissions-global', app({ 'permissions-global': ['user.read'] }, true), { cause: 'initial' })).toEqual(['user.read'])
+    })
+
+    test('client hydrating, manual refresh: undefined, so a refresh during hydration still re-reads', async () => {
+      const cache = await setup()
+      expect(cache('permissions-global', app({ 'permissions-global': ['user.read'] }, true), { cause: 'refresh:manual' })).toBeUndefined()
+    })
+
+    test('client hydrating with nothing in the payload: undefined', async () => {
+      const cache = await setup()
+      expect(cache('permissions-global', app({}, true), { cause: 'initial' })).toBeUndefined()
+    })
+
+    test('server, refresh:hook: undefined', async () => {
+      const cache = await setup()
+      globals.__JEST_IS_SERVER__ = true
+      expect(cache('permissions-global', app({ 'permissions-global': ['user.read'] }), { cause: 'refresh:hook' })).toBeUndefined()
+    })
+
+    test('client navigation (not hydrating): undefined, so a later page reads fresh keys', async () => {
+      const cache = await setup()
+      expect(cache('permissions-global', app({ 'permissions-global': ['user.read'] }), { cause: 'initial' })).toBeUndefined()
+    })
+
+    test('the project scope gets the same cache function', async () => {
+      install(async () => ({ scope: 'project', projectSlug: 'web', keys: [] }))
+      useProjectPermissions('web')
+      await settle()
+      globals.__JEST_IS_SERVER__ = true
+      expect(cacheOf('permissions-project-web')('permissions-project-web', app({ 'permissions-project-web': ['ticket.create'] }), { cause: 'initial' })).toEqual(['ticket.create'])
+    })
+  })
+
   test('a manual refresh re-reads even while a read is in flight (it overrides defer with cancel)', async () => {
     const refreshArgs: unknown[] = []
     globals.useApi = () => ({ $api: { get: jest.fn(async () => ({ keys: [] })) } })
