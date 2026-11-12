@@ -154,7 +154,7 @@ function featureLabel(job: FleetJobDto): string {
         type="button"
         :aria-pressed="filters.state === chip.value"
         :data-testid="`fleet-filter-chip-${chip.value}`"
-        :class="['rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', filters.state === chip.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground']"
+        :class="['h-11 sm:h-8 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', filters.state === chip.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground']"
         @click="filters.state = chip.value"
       >
         {{ chip.label }}

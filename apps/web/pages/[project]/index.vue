@@ -94,7 +94,7 @@ function handleCreated() {
         <Button @click="showCreateDialog = true">
           {{ t('tickets.newTicket') }}
         </Button>
-        <Button @click="showImportDialog = true">
+        <Button variant="outline" @click="showImportDialog = true">
           {{ t('vcs.importIssue.button') }}
         </Button>
       </template>
@@ -119,7 +119,7 @@ function handleCreated() {
             type="button"
             :aria-pressed="priorityFilter === p"
             :class="[
-              'h-9 cursor-pointer rounded-md border px-3 text-xs font-medium transition-colors',
+              'h-11 sm:h-9 cursor-pointer rounded-md border px-3 text-xs font-medium transition-colors',
               priorityFilter === p ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-card text-muted-foreground hover:text-foreground',
             ]"
             @click="priorityFilter = priorityFilter === p ? null : p"
