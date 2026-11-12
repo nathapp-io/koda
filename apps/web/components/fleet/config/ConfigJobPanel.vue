@@ -38,7 +38,7 @@ const filesLabel = computed(() => (outcome.value === 'conflict' || outcome.value
     </div>
 
     <p v-if="prUrl">
-      <a :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-primary underline-offset-4 hover:underline" data-testid="config-panel-pr">{{ prUrl }}</a>
+      <a :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-link underline-offset-4 hover:underline" data-testid="config-panel-pr">{{ prUrl }}</a>
     </p>
 
     <div v-if="filesLabel && resultFiles.length > 0">

@@ -22,7 +22,7 @@ function mount(activity: HomeActivity[]) {
 }
 
 describe('HomeActivityList', () => {
-  test('words the event type and shows the raw action code and project', () => {
+  test('words the event type, words the action code (raw code kept as a tooltip) and shows the project', () => {
     const app = mount([
       event(),
       event({ id: 'e2', eventType: 'agent_event', action: 'CODE_INDEXED', ticketId: null }),
@@ -32,7 +32,9 @@ describe('HomeActivityList', () => {
     expect(text).toContain('Ticket')
     expect(text).toContain('Agent')
     expect(text).toContain('Decision')
-    expect(text).toContain('STATUS_CHANGE')
+    expect(text).toContain('Status change')
+    expect(text).not.toContain('STATUS_CHANGE')
+    expect(app.find('[title="STATUS_CHANGE"]')).toHaveLength(1)
     expect(text).toContain('acme')
     expect(app.find('[data-testid="home-activity-decision_event"]')).toHaveLength(1)
     app.unmount()

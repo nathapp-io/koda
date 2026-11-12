@@ -102,7 +102,7 @@ onMounted(() => { void reload() })
               <td class="p-3">{{ item.attempts }}</td>
               <td class="p-3">{{ item.lastError ?? '—' }}</td>
               <td class="p-3">
-                <button v-if="canRetry(item)" type="button" class="text-sm text-primary hover:underline" @click="retryEvent(item.id)">
+                <button v-if="canRetry(item)" type="button" class="text-sm text-link hover:underline" @click="retryEvent(item.id)">
                   {{ t('outbox.retry.action') }}
                 </button>
               </td>

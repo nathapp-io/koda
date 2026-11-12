@@ -26,7 +26,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
       <tbody>
         <tr v-for="row in rows" :key="row.jobId" :data-testid="`${testid}-row`" :data-job="row.jobId">
           <td class="py-1 break-all">
-            <NuxtLink :to="`/${slug}/fleet/jobs/${row.jobId}`" class="text-primary underline-offset-4 hover:underline">{{ row.featureName }}</NuxtLink>
+            <NuxtLink :to="`/${slug}/fleet/jobs/${row.jobId}`" class="text-link underline-offset-4 hover:underline">{{ row.featureName }}</NuxtLink>
           </td>
           <td class="py-1">{{ row.command }}</td>
           <td class="py-1">{{ stateLabel(row.state) }}</td>

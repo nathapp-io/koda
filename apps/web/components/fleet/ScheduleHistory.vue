@@ -19,7 +19,7 @@
       <TableBody>
         <TableRow v-for="row in rows" :key="row.job.id" :data-testid="`fleet-schedule-run-${row.job.id}`">
           <TableCell>
-            <NuxtLink :to="`/${slug}/fleet/jobs/${row.job.id}`" class="font-mono text-xs text-primary underline-offset-4 hover:underline">{{ row.job.id.slice(0, 8) }}</NuxtLink>
+            <NuxtLink :to="`/${slug}/fleet/jobs/${row.job.id}`" class="font-mono text-xs text-link underline-offset-4 hover:underline">{{ row.job.id.slice(0, 8) }}</NuxtLink>
           </TableCell>
           <TableCell><FleetJobStateBadge :state="row.job.state" /></TableCell>
           <TableCell data-testid="fleet-schedule-run-stories">{{ storiesText(row) }}</TableCell>

@@ -30,7 +30,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.common.duration': ['s', 'm', 'h', 'd'],
   'fleet.repos.provider': ['github', 'gitlab'],
   'fleet.runners.chip.kind': ['api-key', 'oauth', 'exec', 'ambient', 'none'],
-  'fleet.command': ['AGENT', 'CONFIG_DRIFT', 'CONFIG_EDIT', 'FIX', 'PLAN', 'REVIEW', 'RUN'],
+  'fleet.command': ['AGENT', 'CONFIG_DRIFT', 'CONFIG_EDIT', 'FIX', 'PLAN', 'REVIEW', 'RUN', 'THREAD'],
   'fleet.fixOutcome': ['nothing', 'pushed'],
   'fleet.rulings.state': ['pending', 'applied', 'skipped', 'replaced'],
   'fleet.rulings.disposition': ['fixed', 'waived', 'overridden', 'confirmed', 'verified'],

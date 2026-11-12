@@ -129,7 +129,7 @@ async function finish(): Promise<void> {
         </TableBody>
       </Table>
     </div>
-    <NuxtLink v-if="finishApproval" :to="inboxHref(slug, finishApproval)" class="text-primary underline" data-testid="finish-approval">{{ t('fleet.rulings.finishPendingApproval', { id: finishApproval }) }}</NuxtLink>
+    <NuxtLink v-if="finishApproval" :to="inboxHref(slug, finishApproval)" class="text-link underline" data-testid="finish-approval">{{ t('fleet.rulings.finishPendingApproval', { id: finishApproval }) }}</NuxtLink>
     <Button v-if="canDispatch" :disabled="finishing || finishApproval !== null" data-testid="fleet-job-finish" @click="finish()">{{ t('fleet.rulings.finish') }}</Button>
   </section>
 </template>

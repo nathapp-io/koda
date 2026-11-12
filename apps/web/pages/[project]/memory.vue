@@ -190,7 +190,7 @@ function formatConfidence(value: number) {
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">
               <template v-if="item.kind === 'NOTE'">
                 <p>{{ item.description }}</p>
-                <button type="button" class="mt-1 text-primary underline" :aria-expanded="expandedNotes.has(item.id)" @click="toggleNote(item.id)">{{ t('memory.expand') }}</button>
+                <button type="button" class="mt-1 text-link underline" :aria-expanded="expandedNotes.has(item.id)" @click="toggleNote(item.id)">{{ t('memory.expand') }}</button>
                 <p v-if="expandedNotes.has(item.id)" class="mt-2 whitespace-pre-wrap">{{ item.object }}</p>
               </template>
               <template v-else>{{ item.object }}</template>

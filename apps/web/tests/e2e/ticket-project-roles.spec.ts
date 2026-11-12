@@ -78,7 +78,7 @@ test.describe('Ticket actions follow the project role (#144, M25)', () => {
     await expect(dialog.getByText('Reason for closing')).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Confirm' })).toBeDisabled();
     await confirmTransitionDialog(page, 'closing as duplicate');
-    await expect(page.getByText(/^CLOSED$/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('ticket-status-chip')).toHaveText('Closed', { timeout: 5000 });
     await expect(page.getByText('closing as duplicate')).toBeVisible();
   });
 

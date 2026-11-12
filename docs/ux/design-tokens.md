@@ -65,6 +65,10 @@ classes through `tailwind.config.ts`. Never hardcode hex or palette classes (`bg
 `background foreground card muted accent primary destructive border input ring` — one indigo
 accent (`--primary: 243 75% 55%` light / `243 80% 64%` dark); semantic colors only for state.
 
+`--primary` is a fill color. Text and icon accents on a surface (links, "New ticket", active icons) use
+`text-link` (`--link`: equal to primary in light, `243 80% 74%` in dark) so they clear 4.5:1 on dark
+surfaces; bare `text-primary` is rejected by `tests/lib/token-contrast.spec.ts`.
+
 ### Ticket status tokens (`--status-*`)
 | Token | Light | Dark | Meaning |
 |:------|:------|:-----|:--------|

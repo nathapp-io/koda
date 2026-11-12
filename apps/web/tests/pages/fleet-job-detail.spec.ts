@@ -431,6 +431,13 @@ describe('FIX outcomes', () => {
     m.app.unmount()
   })
 
+  test('a held FIX with no runner reason reads "PR not ready" without a dangling colon', async () => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixReady: { markedReady: false } }), records: [] })
+    await m.settle()
+    expect(m.app.textOf(m.byId('fleet-job-fix-ready')[0]).trim()).toBe('PR not ready')
+    m.app.unmount()
+  })
+
   test('AC-3: a FIX with no ready result renders no ready line', async () => {
     const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixReady: null }), records: [] })
     await m.settle()

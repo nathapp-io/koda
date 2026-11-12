@@ -339,12 +339,12 @@
     "loadMore": "加载更多",
     "live": { "deleted": "此工单已被删除。" },
     "status": {
-      "CREATED": "CREATED",
-      "VERIFIED": "VERIFIED",
-      "IN_PROGRESS": "IN_PROGRESS",
-      "VERIFY_FIX": "VERIFY_FIX",
-      "CLOSED": "CLOSED",
-      "REJECTED": "REJECTED"
+      "CREATED": "已创建",
+      "VERIFIED": "已验证",
+      "IN_PROGRESS": "进行中",
+      "VERIFY_FIX": "待验证修复",
+      "CLOSED": "已关闭",
+      "REJECTED": "已拒绝"
     },
     "priority": {
       "CRITICAL": "紧急",
@@ -1276,7 +1276,8 @@
       "CONFIG_EDIT": "配置修改",
       "CONFIG_DRIFT": "漂移检查",
       "REVIEW": "PR 评审",
-      "FIX": "PR 修复"
+      "FIX": "PR 修复",
+      "THREAD": "线程轮次"
     },
     "agentResult": {
       "title": "代理任务结果",
@@ -1297,6 +1298,7 @@
     "fixReady": {
       "markedReady": "PR 已标记为可合并",
       "held": "PR 尚未就绪：{reason}",
+      "heldNoReason": "PR 尚未就绪",
       "replies": "已回复 {count} 条",
       "resolved": "已解决 {count} 条"
     },

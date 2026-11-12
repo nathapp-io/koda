@@ -26,7 +26,7 @@ const shortPath = (path: string): string => path.replace(/^\.nax\//, '')
             @click="emit('select', f.path)"
           >
             <span :class="['truncate font-mono text-xs', f.status === 'deleted' ? 'line-through text-muted-foreground' : '']">{{ shortPath(f.path) }}</span>
-            <span v-if="f.status !== 'unchanged'" data-testid="nax-file-marker" class="ml-auto shrink-0 text-xs text-primary">{{ t(`fleet.config.status.${f.status}`) }}</span>
+            <span v-if="f.status !== 'unchanged'" data-testid="nax-file-marker" class="ml-auto shrink-0 text-xs text-link">{{ t(`fleet.config.status.${f.status}`) }}</span>
           </button>
         </li>
       </ul>

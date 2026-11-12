@@ -53,15 +53,14 @@ onMounted(() => {
 
 <template>
   <div class="space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <MessagesSquare class="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-        <h1 class="text-xl font-semibold">{{ t('fleet.threads.list.title') }}</h1>
-      </div>
-      <NuxtLink v-if="canCreate" :to="`/${slug}/threads/new`" class="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
-        {{ t('fleet.threads.list.newThread') }}
-      </NuxtLink>
-    </div>
+    <PageHeader :title="t('fleet.threads.list.title')">
+      <template #icon><MessagesSquare class="h-5 w-5" aria-hidden="true" /></template>
+      <template #actions>
+        <NuxtLink v-if="canCreate" :to="`/${slug}/threads/new`" class="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
+          {{ t('fleet.threads.list.newThread') }}
+        </NuxtLink>
+      </template>
+    </PageHeader>
 
     <div class="inline-flex rounded-md border border-border p-1" role="group" :aria-label="t('fleet.threads.list.status')">
       <button

@@ -160,7 +160,7 @@ useProjectEvents(slug, {
             class="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm hover:bg-muted"
             data-testid="fleet-log-download"
           >{{ t('fleet.logs.download') }}</a>
-          <NuxtLink :to="`/${slug}/fleet/jobs/${jobId}`" class="inline-flex h-9 items-center px-3 text-sm text-primary underline-offset-4 hover:underline" data-testid="fleet-log-back">
+          <NuxtLink :to="`/${slug}/fleet/jobs/${jobId}`" class="inline-flex h-9 items-center px-3 text-sm text-link underline-offset-4 hover:underline" data-testid="fleet-log-back">
             {{ t('fleet.logs.back') }}
           </NuxtLink>
         </template>

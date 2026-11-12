@@ -14,7 +14,7 @@ const sorted = computed(() => props.repos.slice().sort((a, b) => `${a.owner}/${a
     <ul class="mt-2 divide-y divide-border">
       <li v-for="repo in sorted" :key="repo.id" class="flex items-center justify-between gap-3 py-2 text-sm">
         <span class="truncate">{{ repo.owner }}/{{ repo.name }} <span class="text-muted-foreground">@ {{ repo.defaultBranch }}</span></span>
-        <NuxtLink :to="`/${slug}/fleet/repos/${repo.id}/config`" class="shrink-0 text-primary underline-offset-4 hover:underline" data-testid="fleet-repo-config-link">
+        <NuxtLink :to="`/${slug}/fleet/repos/${repo.id}/config`" class="shrink-0 text-link underline-offset-4 hover:underline" data-testid="fleet-repo-config-link">
           {{ t('fleet.config.repos.open') }}
         </NuxtLink>
       </li>

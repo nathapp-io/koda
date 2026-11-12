@@ -100,13 +100,13 @@ async function confirmUnlink(): Promise<void> {
         <div class="flex flex-wrap items-center gap-2">
           <Badge variant="outline" data-testid="ticket-fleet-run-command">{{ row.run.command }}</Badge>
           <FleetJobStateBadge :state="row.run.state" />
-          <NuxtLink :to="`/${projectSlug}/fleet/jobs/${row.run.id}`" class="min-w-0 truncate font-medium text-primary underline-offset-4 hover:underline" data-testid="ticket-fleet-run-link">{{ row.run.feature }}</NuxtLink>
+          <NuxtLink :to="`/${projectSlug}/fleet/jobs/${row.run.id}`" class="min-w-0 truncate font-medium text-link underline-offset-4 hover:underline" data-testid="ticket-fleet-run-link">{{ row.run.feature }}</NuxtLink>
           <span class="ml-auto text-xs text-muted-foreground"><FleetAge :iso="row.at" :now="now" mode="ago" /></span>
         </div>
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span v-if="row.run.resultBranch" class="break-all font-mono" data-testid="ticket-fleet-run-branch">{{ row.run.resultBranch }}<template v-if="row.sha"> ({{ row.sha }})</template></span>
           <span v-if="row.run.resultPrUrl" class="flex items-center gap-1.5" data-testid="ticket-fleet-run-pr">
-            <a v-if="row.prUrl" :href="row.prUrl" target="_blank" rel="noopener noreferrer" class="text-primary underline-offset-4 hover:underline">{{ t('fleet.tickets.pr') }}</a>
+            <a v-if="row.prUrl" :href="row.prUrl" target="_blank" rel="noopener noreferrer" class="text-link underline-offset-4 hover:underline">{{ t('fleet.tickets.pr') }}</a>
             <span v-else class="break-all">{{ row.run.resultPrUrl }}</span>
             <Badge v-if="row.prState" variant="outline" data-testid="ticket-fleet-run-pr-state" :data-state="row.prState">{{ t(`tickets.pr.status.${row.prState}`) }}</Badge>
           </span>

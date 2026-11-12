@@ -46,7 +46,7 @@ function runnerText(job: DashboardActiveJob): string {
             <TableCell>
               <NuxtLink
                 :to="jobPath(job.projectSlug, job.id)"
-                class="break-all font-medium text-primary underline-offset-4 hover:underline"
+                class="break-all font-medium text-link underline-offset-4 hover:underline"
                 data-testid="fleet-dashboard-active-link"
               >{{ job.feature }}</NuxtLink>
               <Badge v-if="job.pendingApprovals > 0" variant="destructive" class="ml-2" data-testid="fleet-dashboard-active-approvals">

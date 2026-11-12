@@ -313,12 +313,13 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
             <template v-if="job.fixReady.replied !== undefined"> {{ t('fleet.fixReady.replies', { count: job.fixReady.replied }) }}</template>
             <template v-if="job.fixReady.resolved !== undefined"> {{ t('fleet.fixReady.resolved', { count: job.fixReady.resolved }) }}</template>
           </template>
-          <template v-else>{{ t('fleet.fixReady.held', { reason: job.fixReady.readyHeld ?? '' }) }}</template>
+          <template v-else-if="job.fixReady.readyHeld">{{ t('fleet.fixReady.held', { reason: job.fixReady.readyHeld }) }}</template>
+          <template v-else>{{ t('fleet.fixReady.heldNoReason') }}</template>
         </span>
         <span v-if="job.stateReason" class="text-sm text-muted-foreground" :title="job.stateReason" data-testid="fleet-job-state-reason">
           <template v-if="budgetPolicyId">
             {{ t('fleet.jobs.detail.budgetStop') }}
-            <NuxtLink :to="`/${slug}/fleet/budgets`" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-budget-link">{{ t('fleet.jobs.detail.budgetStopLink') }}</NuxtLink>
+            <NuxtLink :to="`/${slug}/fleet/budgets`" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-budget-link">{{ t('fleet.jobs.detail.budgetStopLink') }}</NuxtLink>
           </template>
           <template v-else>{{ job.stateReason }}</template>
         </span>
@@ -327,7 +328,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         </span>
         <span v-if="job.scheduleId" class="text-sm text-muted-foreground" data-testid="fleet-job-schedule">
           {{ t('fleet.jobs.detail.fromSchedule') }}
-          <NuxtLink :to="`/${slug}/fleet/schedules/${job.scheduleId}`" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-schedule-link">{{ t('fleet.jobs.detail.openSchedule') }}</NuxtLink>
+          <NuxtLink :to="`/${slug}/fleet/schedules/${job.scheduleId}`" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-schedule-link">{{ t('fleet.jobs.detail.openSchedule') }}</NuxtLink>
         </span>
         <span v-if="job.coalescedCount > 0" class="text-sm text-muted-foreground" data-testid="fleet-job-coalesced">
           {{ t('fleet.jobs.detail.coalesced', { count: job.coalescedCount }) }}
@@ -342,7 +343,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 
       <div v-if="job.pendingApprovals > 0" class="flex flex-wrap items-center gap-3 rounded-md border border-primary p-4 text-sm" data-testid="fleet-job-approval-callout">
         <span class="font-medium">{{ t('fleet.jobs.detail.waitingApproval', { count: job.pendingApprovals }) }}</span>
-        <NuxtLink :to="reviewHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-approval-review">{{ t('fleet.jobs.detail.reviewApproval') }}</NuxtLink>
+        <NuxtLink :to="reviewHref" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-approval-review">{{ t('fleet.jobs.detail.reviewApproval') }}</NuxtLink>
       </div>
 
       <section v-if="requeueResult" class="space-y-2" data-testid="fleet-job-requeue-result">
@@ -369,7 +370,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <div>
           <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.pr') }}</dt>
           <dd>
-            <a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-primary underline-offset-4 hover:underline" data-testid="fleet-job-pr">{{ prUrl }}</a>
+            <a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-link underline-offset-4 hover:underline" data-testid="fleet-job-pr">{{ prUrl }}</a>
             <span v-else class="break-all">{{ job.resultPrUrl ?? '-' }}</span>
           </dd>
         </div>

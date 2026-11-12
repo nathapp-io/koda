@@ -53,7 +53,7 @@ const tiles = computed(() => (props.snapshot ? dashboardTiles(props.snapshot.cou
           <NuxtLink
             v-if="scope === 'global'"
             to="/admin/fleet/credentials"
-            class="text-sm text-primary underline-offset-4 hover:underline"
+            class="text-sm text-link underline-offset-4 hover:underline"
             data-testid="fleet-dashboard-credentials-link"
           >{{ t('fleet.dashboard.runners.board') }}</NuxtLink>
         </div>

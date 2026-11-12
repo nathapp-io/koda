@@ -32,7 +32,7 @@
         <span class="text-sm font-semibold">{{ t('notifications.bell.title') }}</span>
         <button
           type="button"
-          class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          class="text-xs text-link hover:underline disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="unreadCount === 0"
           data-testid="notification-mark-all"
           @click="onMarkAll"
@@ -59,7 +59,7 @@
         </li>
       </ul>
       <div class="mt-2 flex items-center justify-between border-t border-border px-2 pt-2 text-xs">
-        <NuxtLink to="/notifications" class="text-primary hover:underline" data-testid="notification-view-all" @click="open = false">
+        <NuxtLink to="/notifications" class="text-link hover:underline" data-testid="notification-view-all" @click="open = false">
           {{ t('notifications.viewAll') }}
         </NuxtLink>
         <NuxtLink to="/settings/notifications" class="text-muted-foreground hover:underline" @click="open = false">

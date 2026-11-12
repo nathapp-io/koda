@@ -12,7 +12,7 @@ const { t } = useI18n()
       <template v-else-if="notice.key === 'truncated'">{{ t('fleet.logs.notice.truncated', { size: formatBytes(truncatedAt) }) }}</template>
       <template v-else-if="notice.key === 'legacy'">
         {{ t('fleet.logs.notice.legacy') }}
-        <NuxtLink :to="timelineHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-log-notice-timeline">{{ t('fleet.logs.legacyLink') }}</NuxtLink>
+        <NuxtLink :to="timelineHref" class="text-link underline-offset-4 hover:underline" data-testid="fleet-log-notice-timeline">{{ t('fleet.logs.legacyLink') }}</NuxtLink>
       </template>
       <template v-else>{{ t(`fleet.logs.notice.${notice.key}`) }}</template>
     </p>

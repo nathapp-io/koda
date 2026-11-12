@@ -315,7 +315,7 @@ async function confirmPrConflict(): Promise<void> {
 
     <div v-if="activeJob" class="rounded-md border border-border p-4 text-sm" data-testid="dispatch-conflict">
       {{ t('fleet.dispatch.conflict') }}
-      <NuxtLink :to="`/${slug}/fleet/jobs/${activeJob.id}`" class="font-medium text-primary underline-offset-4 hover:underline" data-testid="dispatch-conflict-link">
+      <NuxtLink :to="`/${slug}/fleet/jobs/${activeJob.id}`" class="font-medium text-link underline-offset-4 hover:underline" data-testid="dispatch-conflict-link">
         {{ t('fleet.dispatch.conflictLink') }}
       </NuxtLink>
     </div>
@@ -330,7 +330,7 @@ async function confirmPrConflict(): Promise<void> {
       </div>
     </div>
 
-    <NuxtLink v-if="result && 'permissionKey' in result" :to="inboxHref(slug, result.id)" class="text-primary underline">{{ t('fleet.dispatch.pendingApproval', { id: result.id }) }}</NuxtLink>
+    <NuxtLink v-if="result && 'permissionKey' in result" :to="inboxHref(slug, result.id)" class="text-link underline">{{ t('fleet.dispatch.pendingApproval', { id: result.id }) }}</NuxtLink>
     <FleetPlacementResult v-if="result && 'job' in result" :slug="slug" :result="result" :runner-name="options.runnerName" />
   </div>
 </template>

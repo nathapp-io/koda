@@ -46,7 +46,7 @@ const rows = computed(() =>
           <NuxtLink
             v-if="row.link"
             :to="row.link"
-            class="break-all font-medium text-primary underline-offset-4 hover:underline"
+            class="break-all font-medium text-link underline-offset-4 hover:underline"
             data-testid="fleet-dashboard-attention-link"
           >{{ row.item.subjectName }}</NuxtLink>
           <span v-else class="break-all font-medium">{{ row.item.subjectName }}</span>

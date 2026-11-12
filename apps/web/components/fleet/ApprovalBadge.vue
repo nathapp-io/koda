@@ -16,14 +16,15 @@
     <button
       v-if="notifications.supported.value"
       type="button"
-      class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+      class="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
       :aria-label="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
       :title="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
       :aria-pressed="notifications.enabled.value"
       data-testid="fleet-approval-notifications"
       @click="notifications.toggleBrowserNotifications"
     >
-      <Bell class="h-4 w-4" />
+      <BellRing v-if="notifications.enabled.value" class="h-4 w-4" aria-hidden="true" />
+      <BellOff v-else class="h-4 w-4" aria-hidden="true" />
     </button>
   </div>
 </template>
@@ -47,7 +48,7 @@
  *   and retries at the next poll or event.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Bell, Inbox } from 'lucide-vue-next'
+import { BellOff, BellRing, Inbox } from 'lucide-vue-next'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
 import { useApprovalRequestNotifications } from '~/composables/useApprovalRequestNotifications'
 import { isForbidden } from '~/composables/useFleetBudgetPage'

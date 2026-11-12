@@ -339,12 +339,12 @@
     "loadMore": "Load more",
     "live": { "deleted": "This ticket was deleted." },
     "status": {
-      "CREATED": "CREATED",
-      "VERIFIED": "VERIFIED",
-      "IN_PROGRESS": "IN_PROGRESS",
-      "VERIFY_FIX": "VERIFY_FIX",
-      "CLOSED": "CLOSED",
-      "REJECTED": "REJECTED"
+      "CREATED": "Created",
+      "VERIFIED": "Verified",
+      "IN_PROGRESS": "In progress",
+      "VERIFY_FIX": "Verify fix",
+      "CLOSED": "Closed",
+      "REJECTED": "Rejected"
     },
     "priority": {
       "CRITICAL": "Critical",
@@ -1276,7 +1276,8 @@
       "CONFIG_EDIT": "Config edit",
       "CONFIG_DRIFT": "Drift check",
       "REVIEW": "PR review",
-      "FIX": "PR fix"
+      "FIX": "PR fix",
+      "THREAD": "Thread turn"
     },
     "agentResult": {
       "title": "Agent result",
@@ -1297,6 +1298,7 @@
     "fixReady": {
       "markedReady": "PR marked ready",
       "held": "PR not ready: {reason}",
+      "heldNoReason": "PR not ready",
       "replies": "{count} replies",
       "resolved": "{count} resolved"
     },

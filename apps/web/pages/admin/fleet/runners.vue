@@ -83,7 +83,7 @@ onBeforeUnmount(polling.stop)
       <template #actions>
         <NuxtLink
           to="/admin/fleet/credentials"
-          class="mr-4 self-center text-sm text-primary underline-offset-4 hover:underline"
+          class="mr-4 self-center text-sm text-link underline-offset-4 hover:underline"
           data-testid="fleet-runners-credentials-link"
         >{{ t('fleet.runners.actions.credentials') }}</NuxtLink>
         <Button :disabled="adminOnly" @click="enrollOpen = true">

@@ -56,14 +56,11 @@ function ticketsForStatus(status: string): Ticket[] {
             <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>
-          <!-- dark:text-ring: --primary at its dark step is only 3.5:1 on the
-               muted column; the ring token is the same hue stepped bright
-               enough to clear WCAG AA (4.8:1). -->
           <Button
             v-if="status === 'CREATED'"
             variant="ghost"
             size="sm"
-            class="text-xs text-primary hover:underline whitespace-nowrap dark:text-ring"
+            class="text-xs text-link hover:underline whitespace-nowrap"
             @click="emit('create')"
           >
             {{ t('tickets.newTicket') }}

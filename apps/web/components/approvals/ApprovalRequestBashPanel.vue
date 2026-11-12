@@ -3,7 +3,7 @@
     <NuxtLink
       v-if="jobHref !== null"
       :to="jobHref"
-      class="text-primary underline-offset-4 hover:underline"
+      class="text-link underline-offset-4 hover:underline"
       data-testid="approval-request-bash-job"
     >{{ t('approvals.fleet.bash.openJob') }}</NuxtLink>
 
