@@ -110,6 +110,7 @@ onMounted(() => { void reload() })
           <input
             :id="`notification-pref-email-${row.category}`"
             :data-testid="`notification-pref-email-${row.category}`"
+            :aria-label="t('notifications.preferences.emailFor', { category: t(`notifications.categories.${row.category}.label`) })"
             type="checkbox"
             class="h-4 w-4 accent-primary"
             :checked="row.email"

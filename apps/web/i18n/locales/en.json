@@ -2696,6 +2696,7 @@
       "subtitle": "Choose which notifications reach your inbox.",
       "inApp": "In-app",
       "email": "Email",
+      "emailFor": "Email: {category}",
       "emailEnabled": "Email notifications",
       "emailUnavailable": "Email notifications are unavailable",
       "saved": "Notification settings saved"
