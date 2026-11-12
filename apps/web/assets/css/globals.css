@@ -23,6 +23,9 @@
     --border: 220 16% 89%;
     --input: 220 16% 86%;
     --ring: 243 75% 55%;
+    /* Text links and accent text on surfaces. Light equals --primary; dark is stepped up because
+       --primary must stay dark enough for white button text (see token-contrast.spec). */
+    --link: 243 75% 55%;
     --radius: 0.5rem;
     /* Status tokens: board dots, run states. Pair with a label, never color alone. */
     --status-todo: 220 9% 46%;
@@ -79,6 +82,7 @@
     --border: 224 18% 18%;
     --input: 224 18% 22%;
     --ring: 243 80% 70%;
+    --link: 243 80% 74%;
     --status-todo: 220 12% 62%;
     --status-active: 238 90% 74%;
     --status-review: 40 92% 58%;
@@ -123,6 +127,6 @@
 @layer components {
   /* S4a @mention chip (comments, descriptions, editor preview). The sanitizer keeps only this exact class. */
   .mention-chip {
-    @apply rounded bg-primary/10 px-1 font-medium text-primary;
+    @apply rounded bg-primary/10 px-1 font-medium text-link;
   }
 }

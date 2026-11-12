@@ -61,6 +61,10 @@ const PAIRS: Array<[string, string]> = [
   ['card', 'muted-foreground'],
   ['background', 'status-rejected'],
   ['card', 'status-rejected'],
+  ['background', 'link'],
+  ['card', 'link'],
+  ['muted', 'link'],
+  ['accent', 'link'],
 ]
 
 describe('design token contrast (WCAG AA)', () => {
@@ -98,6 +102,23 @@ describe('destructive text usage', () => {
       const rel = f.replace(root, '')
       return !FILL_CONTEXT_FILES.includes(rel)
     })
+    expect(offenders).toEqual([])
+  })
+})
+
+// `--primary` in dark mode is a fill color (white button text needs it dark), so as *text* on a dark
+// card it is 3.6:1. Text and icon accents use `text-link`, the stepped token pinned in PAIRS above.
+describe('primary text usage', () => {
+  test('no component uses bare text-primary', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { execSync } = require('child_process') as typeof import('child_process')
+    const root = join(__dirname, '../../')
+    const files = execSync(
+      `grep -rln "text-primary" ${root}components ${root}pages ${root}layouts ${root}assets ${root}lib || true`,
+      { encoding: 'utf8' },
+    ).split('\n').filter(Boolean)
+    const bareClass = /(^|[\s'"`:])text-primary(?![-\w])/
+    const offenders = files.filter((f: string) => bareClass.test(readFileSync(f, 'utf8'))).map((f: string) => f.replace(root, ''))
     expect(offenders).toEqual([])
   })
 })

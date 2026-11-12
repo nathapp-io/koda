@@ -56,7 +56,7 @@ function mountEnginePage(job: FleetJobDto, permissions: string[]) {
         events: jest.fn(async () => ({ records: [], total: 0, current: 1, size: 50, hasNext: false, hasPrev: false })),
         cancel: jest.fn(), requeue: jest.fn(), downloadBundle: jest.fn(),
       }),
-      useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => id, runnerName: (id: string | null) => id }),
+      useFleetDispatchOptions: () => ({ settled: ref(true), load: jest.fn(async () => undefined), repoName: (id: string) => id, runnerName: (id: string | null) => id }),
       useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
       useFleetRepoConfig: () => ({ submitRegenerate: jest.fn() }),
       useFleetJobLogs: () => ({ list: jest.fn(async () => ({ attempts: [] })) }),

@@ -56,7 +56,7 @@ const rows = computed(() => visibleTimelineEvents(props.events).map((event) => {
     <h2 class="text-lg font-semibold">{{ t('fleet.jobs.timeline.title') }}</h2>
     <ul v-if="logsHref && logAttempts.length > 0" class="space-y-1 text-sm">
       <li v-for="epoch in logAttempts" :key="epoch">
-        <NuxtLink :to="{ path: logsHref, query: { epoch: String(epoch) } }" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-timeline-logs">
+        <NuxtLink :to="{ path: logsHref, query: { epoch: String(epoch) } }" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-timeline-logs">
           {{ t('fleet.jobs.timeline.logs', { epoch }) }} &rarr;
         </NuxtLink>
       </li>

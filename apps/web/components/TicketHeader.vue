@@ -123,7 +123,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
-      <span :class="chipClass"><span :class="[dotClass, STATUS_DOT[ticket.status]]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}</span>
+      <span :class="chipClass" data-testid="ticket-status-chip" :data-status="ticket.status"><span :class="[dotClass, STATUS_DOT[ticket.status]]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}</span>
       <Select
         v-if="editing"
         :model-value="editPriority"

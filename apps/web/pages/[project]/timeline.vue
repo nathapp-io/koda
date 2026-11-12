@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { extractApiError } from '~/composables/useApi'
+import { humanizeCode } from '~/lib/humanize-code'
 
 definePageMeta({ layout: 'default' })
 
@@ -7,7 +8,17 @@ const route = useRoute()
 const slug = route.params.project as string
 
 const i18n = useI18n()
-const { locale, t } = i18n
+const { locale, t, te } = i18n
+const memberNames = useProjectMemberNames(slug)
+
+function eventTypeLabel(eventType: string): string {
+  const key = `home.activity.eventType.${eventType}`
+  return te(key) ? t(key) : humanizeCode(eventType)
+}
+
+function actorName(actorId: string): string {
+  return memberNames.nameOf(actorId) ?? actorId
+}
 const toast = useAppToast()
 
 const {
@@ -40,6 +51,7 @@ const loadMoreAndToast = () => withToastError(loadMore)
 
 onMounted(() => {
   loadAndToast()
+  void memberNames.load().catch(() => undefined)
 })
 
 function formatDate(dateStr: string) {
@@ -59,22 +71,22 @@ function formatDate(dateStr: string) {
 
     <FilterBar columns="3">
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.eventType') }}</label>
-        <select v-model="eventTypeFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
+        <label for="timeline-event-type" class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.eventType') }}</label>
+        <select id="timeline-event-type" v-model="eventTypeFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
           <option v-for="opt in EVENT_TYPES" :key="opt" :value="opt">
-            {{ opt || t('timeline.filter.all') }}
+            {{ opt ? eventTypeLabel(opt) : t('timeline.filter.all') }}
           </option>
         </select>
       </div>
 
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.from') }}</label>
-        <Input v-model="fromFilter" type="date" @change="applyAndToast" />
+        <label for="timeline-from" class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.from') }}</label>
+        <Input id="timeline-from" v-model="fromFilter" type="date" @change="applyAndToast" />
       </div>
 
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.to') }}</label>
-        <Input v-model="toFilter" type="date" @change="applyAndToast" />
+        <label for="timeline-to" class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.to') }}</label>
+        <Input id="timeline-to" v-model="toFilter" type="date" @change="applyAndToast" />
       </div>
     </FilterBar>
 
@@ -106,9 +118,9 @@ function formatDate(dateStr: string) {
         </thead>
         <tbody class="divide-y divide-border">
           <tr v-for="event in events" :key="event.id" class="hover:bg-muted/30">
-            <td class="px-4 py-3 font-mono text-xs">{{ event.eventType }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ event.actorId }}</td>
-            <td class="px-4 py-3">{{ event.action }}</td>
+            <td class="px-4 py-3 font-mono text-xs">{{ eventTypeLabel(event.eventType) }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ actorName(event.actorId) }}</td>
+            <td class="px-4 py-3" :title="event.action">{{ humanizeCode(event.action) }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(event.createdAt) }}</td>
           </tr>
         </tbody>

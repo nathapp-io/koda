@@ -74,7 +74,7 @@ const onSubmit = handleSubmit(async (values) => {
     <div v-else-if="isAuthenticated" data-testid="invite-signed-in" class="rounded-md border border-border p-6 text-center space-y-2">
       <h2 class="text-xl font-semibold">{{ t('invite.title') }}</h2>
       <p class="text-sm text-muted-foreground">{{ t('invite.signedIn') }}</p>
-      <NuxtLink v-if="preview" :to="`/${preview.projectSlug}`" class="font-medium text-primary hover:underline">
+      <NuxtLink v-if="preview" :to="`/${preview.projectSlug}`" class="font-medium text-link hover:underline">
         {{ preview.projectName }}
       </NuxtLink>
     </div>

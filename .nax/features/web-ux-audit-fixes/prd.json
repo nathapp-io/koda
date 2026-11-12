@@ -1,0 +1,485 @@
+{
+  "project": "koda",
+  "feature": "web-ux-audit-fixes",
+  "branchName": "feat/web-ux-audit-fixes",
+  "createdAt": "2026-11-12T00:00:00.000Z",
+  "updatedAt": "2026-11-12T04:17:15.657Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Readable Memory subjects, statuses and kinds",
+      "description": "**Goal** — Make Memory rows readable and name their Kind and Status filters without changing stored values or backend behavior.\n\n**Motivation** — R2-2: the Memory page shows subjects as raw `ticket:<cuid>` / `agent:<cuid>`, ticket-status objects as raw enums (`IN_PROGRESS`), and kinds as raw codes (`INCIDENT_PATTERN`).\n\n**Approach** — Add `memorySubject` in `apps/web/lib/memory-subject.ts`. In `pages/[project]/memory.vue`, render a ticket subject as the label `Ticket` plus the short id, linked to `/<slug>/tickets/<id>`; an agent subject as the label `Agent` plus the short id; any other subject unchanged; the raw subject as the `title`. Render a `status` object through `tickets.status.*` when that key exists, and kinds through new `memory.kinds.*` keys (falling back to `humanizeCode`), in the table and in the Kind filter options. Associate the Kind and Status filter labels with their selects. Add `memory.kinds.*` (FACT, DECISION, PREFERENCE, CONSTRAINT, INCIDENT_PATTERN, NOTE) and `memory.subject.ticket` / `memory.subject.agent` to `en.json` and `zh.json`.\n\nNo API change. Memory subjects are not resolved to ticket refs (that needs an API lookup); a ticket subject links to `/<slug>/tickets/<cuid>`, which the ticket route already accepts (`GET /projects/:slug/tickets/:ref` takes \"KODA-42 or CUID\").\n\nA shortened id is the first 8 characters of the id. The full raw value stays available as the element's `title`.\n\nAccessible names come from a `<label for>` / control `id` pair where a visible label already sits above the control, and from `aria-label` where the control has no visible label of its own (the per-row notification checkboxes).\n\nReadable labels reuse existing helpers: `codeLabel(t, te, prefix, code)` from `~/lib/fleet-i18n` (translation or the raw code), `humanizeCode(code)` from `~/lib/humanize-code` (words for a code with no key), the `tickets.status.*` keys, the `home.activity.eventType.*` keys and `fleet.command.*` / `fleet.state.*`. For this story, missing kind keys use humanizeCode; a missing ticket status key preserves the original object.\n\n**Scope** — In: Memory display, the two filter associations, the pure subject parser, both web locales, and Jest coverage. Out: Timeline labels/member lookup (US-002), flow labels (US-003), ingest project labels (US-004), permission/loading UI (US-005), notification/SLO controls (US-006), and board layout (US-007). Resolving memory `ticket:<cuid>` subjects to ticket refs (`SB-10`); it needs an API lookup.\n\n**Interface** — New module, verbatim contract:\n```ts\n// apps/web/lib/memory-subject.ts\nexport interface MemorySubject {\n  type: 'ticket' | 'agent' | 'other'\n  /** The part after the `ticket:` / `agent:` prefix; the whole subject for `other`. */\n  id: string\n  /** `id` cut to its first 8 characters. */\n  short: string\n}\n// `ticket:` / `agent:` with nothing after the prefix is `other` (the whole subject is the id).\n// Only the first colon splits: `ticket:a:b` has id `a:b`.\nexport function memorySubject(subject: string): MemorySubject\n```\n\n**Tests and regression anchors** — Create tests/lib/memory-subject.spec.ts and tests/pages/memory-readable.spec.ts. Page and component ACs mount with `mountSfc` (`apps/web/tests/helpers/mount-sfc.ts`) and assert on the rendered DOM, as `tests/pages/notification-settings-page.spec.ts` does. Add the new subject, kind and status template bindings to createRenderContext in tests/pages/memory.spec.ts; keep the `{{ ... item.subject ... }}` interpolation pins and every other existing assertion as they are. Add `te: () => false` to the useI18n stubs in memory-mount.spec.ts and memory-retire-visibility.spec.ts and to the page-level i18nStub() in memory-retire-flow.spec.ts if absent; every existing assertion stays as it is. Preserve NOTE expansion, filtering payloads, pagination, scope badges and retirement permissions/flows.",
+      "acceptanceCriteria": [
+        "[unit] memorySubject('ticket:cmw852hth00c408tguaxw2f78') returns { type: 'ticket', id: 'cmw852hth00c408tguaxw2f78', short: 'cmw852ht' }.",
+        "[unit] memorySubject('agent:a1') returns { type: 'agent', id: 'a1', short: 'a1' }.",
+        "[unit] memorySubject('deploy') returns { type: 'other', id: 'deploy', short: 'deploy' }.",
+        "[unit] memorySubject('ticket:') returns { type: 'other', id: 'ticket:', short: 'ticket:' }.",
+        "[unit] memorySubject('ticket:a:b') returns { type: 'ticket', id: 'a:b', short: 'a:b' }.",
+        "[unit] When pages/[project]/memory.vue is mounted for slug acme with an item whose subject is ticket:t1, it renders a link to /acme/tickets/t1 whose text includes the en label Ticket and t1.",
+        "[unit] On that page, the element rendering subject ticket:t1 carries title=\"ticket:t1\".",
+        "[unit] When an item has subject agent:a1, the Memory page renders the en label Agent and a1 as plain text.",
+        "[unit] When an item has predicate status and object IN_PROGRESS, the Memory page renders the object as In progress.",
+        "[unit] When an item has predicate status and object open, the Memory page renders the object as open.",
+        "[unit] When an item has kind INCIDENT_PATTERN, the Memory page renders the kind as Incident pattern from memory.kinds.INCIDENT_PATTERN.",
+        "[unit] The Kind filter's FACT option has the value FACT and the text Fact.",
+        "[unit] The Kind filter select has a non-empty id equal to the for attribute of the label whose text is Kind.",
+        "[unit] The Status filter select has a non-empty id equal to the for attribute of the label whose text is Status.",
+        "[unit] Every key under memory.kinds and memory.subject in en.json exists in zh.json with a non-empty value."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "memory",
+        "i18n",
+        "accessibility"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small pure parser and standard page/i18n changes with additive fixture updates; no backend or permission-rule changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/memory.vue",
+        "apps/web/composables/useMemory.ts",
+        "apps/web/lib/humanize-code.ts",
+        "apps/web/tests/pages/memory-mount.spec.ts",
+        "apps/web/tests/helpers/fleet-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/memory-subject.ts",
+        "apps/web/tests/lib/memory-subject.spec.ts",
+        "apps/web/tests/pages/memory-readable.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a Memory item has subject deploy, its subject text remains deploy.",
+        "When a Memory item has an unknown kind FOO_KIND, its kind label is Foo kind.",
+        "When a Memory item has a predicate other than status and object IN_PROGRESS, the object remains IN_PROGRESS."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/memory.spec.ts",
+          "reason": "its SSR render tests build the template context in `createRenderContext`, which holds only the bindings the page has today; the page template now also uses the subject, kind and status label bindings this story adds. Add those bindings to `createRenderContext`; keep the `{{ ... item.subject ... }}` interpolation pins and every other existing assertion as they are."
+        },
+        {
+          "path": "apps/web/tests/pages/memory-mount.spec.ts",
+          "reason": "its `useI18n` stub returns only `t` and `locale`; the page now also destructures `te` for the kind and status labels. Add `te: () => false` to the stub; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/memory-retire-visibility.spec.ts",
+          "reason": "its `useI18n` stub returns only `t`; the page now also destructures `te`. Add `te: () => false` to the stub; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/memory-retire-flow.spec.ts",
+          "reason": "the page-level `i18nStub()` passed as `useI18n` may lack `te`, which the page now destructures. Add `te: () => false` to the object it returns if absent; every existing assertion stays as it is."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6664816b288f0ce9fa3d08bdae64fd72a79b9bb3"
+    },
+    {
+      "id": "US-002",
+      "title": "Readable Timeline actors, events and actions",
+      "description": "**Goal** — Display Timeline actors and event/action labels readably and associate its filters with their visible labels.\n\n**Motivation** — R2-3: the Timeline shows the actor as a raw user id, the event as `ticket_event` and the action as a raw code (`TICKET_CREATED`, `status_changed`).\n\n**Approach** — In `pages/[project]/timeline.vue`, load project member names with `useProjectMemberNames(slug)` on mount and render the actor through `nameOf`, falling back to the raw id. Render the event type through `home.activity.eventType.*` (falling back to `humanizeCode`) in the rows and in the filter options, and the action through `humanizeCode` with the raw code as `title`. Associate the Event Type, From and To labels with their controls.\n\nActor and approver names come from `useProjectMemberNames(slug).nameOf`, which already names the signed-in user when they are not a project member; an id it cannot name renders raw.\n\nAccessible names come from a `<label for>` / control `id` pair where a visible label already sits above the control, and from `aria-label` where the control has no visible label of its own (the per-row notification checkboxes).\n\nReadable labels reuse existing helpers: `codeLabel(t, te, prefix, code)` from `~/lib/fleet-i18n` (translation or the raw code), `humanizeCode(code)` from `~/lib/humanize-code` (words for a code with no key), the `tickets.status.*` keys, the `home.activity.eventType.*` keys and `fleet.command.*` / `fleet.state.*`. Unknown Timeline event types use humanizeCode, not a raw-code-only fallback. Preserve the empty filter option as the existing All translation.\n\nFailure handling: The members read fails on the timeline — Events still render; actors show the raw id; no toast for the members read. Catch the cosmetic members failure independently of loadEvents; load the members exactly once on mount for this slug.\n\n**Scope** — In: Timeline row labels, members-read wiring, Event Type/From/To associations and Jest coverage. Out: Memory filters (US-001), flow display (US-003), ingest labels (US-004), dispatch loading (US-005), SLO date associations (US-006), board/dashboard layout (US-007), changes to the shared member-name resolution rules, and new API routes.\n\n**Interface** — Reuse the existing contracts without changing them:\n```ts\n// useProjectMemberNames(slug): { members, load, nameOf }\nnameOf(userId: string): string | null\nhumanizeCode(code: string): string\n```\nThe existing member load issues GET /projects/:slug/members with query size: '100'.\n\n**Tests and regression anchors** — Create tests/pages/timeline-readable.spec.ts using mountSfc with the en locale, explicit useProjectMemberNames globals or an alias, and rendered row/option/label attributes. The current harness already lists the member composable among injectable auto-imports; still provide its implementation explicitly. Exercise the real member helper through a request double to prove the one members GET and silent rejection. In tests/pages/timeline.spec.ts, add actor-name, event-type label and action label bindings to createRenderContext; keep the `{{ ... event.eventType ... }}`, `{{ ... event.actorId ... }}` and `{{ ... event.action ... }}` interpolation pins and every other existing assertion as they are. Do not change existing event load/error/empty/pagination behavior.",
+      "acceptanceCriteria": [
+        "[unit] When pages/[project]/timeline.vue is mounted with an event { eventType: 'ticket_event', actorId: 'u1', action: 'TICKET_CREATED' } and a members read returning u1 named Ann, that row's actor cell renders Ann.",
+        "[unit] When an event's actorId is not a member and not the signed-in user, its actor cell renders that raw actorId.",
+        "[unit] When an event has eventType ticket_event, its event cell renders Ticket.",
+        "[unit] When an event has eventType foo_event, its event cell renders Foo event.",
+        "[unit] When an event has action TICKET_CREATED, it renders Ticket created in an element carrying title=\"TICKET_CREATED\".",
+        "[unit] When an event has action status_changed, it renders Status changed.",
+        "[unit] The event-type filter option with value ticket_event has the text Ticket.",
+        "[unit] The event-type filter option with the empty value has the text All.",
+        "[unit] The event-type select has a non-empty id equal to the for attribute of the label whose text is Event Type.",
+        "[unit] The From date input has a non-empty id equal to the for attribute of the label whose text is From.",
+        "[unit] The To date input has a non-empty id equal to the for attribute of the label whose text is To.",
+        "[unit] Mounting the page issues GET /projects/acme/members with query size: '100' exactly once for slug acme.",
+        "[unit] When the members read rejects, the Timeline events still render with raw actor ids.",
+        "[unit] When the members read rejects, no error toast is raised for that read."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "timeline",
+        "i18n",
+        "accessibility"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard page presentation and one existing composable integration, with isolated cosmetic failure handling and SSR fixture updates.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/timeline.vue",
+        "apps/web/composables/useProjectMemberNames.ts",
+        "apps/web/lib/humanize-code.ts",
+        "apps/web/tests/pages/timeline.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/timeline-readable.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the signed-in user is absent from the project members response but is the event actor, the actor cell displays their signed-in name or email."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/timeline.spec.ts",
+          "reason": "its SSR render tests build the template context in `createRenderContext`, which lacks the actor-name, event-type label and action label bindings the template now uses. Add those bindings to `createRenderContext`; keep the `{{ ... event.eventType ... }}`, `{{ ... event.actorId ... }}` and `{{ ... event.action ... }}` interpolation pins and every other existing assertion as they are."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7d08e4259847a9b9359b382c841a46837bf16577"
+    },
+    {
+      "id": "US-003",
+      "title": "Readable flow detail titles, dates and job labels",
+      "description": "**Goal** — Make flow detail identify its features and format dates, job codes and pull-request text readably.\n\n**Motivation** — R2-4: the flow detail page is titled \"Flow\" with the raw flow id as subtitle although the flow's feature names are known; dates print as ISO strings (`2026-11-10T14:07:45.657Z`); stage rows read \"Spec review · AGENT · COMPLETED · $0.01\"; the pull request line reads \"Pull request#36\".\n\n**Approach** — Add `flowTitle` to `lib/fleet-flows.ts`. `pages/[project]/flows/[id].vue` uses it as the page title (falling back to `fleet.flows.detail.title`), drops the raw id from the subtitle and shows it as an `ID` row (new key `fleet.flows.detail.id`) in the flow details list, formats Created and Recorded with `timeText`, and renders each row of its own \"Flow jobs\" list with the command through `codeLabel(t, te, 'fleet.command', command)` and the state through `codeLabel(t, te, 'fleet.state', state)`. `components/fleet/flows/FlowFeatureSection.vue` renders each job row's command through `codeLabel(t, te, 'fleet.command', command)` and its state through `codeLabel(t, te, 'fleet.state', state)`, and renders a space between the Pull request label and `#<number>`. Add `fleet.flows.detail.id` to `en.json` and `zh.json`.\n\nDates on the flow page are formatted with the existing `timeText(iso)` from `~/lib/fleet-analytics-format` (`new Date(iso).toLocaleString()`, `-` when absent).\n\nActor and approver names come from `useProjectMemberNames(slug).nameOf`, which already names the signed-in user when they are not a project member; an id it cannot name renders raw. Preserve the page's existing approver-name behavior. Readable labels reuse existing helpers: `codeLabel(t, te, prefix, code)` from `~/lib/fleet-i18n` (translation or the raw code), `humanizeCode(code)` from `~/lib/humanize-code` (words for a code with no key), the `tickets.status.*` keys, the `home.activity.eventType.*` keys and `fleet.command.*` / `fleet.state.*`. Use codeLabel's raw fallback for unknown flow job commands/states.\n\n**Scope** — In: pure flowTitle helper, flow PageHeader/details dates/ID row, both job-list labeling surfaces, explicit pull-request whitespace, both locales and Jest tests. Out: Memory labels (US-001), Timeline member loading (US-002), ingest project display (US-004), dispatch/job options loading (US-005), other accessible names/contrast (US-006), board/dashboard layout (US-007), and any flow polling, answer/stop gating, grouping or wire-contract changes.\n\n**Interface** — New exported helper, verbatim signature and algorithm:\n```ts\nflowTitle(flow: { features: readonly { feature: string }[] }): string | null\n```\nThe feature names joined with `\", \"`, or `null` when there are none. Existing helper contract:\n```ts\ncodeLabel(t, te, prefix: string, code: string): string\n```\n\n**Tests and regression anchors** — Create tests/lib/fleet-flows-title.spec.ts and tests/pages/flow-detail-readable.spec.ts, mounting both the real page and FlowFeatureSection with real en labels. Use mountSfc and capture PageHeader props as well as rendered rows. Add `te: () => false` to the useI18n stub in tests/components/flow-feature-section.spec.ts so labels fall back to the raw code; every existing assertion stays as it is. Add `te: () => false` to tests/pages/fleet-flow-detail.spec.ts. Its AC-10 test asserts the raw ISO string `2026-01-02T03:04:05.000Z` for Created, which this story replaces with `timeText`; change that one expectation to the value of `new Date('2026-01-02T03:04:05.000Z').toLocaleString()`. Every other existing assertion stays as it is (with `te` false, the flow jobs row still reads `RUN · RUN · QUEUED · $0.50`). Keep untrusted strings interpolation-only and retain existing overview-failure/polling behavior.",
+      "acceptanceCriteria": [
+        "[unit] flowTitle({ features: [{ feature: 'f17-min3' }] }) returns 'f17-min3'.",
+        "[unit] flowTitle({ features: [{ feature: 'a' }, { feature: 'b' }] }) returns 'a, b'.",
+        "[unit] flowTitle({ features: [] }) returns null.",
+        "[unit] When pages/[project]/flows/[id].vue is mounted with a flow whose features contain one feature with feature: 'f17-min3', it passes f17-min3 as the PageHeader title.",
+        "[unit] When the page is mounted with a flow that has no features, it passes the fleet.flows.detail.title text as the PageHeader title.",
+        "[unit] The PageHeader subtitle the page passes does not include the flow id.",
+        "[unit] The page renders the flow id in the details list under the fleet.flows.detail.id label.",
+        "[unit] When a flow has createdAt 2026-01-02T03:04:05.000Z, its Created value equals new Date('2026-01-02T03:04:05.000Z').toLocaleString().",
+        "[unit] When a flow's approval has approvedAt 2026-01-02T03:04:05.000Z, its Recorded value equals new Date('2026-01-02T03:04:05.000Z').toLocaleString().",
+        "[unit] When the flow page is mounted with the en locale and a flow-level job { step: null, command: 'AGENT', state: 'COMPLETED' }, its Flow jobs row contains Agent task and Completed.",
+        "[unit] When FlowFeatureSection is mounted with the en locale and a job { command: 'AGENT', state: 'COMPLETED' }, its job row contains Agent task and Completed.",
+        "[unit] With the en locale, a feature with prNumber 33 and a pull request URL renders the pull request line text as Pull request #33.",
+        "[unit] fleet.flows.detail.id exists in both en.json and zh.json with a non-empty value.",
+        "[unit] When a flow-level job has command FOO_COMMAND and fleet.command.FOO_COMMAND has no translation key, its Flow jobs row renders FOO_COMMAND unchanged."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "fleet",
+        "flows",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small pure helper and bounded presentation changes across the page, existing feature section and locale keys; existing permission/workflow behavior is untouched.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/components/fleet/flows/FlowFeatureSection.vue",
+        "apps/web/lib/fleet-flows.ts",
+        "apps/web/tests/pages/fleet-flow-detail.spec.ts",
+        "apps/web/tests/components/flow-feature-section.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/fleet-flows-title.spec.ts",
+        "apps/web/tests/pages/flow-detail-readable.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/flow-feature-section.spec.ts",
+          "reason": "its `useI18n` stub returns only `t`; the section now calls `codeLabel(t, te, ...)`. Add `te: () => false` to the stub so labels fall back to the raw code; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-flow-detail.spec.ts",
+          "reason": "its `useI18n` stub returns only `t`, and the page and `FlowFeatureSection` now call `codeLabel(t, te, ...)`; add `te: () => false` to the stub. Its AC-10 test asserts the raw ISO string `2026-01-02T03:04:05.000Z` for Created, which this story replaces with `timeText`; change that one expectation to the value of `new Date('2026-01-02T03:04:05.000Z').toLocaleString()`. Every other existing assertion stays as it is (with `te` false, the flow jobs row still reads `RUN · RUN · QUEUED · $0.50`)."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d43056f1a548e9c8454eb54911b53e64d6b5812f"
+    },
+    {
+      "id": "US-004",
+      "title": "Readable and contained admin ingest table",
+      "description": "**Goal** — Resolve ingest project labels and job links from an existing project-list read and contain the table's screen-reader-only header within its scroll wrapper.\n\n**Motivation** — R2-5: the admin fleet analytics bundle-ingest table shows raw job and project ids; at 390 px the page scrolls sideways by about 30 px because the table header's screen-reader-only text escapes its scroll box.\n\n**Approach** — Add the `IngestProject` type, the `projects()` method on `useFleetAnalyticsAdmin()` and the `projects` prop to `FleetAnalyticsIngestTable`. The project cell shows the project name when the id is in `projects`, else the raw id. The job cell shows the short job id (full id as `title`) plus `#<leaseEpoch>`, linked to `/<slug>/fleet/jobs/<jobId>` when the project is known. The element that wraps the table carries `relative` with `overflow-x-auto`. `pages/admin/fleet/analytics.vue` calls `projects()` once on mount and passes the result as `projects`, using `[]` when the read fails.\n\nThe project list for the ingest table is read through a new `projects()` method on `useFleetAnalyticsAdmin()`, not by the page directly (`.nax/rules/web.md`: API calls live in composables).\n\nA shortened id is the first 8 characters of the id. The full raw value stays available as the element's `title`.\n\njsdom has no layout engine, so layout and touch-target fixes are asserted through the Tailwind classes the rendered element carries. The audit verified the live effect.\n\nFailure handling: `useFleetAnalyticsAdmin().projects()` rejects on `/admin/fleet/analytics` — The ingest table renders with `projects = []` (raw project ids, no job links); no toast. This cosmetic request is separate from refreshAll, range/visibility refreshes and existing ingest/spend error handling. Do not introduce a timer, extra project refreshes, or changes to admin access enforcement.\n\n**Scope** — In: display projection type, additive composable method, backward-compatible table prop, shortened ids/conditional links, positioned scroll wrapper, one page-level cosmetic lookup and Jest coverage. Out: Memory/Timeline/flow labels (US-001 to US-003), dispatch loading (US-005), home chip contrast (US-006), board/dashboard layout (US-007), new endpoints, API/OpenAPI changes, and unrelated analytics calculations or rerun behavior.\n\n**Interface** — Target contracts:\n```ts\n// Exported from apps/web/lib/fleet-analytics-types.ts\nexport interface IngestProject { id: string; slug: string; name: string }\n// FleetAnalyticsIngestTable; projects defaults to []\ndefineProps<{ rows: readonly IngestRowDto[]; busyJobId: string | null; projects?: readonly IngestProject[] }>()\n// Additional method returned by useFleetAnalyticsAdmin()\nprojects: () => Promise<IngestProject[]>\n```\n`projects: () => Promise<IngestProject[]>`, which issues `GET /projects` and maps each row to `{ id, slug, name }`. Keep the pre-existing spend, ingest reads and re-run calls unchanged.\n\n**Tests and regression anchors** — Create tests/components/fleet-ingest-projects.spec.ts; extend tests/composables/useFleetAnalytics.spec.ts for the projected request result and tests/pages/admin-fleet-analytics.spec.ts for successful/failed prop wiring and the silent fallback. Use mountSfc and rendered DOM/props, retaining chart stubs. In tests/pages/admin-fleet-analytics.spec.ts, make makeGet answer the projects route with an empty array; every existing assertion stays as it is. Existing tests/components/fleet-ingest-table.spec.ts retain their behavior with the optional prop omitted. Assert relative and overflow-x-auto on the actual table wrapper, not a source substring or a non-layout renderer's measured width.",
+      "acceptanceCriteria": [
+        "[unit] When FleetAnalyticsIngestTable is mounted with a row whose projectId is proj-1 and projects [{ id: 'proj-1', slug: 'acme', name: 'Acme' }], that row's project cell renders Acme.",
+        "[unit] When a row's projectId is not in projects, its project cell renders the raw projectId.",
+        "[unit] When a row's projectId maps to slug acme and its jobId is job-1, its job cell renders a link to /acme/fleet/jobs/job-1.",
+        "[unit] When a row's projectId is not in projects, its job id renders as text with no link.",
+        "[unit] When a row's jobId is cmwaryvzf008i07s1ojm2l6qg, its job cell renders cmwaryvz inside an element carrying title=\"cmwaryvzf008i07s1ojm2l6qg\".",
+        "[unit] A row with leaseEpoch 2 still renders #2 in its job cell.",
+        "[unit] The element wrapping the table carries both the overflow-x-auto and the relative classes.",
+        "[unit] useFleetAnalyticsAdmin().projects() issues GET /projects and resolves [{ id: 'proj-1', slug: 'acme', name: 'Acme' }] when the API answers that project with further fields.",
+        "[unit] When pages/admin/fleet/analytics.vue is mounted with GET /projects returning [{ id: 'proj-1', slug: 'acme', name: 'Acme' }], it passes that array as the projects prop of FleetAnalyticsIngestTable.",
+        "[unit] When GET /projects rejects, the page passes projects [] to FleetAnalyticsIngestTable.",
+        "[unit] When GET /projects rejects, the page raises no error toast for that read."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "fleet",
+        "analytics",
+        "responsive"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four source modules gain a small typed projection and conventional request/prop plumbing with a silent cosmetic fallback; existing admin guards and API contracts remain unchanged.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/analytics/IngestTable.vue",
+        "apps/web/pages/admin/fleet/analytics.vue",
+        "apps/web/lib/fleet-analytics-types.ts",
+        "apps/web/tests/components/fleet-ingest-table.spec.ts",
+        "apps/web/tests/pages/admin-fleet-analytics.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/fleet-ingest-projects.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When FleetAnalyticsIngestTable is mounted without a projects prop, unknown projects display raw project ids and job cells have no job links.",
+        "When the admin analytics page refreshes after a range change, it does not issue another GET /projects request."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/admin-fleet-analytics.spec.ts",
+          "reason": "its makeGet double throws for any API path it does not know, and the page now reads the project list (the projects route) on mount. Make makeGet answer the projects route with an empty array; every existing assertion stays as it is."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "71f210492aa805d6300b2022dd530acd8ae4ce5f"
+    },
+    {
+      "id": "US-005",
+      "title": "Truthful permission and dispatch-option loading",
+      "description": "**Goal** — Distinguish unknown permissions and unresolved option names from actual denial or final raw-id fallback on dispatch/job detail pages.\n\n**Motivation** — R2-1: `/[project]/fleet/dispatch` renders \"You do not have permission to dispatch jobs\" while the project permissions are still loading, then replaces it with the form. A permitted user is first told they are refused. R1-15: the fleet job page shows the raw repo id and runner id until the repo/runner options load.\n\n**Approach** — `pages/[project]/fleet/dispatch.vue` renders `LoadingState` while the project permissions are pending and only shows `dispatch-no-permission` once they have loaded without `fleet.job.dispatch`; the existing `<p v-if=\"!canDispatch\"` element and `canDispatch` line stay as they are. `useFleetDispatchOptions` gains `settled`. `pages/[project]/fleet/jobs/[id]/index.vue` shows the `common.loading` text in place of the repo name in the subtitle and in the Runner field until `settled` is `true`; a job with no runner shows the unassigned text at once.\n\n`dispatch.vue` keeps its existing `<p v-if=\"!canDispatch\" ...>` element and its `canDispatch` computed line unchanged (`tests/pages/fleet-dispatch-page.spec.ts` pins both); the loading state is added around it: a `LoadingState` when project permissions are pending, and the existing chain otherwise.\n\nA value that is still loading renders the existing `common.loading` text (en `Loading...`), never a hardcoded character.\n\nFailure handling: `useFleetDispatchOptions().load()` rejects on the fleet job page — `settled` becomes `true`; the subtitle and Runner field fall back to the raw id. Preserve the existing rejection propagation and the job page's silent options-read catch; do not leave the loading text on screen indefinitely. Keep settled true after the first terminal outcome, including during subsequent loads.\n\n**Scope** — In: outer permission-pending presentation, additive options settlement state, repo/assigned-runner loading text, final failure fallbacks, and Jest fixtures/behavior tests. Out: Memory/Timeline/flow/ingest display (US-001 to US-004), notification/SLO labeling and contrast (US-006), chip/board/dashboard sizing (US-007), changes to permission evaluation, role-name gating, backend authorization, and Round 1 R1-16 (job page detail grid layout); it needs a layout decision.\n\n**Interface** — Existing read-only integration:\n```ts\nuseProjectPermissions(slug): Permissions\n// Permissions carries permissions: ComputedRef<PermissionSet> and pending: Ref<boolean>\n```\nTarget for `useFleetDispatchOptions(slug)`: also returns `settled: Ref<boolean>`, `false` until the first `load()` call resolves or rejects, then `true`. `repoName` / `runnerName` keep their current fallback to the raw id. Keep all current returned members: repos, runners, moreRepos, moreRunners, load, profileOptions, labelOptions, repoName, runnerName. Preserve this exact gate:\n```ts\nconst canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))\n```\n\n**Tests and regression anchors** — Use three-session-tdd because permission gating is involved: the test-writer creates failing behavioral tests and updates affected test fixtures without source changes; implementation preserves test files. Create tests/pages/fleet-dispatch-loading.spec.ts using mountSfc and pending permission refs. Extend tests/composables/useFleetDispatchOptions.spec.ts to cover initial/resolved/rejected settled state and fallback, and mount the job page to inspect PageHeader subtitle and fleet-job-runner. In tests/pages/fleet-job-detail.spec.ts, fleet-job-detail-workflow.spec.ts, fleet-job-agent-result.spec.ts and fleet-job-fix-action.spec.ts, add `settled: ref(true)` to each useFleetDispatchOptions double; every existing assertion stays as it is. In fleet-job-budget-gates.spec.ts add the same field to its job-page options double; every existing assertion stays as it is. Read permission-nav.ts and existing permission gate mounts for fixture patterns; update additional affected doubles additively if necessary, without weakening guards or assertions. The additive field must not change shared options behavior on schedules, budgets, threads, repo config or the jobs list.",
+      "acceptanceCriteria": [
+        "[unit] When pages/[project]/fleet/dispatch.vue is mounted with project permissions still pending, it renders LoadingState.",
+        "[unit] With project permissions still pending, the dispatch page renders no dispatch-no-permission element.",
+        "[unit] With project permissions loaded without fleet.job.dispatch, the dispatch page renders the dispatch-no-permission element.",
+        "[unit] With project permissions loaded with fleet.job.dispatch, the dispatch page renders no dispatch-no-permission element.",
+        "[unit] useFleetDispatchOptions('acme').settled.value is false before load() is called.",
+        "[unit] After load() resolves, settled.value is true.",
+        "[unit] After load() rejects, settled.value is true.",
+        "[unit] After load() rejects, repoName('r1') returns 'r1'.",
+        "[unit] When pages/[project]/fleet/jobs/[id]/index.vue is mounted with an options double exposing settled: ref(false), its PageHeader subtitle contains 'Loading...' and not the job's repoId.",
+        "[unit] With options.settled.value false and a job whose runnerId is r1, the fleet-job-runner field renders 'Loading...'.",
+        "[unit] With options.settled.value false and a job whose runnerId is null, the fleet-job-runner field renders the fleet.jobs.detail.unassigned text.",
+        "[unit] With options.settled.value true and repoName returning nathapp-io/koda-fleet-sandbox, the job page subtitle contains nathapp-io/koda-fleet-sandbox.",
+        "[unit] With options.settled.value true and repoName returning the raw repo id (the options read failed), the job page subtitle contains that repo id.",
+        "[unit] When useFleetDispatchOptions().load() rejects on the fleet job page and the job has an assigned runner, the Runner field falls back to the raw runner id."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "fleet",
+        "permissions",
+        "loading"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three bounded source changes use existing Vue refs and helpers, but permission/access-control presentation triggers the security override and strict test/implementation isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/dispatch.vue",
+        "apps/web/composables/useFleetDispatchOptions.ts",
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/tests/pages/fleet-dispatch-pr-page.spec.ts",
+        "apps/web/tests/helpers/permission-nav.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-dispatch-loading.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a later options load starts after the first load settled, settled.value remains true.",
+        "When job options settle successfully and runnerName resolves an assigned runner's name, fleet-job-runner renders that name instead of 'Loading...'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "its `useFleetDispatchOptions` double has no `settled`, which the job page now reads. Add `settled: ref(true)` to the double; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail-workflow.spec.ts",
+          "reason": "its `useFleetDispatchOptions` double has no `settled`, which the job page now reads. Add `settled: ref(true)` to the double; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-agent-result.spec.ts",
+          "reason": "its `useFleetDispatchOptions` double has no `settled`, which the job page now reads. Add `settled: ref(true)` to the double; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-fix-action.spec.ts",
+          "reason": "its `useFleetDispatchOptions` double has no `settled`, which the job page now reads. Add `settled: ref(true)` to the double; every existing assertion stays as it is."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-budget-gates.spec.ts",
+          "reason": "its job-page `useFleetDispatchOptions` double has no `settled`, which the job page now reads. Add `settled: ref(true)` to the double; every existing assertion stays as it is."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "97a8d190303b844b770d16c0e7704c33ebe1959f"
+    },
+    {
+      "id": "US-006",
+      "title": "Accessible notification and SLO controls with contrast-safe attention",
+      "description": "**Goal** — Name the remaining audited email/date controls and restore the dashboard attention chip's contrast using an existing safe surface.\n\n**Motivation** — R2-6: axe reports form controls with no accessible name: the email and in-app checkboxes on `/settings/notifications`, the From/To date inputs on `/admin/slos` and `/[project]/timeline`, the event-type select on the timeline, and the kind/status selects on the Memory page. R2-7: on the light dashboard the \"N need attention\" chip is 4.21:1, under WCAG AA.\n\n**Approach** — `pages/settings/notifications.vue` gives each row's email checkbox the `aria-label` from new key `notifications.preferences.emailFor` (takes `{category}`, the row's translated label). `pages/admin/slos.vue` associates its From and To labels with the date inputs. `components/home/HomeProjectList.vue` renders the attention chip on `bg-card`. Add the key to `en.json` (`Email: {category}`) and `zh.json`.\n\nOnly the email checkboxes on `/settings/notifications` get an `aria-label`: each in-app checkbox is already named by its row's `<label for>`.\n\nAccessible names come from a `<label for>` / control `id` pair where a visible label already sits above the control, and from `aria-label` where the control has no visible label of its own (the per-row notification checkboxes).\n\nThe \"need attention\" chip keeps its red text and border but drops the `bg-destructive/10` tint, sitting on `bg-card`; `--status-rejected` on `--card` is already pinned at 4.5:1 or more by `tests/lib/token-contrast.spec.ts`.\n\nTest harness: page and component ACs mount with `mountSfc` (`apps/web/tests/helpers/mount-sfc.ts`) and assert on the rendered DOM, as `tests/pages/notification-settings-page.spec.ts` does; the binding-only harness of `tests/pages/admin-slos-mount.spec.ts` cannot observe `id` / `for` attributes.\n\n**Scope** — In: category email aria-labels, both locale entries, the SLO date for/id pairs, the HomeProjectList chip surface and Jest coverage. Out: Memory select names (US-001), Timeline control names (US-002), flow/ingest labels (US-003/US-004), permission/option loading (US-005), board/dashboard alignment and touch targets (US-007), raw codes on the notifications page and any semantic token redesign. Do not add redundant in-app aria-labels or alter notification toggles, email availability/master disabling, saved settings or SLO query/reload behavior.\n\n**Interface** — No new exported module or API contract. Add `notifications.preferences.emailFor` in both web locale files; English is exactly `Email: {category}`, and each checkbox passes its row's translated category label as the `category` interpolation parameter. Match the SLO labels to their native input ids.\n\n**Tests and regression anchors** — Create tests/pages/accessible-names.spec.ts. Mount the real notification/SLO pages with mountSfc to inspect aria-label/id/for, and HomeProjectList with attentionJobs 2 to inspect its actual classes. Reuse the enI18n interpolation helper. Existing notification settings, SLO and home project list specs assert behavior the change keeps; every existing assertion stays unchanged. Include a negative-path regression: when the initial preferences load rejects with no saved items, preserve the existing ErrorState after pending settles; accessibility additions must not expose defaulted toggles over a failed read. Use the existing contrast-token guard rather than modifying token values or introducing new Playwright specs.",
+      "acceptanceCriteria": [
+        "[unit] When pages/settings/notifications.vue is mounted with mountSfc and the en locale, email checkbox notification-pref-email-ASSIGNED has an aria-label equal to Email: followed by a space and that category's translated label.",
+        "[unit] notifications.preferences.emailFor exists in both en.json and zh.json with a value containing {category}.",
+        "[unit] When pages/admin/slos.vue is mounted with mountSfc, its From date input has a non-empty id equal to the for attribute of the label whose text is the slos.window.from text.",
+        "[unit] The To date input on that page has a non-empty id equal to the for attribute of the label whose text is the slos.window.to text.",
+        "[unit] When HomeProjectList is mounted with a project whose attentionJobs is 2, its attention chip carries the classes bg-card and text-status-rejected.",
+        "[unit] That attention chip does not carry the class bg-destructive/10.",
+        "[unit] When the initial notification-preferences load rejects while view.items is empty and pending has settled to false, pages/settings/notifications.vue still renders ErrorState."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "accessibility",
+        "i18n",
+        "dashboard"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized attribute/surface changes across three existing UI surfaces and two locales, using established labels, translations and safe tokens.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/settings/notifications.vue",
+        "apps/web/pages/admin/slos.vue",
+        "apps/web/components/home/HomeProjectList.vue",
+        "apps/web/tests/pages/notification-settings-page.spec.ts",
+        "apps/web/tests/pages/admin-slos-mount.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/accessible-names.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4b46809c740bc79ed8474e9983e3b2694190cb44"
+    },
+    {
+      "id": "US-007",
+      "title": "Board action hierarchy and compact responsive layouts",
+      "description": "**Goal** — Restore board primary-action hierarchy, align column/dashboard cards and enlarge audited phone-width filter targets.\n\n**Motivation** — R1-17: the project board shows \"New Ticket\" and \"Import Issue\" as two filled primary buttons. R1-18: the board's Created column header is taller than the others (its inline New Ticket button). R1-19: empty \"My tickets\" / \"Approvals\" dashboard cards stretch to the tallest card in the row. R1-20: at phone width the fleet jobs state chips and the board priority chips are under 44 px tall.\n\n**Approach** — On `pages/[project]/index.vue` the Import Issue button uses `variant=\"outline\"`; the priority filter chips carry `h-11 sm:h-9`. In `components/TicketBoard.vue` every column header row carries `data-testid=\"board-column-header-<STATUS>\"` and `h-8`, and the inline New Ticket button carries `h-7`. `components/home/HomeNeedsYou.vue`'s card grid carries `items-start`. On `pages/[project]/fleet/index.vue` each state filter chip carries `h-11 sm:h-8`.\n\nTouch-target fixes set `h-11` below the `sm` breakpoint and an explicit height from `sm` up: `sm:h-9` for the board priority chips (their current height) and `sm:h-8` for the fleet state chips. The fleet chips have no explicit height today (about 26 px from `py-1 text-xs`), so on desktop they grow to 32 px; this is intended.\n\n`TicketBoard` column header rows get `data-testid=\"board-column-header-<STATUS>\"` so tests can find them.\n\njsdom has no layout engine, so layout and touch-target fixes are asserted through the Tailwind classes the rendered element carries. The audit verified the live effect.\n\n**Scope** — In: the four named board/dashboard/fleet layout surfaces, header testids and Jest behavioral class/prop coverage. Out: Memory/Timeline/flow/ingest labels (US-001 to US-004), dispatch loading (US-005), attention-chip contrast and other accessible names (US-006), changing filters or ticket business rules, and Round 1 R1-16 (job page detail grid layout); it needs a layout decision. Do not expand this into filter select height or breadcrumb/other small-target fixes deferred by the feature.\n\n**Interface** — No new exported function or API contract. Header markers are `board-column-header-CREATED`, `board-column-header-VERIFIED`, `board-column-header-IN_PROGRESS`, `board-column-header-VERIFY_FIX`, `board-column-header-CLOSED` and `board-column-header-REJECTED`; preserve existing board-column-<STATUS> ids and create/open-ticket events. New Ticket remains the default primary action. Keep literal Tailwind classes in Vue templates and retain shared ticket-chip token helpers.\n\n**Tests and regression anchors** — Create tests/components/board-layout.spec.ts with mountSfc coverage of rendered header/button/grid classes and the relevant page chips. Use tests/pages/project-board.spec.ts, tests/pages/fleet-jobs-list.spec.ts and tests/components/home-needs-you.spec.ts as neighboring examples; no existing spec pins the button variant, header height, grid alignment or chip height this story changes, so existing assertions remain unchanged. Assert the default variant on New Ticket and outline on Import Issue through component props, all six h-8 header rows through the new testids, and responsive class pairs on each actual filter chip. Preserve the existing home.needsYouEmpty branch when all three totals are zero and its arrays are empty; the items-start change applies only to the nonempty card grid. Do not infer physical heights from the custom renderer or introduce new e2e specs. Read the existing redesign master plan before these additive layout edits.",
+      "acceptanceCriteria": [
+        "[unit] When pages/[project]/index.vue is mounted, the Import Issue Button has variant outline.",
+        "[unit] On that page, the New Ticket Button keeps the default variant.",
+        "[unit] On that page, each priority filter chip carries the classes h-11 and sm:h-9.",
+        "[unit] When TicketBoard is mounted with tickets in every status, it renders six board-column-header-<STATUS> elements, each carrying the class h-8.",
+        "[unit] The Created column's New Ticket button in TicketBoard carries the class h-7.",
+        "[unit] When HomeNeedsYou is mounted with items to show, its card grid carries the class items-start.",
+        "[unit] When pages/[project]/fleet/index.vue is mounted, each state filter chip carries the classes h-11 and sm:h-8.",
+        "[unit] When HomeNeedsYou is mounted with empty tickets, approvals and jobs arrays and all three totals equal to zero, it still renders the existing home.needsYouEmpty text instead of the card grid."
+      ],
+      "tags": [
+        "web",
+        "ux",
+        "board",
+        "dashboard",
+        "responsive",
+        "accessibility"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four tightly bounded presentation surfaces use ordinary variants and Tailwind utilities; there is no new abstraction, state model or business logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/index.vue",
+        "apps/web/components/TicketBoard.vue",
+        "apps/web/components/home/HomeNeedsYou.vue",
+        "apps/web/pages/[project]/fleet/index.vue",
+        "apps/web/tests/pages/project-board.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/board-layout.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6179521516ff697bca923815ee9a730802cf0541"
+    }
+  ],
+  "analysis": "Repository and architecture: This is an enhancement to the existing Bun/Turborepo web workspace, not greenfield work. The execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. No codebase-memory MCP tools are exposed in this session, so graph-first discovery was unavailable; direct Read/Grep/Glob exploration was used instead. Contrary to the detected Codebase Context table, apps/web is Nuxt 4 SSR with Vue 3, not Next.js: apps/web/package.json:6 builds with nuxt, apps/web/package.json:33 declares nuxt ^4.6.4, and .nax/mono/apps/web/context.md:22 identifies the stack. Preserve the existing root-level pages/components/composables structure. .nax/rules/web.md:22 requires useApi-based requests inside composables/utilities; the web has no generated API client. This feature needs no API, Prisma, OpenAPI, generated-client, dependency, or persistent-data migration. The new project lookup is an existing GET /projects request, not a new contract. All seven stories are independent and have workdir apps/web and dependencies []; no exported-symbol seam crosses stories. Locale changes by US-001, US-003 and US-006 share en.json/zh.json and must be merged additively without overwriting another story's keys. No production code was changed or tests executed while drafting this PRD.\n\nUS-001 findings and impact: apps/web/pages/[project]/memory.vue:13 currently destructures only t; its filter labels/selects at :132-148 have no for/id associations, the subject cell at :186 prints item.subject raw, the non-NOTE object branch at :196 prints item.object raw, and the kind badge at :198 prints item.kind raw. apps/web/composables/useMemory.ts:19 defines MemoryItem with string subject/predicate/object/kind/status: this is display-only work and does not require changing its query, retirement, debounce, pagination or permission behavior. Add lib/memory-subject.ts and use it from the page; link ticket ids directly through the existing CUID-capable ticket route, not via an additional lookup. Only ticket:/agent: with a nonempty suffix are recognized, splitting at the first colon. Prefix-free or empty-prefixed subjects stay unchanged. The short form is the first eight characters of the extracted id and the raw subject is retained as title. Translate status objects only for predicate status when tickets.status.<object> exists; leave unknown values, including lowercase open, raw. Translate kinds through memory.kinds and humanize unknown codes. apps/web/lib/humanize-code.ts:5 already trims, splits whitespace/dot/underscore/hyphen runs, lowercases and capitalizes the first character; reuse it. Existing English ticket statuses include IN_PROGRESS = In progress at apps/web/i18n/locales/en.json:344. Add both locales' six kind keys and two subject labels. New tests are tests/lib/memory-subject.spec.ts and tests/pages/memory-readable.spec.ts. Regression risk is the hand-built SSR context at apps/web/tests/pages/memory.spec.ts:482: extend it with every new template binding, including slug if used in links, but preserve its interpolation pins and existing assertions. The setup-only memory-mount harness compiles the real page (apps/web/tests/pages/memory-mount.spec.ts:52); add te: () => false to its i18n stub and to memory-retire-visibility.spec.ts and the page-level i18nStub in memory-retire-flow.spec.ts if absent. Keep NOTE description/expansion, user-scope badge and retirement behavior unchanged.\n\nUS-002 findings and impact: apps/web/pages/[project]/timeline.vue:9 obtains locale and t, :41 initially loads events only, :61-77 renders unnamed event/date filters, and :108-110 prints eventType, actorId and action raw. Load member names independently once on mount, silently catching only the cosmetic members failure; do not suppress the existing event-read error presentation. apps/web/composables/useProjectMemberNames.ts:11 already issues the project members GET with size: '100', :20 resolves member name or email and then the signed-in user, and :24 returns null only for an unresolved actor. Its load() rejects; the page must catch that read without an error toast while still displaying events. Do not alter the shared member helper or add a second members request. Use home.activity.eventType keys (existing mapping at apps/web/i18n/locales/en.json:898), humanize unknown event types and all actions, and retain raw action in title. tests/pages/timeline.spec.ts has source interpolation pins at :320-332 and a manual SSR context at :476; add the actor/event/action bindings to that context while preserving its existing assertions and raw field expressions inside interpolations. Add tests/pages/timeline-readable.spec.ts using mountSfc with real English labels and a members request double. The spec's historical note that useProjectMemberNames is absent from mountSfc's default auto-import list is stale in this checkout: apps/web/tests/helpers/mount-sfc.ts:144 already lists it. Still inject an explicit globals double (or alias for an explicit import); no harness rewrite is necessary merely to add that name.\n\nUS-003 findings and impact: apps/web/pages/[project]/flows/[id].vue:150 currently gives PageHeader a generic title and raw id subtitle, :176 displays createdAt without formatting, :191 displays approvedAt raw, and :214 renders flow-level job command/state directly. Add flowTitle to lib/fleet-flows.ts alongside its existing pure helpers (DTOs at :45, jobsByFeature at :153); do not change wire DTOs, grouping, flow-state logic, stop/answer permissions, polling, approval notices or failure handling. The helper joins feature names in order with ', ' and returns null for no features. The page still keeps the full id in an explicit translated ID details row. FlowFeatureSection.vue:17 currently takes only t, :46-48 separates the pull-request label and number across elements without guaranteed text spacing, and :54 renders raw command/state. Use codeLabel in both job-list surfaces: apps/web/lib/fleet-i18n.ts:5 returns a translation only when te finds the key and otherwise preserves the raw code. Existing en fleet labels include COMPLETED at en.json:1254 and AGENT = Agent task at :1273. Dates reuse timeText at apps/web/lib/fleet-analytics-format.ts:45, which returns local toLocaleString() or '-' when absent; tests must derive the same value rather than assume timezone-specific fixed strings. Existing flow detail tests mount the real feature section/answer form (tests/pages/fleet-flow-detail.spec.ts:30-64), so both page and component need te-capable i18n mocks. Add te: () => false to fleet-flow-detail.spec.ts and flow-feature-section.spec.ts, changing only the existing Created ISO expectation to new Date(...).toLocaleString(); preserve every other assertion, including RUN · RUN · QUEUED · $0.50 fallback text. New tests: tests/lib/fleet-flows-title.spec.ts and tests/pages/flow-detail-readable.spec.ts. Existing tests/lib/fleet-flows.spec.ts and flow polling/stop/feature-section suites provide neighboring regression coverage.\n\nUS-004 findings and impact: apps/web/components/fleet/analytics/IngestTable.vue:7 has only rows and busyJobId props, :14 uses overflow-x-auto without relative, and :30-31 prints full job/project ids. Add optional readonly projects with an empty-array default to preserve all existing callers; export the display-only IngestProject projection from lib/fleet-analytics-types.ts (IngestRowDto remains unchanged at :144). apps/web/composables/useFleetAnalytics.ts:39 contains the admin request facade; extend it with projects() mapping GET /projects rows to exactly id/slug/name. apps/web/pages/admin/fleet/analytics.vue:26 already consumes that facade, :129 hooks refreshAll to mount/visibility and :211 mounts the ingest table. Fetch projects once separately on mount, not inside refreshAll (which also runs for visibility, range and other refresh actions), and pass the result to the table. Do not change spend panels, 403 handling for existing ingest reads, pagination, money precision, rerun actions or lack of polling. A failed projects read is cosmetic: silently use [], show raw project ids and shortened plain-text job ids without links. Known projects supply names and slugs for job links. Always keep the full job id in title and show #leaseEpoch. relative must be on the same overflow wrapper to contain the absolutely positioned sr-only header text at phone width. Extend existing composable/page tests and create tests/components/fleet-ingest-projects.spec.ts to exercise table and page wiring; tests/pages/admin-fleet-analytics.spec.ts:30 has a strict makeGet double that currently throws for any route other than spend/ingest, so teach it /projects -> [] while preserving all existing assertions. Its harness mounts the real ingest table and stubs charts (:25-56); continue using that approach rather than importing client-only Unovis charts into Jest.\n\nUS-005 findings and impact: apps/web/composables/usePermissions.ts:33 exposes pending as Ref<boolean>; its computed permissions intentionally fail closed for pending/error at :66. Do not change that security behavior or infer permissions from roles. apps/web/pages/[project]/fleet/dispatch.vue:25-26 currently computes canDispatch directly from fleet.job.dispatch, and :142 has the source-pinned <p v-if=\"!canDispatch\" ...> denial branch before the error/no-repos/form chain. Add an outer LoadingState/pending branch and an otherwise wrapper around the existing chain, leaving the canDispatch line and denial element unchanged. tests/pages/fleet-dispatch-page.spec.ts:42 explicitly pins both, and tests/pages/project-permission-gates.spec.ts exercises the permission gate. This story touches permission presentation/access-control gating, so use three-session-tdd regardless of its otherwise medium implementation complexity. apps/web/composables/useFleetDispatchOptions.ts:16 performs paired repo/runner reads via Promise.all, updates arrays only after success, and :33-38 already falls back to raw ids. Add a sticky settled ref initially false and set it true when the first load resolves or rejects, retaining rejection propagation and existing lookup fallback behavior. Do not reset it for later retries. The job detail page invokes options.load silently at apps/web/pages/[project]/fleet/jobs/[id]/index.vue:174 but currently displays repoName immediately in its subtitle (:281) and runnerName immediately in fleet-job-runner (:359). Until options settle, render translated common.loading only in the repo/assigned-runner slots; a null runner is immediately unassigned. On failed lookup, settled becomes true and the raw ids become the legitimate final fallback. The shared options composable also serves fleet/index.vue:20, fleet/budgets.vue:21, schedules/index.vue:23, schedules/[id].vue:26, fleet/repos/[id]/config.vue:25, threads/new.vue:18 and threads/[id].vue:40, so make this strictly additive rather than changing any existing request or fallback semantics. Extend tests/composables/useFleetDispatchOptions.spec.ts:10, create tests/pages/fleet-dispatch-loading.spec.ts, and exercise job subtitle/Runner transitions at page level. Add settled: ref(true) to options doubles in fleet-job-detail.spec.ts, fleet-job-detail-workflow.spec.ts, fleet-job-agent-result.spec.ts, fleet-job-fix-action.spec.ts and the job-page mounts in fleet-job-budget-gates.spec.ts, preserving all existing assertions. Inspect other job-page mounts found by search (including project-permission-gates.spec.ts) for fixtures that require the new field; do not relax existing checks.\n\nUS-006 findings and impact: apps/web/pages/settings/notifications.vue:95 associates each in-app checkbox with its row label through notification-pref-<category>; the email checkbox at :113 has its own id but no accessible name. The email master is already inside a label at :80. Add aria-label only to the per-category email boxes, using the new translated notifications.preferences.emailFor with the translated category label as category. Do not replace existing in-app labeling or toggle/save/disabled semantics. apps/web/pages/admin/slos.vue:102-116 has visible From/To labels but unassociated native date inputs; add matching for/id pairs without changing reload behavior. apps/web/components/home/HomeProjectList.vue:22 uses bg-destructive/10 behind text-status-rejected; swap only the surface to bg-card and retain red text/border. tests/lib/token-contrast.spec.ts:72 already includes ['card', 'status-rejected'] in both-theme 4.5:1 assertions, so no token changes are needed. New tests/pages/accessible-names.spec.ts must use mountSfc and inspect rendered attributes. tests/pages/notification-settings-page.spec.ts:15-40 shows the intended real SFC harness and English locale use; tests/pages/admin-slos-mount.spec.ts:62-104 primarily exposes setup bindings and is not sufficient for id/for checks. Existing notification/SLO/home-project tests should keep their assertions unchanged.\n\nUS-007 findings and impact: apps/web/pages/[project]/index.vue:94-99 has two default primary Buttons; change only Import Issue to outline and retain New Ticket's default. Its priority chips have a shared h-9 class string at :122; replace it with h-11 sm:h-9. apps/web/components/TicketBoard.vue:54 has header rows without an explicit height/testid and :60 has the Created-only New Ticket button without h-7; add h-8 plus board-column-header-<STATUS> on all six header rows and h-7 on that button, preserving the existing outer board-column-<STATUS> ids, status list and emitted events. apps/web/components/home/HomeNeedsYou.vue:34 is the dashboard grid; items-start avoids stretching empty cards when another card has content. apps/web/pages/[project]/fleet/index.vue:150-157 renders the state-chip group with py-1 but no explicit height; add h-11 sm:h-8 to every chip, intentionally making desktop fleet chips 32px tall. Keep chip filtering, keyboard behavior and ticket-chip token helpers intact. Add tests/components/board-layout.spec.ts and extend relevant page coverage in tests/pages/project-board.spec.ts / fleet-jobs-list.spec.ts and dashboard component tests as needed. No current test pins the variants/heights/alignment being changed.\n\nTesting and rollout: Use Jest plus mountSfc for page/component acceptance, with pure Jest tests for memorySubject/flowTitle and injected useApi doubles for composables. apps/web/tests/helpers/mount-sfc.ts:1 describes its real SFC compiler and minimal custom renderer: it records element props/events but has no browser layout engine. uiStubs forward attrs and named slots (tests/helpers/fleet-harness.ts:59-77), so rendered class and prop assertions are appropriate for layout/touch targets; do not claim measured pixel dimensions from this harness. enI18n resolves real English keys, te and interpolation (tests/helpers/fleet-harness.ts:207-216). Preserve text interpolation for untrusted values, rather than introducing v-html. Existing SSR/source-pattern suites need additive binding/stub updates, not deleted assertions or rewritten pins. Workspace test command is bun run test (Jest plus existing real-sanitizer harnesses), with no new Playwright specs. Generated nax acceptance remains separate under apps/web/.nax/features/web-ux-audit-fixes/.nax-acceptance.test.ts and must not be edited or copied into tests; package.json:82 ignores .nax in Jest. Validation gates belong to the pipeline, not acceptance criteria. Read docs/ux/redesign/MASTER-PLAN.md before layout edits: its :31-40 constraints require semantic tokens, interpolation safety and additive TicketBoard edits. The spec delegates audit/master-plan bookkeeping to a human after the run; no documentation-only story is introduced. There is no staged migration: deploy additive client changes together, with graceful unknown-id/code and failed-lookup fallbacks. Main risks are premature permission denial, stranded loading state after rejection, stale/minimal mocks, accidental extra member/project reads, changing underlying ids instead of labels, locale-key drift, losing the intentional PR whitespace, and asserting actual layout in a non-layout test renderer.\n\nRefine-pass audit: Re-read the complete spec, its interfaces, all six feature exclusions and the current story AC arrays. Enumerated all 78 original acceptance criteria by story ordinal: US-001 1-15 map to PRD 1-15; US-002 1-12 map to PRD 1-12 and original 13 maps to PRD 13-14 (event rendering and no-toast assertions split without dropping either); US-003 1-13 map to PRD 1-13; US-004 1-11 map to PRD 1-11; US-005 1-13 map to PRD 1-13; US-006 1-6 map to PRD 1-6; US-007 1-7 map to PRD 1-7. Every original assertion and qualifying clause survives, including the not-a-member-and-not-self condition, the literal query size and exactly-once clause, the leaseEpoch still-renders anchor, and the options-read-failed parenthetical. All three failure-table rows are covered; PRD US-005 AC14 additionally covers the Runner raw-id failure fallback. At the refine request's direction, added explicit negative/regression acceptance in US-003 AC14 for an absent command translation (codeLabel's existing raw-code contract at apps/web/lib/fleet-i18n.ts:5-7), US-006 AC7 for an initial preferences rejection (existing ErrorState at apps/web/pages/settings/notifications.vue:23-30 and :76), and US-007 AC8 for all-zero dashboard totals (existing non-grid empty branch at apps/web/components/home/HomeNeedsYou.vue:19-20 and :110-112). The resulting PRD has 83 acceptance criteria. US-001 already has malformed/unknown-subject and unknown-status fallbacks; US-002, US-004 and US-005 already have explicit failed-read cases. All ACs are observable through returned data, refs, recorded API calls, rendered props/attributes/text or locale content; require nonempty association ids so missing id/for pairs cannot pass by comparing absent attributes. Clarified the flow feature-object fixture and the Ref<boolean> options double without changing spec semantics. Restored the exact five spec-recommended context files for US-001, US-004 and US-005; the implementation composable and source-pinned tests omitted from those five remain explicitly identified in the descriptions and analysis. Re-read the selected harnesses at tests/pages/memory-mount.spec.ts:100-134, tests/components/fleet-ingest-table.spec.ts:11-28 and tests/pages/fleet-dispatch-pr-page.spec.ts:10-62. No context path is a story output. All seven binding ids/workdirs and empty dependency arrays are unchanged; medium/tdd-simple remains the lightest fit for the bounded multi-file UI changes except US-005, whose permission presentation still requires three-session-tdd under the security override. All six top-level exclusions remain verbatim, no story-local exclusion was hoisted, and the new negative tests preserve existing behavior rather than expand the feature into new workflows.",
+  "outOfScope": [
+    "Resolving memory `ticket:<cuid>` subjects to ticket refs (`SB-10`); it needs an API lookup.",
+    "Audit findings R2-8 to R2-21 (medium and low severity): the settings page title and Delete Project placement, missing breadcrumb leaves, the ticket page assignee list and empty gap, disabled primary buttons that read as enabled, filter select heights, raw codes on the notifications page, hydration-mismatch warnings, breadcrumb and other sub-32 px touch targets, the KB empty state, the admin users status chip and button heights, the audit log cell wrap, permission-read rate limits, and the repo config page load time.",
+    "Round 1 R1-16 (job page detail grid layout); it needs a layout decision.",
+    "New Playwright e2e specs; the feature is verified with Jest.",
+    "Updating `docs/ux/redesign/AUDIT-2026-11.md` and `docs/ux/redesign/MASTER-PLAN.md`; a human updates them after the run.",
+    "Any `apps/api` change and any change to `openapi.json`."
+  ],
+  "routingProfile": "native-codex-ds"
+}

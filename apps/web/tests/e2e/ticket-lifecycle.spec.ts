@@ -94,7 +94,7 @@ test.describe('Ticket Lifecycle', () => {
     await webLogin(page);
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
 
-    await expect(page.getByText(/^VERIFIED$/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('ticket-status-chip')).toHaveText('Verified', { timeout: 5000 });
     await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 5000 });
   });
 
@@ -126,7 +126,7 @@ test.describe('Ticket Lifecycle', () => {
     await webLogin(page);
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
 
-    await expect(page.getByText(/^IN_PROGRESS$/)).toBeVisible({ timeout: 4000 });
+    await expect(page.getByTestId('ticket-status-chip')).toHaveText('In progress', { timeout: 4000 });
     await expect(page.getByRole('button', { name: 'Submit Fix' })).toBeVisible({ timeout: 4000 });
   });
 
@@ -145,7 +145,7 @@ test.describe('Ticket Lifecycle', () => {
     await webLogin(page);
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
 
-    await expect(page.getByText(/^CLOSED$/)).toBeVisible({ timeout: 4000 });
+    await expect(page.getByTestId('ticket-status-chip')).toHaveText('Closed', { timeout: 4000 });
     await expect(page.getByRole('button', { name: 'Approve Fix' })).not.toBeVisible({ timeout: 3000 });
     await expect(page.getByRole('button', { name: 'Verify' })).not.toBeVisible({ timeout: 3000 });
   });

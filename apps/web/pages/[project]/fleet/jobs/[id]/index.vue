@@ -278,7 +278,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed || !job" @retry="loadJobDetail()" />
     <template v-else>
-      <PageHeader :title="jobTitle" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.repoName(job.repoId)} @ ${job.ref}`">
+      <PageHeader :title="jobTitle" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.settled.value ? options.repoName(job.repoId) : t('common.loading')} @ ${job.ref}`">
         <template #actions>
           <NuxtLink :to="logsHref" class="inline-flex h-10 items-center rounded-md border border-input px-4 text-sm hover:bg-muted" data-testid="fleet-job-logs-link">
             {{ t('fleet.jobs.actions.logs') }}
@@ -313,12 +313,13 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
             <template v-if="job.fixReady.replied !== undefined"> {{ t('fleet.fixReady.replies', { count: job.fixReady.replied }) }}</template>
             <template v-if="job.fixReady.resolved !== undefined"> {{ t('fleet.fixReady.resolved', { count: job.fixReady.resolved }) }}</template>
           </template>
-          <template v-else>{{ t('fleet.fixReady.held', { reason: job.fixReady.readyHeld ?? '' }) }}</template>
+          <template v-else-if="job.fixReady.readyHeld">{{ t('fleet.fixReady.held', { reason: job.fixReady.readyHeld }) }}</template>
+          <template v-else>{{ t('fleet.fixReady.heldNoReason') }}</template>
         </span>
         <span v-if="job.stateReason" class="text-sm text-muted-foreground" :title="job.stateReason" data-testid="fleet-job-state-reason">
           <template v-if="budgetPolicyId">
             {{ t('fleet.jobs.detail.budgetStop') }}
-            <NuxtLink :to="`/${slug}/fleet/budgets`" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-budget-link">{{ t('fleet.jobs.detail.budgetStopLink') }}</NuxtLink>
+            <NuxtLink :to="`/${slug}/fleet/budgets`" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-budget-link">{{ t('fleet.jobs.detail.budgetStopLink') }}</NuxtLink>
           </template>
           <template v-else>{{ job.stateReason }}</template>
         </span>
@@ -327,7 +328,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         </span>
         <span v-if="job.scheduleId" class="text-sm text-muted-foreground" data-testid="fleet-job-schedule">
           {{ t('fleet.jobs.detail.fromSchedule') }}
-          <NuxtLink :to="`/${slug}/fleet/schedules/${job.scheduleId}`" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-schedule-link">{{ t('fleet.jobs.detail.openSchedule') }}</NuxtLink>
+          <NuxtLink :to="`/${slug}/fleet/schedules/${job.scheduleId}`" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-schedule-link">{{ t('fleet.jobs.detail.openSchedule') }}</NuxtLink>
         </span>
         <span v-if="job.coalescedCount > 0" class="text-sm text-muted-foreground" data-testid="fleet-job-coalesced">
           {{ t('fleet.jobs.detail.coalesced', { count: job.coalescedCount }) }}
@@ -342,7 +343,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 
       <div v-if="job.pendingApprovals > 0" class="flex flex-wrap items-center gap-3 rounded-md border border-primary p-4 text-sm" data-testid="fleet-job-approval-callout">
         <span class="font-medium">{{ t('fleet.jobs.detail.waitingApproval', { count: job.pendingApprovals }) }}</span>
-        <NuxtLink :to="reviewHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-approval-review">{{ t('fleet.jobs.detail.reviewApproval') }}</NuxtLink>
+        <NuxtLink :to="reviewHref" class="text-link underline-offset-4 hover:underline" data-testid="fleet-job-approval-review">{{ t('fleet.jobs.detail.reviewApproval') }}</NuxtLink>
       </div>
 
       <section v-if="requeueResult" class="space-y-2" data-testid="fleet-job-requeue-result">
@@ -355,7 +356,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
       <p v-if="job.ruleOverride" data-testid="fleet-job-rule-override">{{ t('fleet.jobs.ruleOverride.summary', { files: job.ruleOverride.ruleFiles, mode: job.ruleOverride.rulesMode, context: job.ruleOverride.contextMode ?? '-', sha256: job.ruleOverride.sha256.slice(0, 8) }) }}</p>
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ job.runnerId === null ? t('fleet.jobs.detail.unassigned') : options.settled.value ? options.runnerName(job.runnerId) : t('common.loading') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
         <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
         <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>
@@ -369,7 +370,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <div>
           <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.pr') }}</dt>
           <dd>
-            <a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-primary underline-offset-4 hover:underline" data-testid="fleet-job-pr">{{ prUrl }}</a>
+            <a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-link underline-offset-4 hover:underline" data-testid="fleet-job-pr">{{ prUrl }}</a>
             <span v-else class="break-all">{{ job.resultPrUrl ?? '-' }}</span>
           </dd>
         </div>

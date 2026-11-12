@@ -43,7 +43,7 @@
 
     <p v-if="registrationOpen" class="text-center text-sm text-muted-foreground">
       {{ t('auth.login.noAccount') }}
-      <NuxtLink to="/register" class="font-medium text-primary hover:underline">
+      <NuxtLink to="/register" class="font-medium text-link hover:underline">
         {{ t('auth.login.createOne') }}
       </NuxtLink>
     </p>

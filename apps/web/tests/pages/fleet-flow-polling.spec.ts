@@ -58,7 +58,7 @@ async function mountPage(options: {
   const mounted = mountSfc(webFile('pages', '[project]', 'flows', '[id].vue'), {
     globals: {
       useRoute: () => ({ params: { project: 'acme', id: 'f-1' } }),
-      useI18n: () => ({ t: (key: string) => key }),
+      useI18n: () => ({ t: (key: string) => key, te: () => false }),
       useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
       useFleetFlows: () => ({ get, overview: getOverview }),
       useProjectMemberNames: () => ({ members: [], load: jest.fn<() => Promise<void>>().mockResolvedValue(undefined), nameOf: () => null }),

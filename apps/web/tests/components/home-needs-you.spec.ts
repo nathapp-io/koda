@@ -63,7 +63,7 @@ describe('HomeNeedsYou', () => {
     const text = app.text()
     expect(text).toContain('My tickets')
     expect(text).toContain('Fix the thing')
-    expect(text).toContain('IN_PROGRESS')
+    expect(text).toContain('In progress')
     expect(text).toContain('High')
     expect(text).toContain('Shell command')
     expect(text).toContain('$1.50')

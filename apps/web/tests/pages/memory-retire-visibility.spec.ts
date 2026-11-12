@@ -15,7 +15,7 @@ function mountMemory(items: ReturnType<typeof rows>, keys: string[] = []) {
   return mountSfc(page, {
     globals: {
       useRoute: () => ({ params: { project: 'sb' } }),
-      useI18n: () => ({ t: (key: string) => key }),
+      useI18n: () => ({ t: (key: string) => key, te: () => false }),
       useAppToast: () => ({ error: () => undefined }),
       useProjectPermissions: () => projectPermissionsStub(keys),
       useMemory: () => memory,

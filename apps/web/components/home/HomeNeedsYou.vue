@@ -31,7 +31,7 @@ function approvalLabel(a: HomeNeedsYou['approvals'][number]): string {
 </script>
 
 <template>
-  <div v-if="anythingTodo" class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <div v-if="anythingTodo" class="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
     <Card class="shadow-none">
       <CardHeader class="pb-2">
         <CardTitle class="flex items-center gap-2 text-base">

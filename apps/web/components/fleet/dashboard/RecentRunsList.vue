@@ -42,7 +42,7 @@ const rows = computed(() =>
             <TableCell>
               <NuxtLink
                 :to="jobPath(row.job.projectSlug, row.job.id)"
-                class="break-all font-medium text-primary underline-offset-4 hover:underline"
+                class="break-all font-medium text-link underline-offset-4 hover:underline"
                 data-testid="fleet-dashboard-recent-link"
               >{{ row.job.feature }}</NuxtLink>
             </TableCell>
@@ -63,7 +63,7 @@ const rows = computed(() =>
                 :href="row.prUrl"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="text-primary underline-offset-4 hover:underline"
+                class="text-link underline-offset-4 hover:underline"
                 data-testid="fleet-dashboard-recent-pr"
               >{{ t('fleet.dashboard.recent.pr') }}</a>
             </TableCell>
@@ -74,7 +74,7 @@ const rows = computed(() =>
     <p v-if="truncated" class="text-xs text-muted-foreground" data-testid="fleet-dashboard-recent-truncated">
       {{ t('fleet.dashboard.recent.truncated') }}
     </p>
-    <NuxtLink :to="analyticsTo" class="inline-block text-sm text-primary underline-offset-4 hover:underline" data-testid="fleet-dashboard-analytics-link">
+    <NuxtLink :to="analyticsTo" class="inline-block text-sm text-link underline-offset-4 hover:underline" data-testid="fleet-dashboard-analytics-link">
       {{ t('fleet.dashboard.recent.analyticsLink') }}
     </NuxtLink>
   </div>

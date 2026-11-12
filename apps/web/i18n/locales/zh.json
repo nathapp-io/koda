@@ -339,12 +339,12 @@
     "loadMore": "加载更多",
     "live": { "deleted": "此工单已被删除。" },
     "status": {
-      "CREATED": "CREATED",
-      "VERIFIED": "VERIFIED",
-      "IN_PROGRESS": "IN_PROGRESS",
-      "VERIFY_FIX": "VERIFY_FIX",
-      "CLOSED": "CLOSED",
-      "REJECTED": "REJECTED"
+      "CREATED": "已创建",
+      "VERIFIED": "已验证",
+      "IN_PROGRESS": "进行中",
+      "VERIFY_FIX": "待验证修复",
+      "CLOSED": "已关闭",
+      "REJECTED": "已拒绝"
     },
     "priority": {
       "CRITICAL": "紧急",
@@ -480,6 +480,15 @@
     }
   },
   "memory": {
+    "kinds": {
+      "FACT": "事实",
+      "DECISION": "决策",
+      "PREFERENCE": "偏好",
+      "CONSTRAINT": "约束",
+      "INCIDENT_PATTERN": "事件模式",
+      "NOTE": "笔记"
+    },
+    "subject": { "ticket": "工单", "agent": "代理" },
     "settings": {
       "title": "代理记忆写入",
       "description": "选择代理的记忆写入是立即生效还是等待人工审批。",
@@ -955,6 +964,7 @@
       },
       "detail": {
         "title": "流程",
+        "id": "ID",
         "overview": "流程详情",
         "entry": "入口",
         "entryValue": { "THREAD": "线程", "NAX": "Nax" },
@@ -1276,7 +1286,8 @@
       "CONFIG_EDIT": "配置修改",
       "CONFIG_DRIFT": "漂移检查",
       "REVIEW": "PR 评审",
-      "FIX": "PR 修复"
+      "FIX": "PR 修复",
+      "THREAD": "线程轮次"
     },
     "agentResult": {
       "title": "代理任务结果",
@@ -1297,6 +1308,7 @@
     "fixReady": {
       "markedReady": "PR 已标记为可合并",
       "held": "PR 尚未就绪：{reason}",
+      "heldNoReason": "PR 尚未就绪",
       "replies": "已回复 {count} 条",
       "resolved": "已解决 {count} 条"
     },
@@ -2684,6 +2696,7 @@
       "subtitle": "选择哪些通知进入你的收件箱。",
       "inApp": "站内",
       "email": "邮件",
+      "emailFor": "邮件：{category}",
       "emailEnabled": "邮件通知",
       "emailUnavailable": "邮件通知不可用",
       "saved": "通知设置已保存"

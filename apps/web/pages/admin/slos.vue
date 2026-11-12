@@ -99,8 +99,9 @@ onMounted(reload)
 
     <div class="flex flex-wrap items-end gap-3">
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('slos.window.from') }}</label>
+        <label for="slo-window-from" class="text-xs font-medium text-muted-foreground">{{ t('slos.window.from') }}</label>
         <input
+          id="slo-window-from"
           v-model="from"
           type="date"
           class="rounded-md border border-border bg-background px-2 py-1 text-sm"
@@ -108,8 +109,9 @@ onMounted(reload)
         >
       </div>
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('slos.window.to') }}</label>
+        <label for="slo-window-to" class="text-xs font-medium text-muted-foreground">{{ t('slos.window.to') }}</label>
         <input
+          id="slo-window-to"
           v-model="to"
           type="date"
           class="rounded-md border border-border bg-background px-2 py-1 text-sm"

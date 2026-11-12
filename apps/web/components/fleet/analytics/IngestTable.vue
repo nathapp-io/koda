@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { ingestVariant, timeText } from '~/lib/fleet-analytics-format'
-import type { IngestRowDto } from '~/lib/fleet-analytics-types'
+import type { IngestProject, IngestRowDto } from '~/lib/fleet-analytics-types'
 import { codeLabel } from '~/lib/fleet-i18n'
 
 /** Spec §5.3, D397: ingest health with a per-row Re-run. Ids are text: the ingest list carries no slug. */
-defineProps<{ rows: readonly IngestRowDto[]; busyJobId: string | null }>()
+const props = withDefaults(defineProps<{ rows: readonly IngestRowDto[]; busyJobId: string | null; projects?: readonly IngestProject[] }>(), { projects: () => [] })
+const projectFor = (projectId: string): IngestProject | undefined => props.projects.find((project) => project.id === projectId)
+const shortJobId = (jobId: string): string => jobId.slice(0, 8)
 const emit = defineEmits<{ rerun: [jobId: string] }>()
 const { t, te } = useI18n()
 const statusLabel = (status: string): string => codeLabel(t, te, 'fleet.analytics.ingestStatus', status)
 </script>
 
 <template>
-  <div class="overflow-x-auto">
+  <div class="relative overflow-x-auto">
     <table class="w-full text-sm" data-testid="fleet-ingest-table">
       <thead>
         <tr class="text-left text-muted-foreground">
@@ -27,8 +29,12 @@ const statusLabel = (status: string): string => codeLabel(t, te, 'fleet.analytic
       <tbody>
         <tr v-for="row in rows" :key="row.id" data-testid="fleet-ingest-row" :data-job="row.jobId" :data-status="row.status">
           <td class="py-1"><Badge :variant="ingestVariant(row.status)">{{ statusLabel(row.status) }}</Badge></td>
-          <td class="py-1 font-mono text-xs break-all">{{ row.jobId }} <span class="text-muted-foreground">#{{ row.leaseEpoch }}</span></td>
-          <td class="py-1 font-mono text-xs break-all">{{ row.projectId }}</td>
+          <td class="py-1 font-mono text-xs break-all">
+            <span v-if="projectFor(row.projectId)" :title="row.jobId"><NuxtLink :to="`/${projectFor(row.projectId)?.slug}/fleet/jobs/${row.jobId}`">{{ shortJobId(row.jobId) }}</NuxtLink></span>
+            <span v-else :title="row.jobId">{{ shortJobId(row.jobId) }}</span>
+            <span class="text-muted-foreground"> #{{ row.leaseEpoch }}</span>
+          </td>
+          <td class="py-1 font-mono text-xs break-all">{{ projectFor(row.projectId)?.name ?? row.projectId }}</td>
           <td class="py-1 text-right tabular-nums">{{ row.attempts }}</td>
           <td class="max-w-xs py-1"><span class="block truncate" :title="row.error ?? ''">{{ row.error ?? '-' }}</span></td>
           <td class="py-1 whitespace-nowrap">{{ timeText(row.updatedAt) }}</td>

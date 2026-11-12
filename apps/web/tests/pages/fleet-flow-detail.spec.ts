@@ -40,7 +40,7 @@ async function mountPage(options: {
   const mounted = mountSfc(webFile('pages', '[project]', 'flows', '[id].vue'), {
     globals: {
       useRoute: () => ({ params: { project: 'acme', id: 'f-1' } }),
-      useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${Object.values(params).join(' ')}` : key }),
+      useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${Object.values(params).join(' ')}` : key, te: () => false }),
       useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
       useFleetFlows: () => ({ get, overview: getOverview, answer }),
       useProjectMemberNames: () => ({ members: [], load, nameOf }),
@@ -175,7 +175,7 @@ describe('fleet flow detail page (US-006)', () => {
     expect(mounted.text()).toContain('THREAD')
     expect(mounted.text()).toContain('review-model')
     expect(mounted.text()).toContain('supervisor-model')
-    expect(mounted.text()).toContain('2026-01-02T03:04:05.000Z')
+    expect(mounted.text()).toContain(new Date('2026-01-02T03:04:05.000Z').toLocaleString())
     mounted.unmount()
   })
 

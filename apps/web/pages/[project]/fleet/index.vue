@@ -125,21 +125,21 @@ function featureLabel(job: FleetJobDto): string {
 
     <FilterBar columns="3">
       <Select v-model="filters.repoId">
-        <SelectTrigger data-testid="fleet-filter-repo"><SelectValue :placeholder="t('fleet.jobs.filters.repo')" /></SelectTrigger>
+        <SelectTrigger data-testid="fleet-filter-repo" :aria-label="t('fleet.jobs.filters.repo')"><SelectValue :placeholder="t('fleet.jobs.filters.repo')" /></SelectTrigger>
         <SelectContent>
           <SelectItem :value="ALL">{{ t('fleet.jobs.filters.allRepos') }}</SelectItem>
           <SelectItem v-for="repo in options.repos.value" :key="repo.id" :value="repo.id">{{ repo.owner }}/{{ repo.name }}</SelectItem>
         </SelectContent>
       </Select>
       <Select v-model="filters.runnerId">
-        <SelectTrigger data-testid="fleet-filter-runner"><SelectValue :placeholder="t('fleet.jobs.filters.runner')" /></SelectTrigger>
+        <SelectTrigger data-testid="fleet-filter-runner" :aria-label="t('fleet.jobs.filters.runner')"><SelectValue :placeholder="t('fleet.jobs.filters.runner')" /></SelectTrigger>
         <SelectContent>
           <SelectItem :value="ALL">{{ t('fleet.jobs.filters.allRunners') }}</SelectItem>
           <SelectItem v-for="runner in options.runners.value" :key="runner.id" :value="runner.id">{{ runner.name }}</SelectItem>
         </SelectContent>
       </Select>
       <Select v-model="filters.requestedById">
-        <SelectTrigger data-testid="fleet-filter-requester"><SelectValue :placeholder="t('fleet.jobs.filters.requester')" /></SelectTrigger>
+        <SelectTrigger data-testid="fleet-filter-requester" :aria-label="t('fleet.jobs.filters.requester')"><SelectValue :placeholder="t('fleet.jobs.filters.requester')" /></SelectTrigger>
         <SelectContent>
           <SelectItem :value="ALL">{{ t('fleet.jobs.filters.allRequesters') }}</SelectItem>
           <SelectItem v-for="member in people.members.value" :key="member.userId" :value="member.userId">{{ member.name || member.email }}</SelectItem>
@@ -154,7 +154,7 @@ function featureLabel(job: FleetJobDto): string {
         type="button"
         :aria-pressed="filters.state === chip.value"
         :data-testid="`fleet-filter-chip-${chip.value}`"
-        :class="['rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', filters.state === chip.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground']"
+        :class="['h-11 sm:h-8 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', filters.state === chip.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground']"
         @click="filters.state = chip.value"
       >
         {{ chip.label }}
@@ -174,7 +174,7 @@ function featureLabel(job: FleetJobDto): string {
               <TableHead>{{ t('fleet.jobs.table.repo') }}</TableHead>
               <TableHead>{{ t('fleet.jobs.table.runner') }}</TableHead>
               <TableHead>{{ t('fleet.jobs.table.state') }}</TableHead>
-              <TableHead>{{ t('fleet.jobs.table.cost') }}</TableHead>
+              <TableHead class="text-right">{{ t('fleet.jobs.table.cost') }}</TableHead>
               <TableHead>{{ t('fleet.jobs.table.requester') }}</TableHead>
               <TableHead>{{ t('fleet.jobs.table.queued') }}</TableHead>
             </TableRow>
@@ -182,20 +182,20 @@ function featureLabel(job: FleetJobDto): string {
           <TableBody>
             <TableRow v-for="job in sortedJobs" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
               <TableCell>
-                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ featureLabel(job) }}</NuxtLink>
+                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-link underline-offset-4 hover:underline">{{ featureLabel(job) }}</NuxtLink>
               </TableCell>
-              <TableCell>{{ codeLabel(t, te, 'fleet.command', job.command) }}</TableCell>
+              <TableCell class="whitespace-nowrap">{{ codeLabel(t, te, 'fleet.command', job.command) }}</TableCell>
               <TableCell>{{ options.repoName(job.repoId) }}</TableCell>
-              <TableCell>{{ options.runnerName(job.runnerId) ?? '-' }}</TableCell>
+              <TableCell class="whitespace-nowrap">{{ options.runnerName(job.runnerId) ?? '-' }}</TableCell>
               <TableCell>
                 <div class="flex flex-wrap items-center gap-2">
                   <FleetJobStateBadge :state="job.state" />
                   <Badge v-if="job.pendingApprovals > 0" variant="default" :data-testid="`fleet-job-needs-approval-${job.id}`">{{ t('fleet.jobs.needsApproval', { count: job.pendingApprovals }) }}</Badge>
                 </div>
               </TableCell>
-              <TableCell>{{ formatUsd(job.costSpentUsd) }}</TableCell>
+              <TableCell class="whitespace-nowrap text-right tabular-nums">{{ formatUsd(job.costSpentUsd) }}</TableCell>
               <TableCell>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</TableCell>
-              <TableCell>{{ new Date(job.queuedAt).toLocaleString() }}</TableCell>
+              <TableCell class="whitespace-nowrap text-muted-foreground">{{ new Date(job.queuedAt).toLocaleString() }}</TableCell>
             </TableRow>
           </TableBody>
         </Table>

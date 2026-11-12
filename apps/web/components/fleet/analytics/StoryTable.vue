@@ -23,7 +23,7 @@ const { t } = useI18n()
       <tbody>
         <tr v-for="row in rows" :key="`${row.jobId}:${row.leaseEpoch}:${row.storyId}`" :data-testid="`${testid}-row`">
           <td class="py-1">
-            <NuxtLink :to="`/${slug}/fleet/jobs/${row.jobId}`" class="font-mono text-xs text-primary underline-offset-4 hover:underline">{{ row.storyId }}</NuxtLink>
+            <NuxtLink :to="`/${slug}/fleet/jobs/${row.jobId}`" class="font-mono text-xs text-link underline-offset-4 hover:underline">{{ row.storyId }}</NuxtLink>
           </td>
           <td class="py-1 break-all">{{ row.featureName }}</td>
           <td class="py-1 text-right tabular-nums">{{ row.attempts }}</td>

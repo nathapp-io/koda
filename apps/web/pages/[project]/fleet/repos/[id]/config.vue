@@ -193,7 +193,7 @@ const problemText = (p: { path: string | null; code: string }): string =>
 
     <div v-if="activeJob" class="rounded-md border border-border p-4 text-sm" data-testid="config-active-job">
       {{ t('fleet.config.page.activeJob') }}
-      <NuxtLink :to="`/${slug}/fleet/jobs/${activeJob.id}`" class="font-medium text-primary underline-offset-4 hover:underline" data-testid="config-active-job-link">
+      <NuxtLink :to="`/${slug}/fleet/jobs/${activeJob.id}`" class="font-medium text-link underline-offset-4 hover:underline" data-testid="config-active-job-link">
         {{ t('fleet.config.page.openActiveJob') }}
       </NuxtLink>
     </div>

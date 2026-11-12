@@ -52,7 +52,7 @@ describe('AGENT job page result', () => {
         useAuth: () => ({ user: ref({ id: 'u1' }) }), useProjectPermissions: () => projectPermissionsStub([]),
         useApi: () => ({ $api: { get: jest.fn(async () => ({ records: [], total: 0, current: 1, size: 100, hasNext: false, hasPrev: false })) } }),
         useFleetJobs: () => ({ get: jest.fn(async () => job), events: jest.fn(async () => ({ records: [], hasNext: false })) }),
-        useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => id, runnerName: () => null }),
+        useFleetDispatchOptions: () => ({ settled: ref(true), load: jest.fn(async () => undefined), repoName: (id: string) => id, runnerName: () => null }),
         useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
         useFleetRepoConfig: () => ({ submitRegenerate: jest.fn() }),
         useFleetJobLogs: () => ({ list: jest.fn(async () => ({ attempts: [] })) }),

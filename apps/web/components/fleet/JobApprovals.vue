@@ -15,7 +15,7 @@
         <span v-if="row.outcome" class="text-xs text-muted-foreground">{{ row.outcome }}</span>
         <span v-if="row.left !== null" class="font-mono text-xs text-muted-foreground" data-testid="fleet-job-approval-countdown">{{ countdownText(row.left) }}</span>
         <span class="text-xs text-muted-foreground"><FleetAge :iso="row.createdAt" :now="now" mode="ago" /></span>
-        <NuxtLink :to="row.href" class="text-xs text-primary underline-offset-4 hover:underline" :data-testid="`fleet-job-approval-open-${row.id}`">
+        <NuxtLink :to="row.href" class="text-xs text-link underline-offset-4 hover:underline" :data-testid="`fleet-job-approval-open-${row.id}`">
           {{ t('fleet.jobs.approvalsSection.open') }}
         </NuxtLink>
       </li>

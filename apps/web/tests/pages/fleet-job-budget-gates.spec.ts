@@ -385,7 +385,7 @@ function mountJobDetail(over: JobDetailOver): Mounted {
         cancel: jest.fn(), requeue: jest.fn(), downloadBundle: jest.fn(),
       }),
       useFleetDispatchOptions: () => ({
-        load: jest.fn(async () => undefined), repoName: (id: string) => id, runnerName: (id: string | null) => id,
+        settled: ref(true), load: jest.fn(async () => undefined), repoName: (id: string) => id, runnerName: (id: string | null) => id,
       }),
       useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
       useFleetRepoConfig: () => ({ submitRegenerate: jest.fn() }),
@@ -523,7 +523,7 @@ function mountConfigPage(project: readonly string[]): Mounted {
       useAsyncData: fakeAsyncData,
       useProjectPermissions,
       useFleetRepoConfig: () => api,
-      useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: () => 'acme/app' }),
+      useFleetDispatchOptions: () => ({ settled: ref(true), load: jest.fn(async () => undefined), repoName: () => 'acme/app' }),
       navigateTo: jest.fn(async () => undefined),
     },
   })
@@ -687,6 +687,7 @@ function mountProjectBudgets(project: readonly string[], hang: readonly string[]
       useProjectEvents: () => undefined,
       useVisiblePolling: (pageTask: () => Promise<void>) => { task = pageTask; return polling },
       useFleetDispatchOptions: () => ({
+        settled: ref(true),
         repos: ref([{ id: 'r1', owner: 'acme', name: 'app' }]), repoName: (id: string) => id,
         load: jest.fn(async () => undefined),
       }),

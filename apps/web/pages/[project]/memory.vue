@@ -4,13 +4,15 @@ import { Brain } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
 import { useMemory, watchDebouncedMemorySearch } from '~/composables/useMemory'
 import { useProjectRef } from '~/composables/useProjectRef'
+import { humanizeCode } from '~/lib/humanize-code'
+import { memorySubject } from '~/lib/memory-subject'
 import type { MemoryItem, RetireOutcome } from '~/composables/useMemory'
 
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const slug = route.params.project as string
-const { t } = useI18n()
+const { t, te } = useI18n()
 const toast = useAppToast()
 const { permissions } = useProjectPermissions(slug)
 
@@ -117,6 +119,17 @@ onMounted(() => {
 function formatConfidence(value: number) {
   return value.toFixed(2)
 }
+
+function kindLabel(kind: string) {
+  const key = `memory.kinds.${kind}`
+  return te(key) ? t(key) : humanizeCode(kind)
+}
+
+function objectLabel(item: MemoryItem) {
+  if (item.predicate !== 'status') return item.object
+  const key = `tickets.status.${item.object}`
+  return te(key) ? t(key) : item.object
+}
 </script>
 
 <template>
@@ -129,17 +142,17 @@ function formatConfidence(value: number) {
 
     <FilterBar columns="3">
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.kind') }}</label>
-        <select v-model="kindFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
+        <label for="memory-kind-filter" class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.kind') }}</label>
+        <select id="memory-kind-filter" v-model="kindFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
           <option v-for="opt in KIND_OPTIONS" :key="opt" :value="opt">
-            {{ opt || t('memory.filter.all') }}
+            {{ opt ? kindLabel(opt) : t('memory.filter.all') }}
           </option>
         </select>
       </div>
 
       <div class="flex flex-col gap-1">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.status') }}</label>
-        <select v-model="statusFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
+        <label for="memory-status-filter" class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.status') }}</label>
+        <select id="memory-status-filter" v-model="statusFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
           <option v-for="opt in STATUS_OPTIONS" :key="opt" :value="opt">
             {{ opt || t('memory.filter.all') }}
           </option>
@@ -183,19 +196,27 @@ function formatConfidence(value: number) {
         <tbody class="divide-y divide-border">
           <tr v-for="item in items" :key="item.id" class="hover:bg-muted/30">
             <td class="px-4 py-3 font-mono text-xs">
-              {{ item.subject }}
+              <template v-for="subject in [memorySubject(item.subject)]" :key="item.id">
+                <span :title="item.subject">
+                  <NuxtLink v-if="subject.type === 'ticket'" :to="`/${slug}/tickets/${subject.id}`">
+                    {{ t('memory.subject.ticket') }} {{ subject.short }}
+                  </NuxtLink>
+                  <template v-else-if="subject.type === 'agent'">{{ t('memory.subject.agent') }} {{ subject.short }}</template>
+                  <template v-else>{{ item.subject }}</template>
+                </span>
+              </template>
               <span v-if="item.scope === 'user'" class="ml-2 rounded border border-border px-1.5 py-0.5 text-xs font-sans">{{ t('memory.scope.user') }}</span>
             </td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ item.predicate }}</td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">
               <template v-if="item.kind === 'NOTE'">
                 <p>{{ item.description }}</p>
-                <button type="button" class="mt-1 text-primary underline" :aria-expanded="expandedNotes.has(item.id)" @click="toggleNote(item.id)">{{ t('memory.expand') }}</button>
+                <button type="button" class="mt-1 text-link underline" :aria-expanded="expandedNotes.has(item.id)" @click="toggleNote(item.id)">{{ t('memory.expand') }}</button>
                 <p v-if="expandedNotes.has(item.id)" class="mt-2 whitespace-pre-wrap">{{ item.object }}</p>
               </template>
-              <template v-else>{{ item.object }}</template>
+              <template v-else>{{ objectLabel(item) }}</template>
             </td>
-            <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.kind }}</span></td>
+            <td class="px-4 py-3"><span :title="item.kind" class="rounded border border-border px-1.5 py-0.5 text-xs">{{ kindLabel(item.kind) }}</span></td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ formatConfidence(item.confidence) }}</td>
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.status }}</span></td>
             <td class="px-4 py-3">

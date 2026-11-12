@@ -65,7 +65,7 @@
 
     <p class="text-center text-sm text-muted-foreground">
       {{ t('auth.register.hasAccount') }}
-      <NuxtLink to="/login" class="font-medium text-primary hover:underline">
+      <NuxtLink to="/login" class="font-medium text-link hover:underline">
         {{ t('auth.register.signIn') }}
       </NuxtLink>
     </p>

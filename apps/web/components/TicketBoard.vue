@@ -50,20 +50,17 @@ function ticketsForStatus(status: string): Ticket[] {
         :data-testid="`board-column-${status}`"
         class="w-72 flex flex-col gap-2 rounded-lg bg-muted/50 border border-border/60 p-2.5"
       >
-        <div class="flex items-center justify-between mb-1">
+        <div :data-testid="`board-column-header-${status}`" class="flex h-8 items-center justify-between mb-1">
           <div class="flex items-center gap-2">
             <span :class="[TICKET_DOT_CLASS, statusDotClass(status)]" aria-hidden="true" />
             <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>
-          <!-- dark:text-ring: --primary at its dark step is only 3.5:1 on the
-               muted column; the ring token is the same hue stepped bright
-               enough to clear WCAG AA (4.8:1). -->
           <Button
             v-if="status === 'CREATED'"
             variant="ghost"
             size="sm"
-            class="text-xs text-primary hover:underline whitespace-nowrap dark:text-ring"
+            class="h-7 text-xs text-link hover:underline whitespace-nowrap"
             @click="emit('create')"
           >
             {{ t('tickets.newTicket') }}

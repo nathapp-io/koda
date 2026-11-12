@@ -27,7 +27,7 @@
       </span>
       <NuxtLink
         :to="`/${slug}/fleet/budgets`"
-        class="font-medium text-primary underline-offset-4 hover:underline"
+        class="font-medium text-link underline-offset-4 hover:underline"
         data-testid="fleet-budget-banner-link"
       >
         {{ t('fleet.budgets.banner.view') }}

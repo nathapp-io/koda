@@ -17,8 +17,10 @@ describe('useFleetDispatchOptions', () => {
     g.useApi = () => ({ $api: { get } })
     const { useFleetDispatchOptions } = await import(composablePath)
     const options = useFleetDispatchOptions('web')
+    expect(options.settled.value).toBe(false)
 
     await options.load()
+    expect(options.settled.value).toBe(true)
 
     expect(get).toHaveBeenCalledWith('/projects/web/fleet/repos', { query: { size: '100' } })
     expect(get).toHaveBeenCalledWith('/projects/web/fleet/runners', { query: { size: '100' } })
@@ -31,5 +33,15 @@ describe('useFleetDispatchOptions', () => {
     expect(options.runnerName('n2')).toBe('lin-1')
     expect(options.runnerName(null)).toBeNull()
     expect(options.runnerName('deleted')).toBe('deleted')
+  })
+
+  test('settles after a rejected load and keeps raw-id fallbacks', async () => {
+    g.useApi = () => ({ $api: { get: jest.fn(async () => { throw new Error('offline') }) } })
+    const { useFleetDispatchOptions } = await import(composablePath)
+    const options = useFleetDispatchOptions('acme')
+    expect(options.settled.value).toBe(false)
+    await expect(options.load()).rejects.toThrow('offline')
+    expect(options.settled.value).toBe(true)
+    expect(options.repoName('r1')).toBe('r1')
   })
 })

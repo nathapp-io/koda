@@ -339,12 +339,12 @@
     "loadMore": "Load more",
     "live": { "deleted": "This ticket was deleted." },
     "status": {
-      "CREATED": "CREATED",
-      "VERIFIED": "VERIFIED",
-      "IN_PROGRESS": "IN_PROGRESS",
-      "VERIFY_FIX": "VERIFY_FIX",
-      "CLOSED": "CLOSED",
-      "REJECTED": "REJECTED"
+      "CREATED": "Created",
+      "VERIFIED": "Verified",
+      "IN_PROGRESS": "In progress",
+      "VERIFY_FIX": "Verify fix",
+      "CLOSED": "Closed",
+      "REJECTED": "Rejected"
     },
     "priority": {
       "CRITICAL": "Critical",
@@ -480,6 +480,15 @@
     }
   },
   "memory": {
+    "kinds": {
+      "FACT": "Fact",
+      "DECISION": "Decision",
+      "PREFERENCE": "Preference",
+      "CONSTRAINT": "Constraint",
+      "INCIDENT_PATTERN": "Incident pattern",
+      "NOTE": "Note"
+    },
+    "subject": { "ticket": "Ticket", "agent": "Agent" },
     "settings": {
       "title": "Agent memory writes",
       "description": "Choose whether agent memory writes apply immediately or wait for human approval.",
@@ -955,6 +964,7 @@
       },
       "detail": {
         "title": "Flow",
+        "id": "ID",
         "overview": "Flow details",
         "entry": "Entry",
         "entryValue": { "THREAD": "Thread", "NAX": "Nax" },
@@ -1276,7 +1286,8 @@
       "CONFIG_EDIT": "Config edit",
       "CONFIG_DRIFT": "Drift check",
       "REVIEW": "PR review",
-      "FIX": "PR fix"
+      "FIX": "PR fix",
+      "THREAD": "Thread turn"
     },
     "agentResult": {
       "title": "Agent result",
@@ -1297,6 +1308,7 @@
     "fixReady": {
       "markedReady": "PR marked ready",
       "held": "PR not ready: {reason}",
+      "heldNoReason": "PR not ready",
       "replies": "{count} replies",
       "resolved": "{count} resolved"
     },
@@ -2684,6 +2696,7 @@
       "subtitle": "Choose which notifications reach your inbox.",
       "inApp": "In-app",
       "email": "Email",
+      "emailFor": "Email: {category}",
       "emailEnabled": "Email notifications",
       "emailUnavailable": "Email notifications are unavailable",
       "saved": "Notification settings saved"

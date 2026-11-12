@@ -107,6 +107,10 @@ export function isLiveFlow(state: string): boolean {
   return LIVE_FLOW_STATES.includes(state)
 }
 
+export function flowTitle(flow: { features: readonly { feature: string }[] }): string | null {
+  return flow.features.length ? flow.features.map(({ feature }) => feature).join(', ') : null
+}
+
 const FLOW_STATE_KEYS: Readonly<Record<string, string>> = {
   PENDING: 'fleet.flows.state.PENDING',
   APPROVED: 'fleet.flows.state.APPROVED',

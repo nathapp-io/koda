@@ -29,7 +29,7 @@ const { t, te } = useI18n()
     <NuxtLink
       v-if="!hideOpenLink"
       :to="`/${slug}/fleet/jobs/${result.job.id}`"
-      class="inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+      class="inline-block text-sm font-medium text-link underline-offset-4 hover:underline"
       data-testid="placement-open-job"
     >
       {{ t('fleet.dispatch.result.openJob') }}

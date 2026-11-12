@@ -11,7 +11,7 @@ import { pct, usd } from '~/lib/fleet-analytics-format'
 import { parseGroup, parseRange, rangeWindow, routeQuery } from '~/lib/fleet-analytics-range'
 import type { RangeState } from '~/lib/fleet-analytics-range'
 import { ADMIN_GROUPS, INGEST_STATUSES } from '~/lib/fleet-analytics-types'
-import type { AdminGroupBy, IngestRowDto, IngestStatus } from '~/lib/fleet-analytics-types'
+import type { AdminGroupBy, IngestProject, IngestRowDto, IngestStatus } from '~/lib/fleet-analytics-types'
 import type { FleetPage } from '~/lib/fleet-types'
 
 definePageMeta({ layout: 'default' })
@@ -45,6 +45,7 @@ const byRole = useAnalyticsPanel(() => api.spend(current(), 'role'), noSeries)
 const statusFilter = ref('')
 const page = ref(1)
 const ingestPage = shallowRef<FleetPage<IngestRowDto> | null>(null)
+const projects = ref<IngestProject[]>([])
 const ingestFailed = ref(false)
 const busyJobId = ref<string | null>(null)
 const busyAll = ref(false)
@@ -126,7 +127,19 @@ async function bulk(action: 'backfill' | 'rerunOutdated'): Promise<void> {
   }
 }
 
-onMounted(refreshAll)
+async function loadProjects(): Promise<void> {
+  try {
+    projects.value = await api.projects()
+  } catch {
+    // Project names only improve the ingest table; retain raw ids without surfacing a page error.
+    projects.value = []
+  }
+}
+
+onMounted(() => {
+  refreshAll()
+  void loadProjects()
+})
 useRefetchOnVisible(refreshAll)
 watch(() => JSON.stringify(range.value), refreshAll)
 watch(group, () => {
@@ -208,7 +221,7 @@ const tiles = computed(() => {
         <LoadingState v-else-if="ingestPage === null" />
         <p v-else-if="ingestPage.records.length === 0" class="text-sm text-muted-foreground" data-testid="fleet-ingest-empty">{{ t('fleet.analytics.ingest.empty') }}</p>
         <template v-else>
-          <FleetAnalyticsIngestTable :rows="ingestPage.records" :busy-job-id="busyJobId" @rerun="rerun" />
+          <FleetAnalyticsIngestTable :rows="ingestPage.records" :busy-job-id="busyJobId" :projects="projects" @rerun="rerun" />
           <div class="flex items-center justify-between text-sm text-muted-foreground">
             <span>{{ t('fleet.analytics.ingest.total', { total: ingestPage.total }) }}</span>
             <div class="flex gap-2">

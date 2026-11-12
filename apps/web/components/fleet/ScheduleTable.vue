@@ -20,7 +20,7 @@
           :data-enabled="String(s.enabled)"
         >
           <TableCell>
-            <NuxtLink :to="`/${slug}/fleet/schedules/${s.id}`" class="font-medium text-primary underline-offset-4 hover:underline" data-testid="fleet-schedule-link">{{ s.name }}</NuxtLink>
+            <NuxtLink :to="`/${slug}/fleet/schedules/${s.id}`" class="font-medium text-link underline-offset-4 hover:underline" data-testid="fleet-schedule-link">{{ s.name }}</NuxtLink>
           </TableCell>
           <TableCell>
             <div>{{ repoName(s.repoId) }}</div>

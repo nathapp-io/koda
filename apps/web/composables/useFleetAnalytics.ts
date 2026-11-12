@@ -1,6 +1,6 @@
 import { apiPath } from '~/lib/api-path'
 import type {
-  IngestHealthDto, IngestQueuedDto, IngestRowDto, IngestStatus, JobAnalyticsDto, JobsAnalyticsDto, QualityAnalyticsDto,
+  IngestHealthDto, IngestProject, IngestQueuedDto, IngestRowDto, IngestStatus, JobAnalyticsDto, JobsAnalyticsDto, QualityAnalyticsDto,
   SpendAnalyticsDto, StoriesAnalyticsDto,
 } from '~/lib/fleet-analytics-types'
 import type { FleetPage } from '~/lib/fleet-types'
@@ -41,6 +41,10 @@ export function useFleetAnalyticsAdmin() {
   return {
     spend: (w: WindowQuery, groupBy: string, top?: number) =>
       $api.get<SpendAnalyticsDto>('/fleet/analytics/spend', { query: { ...w, groupBy, ...topQuery(top) } }),
+    projects: async (): Promise<IngestProject[]> => {
+      const rows = await $api.get<Array<IngestProject & Record<string, unknown>>>('/projects')
+      return rows.map(({ id, slug, name }) => ({ id, slug, name }))
+    },
     ingestList: (status: IngestStatus | undefined, page: number) =>
       $api.get<FleetPage<IngestRowDto>>('/fleet/ingest', {
         query: { size: String(INGEST_PAGE_SIZE), ...(status ? { status } : {}), ...(page > 1 ? { current: String(page) } : {}) },

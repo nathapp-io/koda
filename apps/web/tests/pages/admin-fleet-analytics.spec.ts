@@ -27,10 +27,11 @@ const REAL: FleetComponentName[] = [
   'FleetAnalyticsRangePicker', 'FleetAnalyticsIngestTable', 'FleetNativeSelect',
 ]
 
-function makeGet(ingest: () => unknown): Get {
+function makeGet(ingest: () => unknown, projects: () => unknown = () => []): Get {
   return jest.fn(async (path: string, opts?: { query?: Query }) => {
     if (path === '/fleet/analytics/spend') return SPEND(opts?.query?.groupBy ?? '')
     if (path === '/fleet/ingest') return ingest()
+    if (path === '/projects') return projects()
     throw new Error(`unexpected ${path}`)
   }) as Get
 }
@@ -83,6 +84,24 @@ describe('admin fleet Analytics page (spec §5.3, D395)', () => {
     expect(m.byId('fleet-ingest-row')).toHaveLength(1)
     expect(m.app.text()).toContain('21 rows')
     expect(m.get.mock.calls.some(([p]) => p.includes('/quality'))).toBe(false)
+    m.app.unmount()
+  })
+
+  test('loads project labels for the ingest table once on mount', async () => {
+    const m = mountAdmin(makeGet(() => PAGE(), () => [{ id: 'proj-1', slug: 'acme', name: 'Acme', extra: true }]))
+    await m.settle()
+    expect(m.get.mock.calls.filter(([path]) => path === '/projects')).toHaveLength(1)
+    expect(m.app.textOf(m.byId('fleet-ingest-row')[0])).toContain('Acme')
+    expect(m.app.find('[data-stub="nuxt-link"]').some((link) => link.props.to === '/acme/fleet/jobs/job-1')).toBe(true)
+    m.app.unmount()
+  })
+
+  test('silently falls back to raw ids and no links when project lookup fails', async () => {
+    const m = mountAdmin(makeGet(() => PAGE(), () => { throw new Error('projects unavailable') }))
+    await m.settle()
+    expect(m.app.textOf(m.byId('fleet-ingest-row')[0])).toContain('proj-1')
+    expect(m.app.find('[data-stub="nuxt-link"]').some((link) => String(link.props.to ?? '').includes('/fleet/jobs/'))).toBe(false)
+    expect(m.toasts.errors).toEqual([])
     m.app.unmount()
   })
 
