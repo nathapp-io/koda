@@ -12,18 +12,24 @@ export function useFleetDispatchOptions(slug: string) {
   const runners = ref<FleetRunnerSummary[]>([])
   const moreRepos = ref(false)
   const moreRunners = ref(false)
+  const settled = ref(false)
 
   async function load(): Promise<void> {
-    // D125: fleets are small; one page of FLEET_LIST_SIZE, with a hint when there is more.
-    const query = { size: String(FLEET_LIST_SIZE) }
-    const [repoPage, runnerPage] = await Promise.all([
-      $api.get<FleetPage<FleetRepo>>(apiPath`/projects/${slug}/fleet/repos`, { query }),
-      $api.get<FleetPage<FleetRunnerSummary>>(apiPath`/projects/${slug}/fleet/runners`, { query }),
-    ])
-    repos.value = repoPage.records ?? []
-    runners.value = runnerPage.records ?? []
-    moreRepos.value = repoPage.hasNext === true
-    moreRunners.value = runnerPage.hasNext === true
+    try {
+      // D125: fleets are small; one page of FLEET_LIST_SIZE, with a hint when there is more.
+      const query = { size: String(FLEET_LIST_SIZE) }
+      const [repoPage, runnerPage] = await Promise.all([
+        $api.get<FleetPage<FleetRepo>>(apiPath`/projects/${slug}/fleet/repos`, { query }),
+        $api.get<FleetPage<FleetRunnerSummary>>(apiPath`/projects/${slug}/fleet/runners`, { query }),
+      ])
+      repos.value = repoPage.records ?? []
+      runners.value = runnerPage.records ?? []
+      moreRepos.value = repoPage.hasNext === true
+      moreRunners.value = runnerPage.hasNext === true
+    }
+    finally {
+      settled.value = true
+    }
   }
 
   /** Machine profiles any runner reports; repo-provided names are typed in (S1 spec §2.1). */
@@ -37,5 +43,5 @@ export function useFleetDispatchOptions(slug: string) {
   const runnerName = (id: string | null): string | null =>
     id === null ? null : (runners.value.find(r => r.id === id)?.name ?? id)
 
-  return { repos, runners, moreRepos, moreRunners, load, profileOptions, labelOptions, repoName, runnerName }
+  return { repos, runners, moreRepos, moreRunners, load, settled, profileOptions, labelOptions, repoName, runnerName }
 }

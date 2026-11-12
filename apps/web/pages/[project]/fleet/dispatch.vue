@@ -22,7 +22,7 @@ const toast = useAppToast()
 const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 // Permissions P1 US-008: the form follows the key the dispatch route requires.
-const { permissions } = useProjectPermissions(slug)
+const { permissions, pending: permissionsPending } = useProjectPermissions(slug)
 const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))
 
 const loadFailed = ref(false)
@@ -135,6 +135,8 @@ async function confirmPrConflict(): Promise<void> {
 
     <FleetBudgetBanner :slug="slug" :repo-name="options.repoName" />
 
+    <LoadingState v-if="permissionsPending" />
+    <template v-else>
     <p v-if="!canDispatch" class="text-sm text-muted-foreground" data-testid="dispatch-no-permission">{{ t('fleet.dispatch.noPermission') }}</p>
     <ErrorState v-else-if="loadFailed" @retry="retry()" />
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>
@@ -312,6 +314,7 @@ async function confirmPrConflict(): Promise<void> {
         {{ isSubmitting ? t('fleet.dispatch.submitting') : t('fleet.dispatch.submit') }}
       </Button>
     </form>
+    </template>
 
     <div v-if="activeJob" class="rounded-md border border-border p-4 text-sm" data-testid="dispatch-conflict">
       {{ t('fleet.dispatch.conflict') }}

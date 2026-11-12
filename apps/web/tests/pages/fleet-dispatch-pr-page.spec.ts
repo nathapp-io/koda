@@ -7,7 +7,7 @@ import { projectPermissionsStub } from '../helpers/permission-nav'
 
 const dispatchPage = webFile('pages', '[project]', 'fleet', 'dispatch.vue')
 
-function mountDispatch(query: Record<string, unknown> = {}) {
+function mountDispatch(query: Record<string, unknown> = {}, permissionKeys: string[] = ['fleet.job.dispatch'], permissionPending = false) {
   const fields: Record<string, { value: { value: unknown } }> = {}
   const FormField = {
     props: ['name'],
@@ -35,7 +35,7 @@ function mountDispatch(query: Record<string, unknown> = {}) {
       FormItem: { setup: (_p: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
       FormControl: { setup: (_p: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
       FormLabel: 'label', FormMessage: 'span', Input: 'input', Button: 'button', Label: 'label',
-      PageHeader: 'header', ErrorState: 'div', FleetPlacementResult: 'div', FleetBudgetBanner: 'div', NuxtLink: 'a',
+      PageHeader: 'header', ErrorState: 'div', LoadingState: 'x-loading-state', FleetPlacementResult: 'div', FleetBudgetBanner: 'div', NuxtLink: 'a',
       RadioGroup: { setup: (_props: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
       RadioGroupItem: 'input',
     },
@@ -56,7 +56,7 @@ function mountDispatch(query: Record<string, unknown> = {}) {
         runners: Vue.ref([]), moreRepos: Vue.ref(false), moreRunners: Vue.ref(false),
         profileOptions: Vue.ref([]), labelOptions: Vue.ref([]), runnerName: () => '', load: async () => undefined,
       }),
-      useProjectPermissions: () => projectPermissionsStub(['fleet.job.dispatch']),
+      useProjectPermissions: () => projectPermissionsStub(permissionKeys, { pending: permissionPending }),
       useFleetJobs: () => ({ dispatch: async () => null, findActiveJob: async () => null }),
     },
   })
@@ -64,6 +64,23 @@ function mountDispatch(query: Record<string, unknown> = {}) {
 }
 
 describe('fleet dispatch PR commands', () => {
+  test('pending permissions show loading without a denial; settled permissions gate by key', async () => {
+    const pending = mountDispatch({}, [], true)
+    await Vue.nextTick()
+    expect(pending.app.one('x-loading-state')).toBeDefined()
+    expect(pending.app.one('[data-testid="dispatch-no-permission"]')).toBeUndefined()
+    pending.app.unmount()
+
+    const denied = mountDispatch({}, [])
+    await Vue.nextTick()
+    expect(denied.app.one('[data-testid="dispatch-no-permission"]')).toBeDefined()
+    denied.app.unmount()
+
+    const allowed = mountDispatch()
+    await Vue.nextTick()
+    expect(allowed.app.one('[data-testid="dispatch-no-permission"]')).toBeUndefined()
+    allowed.app.unmount()
+  })
   test('AC-1: command select offers RUN, PLAN, REVIEW and FIX', async () => {
     const { app } = mountDispatch()
     await Vue.nextTick()

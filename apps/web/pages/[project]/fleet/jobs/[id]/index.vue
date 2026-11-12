@@ -278,7 +278,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed || !job" @retry="loadJobDetail()" />
     <template v-else>
-      <PageHeader :title="jobTitle" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.repoName(job.repoId)} @ ${job.ref}`">
+      <PageHeader :title="jobTitle" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.settled.value ? options.repoName(job.repoId) : t('common.loading')} @ ${job.ref}`">
         <template #actions>
           <NuxtLink :to="logsHref" class="inline-flex h-10 items-center rounded-md border border-input px-4 text-sm hover:bg-muted" data-testid="fleet-job-logs-link">
             {{ t('fleet.jobs.actions.logs') }}
@@ -356,7 +356,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
       <p v-if="job.ruleOverride" data-testid="fleet-job-rule-override">{{ t('fleet.jobs.ruleOverride.summary', { files: job.ruleOverride.ruleFiles, mode: job.ruleOverride.rulesMode, context: job.ruleOverride.contextMode ?? '-', sha256: job.ruleOverride.sha256.slice(0, 8) }) }}</p>
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ job.runnerId === null ? t('fleet.jobs.detail.unassigned') : options.settled.value ? options.runnerName(job.runnerId) : t('common.loading') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
         <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
         <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>

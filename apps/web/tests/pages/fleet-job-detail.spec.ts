@@ -300,6 +300,8 @@ interface EnginePageOver {
   records: ApprovalRequestSummary[]
   /** Request ids whose detail read fails. */
   failing?: readonly string[]
+  optionsSettled?: boolean
+  resolvedRepoName?: string
 }
 
 /**
@@ -320,6 +322,7 @@ function mountEnginePage(over: EnginePageOver) {
   const app = mountSfc(webFile('pages', '[project]', 'fleet', 'jobs', '[id]', 'index.vue'), {
     components: {
       ...uiStubs,
+      PageHeader: defineComponent({ props: { title: String, subtitle: String }, setup: (props) => () => h('x-page-header', { 'data-stub': 'page-header', title: props.title, subtitle: props.subtitle }) }),
       FleetBudgetBanner: defineComponent({
         name: 'StubFleetBudgetBanner',
         props: { slug: String, repoName: Function },
@@ -357,8 +360,9 @@ function mountEnginePage(over: EnginePageOver) {
         cancel: jest.fn(), requeue: jest.fn(), downloadBundle: jest.fn(),
       }),
       useFleetDispatchOptions: () => ({
+        settled: ref(over.optionsSettled ?? true),
         load: jest.fn(async () => undefined),
-        repoName: (id: string) => id,
+        repoName: (id: string) => over.resolvedRepoName ?? id,
         runnerName: (id: string | null) => id,
       }),
       useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
@@ -377,6 +381,39 @@ function mountEnginePage(over: EnginePageOver) {
 }
 
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
+
+describe('job detail option-name loading', () => {
+  test('uses common loading for unresolved repo and assigned runner names', async () => {
+    const m = mountEnginePage({ job: jobFixture({ repoId: 'repo-raw', runnerId: 'runner-raw' }), records: [], optionsSettled: false })
+    await m.settle()
+    const header = m.app.one('x-page-header')
+    expect(header?.props.subtitle).toContain('Loading...')
+    expect(header?.props.subtitle).not.toContain('repo-raw')
+    const runner = m.byId('fleet-job-runner')[0]
+    expect(runner && m.app.textOf(runner)).toBe('Loading...')
+    m.app.unmount()
+  })
+
+  test('keeps unassigned immediate and shows resolved repo names after settlement', async () => {
+    const unassigned = mountEnginePage({ job: jobFixture({ runnerId: null }), records: [], optionsSettled: false })
+    await unassigned.settle()
+    const runner = unassigned.byId('fleet-job-runner')[0]
+    expect(runner && unassigned.app.textOf(runner)).toBe('Not assigned')
+    unassigned.app.unmount()
+
+    const resolved = mountEnginePage({ job: jobFixture({ repoId: 'repo-raw' }), records: [], resolvedRepoName: 'nathapp-io/koda-fleet-sandbox' })
+    await resolved.settle()
+    expect(resolved.app.one('x-page-header')?.props.subtitle).toContain('nathapp-io/koda-fleet-sandbox')
+    resolved.app.unmount()
+
+    const failedOptions = mountEnginePage({ job: jobFixture({ repoId: 'repo-failed', runnerId: 'runner-failed' }), records: [], optionsSettled: true })
+    await failedOptions.settle()
+    expect(failedOptions.app.one('x-page-header')?.props.subtitle).toContain('repo-failed')
+    const fallbackRunner = failedOptions.byId('fleet-job-runner')[0]
+    expect(fallbackRunner && failedOptions.app.textOf(fallbackRunner)).toBe('runner-failed')
+    failedOptions.app.unmount()
+  })
+})
 
 describe('review and config job headers', () => {
   test('assigned rule override summary includes count, mode and short sha', async () => {

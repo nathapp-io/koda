@@ -129,6 +129,7 @@ function mountPage(job: FleetJobDto) {
         downloadBundle: jest.fn(),
       }),
       useFleetDispatchOptions: () => ({
+        settled: ref(true),
         load: jest.fn(async () => undefined),
         repoName: (id: string) => id,
         runnerName: (id: string | null) => id,
