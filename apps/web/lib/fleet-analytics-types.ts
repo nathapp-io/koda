@@ -143,6 +143,8 @@ export interface JobAnalyticsDto {
   corrected: boolean
 }
 
+export interface IngestProject { id: string; slug: string; name: string }
+
 export interface IngestRowDto {
   id: string
   jobId: string

@@ -31,6 +31,15 @@ describe('useFleetAnalytics (S2b §4.2, D388)', () => {
     ])
   })
 
+  test('admin projects read requests /projects and projects only id, slug and name', async () => {
+    const get = jest.fn(async () => [{ id: 'proj-1', slug: 'acme', name: 'Acme', description: 'ignored', createdAt: 'now' }])
+    g.useApi = () => ({ $api: { get } })
+    const { useFleetAnalyticsAdmin } = await import(composablePath)
+    const projects = await useFleetAnalyticsAdmin().projects()
+    expect(get).toHaveBeenCalledWith('/projects')
+    expect(projects).toEqual([{ id: 'proj-1', slug: 'acme', name: 'Acme' }])
+  })
+
   test('admin routes: cross-project spend, the ingest list page and the re-ingest actions', async () => {
     const get = jest.fn(async () => ({}))
     const post = jest.fn(async () => ({ queued: 1 }))
