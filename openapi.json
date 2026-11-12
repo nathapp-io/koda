@@ -18103,6 +18103,9 @@
       "ProjectAgentDto": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "slug": {
             "type": "string"
           },
@@ -18141,6 +18144,7 @@
           }
         },
         "required": [
+          "id",
           "slug",
           "name",
           "status",

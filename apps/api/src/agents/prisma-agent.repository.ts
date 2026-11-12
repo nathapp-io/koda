@@ -308,6 +308,7 @@ export class PrismaAgentRepository {
     return rosterRows.map((row) => {
       const bucket = byAgent.get(row.agent.slug) ?? { count: 0, refs: [] };
       return {
+        id: row.agent.id,
         slug: row.agent.slug,
         name: row.agent.name,
         status: row.agent.status,
