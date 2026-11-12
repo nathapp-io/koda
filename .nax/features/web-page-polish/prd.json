@@ -3,7 +3,7 @@
   "feature": "web-page-polish",
   "branchName": "feat/web-page-polish",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T09:28:52.202Z",
+  "updatedAt": "2026-11-12T09:52:28.468Z",
   "userStories": [
     {
       "id": "US-001",
@@ -22,14 +22,17 @@
         "generated-client"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive field through an existing repository/DTO and standard generation flow; no authorization, routing or database behavior changes."
+        "reasoning": "Additive field through an existing repository/DTO and standard generation flow; no authorization, routing or database behavior changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/agents/dto/project-agent.dto.ts",
@@ -54,7 +57,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9cd3f092b37b548f29c5e5b18d9890cc2a9500c8"
     },
     {
       "id": "US-002",
@@ -136,7 +143,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -187,7 +197,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -252,7 +265,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -301,7 +317,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -358,7 +377,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -409,7 +431,10 @@
         "apps/web/tests/components/raw-select-height.spec.ts"
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Goal and completion: resolve the specified page-level audit findings through exactly seven binding implementation stories. The sole dependency is US-002 on US-001. Completion consists of the specified API id propagation, rendered labels, disclosure behavior, conditional fields, locale parity and shared select classes, demonstrated by unit/component/page mounts. Actual measured dimensions, alignment and wrapping remain a post-merge live sweep on koda-wk. This is enhancement of an existing application, not greenfield; no Prisma migration, new dependency, new API route or permission change is required.\n\nDiscovery and architecture: codebase-memory MCP is unavailable in this session, so exploration used direct Read/Grep. The execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The supplied detected Next.js classification is incorrect: apps/web/nuxt.config.ts:2 imports defineNuxtConfig, :24 defines Nuxt configuration and :36 registers Nuxt modules. Follow .nax/mono/apps/web/context.md and .nax/mono/apps/api/context.md: the web is Nuxt 4 SSR, the API is NestJS/Fastify with Prisma and Vitest, and the CLI uses a generated OpenAPI client. Keep backend workflow and permission rules in the API. Web requests use useApi and apiPath with existing Nuxt proxy/SSR behavior, not a generated web client. Root package.json:21-24 defines api:export-spec, generate:cli and generate. US-001 must run bun run generate from the repository root despite its binding apps/api workdir; it updates root openapi.json and apps/cli/src/generated/types.gen.ts. Neither artifact may be hand-edited. Read the nathapp-nestjs-patterns skill before NestJS implementation when available; never edit generated AGENTS.md. No code generation or tests were executed during PRD drafting because this tool set has no shell.\n\nUS-001 source and impact: apps/api/src/agents/dto/project-agent.dto.ts:19 defines ProjectAgentDto without id; :44 maps records in from; :65 defines ProjectAgentRecord without id. apps/api/src/agents/prisma-agent.repository.ts:236 obtains memberships keyed by principalId, :246 already selects agent.id, and :308 builds result objects without returning that id. Add the actual Agent row id, not slug or binding id, to record, DTO and repository output. The existing apps/api/src/agents/prisma-agent.repository.find-roster.spec.ts:35-45 synthesizes principalId/id from slug, so the new roster-id harness must explicitly distinguish agent-1 from bot. Preserve membership semantics, ordering, capabilities, open-ticket counts/ref caps and metadata. apps/api/src/fleet/fleet-openapi.contract.spec.ts:14 shows how to parse committed root OpenAPI without application bootstrap or a database. apps/api/src/projects/projects.controller.spec.ts:378-476 covers roster envelope, metadata and route delegation; no route behavior needs changing. Additional fixture risk: apps/api/src/agents/agents.service.spec.ts:1152-1168 builds records without id, so update fixtures if the required additive field exposes typing/expectation gaps, retaining assertions. The wire change is additive, but TypeScript callers constructing records may need fixture updates. There is no database migration because Agent.id already exists. Generate API and CLI outputs before US-002 consumes the new field.\n\nUS-002 source and impact: apps/web/composables/useProjectAgents.ts:10 defines the roster shape without id and :34-43 catches failures internally. The new names composable must reject on failure, so do not wrap the existing swallowing load implementation. Mirror the reactive lookup pattern in apps/web/composables/useProjectMemberNames.ts:6-17, but fetch roster items rather than member records. Lookup is by id, not slug. apps/web/pages/[project]/timeline.vue:13-22 resolves users only and :53-56 loads members with a local catch. Add an independent agents load/catch and preserve members-first precedence. apps/web/pages/[project]/memory.vue:60-64 implements retire permissions, :116-118 loads memory, :197-205 renders parsed subjects/title/ticket link/other-subject mustache and :230-233 passes raw subject to the retire dialog. Introduce one subjectLabel(item) for row and dialog, preserving the original title, ticket route, explicit other-subject {{ item.subject }} and auto-imported composable convention. Do not alter retirement sequencing or permissions. Roster read failures are cosmetic: no toast and id-based fallbacks. Existing apps/web/tests/pages/memory-readable.spec.ts:19-46 injects globals/aliases without a roster endpoint. Add the same no-op useProjectAgentNames stub to memory-readable.spec.ts, memory-retire-visibility.spec.ts, memory-retire-flow.spec.ts, memory-mount.spec.ts, timeline-readable.spec.ts and filter-select-height.spec.ts so no extra API call is made and every assertion stays. In tests/pages/memory.spec.ts add subjectLabel: (item) => item.subject to the hand-built createRenderContext and retain the other-type source assertion. New naming page tests must use the real names composable with the roster API stubbed to prove wiring, not stub nameOf itself.\n\nUS-003 source and impact: apps/web/pages/[project]/settings.vue:75-81 has the VCS page title and Projects tab label; :96-98 repeats Project Settings on the first card; :122-124 ends the General/Project tab with the memory card. Set independent page title, General tab and Project details heading while retaining the VCS tab heading at :130. Append real SettingsDangerZoneCard last after memory, only when projectData exists. apps/web/components/SettingsProjectCard.vue:71-85 owns the confirm/delete/toast/router/finally flow, and :116-125 places Save and Delete together. Move deletion state and logic unchanged; preserve save payload diffing, name/key/description/brief fields and saved event. apps/web/tests/components/settings-project-card.spec.ts:10-42 mounts the real save card and should keep existing assertions. apps/web/tests/pages/settings-vcs-tab.spec.ts:3-8 provides reusable mount helpers. The new settings page test must register the real danger card instead of letting uiStubs hide it. Update tests/openapi/web-gap-ops.spec.ts so DELETE is read from the new card, with GET still checked on the page and PATCH on SettingsProjectCard. Existing VCS e2e finds the tab-local heading and needs no change.\n\nUS-004 source and impact: apps/web/components/TicketProperties.vue:72-83 declares separate permission flags; :169-190 guards overlapping assignment requests and toasts outcomes; :314-320 always mounts the picker under canAssign today. Add pickerOpen false and Change/Cancel controls without altering ticket.assign eligibility or Unassign visibility. Successful selection closes; failure leaves it open with extractApiError. Preserve the assigning concurrency guard. apps/web/pages/[project]/tickets/[ref].vue:265 is the grid needing lg:grid-rows-[auto_1fr]; do not restructure the spanning rail or board behavior. apps/web/components/TicketFleetRuns.vue:21 currently takes only t and :101 interpolates raw command; use apps/web/lib/fleet-i18n.ts:5-7 codeLabel and existing fleet.command.RUN = Run. apps/web/components/CommentThread.vue:29 currently takes only t and :138 renders raw createdAt. Add a pure formatter and semantic time markup; commentLocale = () => unref(locale) avoids template .value errors and supports existing enI18n stubs without locale. Compare expected dates using the same runtime/timezone rather than a hard-coded hour. Invalid input now remains now. Update tests/components/ticket-fleet-runs.spec.ts to expect Run; update tests/pages/project-permission-gates.spec.ts to assert assignee-change rather than assignee-search for ticket.assign and its negative control, keeping other permission assertions. Update tests/e2e/ticket-detail-operations.e2e.spec.ts to click Change before filling search. Existing CommentThread tests pin no time text and need no change. New component time tests consume the real formatter; grid tests assert classes rather than pixels.\n\nUS-005 source and impact: apps/web/components/fleet/FleetJobProgress.vue:22-46 currently uses a 2/4-column grid and always emits progress/story/phase/cost. apps/web/lib/fleet-jobs.ts:4-9 defines active states centrally as QUEUED, ASSIGNED, RUNNING and UPLOADING; reuse isActiveJobState. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:113-114 computes safe prUrl and parsed wipPush; :355-357 contains config/pipeline conditions; :359-397 is the existing 1/3-column detail dl. Gate whole field items, not dd text alone. Retain existing non-config exclusions while hiding empty profiles, dates, result, branch and PR. Runner, Requester, Queued and non-config Bash remain visible. Preserve Branch when wipPush is present even if resultBranch is null, because its dd is the only push-status display. Preserve safePrUrl linking and raw-result URL plain-text fallback. Plan from, Tickets, pipeline, open-items, live reload and permission checks remain unchanged. Reuse tests/pages/fleet-job-detail.spec.ts:1-17 harness dependencies; :88-100 pins safe links and pipeline placement. Add state: RUNNING to tests/components/fleet-job-progress.spec.ts job() fixture while retaining all assertions. Existing fleet-job-stories.spec.ts tests a different component; fleet-dispatch e2e fixtures populate terminal finish/PR and remain compatible.\n\nUS-006 source and impact: apps/web/lib/notifications.ts:3-12 defines NotificationI18n and notificationText with API-title fallback. Add notificationDetail without changing other kinds. apps/web/pages/notifications.vue:111-112 and apps/web/components/NotificationBell.vue:56-57 both separately render raw body; both must consume the helper and gate on non-empty resulting detail. Preserve navigation, safe links, mark-read, polling/SSE and escaped interpolation. apps/web/pages/[project]/flows/[id].vue:225 renders raw stopReason; use the same translation-then-humanize rule and flow-stop-reason testid. There are 16 known stop reasons: translate all in en and zh, along with flow_stopped and flow_questions titles. Missing or non-string stopReason returns n.body; unknown string reasons are humanized. The flow_questions question body stays unchanged. apps/web/pages/[project]/kb.vue:175-181 repeats the placeholder as its pre-search empty state; :199-205 only renders a documents title. Replace only those empty states with instructional text/testids, keeping input placeholder at :133 and no-results/loading behavior. Update tests/pages/fleet-flow-detail.spec.ts AC-6 expected fallback failed to Failed with te=false, retaining stop detail and ticket checks. New inbox/bell mounts use the real notificationDetail helper. Verify all new keys in both locales, respecting notification locale-parity conventions.\n\nUS-007 source and impact: apps/web/pages/admin/users.vue:217-219 uses plain status text and inline actions. Render an outline Badge with token-based dot and wrap existing buttons with flex alignment, preserving role/self/permission gates and disabled state. apps/web/pages/admin/audit.vue:372-375 is the Project cell; add no-wrap/testid without changing audit-project text or filtering. apps/web/lib/form-control.ts:1 already defines the shared 40px base; leave that value unchanged. The exact 16 instances occur across BackendPicker, ApprovalPolicyDialog, ProjectMembersPanel, RoleEditorDialog, PrincipalRolesDialog, ProjectInvitesPanel and pages/[project]/agents.vue. BackendPicker.vue:62 shows the old h-9 w-full base. ApprovalPolicyDialog.vue:22-110 contains five selects; principal type only renders for subjectKind type at :36 and role only for role at :51, so exercise existing states to assert their classes without broadening visibility. ProjectMembersPanel.vue:271-306 has the three add selectors; :375-382 has the chip select, with max-w-xs retained on agent-add-select. pages/[project]/agents.vue:68 has the h-8 status select and disabled classes to preserve. Do not change other h-8/h-9 inputs such as analytics dates surfaced in search. Reuse current member, role, invite and approval mount conventions; option sets, role checks and handlers are not redesigned.\n\nCross-story concerns and migration: US-003, US-004 and US-006 share en.json and zh.json; coordinate merges to retain every key. US-002 and US-007 share roster consumers, while settings consumes components restyled by US-007; the binding dependency graph still must not gain edges. Every new UI string uses both web locales, not API i18n. Keep untrusted names, comments, reasons and fallback text in escaped interpolation. Backend invariants and authorization remain unchanged. Read docs/ux/redesign/MASTER-PLAN.md before layout edits: :33-39 pins token/interpolation/layout constraints, :43-58 holds the Status table. App guidance requires its Status and Decisions log to be updated within the implementation PR; do not create a documentation story. The audit tracker is manually maintained outside stories. API unit tests use vi, lazy imports and external-collaborator stubs; these ACs need no DB. Web tests use Jest with tests/helpers/mount-sfc and fleet-harness, retaining source-pattern regression anchors. Run app tests/lint/type-check as pipeline gates, not ACs. Playwright uses waitForHydration rather than networkidle because notification live streams stay open. Generated acceptance files must remain untouched and run only through their app's prescribed runner. US-001 keeps apps/api workdir even though the generation command modifies root/CLI artifacts. No extra CLI, runner or DB implementation story is necessary.\n\nRefine-pass adversarial audit: all 65 original spec criteria are retained in their original story and order. Enumeration/mapping: US-001 AC1 DTO id, AC2 repository id distinct from slug, AC3 required OpenAPI string id. US-002 AC1 roster GET, AC2 known lookup, AC3 unknown lookup null, AC4 timeline agent name, AC5 existing member Ada preserved, AC6 timeline rejection/raw id/no toast, AC7 memory agent name, AC8 named retire dialog, AC9 rejected-read short-id row/dialog including first-8-character qualification, AC10 ticket retire short label. US-003 AC1 page title, AC2 General tab, AC3 details heading, AC4 danger card last after memory, AC5 no Delete on save card, AC6 danger card heading/button, AC7 confirmed deletion/toast/navigation, AC8 cancelled confirmation/no DELETE, AC9 deletion error/no navigation. US-004 AC1 collapsed Change/no search, AC2 open picker/cancel, AC3 cancel closes, AC4 successful selection closes, AC5 rejected assign retains picker/toast, AC6 canAssign false hides both, AC7 grid row class, AC8 command Run, AC9 semantic timestamp and both locale-ref outputs, AC10 readable English date, AC11 invalid date unchanged. US-005 AC1 running fields/cost, AC2 terminal cost/no live fields, AC3 1/3 grid/no 4, AC4 terminal heartbeat absent, AC5 running heartbeat present, AC6 empty metadata labels absent, AC7 Runner/Requester/Queued still render, AC8 populated result/branch, AC9 cancelled RUN WIP failure retains Branch. US-006 AC1 known translated reason, AC2 unknown humanized reason, AC3 absent reason body fallback, AC4 job_failed body unchanged, AC5 flow title, AC6 inbox translated detail/no raw code, AC7 bell translated detail/no raw code, AC8 flow detail reason, AC9 instructional pre-search prompt/no repeated placeholder, AC10 documents hint plus existing title, AC11 all new keys in both locales. US-007 AC1 active chip, AC2 disabled chip, AC3 flex actions/toggle, AC4 no-wrap Project cell with original button label retained, AC5 three backend selects, AC6 four policy selects and conditional role select, AC7 three member selects with max-w-xs retained, AC8 chip role select, AC9 role scope select, AC10 binding role select, AC11 invite select, AC12 agent status select with disabled class retained. No regression qualifiers were dropped; all assertions are observable via values, rendered nodes/classes, props or mocked calls.\n\nFailure audit: the five explicit failure-table rows remain covered by US-002 AC6/AC9/AC11, US-004 AC11, US-006 AC3/AC12, US-004 AC5 and US-003 AC9 respectively. Added US-001 AC4 for the existing empty-membership negative path, grounded in prisma-agent.repository.ts:237-238, and US-007 AC13 for existing status-change rejection rollback, grounded in pages/[project]/agents.vue:31-41. US-005 already covers terminal/empty negative rendering and a failed WIP push. There are now 69 criteria: 65 original, two explicit failure-table elaborations and two refine-requested negative-path regression anchors.\n\nInterface/contradiction audit: naming page fixtures now explicitly return the roster items envelope, matching the new composable; bell rendering assertions open the existing initially closed panel. ApprovalPolicyDialog starts subjectKind all and only renders principal type for type, as shown at ApprovalPolicyDialog.vue:36 and :208; AC6 explicitly selects type before asserting the four selects, then role, preserving every original selector/class assertion without changing existing visibility. All spec-recommended context files are included within each five-file cap, and every new file appears only in expectedFiles. All 11 feature exclusions remain verbatim at top level with nearby story boundary echoes. Exactly seven story ids/workdirs and the binding dependency US-002 -> US-001 are unchanged. Routing was reduced to medium for bounded standard changes; ordinary display/style stories use tdd-simple, while US-004 retains strict isolation for its explicit assignment-permission assertions. No role or permission logic is edited by US-007. Descriptions, scope, generated-output instructions and tests align; no new package, invented call site or documentation story was introduced. This was a document/code review, not execution of runtime tests.",
