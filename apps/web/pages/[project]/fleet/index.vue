@@ -6,6 +6,7 @@ import { codeLabel } from '~/lib/fleet-i18n'
 import { formatUsd, isConfigJob, reviewPrNumber } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import { runningFirstJobs } from '~/lib/fleet-jobs'
+import { useLocalDates } from '~/lib/local-dates'
 import type { FleetJobDto } from '~/lib/fleet-types'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'
@@ -14,7 +15,9 @@ definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const slug = route.params.project as string
-const { t, te } = useI18n()
+const i18n = useI18n()
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
@@ -195,7 +198,7 @@ function featureLabel(job: FleetJobDto): string {
               </TableCell>
               <TableCell class="whitespace-nowrap text-right tabular-nums">{{ formatUsd(job.costSpentUsd) }}</TableCell>
               <TableCell>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</TableCell>
-              <TableCell class="whitespace-nowrap text-muted-foreground">{{ new Date(job.queuedAt).toLocaleString() }}</TableCell>
+              <TableCell class="whitespace-nowrap text-muted-foreground">{{ dates.dateTime(job.queuedAt) }}</TableCell>
             </TableRow>
           </TableBody>
         </Table>

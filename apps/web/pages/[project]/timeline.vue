@@ -2,6 +2,7 @@
 import { extractApiError } from '~/composables/useApi'
 import { humanizeCode } from '~/lib/humanize-code'
 import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
+import { useLocalDates } from '~/lib/local-dates'
 
 definePageMeta({ layout: 'default' })
 
@@ -9,7 +10,8 @@ const route = useRoute()
 const slug = route.params.project as string
 
 const i18n = useI18n()
-const { locale, t, te } = i18n
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 const memberNames = useProjectMemberNames(slug)
 const agentNames = useProjectAgentNames(slug)
 
@@ -58,13 +60,7 @@ onMounted(() => {
 })
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString(locale.value, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return dates.dateTime(dateStr)
 }
 </script>
 

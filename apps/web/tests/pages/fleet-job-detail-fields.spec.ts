@@ -1,7 +1,33 @@
 import { describe, expect, test } from '@jest/globals'
+import { formatDateTime } from '~/lib/format-date-time'
 import { jobFixture, mountEnginePage } from './fleet-job-detail.spec'
 
 describe('fleet job detail field visibility (US-005)', () => {
+  test('AC-3/4 shows a missing heartbeat dash immediately and local queued time after mount', async () => {
+    const queuedAt = '2026-11-10T14:07:45.657Z'
+    const page = mountEnginePage({ job: jobFixture({ state: 'RUNNING', queuedAt, lastHeartbeatAt: null }), records: [] })
+    await page.settle()
+    const text = page.app.text()
+    expect(text).toContain('Last heartbeat')
+    expect(text).toContain('Queued')
+    expect(text).toContain(formatDateTime(queuedAt, 'en'))
+    const labels = page.app.find('dt')
+    const heartbeatLabel = labels.find((node) => page.app.textOf(node) === 'Last heartbeat')
+    expect(heartbeatLabel).toBeDefined()
+    if (heartbeatLabel?.parent === null || heartbeatLabel?.parent === undefined) throw new Error('heartbeat label has no details list')
+    const heartbeatIndex = heartbeatLabel.parent.children.indexOf(heartbeatLabel)
+    const heartbeatValue = heartbeatLabel.parent.children[heartbeatIndex + 1]
+    if (heartbeatValue === undefined) throw new Error('heartbeat value is missing')
+    expect(page.app.textOf(heartbeatValue)).toBe('-')
+    const queuedLabel = labels.find((node) => page.app.textOf(node) === 'Queued')
+    if (queuedLabel?.parent === null || queuedLabel?.parent === undefined) throw new Error('queued label has no details list')
+    const queuedIndex = queuedLabel.parent.children.indexOf(queuedLabel)
+    const queuedValue = queuedLabel.parent.children[queuedIndex + 1]
+    if (queuedValue === undefined) throw new Error('queued value is missing')
+    expect(page.app.textOf(queuedValue)).toBe(formatDateTime(queuedAt, 'en'))
+    page.app.unmount()
+  })
+
   const mount = async (over: Parameters<typeof jobFixture>[0] = {}) => {
     const page = mountEnginePage({ job: jobFixture(over), records: [] })
     await page.settle()

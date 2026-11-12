@@ -7,7 +7,7 @@ import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
 import { flowStateKey, flowStepKey, flowTitle, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
 import { codeLabel } from '~/lib/fleet-i18n'
 import { humanizeCode } from '~/lib/humanize-code'
-import { timeText } from '~/lib/fleet-analytics-format'
+import { useLocalDates } from '~/lib/local-dates'
 import { useProjectPermissions } from '~/composables/usePermissions'
 import { formatUsd } from '~/lib/fleet-jobs'
 import FlowFeatureSection from '~/components/fleet/flows/FlowFeatureSection.vue'
@@ -18,7 +18,9 @@ definePageMeta({ layout: 'default' })
 const route = useRoute()
 const slug = route.params.project as string
 const flowId = route.params.id as string
-const { t, te } = useI18n()
+const i18n = useI18n()
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 const flows = useFleetFlows(slug)
 const people = useProjectMemberNames(slug)
 const { permissions } = useProjectPermissions(slug)
@@ -181,7 +183,7 @@ onBeforeUnmount(() => {
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.branch') }}</dt><dd class="break-all">{{ flow.branch }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.reviewer') }}</dt><dd>{{ flow.roles.reviewer }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.supervisor') }}</dt><dd>{{ flow.roles.supervisor }}</dd></div>
-          <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.createdAt') }}</dt><dd>{{ timeText(flow.createdAt) }}</dd></div>
+          <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.createdAt') }}</dt><dd>{{ dates.dateTime(flow.createdAt) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.spend') }}</dt><dd>{{ formatUsd(flow.spentUsd) }} / {{ formatUsd(flow.costCapUsd) }}</dd></div>
         </dl>
         <p v-if="unknownCostText" data-testid="fleet-flow-unknown-cost" class="text-sm text-muted-foreground">{{ unknownCostText }}</p>
@@ -196,7 +198,7 @@ onBeforeUnmount(() => {
         <dl v-else class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvalMode') }}</dt><dd>{{ t(`fleet.flows.detail.approvalModeValue.${flow.approval.mode}`) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approver') }}</dt><dd>{{ approverName }}</dd></div>
-          <div v-if="flow.approval.approvedAt"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvedAt') }}</dt><dd>{{ timeText(flow.approval.approvedAt) }}</dd></div>
+          <div v-if="flow.approval.approvedAt"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvedAt') }}</dt><dd>{{ dates.dateTime(flow.approval.approvedAt) }}</dd></div>
         </dl>
       </section>
 

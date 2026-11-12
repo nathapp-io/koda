@@ -7,6 +7,7 @@ import type { AuditEntry } from '~/composables/useAuditLog'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { AUDIT_ACTOR_TYPES, auditRouteQuery, parseAuditRoute, principalLabel, relatedFilters, withFilter } from '~/lib/audit-log'
 import type { AuditFilters } from '~/lib/audit-log'
+import { useLocalDates } from '~/lib/local-dates'
 
 definePageMeta({ layout: 'default' })
 
@@ -19,6 +20,7 @@ const route = useRoute()
 const router = useRouter()
 const i18n = useI18n()
 const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const { entries, keys, hasNext, pending, load, loadKeys } = useAuditLog()
 
@@ -108,21 +110,6 @@ const chips = computed<AuditChip[]>(() => {
   }
   return list
 })
-
-/**
- * The active locale for a row's time. The i18n instance hands it over as `locale`; when it offers
- * none the runtime's own locale is the honest fallback, never a thrown RangeError.
- */
-const activeLocale = computed((): string => {
-  const value = (i18n as unknown as { locale?: { value?: unknown } }).locale?.value
-  return typeof value === 'string' ? value : ''
-})
-
-function localTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return iso
-  return at.toLocaleString(activeLocale.value === '' ? undefined : activeLocale.value)
-}
 
 function actorLabel(entry: AuditEntry): string {
   return principalLabel(entry.actor, entry.display.actor)
@@ -360,7 +347,7 @@ watch(filterKey, () => { void reload() })
                   <ChevronRight v-else class="h-4 w-4" />
                 </button>
               </TableCell>
-              <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ localTime(entry.createdAt) }}</TableCell>
+              <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ dates.dateTime(entry.createdAt) }}</TableCell>
               <TableCell><code class="text-xs">{{ entry.key }}</code></TableCell>
               <TableCell>
                 <button type="button" class="flex flex-wrap items-center gap-1.5 text-left hover:underline" data-testid="audit-actor" :title="t('admin.audit.filter.byActor')" @click="filterByActor(entry)">
