@@ -27,10 +27,12 @@ function mountMemory(applyFilters = async () => undefined) {
       useI18n: () => ({ t, te: (key: string) => key === 'tickets.status.IN_PROGRESS' }),
       useAppToast: () => ({ error: () => undefined, success: () => undefined }),
       useProjectPermissions: () => ({ permissions: ref({ has: () => false, hasOwn: () => false }) }),
+      useProjectAgentNames: () => ({ nameOf: () => null, load: async () => undefined }),
     },
     alias: {
       '~/composables/useMemory': { useMemory: () => memory, watchDebouncedMemorySearch: () => undefined },
       '~/composables/useProjectRef': { useProjectRef: () => ({ load: async () => null }) },
+      '~/composables/useProjectAgentNames': { useProjectAgentNames: () => ({ nameOf: () => null, load: async () => undefined }) },
       '~/composables/useApi': { extractApiError: (error: unknown) => String(error) },
     },
     components: {

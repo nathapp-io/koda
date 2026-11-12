@@ -16,6 +16,7 @@ const slug = route.params.project as string
 const { t, te } = useI18n()
 const toast = useAppToast()
 const { permissions } = useProjectPermissions(slug)
+const agentNames = useProjectAgentNames(slug)
 
 const {
   items,
@@ -115,6 +116,7 @@ async function confirmRetire(reason: string) {
 
 onMounted(() => {
   loadAndToast()
+  void agentNames.load().catch(() => undefined)
 })
 
 function formatConfidence(value: number) {
@@ -124,6 +126,13 @@ function formatConfidence(value: number) {
 function kindLabel(kind: string) {
   const key = `memory.kinds.${kind}`
   return te(key) ? t(key) : humanizeCode(kind)
+}
+
+function subjectLabel(item: MemoryItem): string {
+  const subject = memorySubject(item.subject)
+  if (subject.type === 'ticket') return `${t('memory.subject.ticket')} ${subject.short}`
+  if (subject.type === 'agent') return `${t('memory.subject.agent')} ${agentNames.nameOf(subject.id) ?? subject.short}`
+  return item.subject
 }
 
 function objectLabel(item: MemoryItem) {
@@ -202,7 +211,7 @@ function objectLabel(item: MemoryItem) {
                   <NuxtLink v-if="subject.type === 'ticket'" :to="`/${slug}/tickets/${subject.id}`">
                     {{ t('memory.subject.ticket') }} {{ subject.short }}
                   </NuxtLink>
-                  <template v-else-if="subject.type === 'agent'">{{ t('memory.subject.agent') }} {{ subject.short }}</template>
+                  <template v-else-if="subject.type === 'agent'">{{ subjectLabel(item) }}</template>
                   <template v-else>{{ item.subject }}</template>
                 </span>
               </template>
@@ -230,7 +239,7 @@ function objectLabel(item: MemoryItem) {
 
     <MemoryRetireDialog
       :open="retireTarget !== null"
-      :item-label="retireTarget?.subject ?? ''"
+      :item-label="retireTarget ? subjectLabel(retireTarget) : ''"
       :busy="retireBusy"
       @update:open="(open) => { if (!open) retireTarget = null }"
       @confirm="confirmRetire"
