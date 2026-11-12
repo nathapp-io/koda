@@ -2,15 +2,16 @@
 
 ## Overview
 
-Koda is a Bun-managed Turborepo monorepo for developer ticket tracking. The system is split into three deployable applications and two shared workspace packages:
+Koda is a Bun-managed Turborepo monorepo for developer ticket tracking and coordinating work between humans and AI agents. It contains four applications and two shared workspace packages:
 
-- `apps/api`: NestJS 12 + Fastify REST API and system-of-record
+- `apps/api`: NestJS 12 + Fastify REST API and system of record
 - `apps/web`: Nuxt 4 SSR web app for human users
-- `apps/cli`: Commander.js CLI for agents and terminal workflows
+- `apps/cli`: Commander.js CLI for API-backed terminal workflows
+- `apps/runner`: Bun-only fleet runner daemon that executes jobs dispatched by the API on host checkouts
 - `packages/eslint-config`: shared lint presets
 - `packages/typescript-config`: shared TypeScript presets
 
-The API owns domain rules, persistence, auth, state transitions, and OpenAPI. The web app and CLI are clients of that API and should stay thin.
+The API owns domain rules, persistence, auth, state transitions, and OpenAPI. The web app and CLI are API clients and should stay thin. The runner is an execution component: it communicates with the API's runner endpoints, runs jobs on its host checkout, and reports progress and results; it does not own business rules.
 
 ## Monorepo Layout
 
@@ -19,6 +20,7 @@ koda/
 ├── apps/
 │   ├── api/
 │   ├── cli/
+│   ├── runner/
 │   └── web/
 ├── packages/
 │   ├── eslint-config/
@@ -26,7 +28,7 @@ koda/
 ├── docs/
 ├── .nax/
 │   ├── context.md
-│   └── mono/apps/{api,cli,web}/context.md
+│   └── mono/apps/{api,cli,runner,web}/context.md
 ├── openapi.json
 ├── package.json
 ├── turbo.json
@@ -55,7 +57,7 @@ Bootstrap details from code:
 - Swagger UI is enabled in development
 - a Fastify `preParsing` hook normalizes empty JSON bodies to `{}`
 
-Top-level module composition in [`apps/api/src/app.module.ts`](/home/williamkhoo/Desktop/projects/nathapp/koda/apps/api/src/app.module.ts):
+Top-level module composition in [`apps/api/src/app.module.ts`](../apps/api/src/app.module.ts):
 - `ConfigModule` loads app/auth/database/rag config with validation
 - `I18nCoreModule` serves `en` and `zh` JSON translations
 - `PrismaModule` provides the shared Prisma client
@@ -91,7 +93,7 @@ Architecture details:
 Important architecture note:
 - the web generated client was intentionally dropped
 - `apps/web/generated` does not exist by design
-- the web app talks to the API through Nuxt-native composables like [`useApi.ts`](/home/williamkhoo/Desktop/projects/nathapp/koda/apps/web/composables/useApi.ts)
+- the web app talks to the API through Nuxt-native composables like [`useApi.ts`](../apps/web/composables/useApi.ts)
 - this is the preferred approach because Nuxt handles API access, SSR, cookies, and proxying better in this app
 
 ### CLI
@@ -107,13 +109,26 @@ Key responsibilities:
 Architecture details:
 - `src/index.ts` registers all commands and global process handling
 - command modules under `src/commands/`
-- auth/context discovery in [`apps/cli/src/config.ts`](/home/williamkhoo/Desktop/projects/nathapp/koda/apps/cli/src/config.ts)
+- auth/context discovery in [`apps/cli/src/config.ts`](../apps/cli/src/config.ts)
 - generated API client under `apps/cli/src/generated/`
 - output/error helpers under `src/utils/`
 
+### Runner
+
+`apps/runner` (`@nathapp/koda-runner`) is the fleet execution daemon. Unlike the web and CLI, it does not provide a user-facing interface or implement Koda's domain rules. It enrolls with the API, polls `POST /fleet/runner/sync`, executes assigned jobs on a host checkout, and reports progress, verdicts, logs, and run bundles.
+
+Key architectural boundaries:
+- API communication is centralized in the runner's sync/client layer; other components produce journal events or uploads through injected transports.
+- A local SQLite journal records job events before they are sent, supporting retries and recovery.
+- Job supervision and execution are separate: the supervisor manages job lifecycle while executors handle checkout and job-specific work.
+- The runner uses NAX to perform work and derives outcomes from NAX status and artifacts, not process exit codes.
+- Runner credentials and host capabilities are handled by the daemon and supplied to jobs only through constrained mechanisms; the runner does not own business policy.
+
+The runner is Bun-only (including `bun:sqlite` and `Bun.spawn`) and is compiled with `bun build --compile`. See [runner context](../.nax/mono/apps/runner/context.md) for the detailed module map and operational invariants.
+
 ## Domain Model
 
-Prisma schema lives in [`apps/api/prisma/schema.prisma`](/home/williamkhoo/Desktop/projects/nathapp/koda/apps/api/prisma/schema.prisma).
+Prisma schema lives in [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma).
 
 Core entities:
 - `User`: human accounts authenticated by email/password
@@ -151,6 +166,16 @@ Key data-model rules reflected in code/docs:
 3. CLI configures the generated OpenAPI client.
 4. CLI calls the API.
 5. CLI unwraps the `JsonResponse` envelope and prints JSON or formatted output.
+
+### Fleet Job Flow
+
+1. A fleet job is dispatched and made available by the API.
+2. The runner enrolls and polls `POST /fleet/runner/sync`, receiving assigned work and lease-scoped credentials.
+3. The runner prepares an isolated job workspace and starts the appropriate NAX or config-job flow.
+4. Job lifecycle events are journaled locally and synchronized to the API; log streams and run bundles use upload transports.
+5. The runner reports the final verdict, and the API remains the authority for job state and business decisions.
+
+The runner is designed to recover and re-adopt eligible jobs after restart. Job execution is host-side, so runner trust, capabilities, filesystem boundaries and process handling are part of the execution boundary.
 
 ## Module Relationships Inside API
 
@@ -333,7 +358,7 @@ Inbound integrations:
 
 ## Build, Test, and Generation Pipeline
 
-Root orchestration is defined in [`package.json`](/home/williamkhoo/Desktop/projects/nathapp/koda/package.json) and [`turbo.json`](/home/williamkhoo/Desktop/projects/nathapp/koda/turbo.json).
+Root orchestration is defined in [`package.json`](../package.json) and [`turbo.json`](../turbo.json).
 
 Important commands:
 - `bun run build`: turbo build for all workspaces
