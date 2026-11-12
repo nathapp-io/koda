@@ -3,7 +3,7 @@
   "feature": "web-ux-audit-fixes",
   "branchName": "feat/web-ux-audit-fixes",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T03:57:32.422Z",
+  "updatedAt": "2026-11-12T04:03:44.306Z",
   "userStories": [
     {
       "id": "US-001",
@@ -390,14 +390,17 @@
         "dashboard"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized attribute/surface changes across three existing UI surfaces and two locales, using established labels, translations and safe tokens."
+        "reasoning": "Localized attribute/surface changes across three existing UI surfaces and two locales, using established labels, translations and safe tokens.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/settings/notifications.vue",
@@ -413,7 +416,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4b46809c740bc79ed8474e9983e3b2694190cb44"
     },
     {
       "id": "US-007",
