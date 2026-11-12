@@ -119,6 +119,10 @@ describe('US-007 board and dashboard layout', () => {
 
   test('AC-4 all six board headers have their marker and h-8', () => {
     const app = mountBoard()
+    // Every header, not just the expected ones: an extra column header must fail this test.
+    const headers = app.find('div').filter(node => String(node.props['data-testid'] ?? '').startsWith('board-column-header-'))
+    expect(headers.map(header => header.props['data-testid']))
+      .toEqual(statuses.map(status => `board-column-header-${status}`))
     for (const status of statuses) {
       const header = app.one(`[data-testid="board-column-header-${status}"]`)
       expect(header).toBeDefined()
