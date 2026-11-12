@@ -27,6 +27,7 @@ const ADMIN_LINKS: ReadonlyArray<readonly [href: string, key: string]> = [
   // P3b US-006: the approval engine's global policy page.
   ['/admin/approval-policies', 'approval.policy.manage'],
   ['/admin/audit', 'audit.read'],
+  ['/admin/outbox', 'outbox.read'],
   ['/admin/fleet', 'fleet.dashboard.read'],
   ['/admin/fleet/runners', 'fleet.runner.read'],
   ['/admin/fleet/repos', 'fleet.repo.read'],
@@ -350,6 +351,46 @@ describe('P3b US-006: /admin/approval-policies follows the global approval.polic
 
     expect(nav.indexOf('href="/threads"')).toBeLessThan(nav.indexOf('href="/approvals"'))
     expect(nav.indexOf('href="/approvals"')).toBeLessThan(nav.indexOf('nav.sectionAdmin'))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-006 — the Outbox destination follows the global outbox.read key
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-006: /admin/outbox follows the global outbox.read key', () => {
+  test('AC-1: outbox.read renders /admin/outbox labelled nav.outbox', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['outbox.read'] }))
+    const link = /<a href="\/admin\/outbox"[^>]*>([\s\S]*?)<\/a>/.exec(nav)?.[0]
+
+    expect(link).toBeDefined()
+    expect(link).toContain('nav.outbox')
+  })
+
+  test('AC-2: without outbox.read, /admin/outbox is absent', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['audit.read'] }))
+
+    expect(hasLink(nav, '/admin/outbox')).toBe(false)
+  })
+
+  test('AC-3: outbox.read alone shows the Admin section', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['outbox.read'] }))
+
+    expect(nav).toContain('nav.sectionAdmin')
+  })
+
+  test('AC-4: Outbox is after Audit and before Fleet', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['audit.read', 'outbox.read', 'fleet.dashboard.read'] }))
+
+    expect(nav.indexOf('href="/admin/audit"')).toBeLessThan(nav.indexOf('href="/admin/outbox"'))
+    expect(nav.indexOf('href="/admin/outbox"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
+  })
+
+  test('AC-5: user.read continues to render Users without outbox.read', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['user.read'] }))
+
+    expect(hasLink(nav, '/admin/users')).toBe(true)
+    expect(hasLink(nav, '/admin/outbox')).toBe(false)
   })
 })
 

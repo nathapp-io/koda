@@ -74,6 +74,7 @@
     "users": "用户",
     "roles": "角色",
     "audit": "审计日志",
+    "outbox": "发件箱",
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
     "fleetJobs": "Fleet 任务",
@@ -506,6 +507,17 @@
       "kind": "类型",
       "confidence": "置信度",
       "status": "状态"
+    },
+    "retire": {
+      "action": "退役",
+      "title": "退役记忆项",
+      "item": "即将退役：{itemLabel}",
+      "reason": "原因（可选）",
+      "reasonPlaceholder": "为什么要退役此记忆项？",
+      "reasonTooLong": "原因不能超过 500 个字符。",
+      "confirm": "退役",
+      "done": "记忆项已退役。",
+      "pending": "退役申请已提交审批。"
     }
   },
   "codeIntel": {
@@ -861,6 +873,16 @@
       "leakageIncidents": "泄漏事件数",
       "memoryGrowthRate": "内存增长率"
     }
+  },
+  "outbox": {
+    "title": "发件箱",
+    "empty": "没有符合此状态的事件。",
+    "error": "无法加载发件箱事件。",
+    "adminOnly": "发件箱仅对管理员开放。",
+    "showing": "显示 {count} / {total}",
+    "status": { "label": "状态", "dead": "已终止", "pending": "待处理", "processing": "处理中", "published": "已发布" },
+    "columns": { "type": "类型", "eventId": "事件 ID", "attempts": "尝试次数", "lastError": "上次错误" },
+    "retry": { "action": "重试", "done": "发件箱事件已安排重试。", "pending": "重试申请已提交审批。" }
   },
   "home": {
     "subtitle": "跨项目的待办一览",

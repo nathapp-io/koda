@@ -61,6 +61,7 @@ async function buildPageBundle(): Promise<string> {
     .replace(/~\/composables\/useApi/g, join(webDir, 'composables/useApi'))
     // Free useMemory() call (no explicit import) — route through sandbox global
     .replace(/useMemory\(/g, 'globalThis.__useMemory__(')
+    .replace(/useProjectRef\(/g, 'globalThis.__useProjectRef__(')
     // Capture setup's return value on globalThis for test access
     .replace(
       'return __returned__',
@@ -124,6 +125,7 @@ async function mountMemoryPage(opts: MountOptions) {
     useRoute: () => ({ params: { project: slug }, path: `/${slug}/memory` }),
     useI18n: () => ({ t: (k: string) => k, locale: { value: 'en' } }),
     useAppToast: () => toastInstance,
+    useProjectPermissions: () => ({ permissions: { has: () => false, hasOwn: () => false } }),
     definePageMeta: () => {},
     onMounted: (fn: () => unknown) => { fn() },
     useApi: () => ({
@@ -152,6 +154,7 @@ async function mountMemoryPage(opts: MountOptions) {
     throw new Error('useMemory bundle did not export useMemory function')
   }
   sandbox.__useMemory__ = useMemoryImpl
+  sandbox.__useProjectRef__ = (_slug: string) => ({ load: async () => null })
   // Reset module.exports for the page bundle evaluation.
   sandbox.module = { exports: {} }
   // Evaluate the page bundle — it references globalThis.__useMemory__ which

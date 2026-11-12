@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles, MessagesSquare, ShieldCheck, ScrollText } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles, MessagesSquare, ShieldCheck, ScrollText, Send } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -56,6 +56,7 @@ const canReadUsers = computed(() => globalPermissions.value.has('user.read'))
 const canReadRoles = computed(() => globalPermissions.value.has('role.read'))
 // US-007: the audit log is a global-admin destination, so its link follows the key `GET /audit` needs.
 const canReadAudit = computed(() => globalPermissions.value.has('audit.read'))
+const canReadOutbox = computed(() => globalPermissions.value.has('outbox.read'))
 const canReadFleetDashboard = computed(() => globalPermissions.value.has('fleet.dashboard.read'))
 const canReadFleetRunners = computed(() => globalPermissions.value.has('fleet.runner.read'))
 const canReadFleetRepos = computed(() => globalPermissions.value.has('fleet.repo.read'))
@@ -72,6 +73,7 @@ const showAdminNav = computed(() =>
   || canReadRoles.value
   || canManageApprovalPolicies.value
   || canReadAudit.value
+  || canReadOutbox.value
   || canReadFleetDashboard.value
   || canReadFleetRunners.value
   || canReadFleetRepos.value
@@ -247,6 +249,8 @@ const backTo = computed(() => {
         <NuxtLink v-if="canManageApprovalPolicies" to="/admin/approval-policies" :class="navLinkClass" :active-class="activeClass"><ScrollText class="h-4 w-4 shrink-0" />{{ t('nav.approvalPolicies') }}</NuxtLink>
 
         <NuxtLink v-if="canReadAudit" to="/admin/audit" :class="navLinkClass" :active-class="activeClass"><ScrollText class="h-4 w-4 shrink-0" />{{ t('nav.audit') }}</NuxtLink>
+
+        <NuxtLink v-if="canReadOutbox" to="/admin/outbox" :class="navLinkClass" :active-class="activeClass"><Send class="h-4 w-4 shrink-0" />{{ t('nav.outbox') }}</NuxtLink>
 
         <NuxtLink v-if="canReadFleetDashboard" to="/admin/fleet" :class="navLinkClass" :active-class="activeClass"><Gauge class="h-4 w-4 shrink-0" />{{ t('nav.fleetOverview') }}</NuxtLink>
 

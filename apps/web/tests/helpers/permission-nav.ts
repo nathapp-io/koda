@@ -68,6 +68,7 @@ export const ADMIN_NAV_KEYS = [
   // P3b US-006: the global approval policy page (after Roles).
   'approval.policy.manage',
   'audit.read',
+  'outbox.read',
   'fleet.dashboard.read',
   'fleet.runner.read',
   'fleet.repo.read',
@@ -115,6 +116,7 @@ export function adminNavFlags(keys: readonly string[]): Record<string, boolean> 
     // P3b US-006: the global approval policy page follows the key its routes need.
     canManageApprovalPolicies: held.has('approval.policy.manage'),
     canReadAudit: held.has('audit.read'),
+    canReadOutbox: held.has('outbox.read'),
     canReadFleetDashboard: held.has('fleet.dashboard.read'),
     canReadFleetRunners: held.has('fleet.runner.read'),
     canReadFleetRepos: held.has('fleet.repo.read'),

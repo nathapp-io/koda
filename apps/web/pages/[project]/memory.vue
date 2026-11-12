@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { Brain } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
-import { watchDebouncedMemorySearch } from '~/composables/useMemory'
+import { useMemory, watchDebouncedMemorySearch } from '~/composables/useMemory'
+import { useProjectRef } from '~/composables/useProjectRef'
+import type { MemoryItem, RetireOutcome } from '~/composables/useMemory'
 
 definePageMeta({ layout: 'default' })
 
@@ -10,6 +12,7 @@ const route = useRoute()
 const slug = route.params.project as string
 const { t } = useI18n()
 const toast = useAppToast()
+const { permissions } = useProjectPermissions(slug)
 
 const {
   items,
@@ -22,7 +25,12 @@ const {
   loadMemory,
   applyFilters,
   loadMore,
+  retireDecision,
+  retireNote,
 } = useMemory(slug)
+const projectRef = useProjectRef(slug)
+const retireTarget = ref<MemoryItem | null>(null)
+const retireBusy = ref(false)
 
 const KIND_OPTIONS = ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE']
 const STATUS_OPTIONS = ['', 'active', 'superseded', 'rejected']
@@ -44,9 +52,62 @@ watchDebouncedMemorySearch(textFilter, () => {
   void withToastError(applyFilters)
 })
 
+function canRetire(item: { kind: string; status: string }) {
+  if (item.status !== 'active') return false
+  if (item.kind === 'DECISION') return permissions.value.has('memory.decision.retire')
+  if (item.kind === 'NOTE') return permissions.value.has('memory.create') || permissions.value.hasOwn('memory.create')
+  return false
+}
+
 function toggleNote(itemId: string) {
   if (expandedNotes.has(itemId)) expandedNotes.delete(itemId)
   else expandedNotes.add(itemId)
+}
+
+/**
+ * The dialog belongs to one row at a time. While a retire request is in flight the busy row's
+ * request is the only one that can settle, so another row cannot take the dialog over: otherwise
+ * the in-flight request's settle would clear the target and close the other row's dialog too.
+ */
+function openRetire(item: MemoryItem) {
+  if (retireBusy.value) return
+  retireTarget.value = item
+}
+
+/** Closes the dialog only if it still belongs to the row whose request just settled. */
+function closeRetire(item: MemoryItem) {
+  if (retireTarget.value?.id === item.id) retireTarget.value = null
+}
+
+async function confirmRetire(reason: string) {
+  const item = retireTarget.value
+  if (!item || retireBusy.value) return
+  retireBusy.value = true
+  try {
+    let outcome: RetireOutcome
+    if (item.kind === 'DECISION') outcome = await retireDecision(item.id, reason)
+    else if (item.kind === 'NOTE') {
+      const projectId = await projectRef.load()
+      if (!projectId) throw new Error('Project could not be resolved')
+      outcome = await retireNote(item.id, projectId, reason)
+    }
+    else return
+
+    closeRetire(item)
+    if (outcome.kind === 'pending') {
+      toast.success(t('memory.retire.pending'))
+    }
+    else {
+      toast.success(t('memory.retire.done'))
+      await withToastError(applyFilters)
+    }
+  }
+  catch (err) {
+    toast.error(extractApiError(err))
+  }
+  finally {
+    retireBusy.value = false
+  }
 }
 
 onMounted(() => {
@@ -116,6 +177,7 @@ function formatConfidence(value: number) {
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('memory.columns.kind') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('memory.columns.confidence') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('memory.columns.status') }}</th>
+            <th class="px-4 py-3 text-left font-medium text-muted-foreground" />
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -136,10 +198,21 @@ function formatConfidence(value: number) {
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.kind }}</span></td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ formatConfidence(item.confidence) }}</td>
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.status }}</span></td>
+            <td class="px-4 py-3">
+              <Button v-if="canRetire(item)" variant="outline" size="sm" @click="openRetire(item)">{{ t('memory.retire.action') }}</Button>
+            </td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <MemoryRetireDialog
+      :open="retireTarget !== null"
+      :item-label="retireTarget?.subject ?? ''"
+      :busy="retireBusy"
+      @update:open="(open) => { if (!open) retireTarget = null }"
+      @confirm="confirmRetire"
+    />
 
     <div v-if="hasMore" class="flex justify-center">
       <Button variant="outline" :disabled="isLoading" @click="loadMoreAndToast">
