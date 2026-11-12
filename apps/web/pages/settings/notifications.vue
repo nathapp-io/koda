@@ -117,7 +117,7 @@ onMounted(() => { void reload() })
             :disabled="!view.emailAvailable || !view.emailEnabled"
             @change="onEmailToggle(row.category, $event)"
           >
-        </span>
+        </label>
       </li>
     </ul>
     </div>
