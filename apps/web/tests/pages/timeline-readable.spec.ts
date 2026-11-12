@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { useProjectMemberNames } from '../../composables/useProjectMemberNames'
 
 const page = webFile('pages', '[project]', 'timeline.vue')
 const event = { id: 'e1', eventType: 'ticket_event', actorId: 'u1', action: 'TICKET_CREATED', createdAt: '2026-01-01T00:00:00Z' }
@@ -39,9 +40,45 @@ describe('Timeline readable labels', () => {
     expect(option && mounted.textOf(option)).toBe('Ticket')
     const all = mounted.find('option').find(node => node.props.value === '')
     expect(all && mounted.textOf(all)).toBe('All')
-    expect(mounted.find('label').some(label => label.props.for === mounted.one('select')?.props.id)).toBe(true)
-    expect(mounted.find('label').some(label => label.props.for === mounted.find('input').find(input => input.props.type === 'date')?.props.id)).toBe(true)
-    expect(mounted.find('label').some(label => label.props.for === mounted.find('input').filter(input => input.props.type === 'date')[1]?.props.id)).toBe(true)
+    const selectId = mounted.one('select')?.props.id
+    expect(typeof selectId).toBe('string')
+    expect(selectId).not.toBe('')
+    const eventTypeLabel = mounted.find('label').find(label => mounted.textOf(label) === 'Event Type')
+    expect(eventTypeLabel?.props.for).toBe(selectId)
+
+    const dateInputs = mounted.find('input').filter(input => input.props.type === 'date')
+    const fromId = dateInputs[0]?.props.id
+    expect(typeof fromId).toBe('string')
+    expect(fromId).not.toBe('')
+    const fromLabel = mounted.find('label').find(label => mounted.textOf(label) === 'From')
+    expect(fromLabel?.props.for).toBe(fromId)
+
+    const toId = dateInputs[1]?.props.id
+    expect(typeof toId).toBe('string')
+    expect(toId).not.toBe('')
+    const toLabel = mounted.find('label').find(label => mounted.textOf(label) === 'To')
+    expect(toLabel?.props.for).toBe(toId)
+  })
+
+  test('real member-name composable requests project members once with page size 100', () => {
+    const calls: Array<{ method: string; path: string; options: { query: { size: string } } }> = []
+    const global = globalThis as typeof globalThis & { useApi?: () => { $api: { get: (path: string, options: { query: { size: string } }) => Promise<{ records: [] }> } } }
+    global.useApi = () => ({ $api: { get: async (path, options) => { calls.push({ method: 'GET', path, options }); return { records: [] } } } })
+    try {
+      mountSfc(page, {
+        globals: {
+          useRoute: () => ({ params: { project: 'acme' } }),
+          useI18n: () => ({ t, te: () => false, locale: { value: 'en' } }),
+          useAppToast: () => ({ error: jest.fn() }),
+          useTimelineEvents: () => ({ events: [], isLoading: true, error: null, hasMore: false, eventTypeFilter: '', fromFilter: '', toFilter: '', loadEvents: jest.fn(), applyFilters: jest.fn(), loadMore: jest.fn() }),
+          useProjectMemberNames: (slug: string) => useProjectMemberNames(slug),
+        },
+      })
+    }
+    finally {
+      delete global.useApi
+    }
+    expect(calls).toEqual([{ method: 'GET', path: '/projects/acme/members', options: { query: { size: '100' } } }])
   })
 
   test('falls back to raw actor and readable unknown event/action codes; member failure is silent', async () => {
