@@ -83,6 +83,9 @@ export default defineNuxtConfig({
   runtimeConfig: {
     // Server-side only: internal URL for SSR → API calls
     apiInternalUrl: process.env.NUXT_API_INTERNAL_URL || 'http://localhost:3100',
+    // Server-side only: reverse proxies in front of this server (NUXT_TRUSTED_PROXY_HOPS).
+    // 0 = browsers connect directly; see server/utils/client-ip.ts.
+    trustedProxyHops: 0,
     public: {
       // Client-side: relative path — requests go to Nuxt server, which proxies to API
       apiBaseUrl: '/api',

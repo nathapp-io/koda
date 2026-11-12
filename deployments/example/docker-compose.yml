@@ -55,6 +55,11 @@ services:
     environment:
       NUXT_API_INTERNAL_URL: http://api:3100
       PORT: 3101
+      # Number of reverse proxies in front of web. 0 (default) when browsers connect to web directly, as in this
+      # file; 1 when one proxy such as nginx sits in front (web then takes the client from the X-Forwarded-For entry
+      # that proxy appended). Set it to the exact number of proxies, and do not also publish web's port: a request that
+      # reaches web directly, or a count above the real one, lets a browser choose the address it is throttled as.
+      # NUXT_TRUSTED_PROXY_HOPS: 1
     depends_on:
       api:
         condition: service_healthy

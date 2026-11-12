@@ -3,12 +3,12 @@ import path from 'node:path'
 import { clientIpHeaders, resolveClientIp, UNKNOWN_CLIENT_IP } from '~/server/utils/client-ip'
 
 /**
- * The API trusts the web container as a proxy and then takes the client IP from
- * `x-client-ip` first, unfiltered (@nathapp/nestjs-common getClientIp). So every
- * upstream call made for a browser must set it to that browser's socket peer:
- * otherwise all browsers share the web container's IP (one login-throttle bucket
- * for everyone), and a browser-sent `x-client-ip` passed through by the proxy
- * would pick its own bucket.
+ * The API trusts the web container as a proxy and reads the client IP from
+ * `x-forwarded-for` before `x-client-ip` (@nathapp/nestjs-common getClientIp).
+ * So every upstream call made for a browser sends one resolved address in both
+ * headers: otherwise all browsers would share the web container's IP (one
+ * login-throttle bucket for everyone, #444), and a browser-sent forwarding header
+ * passed through by the proxy would pick its own bucket (#445).
  */
 
 describe('resolveClientIp', () => {
@@ -38,13 +38,13 @@ describe('resolveClientIp', () => {
 })
 
 describe('clientIpHeaders', () => {
-  test('sets x-client-ip to the resolved client IP', () => {
-    expect(clientIpHeaders('203.0.113.7')).toEqual({ 'x-client-ip': '203.0.113.7' })
+  test('sets x-client-ip and x-forwarded-for to the resolved client IP', () => {
+    expect(clientIpHeaders('203.0.113.7')).toEqual({ 'x-client-ip': '203.0.113.7', 'x-forwarded-for': '203.0.113.7' })
   })
 
   test('fails closed: unknown client -> shared, unspoofable placeholder (never omitted)', () => {
     expect(UNKNOWN_CLIENT_IP).toBe('0.0.0.0')
-    expect(clientIpHeaders(undefined)).toEqual({ 'x-client-ip': '0.0.0.0' })
+    expect(clientIpHeaders(undefined)).toEqual({ 'x-client-ip': '0.0.0.0', 'x-forwarded-for': '0.0.0.0' })
   })
 })
 
