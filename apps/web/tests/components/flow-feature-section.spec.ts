@@ -11,7 +11,7 @@ const job: FleetFlowJobDto = { id: 'j1', feature: 'US-1', step: 'RUN', command: 
  */
 const mountSection = (props: Record<string, unknown>) => mountSfc(webFile('components', 'fleet', 'flows', 'FlowFeatureSection.vue'), {
   props: { slug: 'web', flow, feature, repo: null, jobs: [job], canAnswer: false, ...props },
-  globals: { useI18n: () => ({ t: (key: string) => key }), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
+  globals: { useI18n: () => ({ t: (key: string) => key, te: () => false }), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
   alias: { '~/composables/useFleetFlows': { useFleetFlows: () => ({ answer: jest.fn() }) } },
   components: { NuxtLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } },
 })

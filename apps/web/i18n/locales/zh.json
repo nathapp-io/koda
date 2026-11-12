@@ -964,6 +964,7 @@
       },
       "detail": {
         "title": "流程",
+        "id": "ID",
         "overview": "流程详情",
         "entry": "入口",
         "entryValue": { "THREAD": "线程", "NAX": "Nax" },

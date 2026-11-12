@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { codeLabel } from '~/lib/fleet-i18n'
 import FlowAnswerForm from '~/components/fleet/flows/FlowAnswerForm.vue'
 import { featureBranch, featureStateKey, flowStepKey, openQuestions, prUrl } from '~/lib/fleet-flows'
 import type { FleetFlowDto, FleetFlowFeatureDto, FleetFlowJobDto, FlowRepo } from '~/lib/fleet-flows'
@@ -14,7 +15,7 @@ const props = defineProps<{
   canAnswer: boolean
 }>()
 const emit = defineEmits<{ answered: [pending?: boolean] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const stateLabel = computed(() => {
   const key = featureStateKey(props.feature.state)
   return key ? t(key) : props.feature.state
@@ -43,7 +44,7 @@ function onAnswered(pending?: boolean): void { emit('answered', pending) }
       <p class="text-sm"><span class="text-muted-foreground">{{ t('fleet.flows.feature.branch') }}</span> {{ featureBranch(flow, feature) }}</p>
       <p v-if="feature.dependsOn.length" class="text-sm"><span class="text-muted-foreground">{{ t('fleet.flows.feature.dependsOn') }}</span> {{ feature.dependsOn.join(', ') }}</p>
       <p v-if="feature.prNumber" class="text-sm">
-        <span class="text-muted-foreground">{{ t('fleet.flows.feature.pullRequest') }}</span>
+        <span class="text-muted-foreground">{{ t('fleet.flows.feature.pullRequest') }} </span>
         <a v-if="pullRequestUrl" :href="pullRequestUrl" target="_blank" rel="noopener noreferrer" class="underline">#{{ feature.prNumber }}</a>
         <span v-else>#{{ feature.prNumber }}</span>
       </p>
@@ -51,7 +52,7 @@ function onAnswered(pending?: boolean): void { emit('answered', pending) }
     <ul v-if="jobs.length" class="space-y-2 border-t border-border pt-3">
       <li v-for="job in jobs" :key="job.id" class="text-sm">
         <NuxtLink class="underline" :to="`/${slug}/fleet/jobs/${job.id}`">
-          {{ job.step ? (flowStepKey(job.step) ? t(flowStepKey(job.step)!) : job.step) : '—' }} · {{ job.command }} · {{ job.state }} · {{ formatUsd(job.costUsd) }}
+          {{ job.step ? (flowStepKey(job.step) ? t(flowStepKey(job.step)!) : job.step) : '—' }} · {{ codeLabel(t, te, 'fleet.command', job.command) }} · {{ codeLabel(t, te, 'fleet.state', job.state) }} · {{ formatUsd(job.costUsd) }}
         </NuxtLink>
       </li>
     </ul>

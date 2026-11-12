@@ -4,7 +4,9 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { useVisiblePolling } from '~/composables/useVisiblePolling'
 import { useFleetFlows } from '~/composables/useFleetFlows'
 import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
-import { flowStateKey, flowStepKey, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
+import { flowStateKey, flowStepKey, flowTitle, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
+import { codeLabel } from '~/lib/fleet-i18n'
+import { timeText } from '~/lib/fleet-analytics-format'
 import { useProjectPermissions } from '~/composables/usePermissions'
 import { formatUsd } from '~/lib/fleet-jobs'
 import FlowFeatureSection from '~/components/fleet/flows/FlowFeatureSection.vue'
@@ -15,7 +17,7 @@ definePageMeta({ layout: 'default' })
 const route = useRoute()
 const slug = route.params.project as string
 const flowId = route.params.id as string
-const { t } = useI18n()
+const { t, te } = useI18n()
 const flows = useFleetFlows(slug)
 const people = useProjectMemberNames(slug)
 const { permissions } = useProjectPermissions(slug)
@@ -147,7 +149,7 @@ onBeforeUnmount(() => {
       {{ t(`fleet.flows.detail.${failure}`) }}
     </section>
     <template v-else-if="flow">
-      <PageHeader :title="t('fleet.flows.detail.title')" :subtitle="flow.id">
+      <PageHeader :title="flowTitle(flow) ?? t('fleet.flows.detail.title')" :subtitle="flow.branch">
         <template #actions>
           <span data-testid="fleet-flow-state" class="rounded-md border border-border px-2 py-1 text-sm">{{ stateLabel }}</span>
           <button v-if="canStopFlow" type="button" class="rounded-md border border-border px-3 py-1 text-sm" :disabled="stopBusy" @click="stopFlow">
@@ -169,11 +171,12 @@ onBeforeUnmount(() => {
       <section class="space-y-2">
         <h2 class="text-sm font-medium">{{ t('fleet.flows.detail.overview') }}</h2>
         <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.id') }}</dt><dd class="break-all">{{ flow.id }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.entry') }}</dt><dd>{{ t(`fleet.flows.detail.entryValue.${flow.entry}`) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.branch') }}</dt><dd class="break-all">{{ flow.branch }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.reviewer') }}</dt><dd>{{ flow.roles.reviewer }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.supervisor') }}</dt><dd>{{ flow.roles.supervisor }}</dd></div>
-          <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.createdAt') }}</dt><dd>{{ flow.createdAt }}</dd></div>
+          <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.createdAt') }}</dt><dd>{{ timeText(flow.createdAt) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.spend') }}</dt><dd>{{ formatUsd(flow.spentUsd) }} / {{ formatUsd(flow.costCapUsd) }}</dd></div>
         </dl>
         <p v-if="unknownCostText" data-testid="fleet-flow-unknown-cost" class="text-sm text-muted-foreground">{{ unknownCostText }}</p>
@@ -188,7 +191,7 @@ onBeforeUnmount(() => {
         <dl v-else class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvalMode') }}</dt><dd>{{ t(`fleet.flows.detail.approvalModeValue.${flow.approval.mode}`) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approver') }}</dt><dd>{{ approverName }}</dd></div>
-          <div v-if="flow.approval.approvedAt"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvedAt') }}</dt><dd>{{ flow.approval.approvedAt }}</dd></div>
+          <div v-if="flow.approval.approvedAt"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.approvedAt') }}</dt><dd>{{ timeText(flow.approval.approvedAt) }}</dd></div>
         </dl>
       </section>
 
@@ -211,7 +214,7 @@ onBeforeUnmount(() => {
         <h2 class="text-sm font-medium">{{ t('fleet.flows.detail.flowJobs') }}</h2>
         <ul class="space-y-2">
           <li v-for="job in groupedJobs.flowJobs" :key="job.id" class="text-sm">
-            <NuxtLink class="underline" :to="`/${slug}/fleet/jobs/${job.id}`">{{ flowJobStep(job.step) }} · {{ job.command }} · {{ job.state }} · {{ formatUsd(job.costUsd) }}</NuxtLink>
+            <NuxtLink class="underline" :to="`/${slug}/fleet/jobs/${job.id}`">{{ flowJobStep(job.step) }} · {{ codeLabel(t, te, 'fleet.command', job.command) }} · {{ codeLabel(t, te, 'fleet.state', job.state) }} · {{ formatUsd(job.costUsd) }}</NuxtLink>
           </li>
         </ul>
       </section>
