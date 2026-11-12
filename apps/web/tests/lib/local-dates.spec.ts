@@ -43,6 +43,47 @@ test('renders an empty SSR time then fills viewer-local text after mount', async
   expect(time.children.join('')).toBe(formatDateTime(iso, 'en'))
   app.unmount()
 })
+test('returns missing and invalid values before and after mount for both formats', async () => {
+  let dates: ReturnType<typeof useLocalDates> | undefined
+  const initial: string[] = []
+  const app = renderer.createApp({ setup() {
+    dates = useLocalDates(undefined)
+    return () => {
+      if (!dates) throw new Error('local dates not initialized')
+      const current = dates
+      initial.splice(0, initial.length,
+        current.dateTime(null), current.dateTime(undefined), current.dateTime(''),
+        current.date(null), current.date(undefined), current.date(''),
+        current.dateTime('not-a-date'), current.date('not-a-date'))
+      return h('div')
+    }
+  } })
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  app.mount(root)
+  const localDates = dates
+  if (!localDates) throw new Error('local dates not initialized')
+  expect(initial.slice(0, 6)).toEqual(['-', '-', '-', '-', '-', '-'])
+  expect(initial.slice(6)).toEqual(['', ''])
+  await nextTick()
+  for (const missing of [null, undefined, ''] as const) {
+    expect(localDates.dateTime(missing)).toBe('-')
+    expect(localDates.date(missing)).toBe('-')
+  }
+  expect(localDates.dateTime('not-a-date')).toBe('not-a-date')
+  expect(localDates.date('not-a-date')).toBe('not-a-date')
+  app.unmount()
+})
+
+test.each([undefined, { locale: { value: 42 } }, { locale: {} }, { locale: { value: '' } }])('uses runtime locale when locale is missing or not a non-empty string (%p)', async (i18n) => {
+  let dateTime: ((value: string) => string) | undefined
+  const app = renderer.createApp({ setup() { dateTime = useLocalDates(i18n).dateTime; return () => h('div') } })
+  const root: Node = { tag: 'root', props: {}, children: [] }
+  app.mount(root)
+  await nextTick()
+  expect(dateTime?.(iso)).toBe(formatDateTime(iso, undefined))
+  app.unmount()
+})
+
 test('formats date-only values after mount and handles absent/invalid dates', async () => {
   const root: Node = { tag: 'root', props: {}, children: [] }
   const app = renderer.createApp(component('date'))
