@@ -66,6 +66,12 @@ afterEach(() => {
 })
 
 describe('US-006 AC10-AC13: the project brief field of SettingsProjectCard', () => {
+  test('AC-5: a project settings card does not render a Delete Project button', () => {
+    const app = mountCard()
+    expect(app.text()).not.toContain('projects.settings.delete')
+    app.unmount()
+  })
+
   test('AC10: a project whose brief is Old shows a textarea holding Old with maxlength 3000', () => {
     const app = mountCard()
 

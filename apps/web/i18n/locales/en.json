@@ -268,6 +268,12 @@
     },
     "settings": {
       "title": "Project Settings",
+      "tab": "General",
+      "detailsTitle": "Project details",
+      "dangerZone": {
+        "title": "Danger zone",
+        "description": "Deleting a project removes its tickets, settings and history. This cannot be undone."
+      },
       "description": "Manage project details.",
       "projectDescription": "Description",
       "projectDescriptionPlaceholder": "Short project description",
