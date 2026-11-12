@@ -4,7 +4,7 @@ import { extractApiError } from '~/composables/useApi'
 import { useNotifications } from '~/composables/useNotifications'
 import { useUserEvents } from '~/composables/useUserEvents'
 import { createDebouncer } from '~/lib/debounce'
-import { isInAppPath, notificationText } from '~/lib/notifications'
+import { isInAppPath, notificationDetail, notificationText } from '~/lib/notifications'
 import type { NotificationDto, NotificationPage } from '~/lib/notification-types'
 
 definePageMeta({ layout: 'default' })
@@ -108,7 +108,7 @@ onBeforeUnmount(() => liveReload.cancel())
           <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full" :class="item.readAt ? 'bg-transparent' : 'bg-primary'" aria-hidden="true" />
           <span class="min-w-0 flex-1">
             <span class="block text-sm" :class="item.readAt ? '' : 'font-medium'">{{ notificationText(item, i18n) }}</span>
-            <span v-if="item.body" class="block truncate text-xs text-muted-foreground">{{ item.body }}</span>
+            <span v-if="notificationDetail(item, i18n)" class="block truncate text-xs text-muted-foreground">{{ notificationDetail(item, i18n) }}</span>
           </span>
           <time class="shrink-0 text-xs text-muted-foreground" :datetime="item.createdAt">{{ new Date(item.createdAt).toLocaleString() }}</time>
         </button>

@@ -54,7 +54,7 @@
             @click="onOpen(item)"
           >
             <span class="block truncate">{{ notificationText(item, i18n) }}</span>
-            <span v-if="item.body" class="block truncate text-xs text-muted-foreground">{{ item.body }}</span>
+            <span v-if="notificationDetail(item, i18n)" class="block truncate text-xs text-muted-foreground">{{ notificationDetail(item, i18n) }}</span>
           </button>
         </li>
       </ul>
@@ -78,7 +78,7 @@ import { useNotifications } from '~/composables/useNotifications'
 import { useUserEvents } from '~/composables/useUserEvents'
 import { createDebouncer } from '~/lib/debounce'
 import { badgeText } from '~/lib/fleet-approvals'
-import { isInAppPath, notificationText } from '~/lib/notifications'
+import { isInAppPath, notificationDetail, notificationText } from '~/lib/notifications'
 import type { NotificationDto } from '~/lib/notification-types'
 
 /** Fleet S4a §5: header bell. Live notices and the 60 s poll refresh it; the API owns read state. */

@@ -710,6 +710,8 @@
     },
     "search": {
       "placeholder": "Search the knowledge base...",
+      "promptTitle": "Search this project's knowledge",
+      "promptHint": "Type a question or keywords above and press Search. Results come from the documents indexed for this project.",
       "button": "Search",
       "noResults": "No results found."
     },
@@ -720,6 +722,7 @@
       "optimize": "Optimize",
       "deleteConfirm": "Delete this document source from KB?",
       "empty": "No documents yet.",
+      "emptyHint": "Add a document to make it searchable.",
       "indexed": "{count} document(s) indexed",
       "columns": {
         "source": "Source",
@@ -916,6 +919,24 @@
   },
   "fleet": {
     "flows": {
+      "stopReason": {
+        "step_failed": "Step failed",
+        "verdict_unreadable": "Verdict unreadable",
+        "review_findings": "Review findings",
+        "review_ambiguous": "Review ambiguous",
+        "calls_failed": "Calls failed",
+        "plan_no_result": "Plan produced no result",
+        "run_no_pr": "Run produced no pull request",
+        "pr_not_ready": "Pull request not ready",
+        "cost_cap": "Cost cap reached",
+        "creator_lost_access": "Creator lost access",
+        "budget_paused": "Budget paused",
+        "dispatch_refused": "Dispatch refused",
+        "pr_closed": "Pull request closed",
+        "spec_changed": "Spec changed",
+        "human_stop": "Stopped by a person",
+        "approval_rejected": "Approval rejected"
+      },
       "list": { "title": "Flows", "empty": "No flows yet", "state": "State", "features": "Features", "spend": "Spend / cap", "createdAt": "Created", "previous": "Previous", "next": "Next", "pagination": "Flow pages" },
       "panel": { "title": "Flows" },
       "start": {
@@ -2689,7 +2710,9 @@
       "budget_warn": "Budget {scope} reached {spentUsd} of {amountUsd} USD",
       "budget_hard_stop": "Budget {scope} stopped at {spentUsd} of {amountUsd} USD",
       "runner_offline": "Runner {runner} is offline",
-      "credential_expiring": "{provider} credential on {runner} expires {expiresAt}"
+      "credential_expiring": "{provider} credential on {runner} expires {expiresAt}",
+      "flow_stopped": "Flow {feature} stopped",
+      "flow_questions": "Flow {feature} needs {count} answer(s)"
     },
     "categories": {
       "ASSIGNED": { "label": "Assigned to me", "description": "A ticket is assigned to you." },

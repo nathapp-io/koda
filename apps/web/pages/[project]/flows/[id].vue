@@ -6,6 +6,7 @@ import { useFleetFlows } from '~/composables/useFleetFlows'
 import { useProjectMemberNames } from '~/composables/useProjectMemberNames'
 import { flowStateKey, flowStepKey, flowTitle, isLiveFlow, jobsByFeature } from '~/lib/fleet-flows'
 import { codeLabel } from '~/lib/fleet-i18n'
+import { humanizeCode } from '~/lib/humanize-code'
 import { timeText } from '~/lib/fleet-analytics-format'
 import { useProjectPermissions } from '~/composables/usePermissions'
 import { formatUsd } from '~/lib/fleet-jobs'
@@ -51,6 +52,10 @@ const unknownCostText = computed(() => {
   return count > 0 ? t('fleet.flows.detail.unknownCost', { count }) : ''
 })
 const groupedJobs = computed(() => jobsByFeature(overview.value?.jobs ?? [], flow.value?.features ?? []))
+const stopReasonLabel = (reason: string): string => {
+  const key = `fleet.flows.stopReason.${reason}`
+  return te(key) ? t(key) : humanizeCode(reason)
+}
 const flowJobStep = (step: string | null): string => {
   if (step === null) return '—'
   const key = flowStepKey(step)
@@ -222,7 +227,7 @@ onBeforeUnmount(() => {
       <section v-if="flow.state === 'STOPPED'" class="space-y-2">
         <h2 class="text-sm font-medium">{{ t('fleet.flows.detail.stop') }}</h2>
         <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-          <div v-if="flow.stopReason"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.stopReason') }}</dt><dd>{{ flow.stopReason }}</dd></div>
+          <div v-if="flow.stopReason"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.stopReason') }}</dt><dd data-testid="flow-stop-reason">{{ stopReasonLabel(flow.stopReason) }}</dd></div>
           <div v-if="flow.stopDetail"><dt class="text-muted-foreground">{{ t('fleet.flows.detail.stopDetail') }}</dt><dd>{{ flow.stopDetail }}</dd></div>
         </dl>
         <NuxtLink v-if="overview?.ticketRef" class="text-sm underline" :to="`/${slug}/tickets/${overview.ticketRef}`">{{ t('fleet.flows.detail.ticket', { ref: overview.ticketRef }) }}</NuxtLink>
