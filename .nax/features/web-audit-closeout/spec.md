@@ -66,8 +66,10 @@ the client's hydration render runs before it, so both render `''`; Vue then re-r
 component mounted later (client navigation) shows the text after one tick. The `-` for a missing value is the
 same on both sides, so it renders immediately.
 
-Every site below switches to `useLocalDates(useI18n())` (reusing the component's existing `useI18n()` result)
-and to one of the two formats: `dateTime` where it shows a time today, `date` where it shows only a date.
+Every site below switches to `useLocalDates(i18n)` and to one of the two formats: `dateTime` where it shows a time
+today, `date` where it shows only a date. A site that destructures `useI18n()` today keeps one
+`const i18n = useI18n()`, destructures what it still uses from it, passes `i18n` to `useLocalDates`, and drops
+locals that become unused (`locale`, `commentLocale`, `activeLocale`, `localTime`).
 
 | Story | File | Today | After |
 |:--|:--|:--|:--|
@@ -79,13 +81,13 @@ and to one of the two formats: `dateTime` where it shows a time today, `date` wh
 | US-002 | `components/fleet/FleetJobTimeline.vue` | `new Date(event.createdAt).toLocaleString()` in the `rows` computed | `dates.dateTime(event.createdAt)` |
 | US-002 | `components/fleet/EnrollmentTokenDialog.vue` | `new Date(created.expiresAt).toLocaleString()` | `dates.dateTime(created.expiresAt)` |
 | US-002 | `components/fleet/threads/ThreadPreApprovalCard.vue` | `new Date(thread.preApproval.at).toLocaleString()` | `dates.dateTime(thread.preApproval.at)` |
-| US-002 | `components/fleet/threads/ThreadListTable.vue` | `activityText`: `timeText(value)` behind a finite-date guard, else `-` | `activityText` keeps its finite-date guard and calls `dates.dateTime(value)` only for a valid date, else `-` |
+| US-002 | `components/fleet/threads/ThreadListTable.vue` | `activityText`: `timeText(value)` behind a finite-date guard, else `-` | `activityText` moves into setup after `useLocalDates`, keeps its finite-date guard and calls `dates.dateTime(value)` only for a valid date, else `-` |
 | US-002 | `components/fleet/analytics/JobTable.vue` | `timeText(row.finishedAt)` | `dates.dateTime(row.finishedAt)` |
 | US-002 | `components/fleet/analytics/IngestTable.vue` | `timeText(row.updatedAt)` | `dates.dateTime(row.updatedAt)` |
 | US-002 | `components/fleet/analytics/StoryTable.vue` | `timeText(row.completedAt)` | `dates.dateTime(row.completedAt)` |
 | US-003 | `pages/notifications.vue` | `new Date(item.createdAt).toLocaleString()` inside `<time :datetime>` | `dates.dateTime(item.createdAt)` |
 | US-003 | `pages/admin/audit.vue` | `localTime(iso)` (`toLocaleString(activeLocale)`) | `dates.dateTime(iso)` |
-| US-003 | `pages/[project]/timeline.vue` | local `formatDate` (`toLocaleString`, short with time) | `dates.dateTime(...)` |
+| US-003 | `pages/[project]/timeline.vue` | local `formatDate` (`toLocaleString`, short with time) | keeps a local `formatDate(dateStr)` that returns `dates.dateTime(dateStr)`, so the template and `tests/pages/timeline.spec.ts` (which compiles the template with its own `formatDate`) are unchanged |
 | US-003 | `pages/[project]/kb.vue` | local `formatDate` (`toLocaleDateString(locale.value)`) | `dates.date(...)` |
 | US-003 | `pages/[project]/fleet/index.vue` | `new Date(job.queuedAt).toLocaleString()` | `dates.dateTime(job.queuedAt)` |
 | US-003 | `pages/[project]/fleet/jobs/[id]/index.vue` | `formatTime` (`toLocaleString()`, `-` for null; Queued, Started, Finished, Last heartbeat, cancel-requested text) | `dates.dateTime(iso)` |
@@ -97,7 +99,7 @@ US-003 then removes `timeText` from `lib/fleet-analytics-format.ts` (its last co
 Static gate (not an AC): US-003 adds `tests/lib/no-runtime-zone-dates.spec.ts`, which scans every `.vue` and `.ts`
 file under `apps/web/components`, `pages`, `layouts`, `composables` and `lib` (tests excluded) and fails, naming
 each file, on a match for `/\.toLocale(Date|Time)?String\(/` outside `lib/format-date-time.ts`, or on an import
-from `~/lib/format-date-time` in any file other than `lib/local-dates.ts`. It keeps new sites from returning to
+whose path ends in `/format-date-time` in any file other than `lib/local-dates.ts`. It keeps new sites from returning to
 the runtime zone.
 
 `lib/fleet-schedules.ts` is unchanged: it formats with an explicit `timeZone`, the same on both sides.
@@ -284,7 +286,7 @@ Add `GitHubAppClient.getSubtree` and use it in `GithubFleetRepoFilesReader.list`
 components; ACs US-001-6..8 mount `CommentThread`, `TicketHeader` and `TicketProperties` and assert the empty
 first render and the local text after a tick.
 
-**US-002**: consumes `useLocalDates` from US-001; ACs US-002-1..4 mount real consumers and assert the formatted text.
+**US-002**: consumes `useLocalDates` from US-001; ACs US-002-1..5 mount real consumers and assert the formatted text.
 
 **US-003**: consumes `useLocalDates` from US-001; ACs US-003-1..4 mount real pages and assert the formatted text.
 The `timeText` removal is proven by `type-check`, and missed sites by the static guard.
@@ -298,8 +300,8 @@ the `GET .../nax-files` route calls; AC US-004-9 drives that route end to end ag
 
 1. [unit] `formatDate('2026-11-10T14:07:45.657Z', 'en')` returns a string that includes `Nov` and `2026` and does not include `14:07`, `02:07` or `T14`.
 2. [unit] `formatDate('not-a-date', 'en')` returns `not-a-date`.
-3. [unit] A test component built with `h()` that renders `h('time', { datetime: iso }, dates.dateTime(iso))` for `iso` `2026-11-10T14:07:45.657Z`, where `dates = useLocalDates({ locale: ref('en') })` in its setup, rendered with `renderToString` from `vue/server-renderer` over `createSSRApp`, yields a `<time>` element with that `datetime` attribute and no text.
-4. [unit] The same test component mounted through a `Vue.createRenderer` recorder (the node and text recorders of `tests/helpers/mount-sfc.ts`, copied or exported) has an empty `time` text right after `mount` returns and, after `await nextTick()`, the text `formatDateTime('2026-11-10T14:07:45.657Z', 'en')`; a variant rendering `dates.date(iso)` shows `formatDate('2026-11-10T14:07:45.657Z', 'en')`.
+3. [unit] In `tests/lib/local-dates.spec.ts`, a test component built with `h()` that renders `h('time', { datetime: iso }, dates.dateTime(iso))` for `iso` `2026-11-10T14:07:45.657Z`, where `dates = useLocalDates({ locale: ref('en') })` in its setup, rendered with `renderToString` from `vue/server-renderer` over `createSSRApp`, yields a `<time>` element with that `datetime` attribute and no text.
+4. [unit] In `tests/lib/local-dates.spec.ts`, the same test component mounted through a `Vue.createRenderer` recorder (the node and text recorders of `tests/helpers/mount-sfc.ts`, copied or exported) has an empty `time` text right after `mount` returns and, after `await nextTick()`, the text `formatDateTime('2026-11-10T14:07:45.657Z', 'en')`; a variant rendering `dates.date(iso)` shows `formatDate('2026-11-10T14:07:45.657Z', 'en')`.
 5. [unit] `useLocalDates` returns `-` for `null`, `undefined` and `''` both before and after mount; for `not-a-date` it returns `''` before mount and `not-a-date` after; with `{ locale: { value: 42 } }` or `undefined` as the i18n argument, after mount `dateTime(iso)` returns `formatDateTime(iso, undefined)`.
 6. [unit] Mounting `CommentThread` (harness of `tests/components/comment-thread-time.spec.ts`, locale ref `en`) with a comment whose `createdAt` is `2026-11-10T14:07:45.657Z`: right after `mountSfc` returns, `comment-time` is a `time` element whose `datetime` is that ISO value and whose text is `''`.
 7. [unit] On that mount, after `await nextTick()`, the `comment-time` text equals `formatDateTime('2026-11-10T14:07:45.657Z', 'en')`; with the locale ref holding `zh`, it equals `formatDateTime(..., 'zh')`.
@@ -308,9 +310,10 @@ the `GET .../nax-files` route calls; AC US-004-9 drives that route end to end ag
 ### US-002
 
 1. [unit] Mounting `ThreadPreApprovalCard` with a pre-approval `at` of `2026-01-02T03:04:05.000Z`: after `await nextTick()` the card text contains `formatDateTime('2026-01-02T03:04:05.000Z', <stub locale>)`.
-2. [unit] Mounting `ThreadListTable` with a thread whose `lastActivityAt` is `not-a-date` renders `-` in its last-activity cell, and with `lastActivityAt` `2026-11-10T14:07:45.657Z` renders `formatDateTime('2026-11-10T14:07:45.657Z', <stub locale>)` there after `await nextTick()`.
+2. [unit] Mounting `ThreadListTable` with a thread whose `lastActivityAt` is `not-a-date`, and with one whose `lastActivityAt` is null, renders `-` in each last-activity cell, and with `lastActivityAt` `2026-11-10T14:07:45.657Z` renders `formatDateTime('2026-11-10T14:07:45.657Z', <stub locale>)` there after `await nextTick()`.
 3. [unit] Mounting `BudgetTable` with a paused policy whose `pausedAt` is `2026-10-02T03:04:05.000Z`: after `await nextTick()` that row's text contains `formatDateTime('2026-10-02T03:04:05.000Z', <stub locale>)`.
 4. [unit] Mounting `JobTable` with a row whose `finishedAt` is `2026-11-10T14:07:45.657Z` and another whose `finishedAt` is null renders `formatDateTime('2026-11-10T14:07:45.657Z', <stub locale>)` in the first row after `await nextTick()` and `-` in the second.
+5. [unit] Mounting `FleetJobTimeline` with one event whose `createdAt` is `2026-11-10T14:07:45.657Z`: after `await nextTick()` that row's text contains `formatDateTime('2026-11-10T14:07:45.657Z', <stub locale>)`.
 
 ### US-003
 
