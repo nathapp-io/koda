@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 /**
  * Permissions P1 US-014: project invites carry a project role key.
  *
@@ -142,7 +143,7 @@ async function onCancel(invite: InviteDto): Promise<void> {
         data-testid="invite-role"
         :aria-label="t('projects.invites.roleLabel')"
         :value="roleKey"
-        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        :class="FILTER_CONTROL_CLASS"
         @change="roleKey = ($event.target as HTMLSelectElement).value"
         @update:model-value="roleKey = $event as string"
       >

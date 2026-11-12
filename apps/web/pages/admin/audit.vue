@@ -369,7 +369,7 @@ watch(filterKey, () => { void reload() })
                   <span v-if="entry.onBehalfOf" class="text-xs text-muted-foreground">{{ t('admin.audit.onBehalfOf', { name: onBehalfLabel(entry) }) }}</span>
                 </button>
               </TableCell>
-              <TableCell>
+              <TableCell class="whitespace-nowrap" data-testid="audit-project-cell">
                 <button v-if="entry.projectId" type="button" class="text-left hover:underline" data-testid="audit-project" :title="t('admin.audit.filter.byProject')" @click="filterByProject(entry)">{{ projectLabel(entry) }}</button>
                 <span v-else class="text-muted-foreground">{{ projectLabel(entry) }}</span>
               </TableCell>

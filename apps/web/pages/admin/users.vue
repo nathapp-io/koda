@@ -215,8 +215,23 @@ onMounted(() => { void reload() })
                 {{ t('admin.users.noRoles') }}
               </span>
             </TableCell>
-            <TableCell>{{ user.disabled ? t('admin.users.status.disabled') : t('admin.users.status.active') }}</TableCell>
-            <TableCell class="space-x-2 text-right">
+            <TableCell>
+              <Badge
+                variant="outline"
+                data-testid="user-status-chip"
+                :data-status="user.disabled ? 'disabled' : 'active'"
+                class="inline-flex items-center gap-1.5"
+              >
+                <span
+                  aria-hidden="true"
+                  class="h-1.5 w-1.5 rounded-full"
+                  :class="user.disabled ? 'bg-status-rejected' : 'bg-status-done'"
+                />
+                {{ user.disabled ? t('admin.users.status.disabled') : t('admin.users.status.active') }}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <div data-testid="user-actions" class="flex items-center justify-end gap-2">
               <Button
                 v-if="canEditRoles(user)"
                 size="sm"
@@ -226,9 +241,10 @@ onMounted(() => { void reload() })
               >
                 <Pencil class="mr-1 h-3.5 w-3.5" />{{ t('admin.users.editRoles') }}
               </Button>
-              <Button size="sm" variant="outline" :disabled="isSelf(user)" @click="toggleDisabled(user)">
+              <Button size="sm" variant="outline" data-testid="user-toggle-disabled" :disabled="isSelf(user)" @click="toggleDisabled(user)">
                 {{ user.disabled ? t('admin.users.enable') : t('admin.users.disable') }}
               </Button>
+              </div>
             </TableCell>
           </TableRow>
         </TableBody>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 /**
  * Permissions P1 US-013: the project's members, users and agents in one list with role chips.
  *
@@ -272,7 +273,7 @@ onMounted(async () => {
         data-testid="member-add-role"
         :aria-label="t('projects.members.roleLabel')"
         :value="newRoleKey"
-        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        :class="FILTER_CONTROL_CLASS"
         @change="newRoleKey = ($event.target as HTMLSelectElement).value"
         @update:model-value="newRoleKey = $event as string"
       >
@@ -289,7 +290,7 @@ onMounted(async () => {
         data-testid="agent-add-select"
         :aria-label="t('projects.members.agentLabel')"
         :value="agentId"
-        class="h-9 max-w-xs rounded-md border border-input bg-background px-2 text-sm"
+        :class="[FILTER_CONTROL_CLASS, 'max-w-xs']"
         @change="agentId = ($event.target as HTMLSelectElement).value"
         @update:model-value="agentId = $event as string"
       >
@@ -300,7 +301,7 @@ onMounted(async () => {
         data-testid="agent-add-role"
         :aria-label="t('projects.members.roleLabel')"
         :value="agentRoleKey"
-        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        :class="FILTER_CONTROL_CLASS"
         @change="agentRoleKey = ($event.target as HTMLSelectElement).value"
         @update:model-value="agentRoleKey = $event as string"
       >
@@ -376,7 +377,7 @@ onMounted(async () => {
               data-testid="member-chip-add-role"
               :aria-label="t('projects.members.roleLabel')"
               :value="rowRoleKey[rowKey(row)] ?? ''"
-              class="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              :class="FILTER_CONTROL_CLASS"
               @change="rowRoleKey = { ...rowRoleKey, [rowKey(row)]: ($event.target as HTMLSelectElement).value }"
               @update:model-value="rowRoleKey = { ...rowRoleKey, [rowKey(row)]: $event as string }"
             >

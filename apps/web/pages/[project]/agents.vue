@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 import { computed } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
@@ -65,7 +66,7 @@ function onStatusChange(agent: ProjectAgent, event: Event): void {
         <TableCell><div class="flex flex-wrap gap-1"><Badge v-for="cap in agent.capabilities" :key="cap" variant="outline" class="text-xs">{{ cap }}</Badge></div></TableCell>
         <TableCell><span :class="TICKET_CHIP_CLASS"><span :class="[TICKET_DOT_CLASS, agentStatusDot(agent.status)]" aria-hidden="true"></span>{{ t(`agents.status.${agent.status}`) }}</span></TableCell>
         <TableCell><span class="text-sm tabular-nums">{{ agent.openTicketCount }}</span></TableCell>
-        <TableCell v-if="canUpdateAgentStatus"><select :value="agent.status" :aria-label="t('agents.columns.status')" :disabled="busySlug === agent.slug" class="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:cursor-not-allowed disabled:opacity-50" @change="onStatusChange(agent, $event)"><option v-for="status in AGENT_STATUSES" :key="status" :value="status">{{ t(`agents.status.${status}`) }}</option></select></TableCell>
+        <TableCell v-if="canUpdateAgentStatus"><select :value="agent.status" :aria-label="t('agents.columns.status')" :disabled="busySlug === agent.slug" :class="[FILTER_CONTROL_CLASS, 'disabled:cursor-not-allowed disabled:opacity-50']" @change="onStatusChange(agent, $event)"><option v-for="status in AGENT_STATUSES" :key="status" :value="status">{{ t(`agents.status.${status}`) }}</option></select></TableCell>
       </TableRow></TableBody>
     </Table>
   </div>

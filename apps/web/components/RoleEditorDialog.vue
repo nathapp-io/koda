@@ -35,7 +35,7 @@
           <select
             id="role-scope"
             data-testid="role-scope"
-            class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            :class="[FILTER_CONTROL_CLASS, 'w-full']"
             :value="scope"
             @change="onScopeChange(($event.target as HTMLSelectElement).value as RoleScope)"
           >
@@ -98,6 +98,7 @@
 </template>
 
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 import { X } from 'lucide-vue-next'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
