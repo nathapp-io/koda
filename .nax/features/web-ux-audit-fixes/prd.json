@@ -3,7 +3,7 @@
   "feature": "web-ux-audit-fixes",
   "branchName": "feat/web-ux-audit-fixes",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T03:37:19.830Z",
+  "updatedAt": "2026-11-12T03:45:04.661Z",
   "userStories": [
     {
       "id": "US-001",
@@ -247,14 +247,17 @@
         "responsive"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Four source modules gain a small typed projection and conventional request/prop plumbing with a silent cosmetic fallback; existing admin guards and API contracts remain unchanged."
+        "reasoning": "Four source modules gain a small typed projection and conventional request/prop plumbing with a silent cosmetic fallback; existing admin guards and API contracts remain unchanged.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/analytics/IngestTable.vue",
@@ -280,7 +283,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "71f210492aa805d6300b2022dd530acd8ae4ce5f"
     },
     {
       "id": "US-005",
