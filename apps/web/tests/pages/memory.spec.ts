@@ -1,4 +1,6 @@
 import { describe, test, expect, jest, beforeAll } from '@jest/globals'
+import { memorySubject } from '../../lib/memory-subject'
+import { humanizeCode } from '../../lib/humanize-code'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -484,6 +486,11 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
 
   const ctx = {
     t: (key: string) => key,
+    te: () => false,
+    slug: 'sb',
+    memorySubject,
+    kindLabel: (kind: string) => humanizeCode(kind),
+    objectLabel: (item: MemoryItem) => item.object,
     toast: { error: jest.fn(), success: jest.fn() },
 
     items: ref<MemoryItem[]>([]),

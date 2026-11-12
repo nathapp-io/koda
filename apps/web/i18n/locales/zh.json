@@ -480,6 +480,15 @@
     }
   },
   "memory": {
+    "kinds": {
+      "FACT": "事实",
+      "DECISION": "决策",
+      "PREFERENCE": "偏好",
+      "CONSTRAINT": "约束",
+      "INCIDENT_PATTERN": "事件模式",
+      "NOTE": "笔记"
+    },
+    "subject": { "ticket": "工单", "agent": "代理" },
     "settings": {
       "title": "代理记忆写入",
       "description": "选择代理的记忆写入是立即生效还是等待人工审批。",

@@ -480,6 +480,15 @@
     }
   },
   "memory": {
+    "kinds": {
+      "FACT": "Fact",
+      "DECISION": "Decision",
+      "PREFERENCE": "Preference",
+      "CONSTRAINT": "Constraint",
+      "INCIDENT_PATTERN": "Incident pattern",
+      "NOTE": "Note"
+    },
+    "subject": { "ticket": "Ticket", "agent": "Agent" },
     "settings": {
       "title": "Agent memory writes",
       "description": "Choose whether agent memory writes apply immediately or wait for human approval.",
