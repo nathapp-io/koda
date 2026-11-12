@@ -23,7 +23,7 @@
             <select
               id="policy-subject-kind"
               data-testid="policy-subject-kind"
-              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              :class="[FILTER_CONTROL_CLASS, 'w-full']"
               :value="subjectKind"
               @change="onSubjectKindChange"
             >
@@ -38,7 +38,7 @@
             <select
               id="policy-principal-type"
               data-testid="policy-principal-type"
-              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              :class="[FILTER_CONTROL_CLASS, 'w-full']"
               :value="principalType"
               @change="onPrincipalTypeChange"
             >
@@ -53,7 +53,7 @@
             <select
               id="policy-role"
               data-testid="policy-role"
-              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              :class="[FILTER_CONTROL_CLASS, 'w-full']"
               :value="roleId"
               @change="onRoleChange"
             >
@@ -74,7 +74,7 @@
           <select
             id="policy-mode"
             data-testid="policy-mode"
-            class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            :class="[FILTER_CONTROL_CLASS, 'w-full']"
             :value="mode"
             @change="onModeChange"
           >
@@ -98,7 +98,7 @@
           <select
             id="policy-on-timeout"
             data-testid="policy-on-timeout"
-            class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            :class="[FILTER_CONTROL_CLASS, 'w-full']"
             :value="onTimeout"
             @change="onOnTimeoutChange"
           >
@@ -141,6 +141,7 @@
 </template>
 
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 /**
  * P3b US-008: the one policy dialog, shared by the global page and (US-009) the project page.
  *

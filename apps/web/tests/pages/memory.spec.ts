@@ -489,6 +489,7 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     te: () => false,
     slug: 'sb',
     memorySubject,
+    subjectLabel: (item: MemoryItem) => item.subject,
     kindLabel: (kind: string) => humanizeCode(kind),
     objectLabel: (item: MemoryItem) => item.object,
     toast: { error: jest.fn(), success: jest.fn() },

@@ -18,6 +18,9 @@ export class ProjectAgentAddedByDto {
 
 export class ProjectAgentDto {
   @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
   slug!: string;
 
   @ApiProperty()
@@ -43,6 +46,7 @@ export class ProjectAgentDto {
 
   static from(record: ProjectAgentRecord): ProjectAgentDto {
     return {
+      id: record.id,
       slug: record.slug,
       name: record.name,
       status: record.status,
@@ -63,6 +67,7 @@ export class ProjectAgentDto {
 
 /** Raw shape the repository returns; the service turns it into ProjectAgentDto. */
 export interface ProjectAgentRecord {
+  id: string;
   slug: string;
   name: string;
   status: string;

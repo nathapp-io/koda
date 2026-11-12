@@ -268,6 +268,12 @@
     },
     "settings": {
       "title": "项目设置",
+      "tab": "常规",
+      "detailsTitle": "项目详情",
+      "dangerZone": {
+        "title": "危险区域",
+        "description": "删除项目会移除其工单、设置和历史记录。此操作无法撤销。"
+      },
       "description": "管理项目详情。",
       "projectDescription": "描述",
       "projectDescriptionPlaceholder": "输入项目描述",
@@ -424,6 +430,7 @@
       "unassign": "取消指派"
     },
     "assignee": {
+      "change": "更改",
       "searchPlaceholder": "搜索人员或代理",
       "group": {
         "people": "人员",
@@ -703,6 +710,8 @@
     },
     "search": {
       "placeholder": "搜索知识库...",
+      "promptTitle": "搜索此项目的知识库",
+      "promptHint": "在上方输入问题或关键词，然后点击搜索。结果来自此项目已索引的文档。",
       "button": "搜索",
       "noResults": "未找到结果。"
     },
@@ -713,6 +722,7 @@
       "optimize": "优化",
       "deleteConfirm": "确认从知识库删除该来源文档？",
       "empty": "暂无文档。",
+      "emptyHint": "添加文档后即可搜索。",
       "indexed": "{count} 个文档已索引",
       "columns": {
         "source": "来源",
@@ -909,6 +919,24 @@
   },
   "fleet": {
     "flows": {
+      "stopReason": {
+        "step_failed": "步骤失败",
+        "verdict_unreadable": "无法读取判定结果",
+        "review_findings": "审查发现问题",
+        "review_ambiguous": "审查结果不明确",
+        "calls_failed": "调用失败",
+        "plan_no_result": "计划未产生结果",
+        "run_no_pr": "运行未产生拉取请求",
+        "pr_not_ready": "拉取请求尚未就绪",
+        "cost_cap": "已达到费用上限",
+        "creator_lost_access": "创建者已失去访问权限",
+        "budget_paused": "预算已暂停",
+        "dispatch_refused": "调度被拒绝",
+        "pr_closed": "拉取请求已关闭",
+        "spec_changed": "规格已更改",
+        "human_stop": "由人员停止",
+        "approval_rejected": "审批已拒绝"
+      },
       "list": { "title": "流程", "empty": "暂无流程", "state": "状态", "features": "功能", "spend": "花费 / 上限", "createdAt": "创建时间", "previous": "上一页", "next": "下一页", "pagination": "流程分页" },
       "panel": { "title": "流程" },
       "start": {
@@ -2682,7 +2710,9 @@
       "budget_warn": "预算 {scope} 已用 {spentUsd} / {amountUsd} USD",
       "budget_hard_stop": "预算 {scope} 在 {spentUsd} / {amountUsd} USD 处停止",
       "runner_offline": "Runner {runner} 已离线",
-      "credential_expiring": "{runner} 上的 {provider} 凭据将于 {expiresAt} 过期"
+      "credential_expiring": "{runner} 上的 {provider} 凭据将于 {expiresAt} 过期",
+      "flow_stopped": "流程 {feature} 已停止",
+      "flow_questions": "流程 {feature} 需要 {count} 个回答"
     },
     "categories": {
       "ASSIGNED": { "label": "分配给我", "description": "有工单分配给你。" },

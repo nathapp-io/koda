@@ -168,6 +168,7 @@ const hasLinkedSection = computed(() =>
 )
 
 const assigning = vueRef(false)
+const pickerOpen = vueRef(false)
 
 interface AssigneeChoice {
   type: 'user' | 'agent'
@@ -182,6 +183,7 @@ async function onAssigneeSelect(choice: AssigneeChoice): Promise<void> {
   try {
     await $api.post(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/assign`, payload)
     toast.success(t('tickets.toast.assigned'))
+    pickerOpen.value = false
     emit('changed')
   } catch (err: unknown) {
     toast.error(extractApiError(err))
@@ -312,8 +314,14 @@ async function removeLink(linkId: string) {
           <span v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</span>
         </div>
         <div v-if="canAssign" class="space-y-2 border-t pt-2.5">
-          <AssigneePicker :project-slug="projectSlug" :disabled="assigning" @select="onAssigneeSelect" />
+          <AssigneePicker v-if="pickerOpen" :project-slug="projectSlug" :disabled="assigning" @select="onAssigneeSelect" />
           <div class="flex items-center gap-2">
+            <Button v-if="pickerOpen" size="sm" variant="ghost" data-testid="assignee-cancel" @click="pickerOpen = false">
+              {{ t('common.cancel') }}
+            </Button>
+            <Button v-else size="sm" variant="outline" data-testid="assignee-change" @click="pickerOpen = true">
+              {{ t('tickets.assignee.change') }}
+            </Button>
             <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
               {{ t('tickets.assign.unassign') }}
             </Button>

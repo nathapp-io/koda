@@ -8,6 +8,7 @@ import { apiPath } from '~/lib/api-path'
  * bindings, read from `/role-bindings`) nor a `scoping` flag, so neither is part of this shape.
  */
 export interface ProjectAgent {
+  id: string
   slug: string
   name: string
   status: string

@@ -110,6 +110,7 @@ test.describe('Ticket Detail Operations', () => {
     // The page holds a live EventSource open, so 'networkidle' never settles.
     await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
     await waitForHydration(page);
+    await page.locator('[data-testid="assignee-change"]').click();
     const pickerInput = page.locator('[data-testid="assignee-search"]').first();
     await pickerInput.fill(ASSIGNEE.email);
     const assigneeOption = page.locator(`[data-testid="assignee-option-${assigneeId}"]`).first();

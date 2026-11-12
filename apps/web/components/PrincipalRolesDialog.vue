@@ -43,7 +43,7 @@
             <select
               :value="selectedRoleKey"
               data-testid="binding-role-select"
-              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              :class="[FILTER_CONTROL_CLASS, 'w-full']"
               :disabled="writeBlocked"
               @change="selectedRoleKey = ($event.target as HTMLSelectElement).value"
             >
@@ -75,6 +75,7 @@
 </template>
 
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 /**
  * Permissions P1 US-011: the one dialog that grants and removes a principal's global role bindings.
  *

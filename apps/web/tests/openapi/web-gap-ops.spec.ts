@@ -11,6 +11,7 @@ const actionPanelPath = join(webDir, 'components', 'TicketActionPanel.vue')
 const commentThreadPath = join(webDir, 'components', 'CommentThread.vue')
 const kbPath = join(webDir, 'pages', '[project]', 'kb.vue')
 const settingsProjectCardPath = join(webDir, 'components', 'SettingsProjectCard.vue')
+const settingsDangerZoneCardPath = join(webDir, 'components', 'SettingsDangerZoneCard.vue')
 const settingsVcsCardPath = join(webDir, 'components', 'SettingsVcsCard.vue')
 
 function src(path: string): string {
@@ -19,13 +20,13 @@ function src(path: string): string {
 
 describe('Web OpenAPI gap operations are wired in source', () => {
   test('project settings uses GET/PATCH/DELETE /projects/:slug', () => {
-    // 2026-10-06 UX redesign slice 5: project save/delete moved from the page
-    // into components/SettingsProjectCard.vue.
+    // Project read/save/delete live in the page and their respective cards.
     const source = src(settingsPath)
     const cardSource = src(settingsProjectCardPath)
+    const dangerZoneSource = src(settingsDangerZoneCardPath)
     expect(source).toContain('$api.get(apiPath`/projects/${slug}`)')
     expect(cardSource).toContain('$api.patch(apiPath`/projects/${props.project.slug}`')
-    expect(cardSource).toContain('$api.delete(apiPath`/projects/${props.project.slug}`)')
+    expect(dangerZoneSource).toContain('$api.delete(apiPath`/projects/${props.project.slug}`)')
   })
 
   test('comment thread uses DELETE /comments/:id', () => {

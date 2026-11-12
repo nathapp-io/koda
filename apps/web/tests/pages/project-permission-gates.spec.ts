@@ -195,11 +195,12 @@ function mountTicketPage(over: TicketOver = {}): TicketPage {
 }
 
 describe('US-007 AC-1: ticket.assign renders the assignee controls alone', () => {
-  test('AC-1: only that key renders the assignee picker and no label select, link form or delete button', async () => {
+  test('AC-1: only that key renders Change and no label select, link form or delete button', async () => {
     const { app } = mountTicketPage({ project: ['ticket.assign'] })
     await settle()
 
-    expect(byTestId(app, 'assignee-search')).toBeDefined()
+    expect(byTestId(app, 'assignee-change')).toBeDefined()
+    expect(byTestId(app, 'assignee-search')).toBeUndefined()
     expect(buttonByText(app, 'Unassign')).toBeDefined()
     expect(buttonByText(app, 'Add Label')).toBeUndefined()
     expect(buttonByText(app, 'Add Link')).toBeUndefined()
@@ -207,10 +208,11 @@ describe('US-007 AC-1: ticket.assign renders the assignee controls alone', () =>
     app.unmount()
   })
 
-  test('AC-1 (control): no key at all renders no assignee picker either', async () => {
+  test('AC-1 (control): no key at all renders no assignment controls', async () => {
     const { app } = mountTicketPage({ project: [] })
     await settle()
 
+    expect(byTestId(app, 'assignee-change')).toBeUndefined()
     expect(byTestId(app, 'assignee-search')).toBeUndefined()
     expect(buttonByText(app, 'Unassign')).toBeUndefined()
     app.unmount()

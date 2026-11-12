@@ -30,6 +30,7 @@ async function mountPage(options: {
   memberName?: string | null
   permissions?: string[]
   answer?: jest.Mock<() => Promise<AnswerResult>>
+  localizedReason?: boolean
 } = {}) {
   const get = jest.fn<() => Promise<FleetFlowDto>>(() => options.getError ? Promise.reject(options.getError) : Promise.resolve(options.flow ?? flow()))
   const getOverview = jest.fn<() => Promise<FleetFlowOverviewDto>>(() => options.overviewError ? Promise.reject(options.overviewError) : Promise.resolve(options.overview ?? overview()))
@@ -40,7 +41,7 @@ async function mountPage(options: {
   const mounted = mountSfc(webFile('pages', '[project]', 'flows', '[id].vue'), {
     globals: {
       useRoute: () => ({ params: { project: 'acme', id: 'f-1' } }),
-      useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${Object.values(params).join(' ')}` : key, te: () => false }),
+      useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => options.localizedReason && key === 'fleet.flows.stopReason.verdict_unreadable' ? 'Verdict unreadable' : params ? `${key} ${Object.values(params).join(' ')}` : key, te: (key: string) => options.localizedReason === true && key === 'fleet.flows.stopReason.verdict_unreadable' }),
       useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
       useFleetFlows: () => ({ get, overview: getOverview, answer }),
       useProjectMemberNames: () => ({ members: [], load, nameOf }),
@@ -127,12 +128,20 @@ describe('fleet flow detail page (US-006)', () => {
     mounted.unmount()
   })
 
+  test('AC-8 translates a known stop reason', async () => {
+    const { mounted } = await mountPage({ flow: flow({ state: 'STOPPED', stopReason: 'verdict_unreadable' }), localizedReason: true })
+    expect(mounted.find('[data-testid="flow-stop-reason"]')).toHaveLength(1)
+    expect(mounted.text()).toContain('Verdict unreadable')
+    mounted.unmount()
+  })
+
   test('AC-6 shows stop text and linked ticket', async () => {
     const { mounted } = await mountPage({
       flow: flow({ state: 'STOPPED', stopReason: 'failed', stopDetail: 'runner stopped' }),
       overview: overview({ ticketRef: 'SB-7' }),
     })
-    expect(mounted.text()).toContain('failed')
+    expect(mounted.text()).toContain('Failed')
+    expect(mounted.find('[data-testid="flow-stop-reason"]')).toHaveLength(1)
     expect(mounted.text()).toContain('runner stopped')
     expect(mounted.find('a').some((node) => node.props.href === '/acme/tickets/SB-7')).toBe(true)
     mounted.unmount()

@@ -11,6 +11,7 @@ const slug = route.params.project as string
 const i18n = useI18n()
 const { locale, t, te } = i18n
 const memberNames = useProjectMemberNames(slug)
+const agentNames = useProjectAgentNames(slug)
 
 function eventTypeLabel(eventType: string): string {
   const key = `home.activity.eventType.${eventType}`
@@ -18,7 +19,7 @@ function eventTypeLabel(eventType: string): string {
 }
 
 function actorName(actorId: string): string {
-  return memberNames.nameOf(actorId) ?? actorId
+  return memberNames.nameOf(actorId) ?? agentNames.nameOf(actorId) ?? actorId
 }
 const toast = useAppToast()
 
@@ -53,6 +54,7 @@ const loadMoreAndToast = () => withToastError(loadMore)
 onMounted(() => {
   loadAndToast()
   void memberNames.load().catch(() => undefined)
+  void agentNames.load().catch(() => undefined)
 })
 
 function formatDate(dateStr: string) {

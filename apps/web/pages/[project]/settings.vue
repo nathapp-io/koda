@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
+import SettingsDangerZoneCard from '~/components/SettingsDangerZoneCard.vue'
 
 definePageMeta({ layout: 'default' })
 
@@ -71,13 +72,13 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
 
 <template>
   <div class="space-y-6">
-    <PageHeader :title="t('vcs.title')" />
+    <PageHeader :title="t('projects.settings.title')" />
 
     <!-- Tabs Container -->
     <Tabs default-value="project" class="w-full">
       <TabsList class="grid w-full max-w-md grid-cols-4">
         <TabsTrigger value="project">
-          {{ t('projects.title') }}
+          {{ t('projects.settings.tab') }}
         </TabsTrigger>
         <TabsTrigger value="vcs">
           {{ t('vcs.tab') }}
@@ -93,7 +94,7 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
       <TabsContent value="project" class="space-y-4">
         <div class="rounded-md border border-border p-6 space-y-6">
           <div>
-            <h2 class="text-lg font-semibold">{{ t('projects.settings.title') }}</h2>
+            <h2 class="text-lg font-semibold">{{ t('projects.settings.detailsTitle') }}</h2>
             <p class="text-sm text-muted-foreground">{{ t('projects.settings.description') }}</p>
           </div>
 
@@ -118,6 +119,8 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
         <div class="rounded-md border border-border p-6 space-y-6">
           <SettingsMemoryCard :slug="slug" />
         </div>
+
+        <SettingsDangerZoneCard v-if="projectData" :project="projectData" />
       </TabsContent>
 
       <!-- VCS Integration Tab -->

@@ -142,7 +142,7 @@ const NUXT_AUTO_IMPORTS = [
   // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).
   'useNuxtData',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useTimelineEvents', 'useFleetJobLogs',
-  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
+  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave', 'useProjectAgentNames',
   // The personal thread pages (US-005/US-006) auto-import these two; tests override them through globals.
   'useWorkspaceThreads', 'useWorkspaceThread',
   // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
@@ -169,6 +169,8 @@ const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = {
   // Thread pages auto-import useThread/useThreads (US-004): tests override them through globals.
   useThread: undefined,
   useThreads: undefined,
+  // Pages may mount without exercising roster lookups; these tests should make no API request.
+  useProjectAgentNames: () => ({ agents: [], load: async () => undefined, nameOf: () => null }),
 }
 
 /** Compiled JS per file: the expensive half, safe to reuse across mounts. */

@@ -68,20 +68,6 @@ async function saveProject() {
   }
 }
 
-const deletingProject = ref(false)
-async function deleteProject() {
-  if (!window.confirm(t('projects.settings.deleteConfirm'))) return
-  deletingProject.value = true
-  try {
-    await $api.delete(apiPath`/projects/${props.project.slug}`)
-    toast.success(t('projects.settings.deleted'))
-    await useRouter().push('/')
-  } catch (err) {
-    toast.error(extractApiError(err))
-  } finally {
-    deletingProject.value = false
-  }
-}
 </script>
 
 <template>
@@ -118,9 +104,6 @@ async function deleteProject() {
     <div class="flex flex-wrap gap-3">
       <Button type="submit" :disabled="savingProject">
         {{ savingProject ? t('common.loading') : t('projects.settings.save') }}
-      </Button>
-      <Button type="button" variant="destructive" :disabled="deletingProject" @click="deleteProject">
-        {{ deletingProject ? t('common.loading') : t('projects.settings.delete') }}
       </Button>
     </div>
   </form>

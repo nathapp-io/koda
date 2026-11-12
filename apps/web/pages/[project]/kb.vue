@@ -175,9 +175,11 @@ async function deleteDocument(sourceId: string) {
         <!-- Pre-search prompt -->
         <div
           v-else-if="!searchResult && !isSearching"
+          data-testid="kb-search-prompt"
           class="py-12 text-center text-sm text-muted-foreground"
         >
-          {{ t('kb.search.placeholder') }}
+          <p>{{ t('kb.search.promptTitle') }}</p>
+          <p>{{ t('kb.search.promptHint') }}</p>
         </div>
       </TabsContent>
 
@@ -199,9 +201,11 @@ async function deleteDocument(sourceId: string) {
           <!-- Empty state -->
           <div
             v-if="docs.length === 0"
+            data-testid="kb-documents-empty"
             class="rounded-lg border border-dashed border-border py-16 text-center"
           >
             <p class="text-sm font-medium text-muted-foreground">{{ t('kb.documents.empty') }}</p>
+            <p class="text-sm text-muted-foreground">{{ t('kb.documents.emptyHint') }}</p>
           </div>
 
           <!-- Documents table -->

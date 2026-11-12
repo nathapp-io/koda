@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { extractProgress, formatUsd } from '~/lib/fleet-jobs'
+import { extractProgress, formatUsd, isActiveJobState } from '~/lib/fleet-jobs'
 import { phaseLabelKey } from '~/lib/fleet-phase'
 import type { FleetJobDto } from '~/lib/fleet-types'
 
@@ -19,8 +19,8 @@ const phase = computed(() => {
 </script>
 
 <template>
-  <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
-    <div>
+  <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+    <div v-if="isActiveJobState(job.state)">
       <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.progress') }}</dt>
       <dd data-testid="fleet-job-progress">
         <template v-if="progress">
@@ -32,11 +32,11 @@ const phase = computed(() => {
         <template v-else>-</template>
       </dd>
     </div>
-    <div>
+    <div v-if="isActiveJobState(job.state)">
       <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.story') }}</dt>
       <dd data-testid="fleet-job-story">{{ job.currentStoryId ?? '-' }}</dd>
     </div>
-    <div>
+    <div v-if="isActiveJobState(job.state)">
       <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.phase') }}</dt>
       <dd data-testid="fleet-job-phase">{{ phase }}</dd>
     </div>

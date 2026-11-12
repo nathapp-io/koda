@@ -4,6 +4,7 @@ import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
 import { createDebouncer } from '~/lib/debounce'
 import { formatUsd, safePrUrl } from '~/lib/fleet-jobs'
+import { codeLabel } from '~/lib/fleet-i18n'
 import { affectsRuns, runPrState, runReason, shortSha } from '~/lib/fleet-ticket-links'
 import type { TicketFleetJobDto } from '~/lib/fleet-types'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
@@ -18,7 +19,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'changed'): void }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { $api } = useApi()
 const toast = useAppToast()
 
@@ -98,7 +99,7 @@ async function confirmUnlink(): Promise<void> {
     <ul class="divide-y">
       <li v-for="row in rows" :key="row.run.id" class="flex flex-col gap-1.5 px-3.5 py-3 text-sm" data-testid="ticket-fleet-run" :data-job="row.run.id">
         <div class="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" data-testid="ticket-fleet-run-command">{{ row.run.command }}</Badge>
+          <Badge variant="outline" data-testid="ticket-fleet-run-command">{{ codeLabel(t, te, 'fleet.command', row.run.command) }}</Badge>
           <FleetJobStateBadge :state="row.run.state" />
           <NuxtLink :to="`/${projectSlug}/fleet/jobs/${row.run.id}`" class="min-w-0 truncate font-medium text-link underline-offset-4 hover:underline" data-testid="ticket-fleet-run-link">{{ row.run.feature }}</NuxtLink>
           <span class="ml-auto text-xs text-muted-foreground"><FleetAge :iso="row.at" :now="now" mode="ago" /></span>

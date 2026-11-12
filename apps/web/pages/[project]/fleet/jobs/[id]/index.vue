@@ -4,7 +4,7 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, fixDispatchQuery, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, reviewPrNumber, safePrUrl, showFixAction, wipPushStatus } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, fixDispatchQuery, isActiveJobState, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, reviewPrNumber, safePrUrl, showFixAction, wipPushStatus } from '~/lib/fleet-jobs'
 import type { JobViewer } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
@@ -358,16 +358,16 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ job.runnerId === null ? t('fleet.jobs.detail.unassigned') : options.settled.value ? options.runnerName(job.runnerId) : t('common.loading') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
-        <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
+        <div v-if="!configJob && job.profiles.length > 0"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.join(' > ') }}</dd></div>
         <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.queuedAt') }}</dt><dd>{{ formatTime(job.queuedAt) }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.startedAt') }}</dt><dd>{{ formatTime(job.startedAt) }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishedAt') }}</dt><dd>{{ formatTime(job.finishedAt) }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.heartbeat') }}</dt><dd>{{ formatTime(job.lastHeartbeatAt) }}</dd></div>
-        <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishResult') }}</dt><dd data-testid="fleet-job-finish">{{ job.finishResult ?? '-' }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.branch') }}</dt><dd class="break-all">{{ job.resultBranch ?? '-' }}<template v-if="job.resultSha"> ({{ job.resultSha.slice(0, 12) }})</template><span v-if="wipPush" class="block text-xs text-muted-foreground">{{ wipPush.key === 'failed' ? t('fleet.jobs.detail.wipPush.failed', { reason: wipPush.reason }) : t(`fleet.jobs.detail.wipPush.${wipPush.key}`) }}</span></dd></div>
+        <div v-if="job.startedAt"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.startedAt') }}</dt><dd>{{ formatTime(job.startedAt) }}</dd></div>
+        <div v-if="job.finishedAt"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishedAt') }}</dt><dd>{{ formatTime(job.finishedAt) }}</dd></div>
+        <div v-if="isActiveJobState(job.state)"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.heartbeat') }}</dt><dd>{{ formatTime(job.lastHeartbeatAt) }}</dd></div>
+        <div v-if="!configJob && job.finishResult"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishResult') }}</dt><dd data-testid="fleet-job-finish">{{ job.finishResult }}</dd></div>
+        <div v-if="job.resultBranch || wipPush"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.branch') }}</dt><dd class="break-all">{{ job.resultBranch ?? '-' }}<template v-if="job.resultSha"> ({{ job.resultSha.slice(0, 12) }})</template><span v-if="wipPush" class="block text-xs text-muted-foreground">{{ wipPush.key === 'failed' ? t('fleet.jobs.detail.wipPush.failed', { reason: wipPush.reason }) : t(`fleet.jobs.detail.wipPush.${wipPush.key}`) }}</span></dd></div>
         <div v-if="job.planFrom"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.planFrom') }}</dt><dd class="break-all">{{ job.planFrom }}</dd></div>
-        <div>
+        <div v-if="job.resultPrUrl">
           <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.pr') }}</dt>
           <dd>
             <a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-link underline-offset-4 hover:underline" data-testid="fleet-job-pr">{{ prUrl }}</a>
