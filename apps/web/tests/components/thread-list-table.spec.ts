@@ -1,5 +1,6 @@
 import { describe, expect, test } from '@jest/globals'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub } from '../helpers/fleet-harness'
@@ -67,6 +68,34 @@ function linkTo(app: { root: FakeNode }, to: string): FakeNode | undefined {
   walk(app.root)
   return found[0]
 }
+
+describe('US-002: ThreadListTable local activity dates', () => {
+  const activityCell = (app: Mounted): FakeNode => {
+    const cell = app.find('td', bodyRow(app) as FakeNode)[5]
+    if (!cell) throw new Error('no last-activity cell')
+    return cell
+  }
+
+  test('AC-2: invalid activity dates render a dash', () => {
+    const app = mountTable([listItem({ lastActivityAt: 'not-a-date' })])
+    expect(app.textOf(activityCell(app))).toBe('-')
+    app.unmount()
+  })
+
+  test('AC-3: absent activity dates render a dash', () => {
+    const app = mountTable([listItem({ lastActivityAt: null })])
+    expect(app.textOf(activityCell(app))).toBe('-')
+    app.unmount()
+  })
+
+  test('AC-4: valid activity dates use the shared viewer-local format', async () => {
+    const at = '2026-11-10T14:07:45.657Z'
+    const app = mountTable([listItem({ lastActivityAt: at })])
+    await nextTick()
+    expect(app.textOf(activityCell(app))).toBe(formatDateTime(at, undefined))
+    app.unmount()
+  })
+})
 
 describe('US-004 AC5-AC10: ThreadListTable row rendering', () => {
   test('AC5: with threads [t] renders a link to /web/threads/th1 whose text is the title Auth spec', () => {

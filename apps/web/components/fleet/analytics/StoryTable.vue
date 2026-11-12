@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { timeText, usd } from '~/lib/fleet-analytics-format'
+import { usd } from '~/lib/fleet-analytics-format'
+import { useLocalDates } from '~/lib/local-dates'
 import type { StoryAnalyticsRowDto } from '~/lib/fleet-analytics-types'
 
 /** Spec §5.2: most expensive / most-looping stories; each row opens its job. */
 defineProps<{ slug: string; rows: readonly StoryAnalyticsRowDto[]; testid: string }>()
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 </script>
 
 <template>
@@ -29,7 +32,7 @@ const { t } = useI18n()
           <td class="py-1 text-right tabular-nums">{{ row.attempts }}</td>
           <td class="py-1">{{ row.firstPassSuccess ? t('fleet.analytics.table.yes') : t('fleet.analytics.table.no') }}</td>
           <td class="py-1 text-right tabular-nums">{{ usd(row.costUsd) }}</td>
-          <td class="py-1 whitespace-nowrap">{{ timeText(row.completedAt) }}</td>
+          <td class="py-1 whitespace-nowrap">{{ dates.dateTime(row.completedAt) }}</td>
         </tr>
       </tbody>
     </table>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useLocalDates } from '~/lib/local-dates'
 import { codeLabel } from '~/lib/fleet-i18n'
 import { summarizeEvent, visibleTimelineEvents, type TimelineEntry } from '~/lib/fleet-jobs'
 import type { FleetJobEventDto } from '~/lib/fleet-types'
@@ -13,7 +14,9 @@ const props = withDefaults(defineProps<{
   logsHref?: string
 }>(), { logAttempts: () => [], logsHref: '' })
 const emit = defineEmits<{ loadMore: [] }>()
-const { t, te } = useI18n()
+const i18n = useI18n()
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 
 const stateLabel = (code: string): string => codeLabel(t, te, 'fleet.state', code)
 
@@ -44,7 +47,7 @@ const rows = computed(() => visibleTimelineEvents(props.events).map((event) => {
   return {
     id: event.id,
     seq: event.seq,
-    at: new Date(event.createdAt).toLocaleString(),
+    at: dates.dateTime(event.createdAt),
     text: describe(entry),
     reason: entry.kind === 'transition' ? entry.reason : null,
   }

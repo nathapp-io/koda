@@ -53,7 +53,7 @@
           <TableCell>
             <Badge :variant="badgeVariant(policy)" data-testid="fleet-budget-status">{{ label('fleet.budgets.status', budgetStatus(policy)) }}</Badge>
             <div v-if="policy.paused && policy.pausedAt" class="mt-1 text-xs text-muted-foreground">
-              {{ t('fleet.budgets.pausedSince', { at: new Date(policy.pausedAt).toLocaleString() }) }}
+              {{ t('fleet.budgets.pausedSince', { at: dates.dateTime(policy.pausedAt) }) }}
             </div>
           </TableCell>
           <TableCell class="space-x-1 whitespace-nowrap text-right">
@@ -75,6 +75,7 @@
 
 <script setup lang="ts">
 import { codeLabel } from '~/lib/fleet-i18n'
+import { useLocalDates } from '~/lib/local-dates'
 import { budgetStatus, spendPercent, windowSinceDate } from '~/lib/fleet-budgets'
 import { formatUsd } from '~/lib/fleet-jobs'
 import type { BudgetPolicyDto } from '~/lib/fleet-types'
@@ -97,7 +98,9 @@ const emit = defineEmits<{
   (e: 'resume', policy: BudgetPolicyDto): void
 }>()
 
-const { t, te } = useI18n()
+const i18n = useI18n()
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 
 const label = (prefix: string, code: string): string => codeLabel(t, te, prefix, code)
 const percent = (policy: BudgetPolicyDto): number => spendPercent(policy.spentUsd, policy.amountUsd)

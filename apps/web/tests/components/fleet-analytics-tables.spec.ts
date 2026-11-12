@@ -1,4 +1,6 @@
 import { describe, expect, it } from '@jest/globals'
+import { nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
 
@@ -23,6 +25,21 @@ describe('FleetAnalyticsStoryTable', () => {
 })
 
 describe('FleetAnalyticsJobTable', () => {
+  it('AC-6 and AC-7: formats finish dates after mount and keeps a dash for null', async () => {
+    const at = '2026-11-10T14:07:45.657Z'
+    const app = mount('JobTable.vue', {
+      slug: 'koda', testid: 'jobs',
+      rows: [
+        { jobId: 'finished', command: 'RUN', featureName: 'alpha', state: 'COMPLETED', costUsd: '0.1', ledgerCostUsd: null, driftUsd: null, finishedAt: at },
+        { jobId: 'unfinished', command: 'RUN', featureName: 'beta', state: 'RUNNING', costUsd: '0.1', ledgerCostUsd: null, driftUsd: null, finishedAt: null },
+      ],
+    })
+    await nextTick()
+    const rows = byId(app, 'jobs-row')
+    expect(app.textOf(rows[0])).toContain(formatDateTime(at, undefined))
+    expect(app.textOf(rows[1])).toContain('-')
+  })
+
   it('shows cost, ledger and drift as given and a dash before ingest', () => {
     const app = mount('JobTable.vue', {
       slug: 'koda', testid: 'jobs',

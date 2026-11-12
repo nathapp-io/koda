@@ -24,7 +24,7 @@
 
       <div v-else class="space-y-4">
         <p class="text-sm text-muted-foreground">
-          {{ t('fleet.runners.enrollment.tokenOnce', { expiresAt: new Date(created.expiresAt).toLocaleString() }) }}
+          {{ t('fleet.runners.enrollment.tokenOnce', { expiresAt: dates.dateTime(created.expiresAt) }) }}
         </p>
         <div class="space-y-1">
           <Label>{{ t('fleet.runners.enrollment.token') }}</Label>
@@ -57,13 +57,16 @@ import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { parseLabels } from '~/lib/fleet-validation'
 import { enrollCommand } from '~/lib/fleet-enroll'
+import { useLocalDates } from '~/lib/local-dates'
 import type { FleetEnrollmentCreated } from '~/lib/fleet-types'
 
 defineProps<{ open: boolean }>()
 
 const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 const toast = useAppToast()
 const { createEnrollment } = useFleetRunners()
 

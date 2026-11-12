@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { timeText, usd } from '~/lib/fleet-analytics-format'
+import { usd } from '~/lib/fleet-analytics-format'
+import { useLocalDates } from '~/lib/local-dates'
 import type { JobAnalyticsRowDto } from '~/lib/fleet-analytics-types'
 import { codeLabel } from '~/lib/fleet-i18n'
 
 /** Spec §5.2, D382: most expensive jobs with the ledger and drift (null before ingest). */
 defineProps<{ slug: string; rows: readonly JobAnalyticsRowDto[]; testid: string }>()
-const { t, te } = useI18n()
+const i18n = useI18n()
+const { t, te } = i18n
+const dates = useLocalDates(i18n)
 const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', state)
 </script>
 
@@ -33,7 +36,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
           <td class="py-1 text-right tabular-nums">{{ usd(row.costUsd) }}</td>
           <td class="py-1 text-right tabular-nums">{{ usd(row.ledgerCostUsd) }}</td>
           <td class="py-1 text-right tabular-nums">{{ usd(row.driftUsd) }}</td>
-          <td class="py-1 whitespace-nowrap">{{ timeText(row.finishedAt) }}</td>
+          <td class="py-1 whitespace-nowrap">{{ dates.dateTime(row.finishedAt) }}</td>
         </tr>
       </tbody>
     </table>

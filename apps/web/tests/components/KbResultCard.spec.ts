@@ -115,11 +115,10 @@ describe('KbResultCard: renders meta information', () => {
     expect(source).toContain('{{ source }}')
   })
 
-  test('source formats createdAt as a localized date with the active i18n locale', () => {
+  test('source formats createdAt with the shared mount-gated local date helper', () => {
     const source = getSource()
     expect(source).toContain('createdAt')
-    // The locale is read from useI18n() so server- and client-rendered dates agree.
-    expect(source).toMatch(/toLocaleDateString\(\s*locale/)
+    expect(source).toMatch(/import\s*\{\s*useLocalDates\s*\}\s*from\s*['"]~\/lib\/local-dates['"]/)
   })
 })
 

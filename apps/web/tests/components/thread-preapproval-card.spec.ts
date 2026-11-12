@@ -1,5 +1,6 @@
 import { describe, expect, test } from '@jest/globals'
 import * as Vue from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder } from '../helpers/fleet-harness'
 import type { ThreadDetailDto } from '~/lib/thread-types'
@@ -53,11 +54,11 @@ describe('ThreadPreApprovalCard', () => {
     mounted.unmount()
   })
 
-  test('AC-6 to AC-9: displays exact cap and local set time with Clear, but no Set', async () => {
-    const at = '2026-11-09T06:36:35.837Z'
+  test('AC-1: displays exact cap and shared local set time with Clear, but no Set', async () => {
+    const at = '2026-01-02T03:04:05.000Z'
     const mounted = await mountCard(thread({ preApproval: { userId: 'u1', at, costCapUsd: '3.0000' } }))
     expect(mounted.text()).toContain('$3.0000')
-    expect(mounted.text()).toContain(new Date(at).toLocaleString())
+    expect(mounted.text()).toContain(formatDateTime(at, undefined))
     expect(mounted.text()).toContain('Clear')
     const button = mounted.one('button')
     expect(button).toBeDefined()

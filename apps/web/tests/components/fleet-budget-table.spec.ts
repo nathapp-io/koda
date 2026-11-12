@@ -1,4 +1,6 @@
 import { describe, test, expect } from '@jest/globals'
+import { nextTick } from 'vue'
+import { formatDateTime } from '~/lib/format-date-time'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs, enI18n } from '../helpers/fleet-harness'
 import type { BudgetPolicyDto } from '../../lib/fleet-types'
@@ -128,10 +130,11 @@ describe('FleetBudgetTable', () => {
     app.unmount()
   })
 
-  test('a paused row shows when it was paused', () => {
-    const app = mountTable([policy('stop', { paused: true, pausedAt: '2026-10-02T03:04:05.000Z' })], READ_ONLY)
-    // The badge says Paused; the line under it says Paused <local date and time>.
-    expect(app.textOf(rowOf(app, 'stop'))).toMatch(/Paused\s*Paused \S/)
+  test('AC-5: a paused row shows its formatted pause time after mount', async () => {
+    const pausedAt = '2026-10-02T03:04:05.000Z'
+    const app = mountTable([policy('stop', { paused: true, pausedAt })], READ_ONLY)
+    await nextTick()
+    expect(app.textOf(rowOf(app, 'stop'))).toContain(formatDateTime(pausedAt, undefined))
     app.unmount()
   })
 })

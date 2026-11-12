@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { costText, sessionLabel } from '~/lib/thread-view'
-import { timeText } from '~/lib/fleet-analytics-format'
+import { useLocalDates } from '~/lib/local-dates'
 import type { ThreadDto } from '~/lib/thread-types'
-
-function activityText(value: string | null | undefined): string {
-  return value && Number.isFinite(new Date(value).getTime()) ? timeText(value) : '-'
-}
 
 const props = defineProps<{
   threads: ThreadDto[]
@@ -17,7 +13,13 @@ const props = defineProps<{
   basePath?: string
 }>()
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
+
+function activityText(value: string | null | undefined): string {
+  return value && Number.isFinite(new Date(value).getTime()) ? dates.dateTime(value) : '-'
+}
 
 /**
  * The prefix every row link starts with: `basePath` when given, else the project path (S5b 1d). Both props are
