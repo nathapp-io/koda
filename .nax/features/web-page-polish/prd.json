@@ -3,7 +3,7 @@
   "feature": "web-page-polish",
   "branchName": "feat/web-page-polish",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T10:30:44.567Z",
+  "updatedAt": "2026-11-12T10:36:40.223Z",
   "userStories": [
     {
       "id": "US-001",
@@ -304,14 +304,17 @@
         "layout"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Two existing display surfaces use standard field conditions and the existing active-state helper; no new abstraction, authorization or workflow change."
+        "reasoning": "Two existing display surfaces use standard field conditions and the existing active-state helper; no new abstraction, authorization or workflow change.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/FleetJobProgress.vue",
@@ -332,7 +335,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fb1f151e33e039f792a4bd689d466a91d023f657"
     },
     {
       "id": "US-006",
