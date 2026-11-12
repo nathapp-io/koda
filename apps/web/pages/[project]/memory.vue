@@ -6,6 +6,7 @@ import { useMemory, watchDebouncedMemorySearch } from '~/composables/useMemory'
 import { useProjectRef } from '~/composables/useProjectRef'
 import { humanizeCode } from '~/lib/humanize-code'
 import { memorySubject } from '~/lib/memory-subject'
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 import type { MemoryItem, RetireOutcome } from '~/composables/useMemory'
 
 definePageMeta({ layout: 'default' })
@@ -143,7 +144,7 @@ function objectLabel(item: MemoryItem) {
     <FilterBar columns="3">
       <div class="flex flex-col gap-1">
         <label for="memory-kind-filter" class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.kind') }}</label>
-        <select id="memory-kind-filter" v-model="kindFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
+        <select id="memory-kind-filter" v-model="kindFilter" :class="FILTER_CONTROL_CLASS" @change="applyAndToast">
           <option v-for="opt in KIND_OPTIONS" :key="opt" :value="opt">
             {{ opt ? kindLabel(opt) : t('memory.filter.all') }}
           </option>
@@ -152,7 +153,7 @@ function objectLabel(item: MemoryItem) {
 
       <div class="flex flex-col gap-1">
         <label for="memory-status-filter" class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.status') }}</label>
-        <select id="memory-status-filter" v-model="statusFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
+        <select id="memory-status-filter" v-model="statusFilter" :class="FILTER_CONTROL_CLASS" @change="applyAndToast">
           <option v-for="opt in STATUS_OPTIONS" :key="opt" :value="opt">
             {{ opt || t('memory.filter.all') }}
           </option>
@@ -160,7 +161,7 @@ function objectLabel(item: MemoryItem) {
       </div>
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.search') }}</label>
-        <input v-model="textFilter" type="search" maxlength="100" :placeholder="t('memory.searchPlaceholder')" class="rounded-md border border-border bg-background px-2 py-1 text-sm">
+        <input v-model="textFilter" type="search" maxlength="100" :placeholder="t('memory.searchPlaceholder')" :class="FILTER_CONTROL_CLASS">
       </div>
     </FilterBar>
 

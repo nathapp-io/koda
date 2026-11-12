@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { useAdminOutbox, type OutboxStatus } from '~/composables/useAdminOutbox'
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 
 definePageMeta({ layout: 'default' })
 
@@ -64,7 +65,7 @@ onMounted(() => { void reload() })
       <select
         id="outbox-status"
         :value="status"
-        class="w-fit rounded-md border border-border bg-background px-2 py-1 text-sm"
+        :class="[FILTER_CONTROL_CLASS, 'w-fit']"
         @change="onStatusChange(($event.target as HTMLSelectElement).value)"
       >
         <option value="dead">{{ t('outbox.status.dead') }}</option>

@@ -61,8 +61,9 @@ describe('FleetNativeSelect binds vee-validate componentField', () => {
     unmount()
   })
 
-  test('the SFC imports nothing but vue (the mount helper only provides vue)', () => {
+  test('the SFC imports vue and the shared form-control class only', () => {
     const source = readFileSync(join(__dirname, '..', '..', 'components', 'fleet', 'NativeSelect.vue'), 'utf-8')
-    expect(source).not.toMatch(/from '(?!vue')/)
+    const imports = [...source.matchAll(/from ['"]([^'"]+)['"]/g)].map((match) => match[1])
+    expect(imports).toEqual(['~/lib/form-control'])
   })
 })

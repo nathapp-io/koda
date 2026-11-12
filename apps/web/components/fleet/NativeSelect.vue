@@ -3,7 +3,7 @@
     :id="id"
     :value="modelValue"
     :data-testid="testid"
-    class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+    :class="[FILTER_CONTROL_CLASS, 'w-full']"
     @change="onChange"
     @blur="emit('blur', $event)"
   >
@@ -13,6 +13,8 @@
 </template>
 
 <script setup lang="ts">
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
+
 /**
  * A native <select> that speaks the v-model protocol, so vee-validate's `componentField`
  * (modelValue + onUpdate:modelValue + onBlur) binds to it. Binding componentField straight onto a

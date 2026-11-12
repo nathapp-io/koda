@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { extractApiError } from '~/composables/useApi'
 import { humanizeCode } from '~/lib/humanize-code'
+import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 
 definePageMeta({ layout: 'default' })
 
@@ -72,7 +73,7 @@ function formatDate(dateStr: string) {
     <FilterBar columns="3">
       <div class="flex flex-col gap-1">
         <label for="timeline-event-type" class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.eventType') }}</label>
-        <select id="timeline-event-type" v-model="eventTypeFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
+        <select id="timeline-event-type" v-model="eventTypeFilter" :class="FILTER_CONTROL_CLASS" @change="applyAndToast">
           <option v-for="opt in EVENT_TYPES" :key="opt" :value="opt">
             {{ opt ? eventTypeLabel(opt) : t('timeline.filter.all') }}
           </option>
