@@ -3,7 +3,7 @@
   "feature": "web-shared-ui",
   "branchName": "feat/web-shared-ui",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T08:03:11.874Z",
+  "updatedAt": "2026-11-12T08:09:16.410Z",
   "userStories": [
     {
       "id": "US-001",
@@ -129,14 +129,17 @@
         "forms"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One static class constant and four existing consumers form a small same-story seam; broad NativeSelect propagation is intentional, with no new abstraction beyond the constant or behavioral filter changes."
+        "reasoning": "One static class constant and four existing consumers form a small same-story seam; broad NativeSelect propagation is intentional, with no new abstraction beyond the constant or behavioral filter changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/NativeSelect.vue",
@@ -160,7 +163,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "79d7c5066005e7279e03028db6609276d5c78e1d"
     },
     {
       "id": "US-004",
