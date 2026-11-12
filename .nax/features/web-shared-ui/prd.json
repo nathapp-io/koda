@@ -3,7 +3,7 @@
   "feature": "web-shared-ui",
   "branchName": "feat/web-shared-ui",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-11-12T07:57:02.335Z",
+  "updatedAt": "2026-11-12T08:03:11.874Z",
   "userStories": [
     {
       "id": "US-001",
@@ -78,14 +78,17 @@
         "accessibility"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Two existing components with shared class-merging effects and small semantic markup changes; availability and authorization behavior remain unchanged."
+        "reasoning": "Two existing components with shared class-merging effects and small semantic markup changes; availability and authorization behavior remain unchanged.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/ui/button/Button.vue",
@@ -101,7 +104,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f8c01d1b79ee09f074ee77da367d8cab12ac45fc"
     },
     {
       "id": "US-003",
