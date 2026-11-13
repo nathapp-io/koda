@@ -3,7 +3,7 @@
   "feature": "memory-notes-search",
   "branchName": "feat/memory-notes-search",
   "createdAt": "2026-11-13T12:22:07.085Z",
-  "updatedAt": "2026-11-13T13:01:19.822Z",
+  "updatedAt": "2026-11-13T13:10:50.700Z",
   "userStories": [
     {
       "id": "US-001",
@@ -217,14 +217,17 @@
         "postgres"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One repository and its existing SQL-spy unit suite gain a probe value and a second query expression; the same ranked-query builder reuses unchanged read-scope and filter predicates, with no authentication or authorization-rule changes."
+        "reasoning": "One repository and its existing SQL-spy unit suite gain a probe value and a second query expression; the same ranked-query builder reuses unchanged read-scope and filter predicates, with no authentication or authorization-rule changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-memory-item.repository.ts",
@@ -245,7 +248,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bde57da94f65f627a1724ee0f71cc279721796ba"
     },
     {
       "id": "US-005",
