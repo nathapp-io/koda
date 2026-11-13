@@ -103,7 +103,7 @@ const PR_STATE_CLASS: Record<string, string> = {
 
 const chipClass = 'inline-flex items-center gap-1.5 h-[22px] rounded-full border border-border bg-card px-2.5 text-xs font-medium'
 const panelClass = 'rounded-lg border bg-card overflow-hidden'
-const panelHeadingClass = 'flex items-center justify-between gap-2 border-b px-3.5 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
+const panelHeadingClass = 'flex items-center justify-between gap-2 border-b px-3.5 py-2.5 text-xs font-medium text-muted-foreground'
 const panelBodyClass = 'flex flex-col gap-2.5 p-3.5'
 const summaryChevronClass = 'h-4 w-4 lg:hidden'
 

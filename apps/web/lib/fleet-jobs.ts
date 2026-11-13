@@ -114,7 +114,7 @@ export interface StoryRow {
 }
 
 const STORY_VARIANTS: Readonly<Record<string, StoryRow['variant']>> = {
-  'passed': 'default',
+  'passed': 'outline',
   'in-progress': 'secondary',
   'failed': 'destructive',
   'regression-failed': 'destructive',

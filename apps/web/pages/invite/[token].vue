@@ -2,7 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
-import { extractApiError, extractErrorStatus } from '~/composables/useApi'
+import { ApiError, extractApiError, extractErrorStatus } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'auth' })
@@ -24,22 +24,31 @@ const { $api } = useApi()
 const { isAuthenticated, acceptInvite } = useAuth()
 const { t } = useI18n()
 const toast = useAppToast()
+useHead({ title: () => `${t('invite.title')} · Koda` })
 
 const preview = ref<InvitePreview | null>(null)
 const loading = ref(true)
 const invalid = ref(false)
 const accountExists = ref(false)
+const loadFailed = ref(false)
 
-onMounted(async () => {
+const errorCode = (err: unknown): number | undefined => err instanceof ApiError ? err.code : extractErrorStatus(err)
+
+async function loadPreview(): Promise<void> {
+  loading.value = true
+  invalid.value = false
+  loadFailed.value = false
+  preview.value = null
   try {
     preview.value = await $api.get<InvitePreview>(apiPath`/invites/${token}`)
   } catch (err: unknown) {
-    if (extractErrorStatus(err) === 404) invalid.value = true
-    else toast.error(extractApiError(err))
+    if ([404, 410].includes(errorCode(err) ?? 0)) invalid.value = true
+    else loadFailed.value = true
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(loadPreview)
 
 const formSchema = toTypedSchema(z.object({
   name: z.string().min(1, t('invite.validation.nameRequired') || 'Name is required'),
@@ -51,12 +60,14 @@ const [name] = defineField('name')
 const [password] = defineField('password')
 
 const onSubmit = handleSubmit(async (values) => {
+  if (loading.value || !preview.value || invalid.value || loadFailed.value) return
   accountExists.value = false
   try {
     await acceptInvite(token, { name: values.name, password: values.password })
     await navigateTo(`/${preview.value?.projectSlug ?? ''}`)
   } catch (err: unknown) {
-    if (extractErrorStatus(err) === 409) accountExists.value = true
+    if (errorCode(err) === 409) accountExists.value = true
+    else if ([404, 410].includes(errorCode(err) ?? 0)) { invalid.value = true; preview.value = null }
     else toast.error(extractApiError(err))
   }
 })
@@ -71,6 +82,11 @@ const onSubmit = handleSubmit(async (values) => {
       <p class="mt-2 text-sm text-muted-foreground">{{ t('invite.invalid') }}</p>
     </div>
 
+    <div v-else-if="loadFailed" data-testid="invite-load-error" class="space-y-4 text-center">
+      <p role="alert" class="text-sm text-muted-foreground">{{ t('invite.loadFailed') }}</p>
+      <Button variant="outline" data-testid="invite-retry" @click="loadPreview">{{ t('common.retry') }}</Button>
+    </div>
+
     <div v-else-if="isAuthenticated" data-testid="invite-signed-in" class="rounded-md border border-border p-6 text-center space-y-2">
       <h2 class="text-xl font-semibold">{{ t('invite.title') }}</h2>
       <p class="text-sm text-muted-foreground">{{ t('invite.signedIn') }}</p>
@@ -79,9 +95,9 @@ const onSubmit = handleSubmit(async (values) => {
       </NuxtLink>
     </div>
 
-    <template v-else>
+    <template v-else-if="preview">
       <div class="text-center">
-        <h2 class="text-2xl font-bold tracking-tight">{{ t('invite.title') }}</h2>
+        <h2 class="text-[28px] font-medium tracking-tight">{{ t('invite.title') }}</h2>
         <p v-if="preview" class="mt-2 text-sm text-muted-foreground">
           {{ t('invite.subtitle', { projectName: preview.projectName }) }}
         </p>

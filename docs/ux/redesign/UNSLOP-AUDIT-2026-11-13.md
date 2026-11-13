@@ -2,6 +2,8 @@
 
 Audited after polish commit `ddfb7b4` on `style/koda-unslop-page-audit`. This report proposes follow-ups; this audit adds no product changes. Verdict: **light residual slop**. Keep the existing direction and address the specific findings below.
 
+**Follow-up:** U01–U09 are now resolved on this branch. See the [resolution record](UNSLOP-FIXES-2026-11-13.md) for changes, verification and remaining coverage limits. The original observations below are retained as audit history.
+
 ## Direction
 
 - **Product:** Koda gives engineering teams one workbench for tickets, agent conversations, approvals and fleet execution.

@@ -3,15 +3,16 @@
     <NuxtLink
       v-if="target"
       :to="target"
-      class="inline-flex animate-pulse items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 text-sm font-semibold text-foreground hover:bg-amber-500/25"
+      class="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-muted"
       :aria-label="t('fleet.approvals.badge.label', { count })"
       :title="t('fleet.approvals.badge.label', { count })"
       aria-live="polite"
       data-testid="fleet-approval-badge"
       :data-count="count"
     >
-      <Inbox class="h-4 w-4" />
-      <span class="rounded-full bg-destructive px-1.5 text-xs text-destructive-foreground">{{ t('fleet.approvals.badge.waiting', { count: badgeText(count) }) }}</span>
+      <Inbox class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+      <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-status-review" aria-hidden="true" />
+      <span class="tabular-nums">{{ t('fleet.approvals.badge.waiting', { count: badgeText(count) }) }}</span>
     </NuxtLink>
     <button
       v-if="notifications.supported.value"

@@ -7,8 +7,8 @@
       data-testid="matrix-group"
       :data-group="group.group"
     >
-      <h4 class="border-b border-border bg-muted/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {{ group.group }}
+      <h4 class="border-b border-border bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        {{ humanizeCode(group.group) }}
       </h4>
       <ul class="divide-y divide-border">
         <li
@@ -55,6 +55,7 @@
 </template>
 
 <script setup lang="ts">
+import { humanizeCode } from '~/lib/humanize-code'
 import { groupRows } from '~/lib/role-editor'
 import type { MatrixSelection, RowChoice } from '~/lib/role-editor'
 import type { CatalogEntry } from '~/composables/useRoles'

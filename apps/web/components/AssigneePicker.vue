@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
       @update:model-value="onSearchUpdate"
     />
     <div v-if="userItems.length > 0" data-testid="assignee-group-people">
-      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <p class="text-xs font-medium text-muted-foreground">
         {{ t('tickets.assignee.group.people') }}
       </p>
       <ul class="mt-1 space-y-1">
@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
       </ul>
     </div>
     <div v-if="agentItems.length > 0" data-testid="assignee-group-agents">
-      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <p class="text-xs font-medium text-muted-foreground">
         {{ t('tickets.assignee.group.agents') }}
       </p>
       <ul class="mt-1 space-y-1">

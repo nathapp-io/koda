@@ -6,7 +6,7 @@ const webDir = join(__dirname, '../..')
 const registerPath = join(webDir, 'pages', 'register.vue')
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC1 — Outermost template element is <div class="w-full max-w-md space-y-8">
+// AC1 — Outermost template element is <div class="w-full max-w-md space-y-6">
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('AC1: pages/register.vue exists and has correct outer structure', () => {
@@ -14,13 +14,13 @@ describe('AC1: pages/register.vue exists and has correct outer structure', () =>
     expect(existsSync(registerPath)).toBe(true)
   })
 
-  test('outermost template element is <div class="w-full max-w-md space-y-8">', () => {
+  test('outermost template element is <div class="w-full max-w-md space-y-6">', () => {
     const source = readFileSync(registerPath, 'utf-8')
     const templateMatch = source.match(/<template>([\s\S]*?)<\/template>/)
     if (templateMatch) {
       const templateContent = templateMatch[1].trim()
       // Verify the outermost element is the correct div
-      expect(templateContent).toMatch(/^<div\s+class="w-full max-w-md space-y-8">/)
+      expect(templateContent).toMatch(/^<div\s+class="w-full max-w-md space-y-6">/)
     }
   })
 
@@ -30,7 +30,7 @@ describe('AC1: pages/register.vue exists and has correct outer structure', () =>
     const templateMatch = source.match(/<template>([\s\S]*?)<\/template>/)
     if (templateMatch) {
       const templateContent = templateMatch[1]
-      // The first opening div should be the w-full max-w-md space-y-8 div
+      // The first opening div should be the w-full max-w-md space-y-6 div
       const firstDivMatch = templateContent.match(/<div[^>]*>/)
       if (firstDivMatch) {
         const firstDiv = firstDivMatch[0]

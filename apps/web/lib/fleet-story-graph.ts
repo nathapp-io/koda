@@ -163,7 +163,7 @@ export interface PipelineStage {
 }
 
 const STAGE_VARIANTS: Readonly<Record<string, StoryRow['variant']>> = {
-  passed: 'default',
+  passed: 'outline',
   running: 'secondary',
   failed: 'destructive',
 }

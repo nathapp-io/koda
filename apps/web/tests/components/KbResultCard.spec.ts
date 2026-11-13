@@ -64,19 +64,19 @@ describe('KbResultCard: similarity config', () => {
     expect(source).toContain('similarityConfig')
   })
 
-  test('similarityConfig has a high entry with label HIGH', () => {
+  test('similarityConfig has a high entry with localized label', () => {
     const source = getSource()
-    expect(source).toContain("label: 'HIGH'")
+    expect(source).toContain("label: 'kb.similarity.high'")
   })
 
-  test('similarityConfig has a medium entry with label MED', () => {
+  test('similarityConfig has a medium entry with localized label', () => {
     const source = getSource()
-    expect(source).toContain("label: 'MED'")
+    expect(source).toContain("label: 'kb.similarity.medium'")
   })
 
-  test('similarityConfig has a low entry with label LOW', () => {
+  test('similarityConfig has a low entry with localized label', () => {
     const source = getSource()
-    expect(source).toContain("label: 'LOW'")
+    expect(source).toContain("label: 'kb.similarity.low'")
   })
 })
 

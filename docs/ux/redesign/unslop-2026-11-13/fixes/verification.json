@@ -1,0 +1,164 @@
+[
+  {
+    "name": "Dispatch all commands, names and radios / dark",
+    "pass": true,
+    "detail": [
+      {
+        "command": "RUN",
+        "violations": []
+      },
+      {
+        "command": "PLAN",
+        "violations": []
+      },
+      {
+        "command": "REVIEW",
+        "violations": []
+      },
+      {
+        "command": "FIX",
+        "violations": []
+      }
+    ]
+  },
+  {
+    "name": "Ticket headings and muted typed comments / dark",
+    "pass": true
+  },
+  {
+    "name": "Completed job uses quiet passed badges / dark",
+    "pass": true
+  },
+  {
+    "name": "Real pending approval is static / dark",
+    "pass": true,
+    "detail": {
+      "animation": "none",
+      "text": "1 waiting"
+    }
+  },
+  {
+    "name": "Invalid, expired and valid invitations / dark",
+    "pass": true
+  },
+  {
+    "name": "Auth heading scale and registration title / dark",
+    "pass": true
+  },
+  {
+    "name": "Synthetic knowledge results and all verdicts / dark",
+    "pass": true
+  },
+  {
+    "name": "Dispatch all commands, names and radios / light",
+    "pass": true,
+    "detail": [
+      {
+        "command": "RUN",
+        "violations": []
+      },
+      {
+        "command": "PLAN",
+        "violations": []
+      },
+      {
+        "command": "REVIEW",
+        "violations": []
+      },
+      {
+        "command": "FIX",
+        "violations": []
+      }
+    ]
+  },
+  {
+    "name": "Ticket headings and muted typed comments / light",
+    "pass": true
+  },
+  {
+    "name": "Completed job uses quiet passed badges / light",
+    "pass": true
+  },
+  {
+    "name": "Real pending approval is static / light",
+    "pass": true,
+    "detail": {
+      "animation": "none",
+      "text": "1 waiting"
+    }
+  },
+  {
+    "name": "Invalid, expired and valid invitations / light",
+    "pass": true
+  },
+  {
+    "name": "Auth heading scale and registration title / light",
+    "pass": true
+  },
+  {
+    "name": "Synthetic knowledge results and all verdicts / light",
+    "pass": true
+  },
+  {
+    "name": "Role editor and assignee groups use sentence case / dark",
+    "pass": true,
+    "detail": {
+      "groups": [
+        "none"
+      ],
+      "headings": 17
+    }
+  },
+  {
+    "name": "Role editor and assignee groups use sentence case / light",
+    "pass": true,
+    "detail": {
+      "groups": [
+        "none"
+      ],
+      "headings": 17
+    }
+  },
+  {
+    "name": "Labels create and edit fit 320/390/768 / dark",
+    "pass": true,
+    "detail": [
+      {
+        "viewport": 320,
+        "scroll": 320,
+        "input": 254
+      },
+      {
+        "viewport": 390,
+        "scroll": 390,
+        "input": 324
+      },
+      {
+        "viewport": 768,
+        "scroll": 768,
+        "input": 362.421875
+      }
+    ]
+  },
+  {
+    "name": "Labels create and edit fit 320/390/768 / light",
+    "pass": true,
+    "detail": [
+      {
+        "viewport": 320,
+        "scroll": 320,
+        "input": 254
+      },
+      {
+        "viewport": 390,
+        "scroll": 390,
+        "input": 324
+      },
+      {
+        "viewport": 768,
+        "scroll": 768,
+        "input": 362.421875
+      }
+    ]
+  }
+]

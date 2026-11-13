@@ -8,6 +8,7 @@
 import { describe, test, expect, jest, beforeEach } from '@jest/globals'
 import { existsSync } from 'fs'
 import { ref, nextTick } from 'vue'
+import * as apiErrors from '../../composables/useApi'
 import { mountSfc, webFile, type Mounted, type FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, enLocale } from '../helpers/fleet-harness'
 
@@ -78,6 +79,7 @@ function mountPage(over: PageOverrides = {}) {
   const toast = { error: jest.fn(), success: jest.fn() }
   const app = mountSfc(pagePath, {
     components: uiStubs,
+    alias: { '~/composables/useApi': apiErrors },
     globals: {
       useRoute: () => ({ params: { token: over.token ?? 'tok123' } }),
       useApi: () => ({ $api: { get } }),
@@ -86,6 +88,7 @@ function mountPage(over: PageOverrides = {}) {
       useI18n: () => enI18n(),
       useAppToast: () => toast,
       definePageMeta: () => undefined,
+      useHead: () => undefined,
     },
   })
   return { app, get, auth, navigateTo, toast }
@@ -175,6 +178,41 @@ describe('/invite/[token] (US-007)', () => {
     p.app.unmount()
   })
 
+  test.each([404, 410])('normalized API error %i hides submission and shows the invalid link notice', async (code) => {
+    const p = mountPage({ get: jest.fn(async () => { throw new apiErrors.ApiError(code, 'Unavailable invite') }) })
+    await settle()
+    expect(p.app.one('[data-testid="invite-invalid"]')).toBeDefined()
+    expect(p.app.one('[data-testid="invite-accept-form"]')).toBeUndefined()
+    p.app.unmount()
+  })
+
+  test('a failed preview stays blocked until a successful retry', async () => {
+    const get = jest.fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(new apiErrors.ApiError(503, 'Unavailable'))
+      .mockResolvedValueOnce({ projectName: 'Recovered project', projectSlug: 'recovered', email: 'a@x.io' })
+    const p = mountPage({ get })
+    await settle()
+    expect(p.app.one('[data-testid="invite-accept-form"]')).toBeUndefined()
+    const retry = node(p.app, 'invite-retry')
+    ;(retry.props.onClick as () => void)()
+    await settle()
+    expect(p.app.one('[data-testid="invite-load-error"]')).toBeUndefined()
+    expect(p.app.text()).toContain('Recovered project')
+    expect(p.app.one('[data-testid="invite-accept-form"]')).toBeDefined()
+    p.app.unmount()
+  })
+
+  test('a pending preview never offers account creation', async () => {
+    let resolve!: (v: unknown) => void
+    const p = mountPage({ get: jest.fn(() => new Promise(r => { resolve = r })) })
+    await nextTick()
+    expect(p.app.one('[data-testid="invite-accept-form"]')).toBeUndefined()
+    resolve({ projectName: 'Loaded', projectSlug: 'loaded', email: 'a@x.io' })
+    await settle()
+    expect(p.app.one('[data-testid="invite-accept-form"]')).toBeDefined()
+    p.app.unmount()
+  })
+
   test('AC9 boundary: a valid preview does not show the invalid notice', async () => {
     const p = mountPage()
     await settle()
@@ -260,8 +298,11 @@ describe('/invite/[token] (US-007)', () => {
     p.app.unmount()
   })
 
-  test('AC14: a 409 accept rejection shows invite.accountExists and does not navigate', async () => {
-    const acceptInvite = jest.fn(async () => { throw { status: 409 } })
+  test.each([
+    ['normalized API error', new apiErrors.ApiError(409, 'Account exists')],
+    ['HTTP error', { status: 409 }],
+  ])('AC14: a %s 409 accept rejection shows invite.accountExists and does not navigate', async (_shape, error) => {
+    const acceptInvite = jest.fn(async () => { throw error })
     const p = mountPage({ acceptInvite })
     await settle()
 
@@ -272,6 +313,20 @@ describe('/invite/[token] (US-007)', () => {
     await settle()
 
     expect(p.app.text()).toContain(copyOf('invite.accountExists'))
+    expect(p.navigateTo).not.toHaveBeenCalled()
+    p.app.unmount()
+  })
+
+  test.each([404, 410])('an invitation that becomes unavailable during acceptance (%i) hides the form', async (status) => {
+    const p = mountPage({ acceptInvite: jest.fn(async () => { throw { status } }) })
+    await settle()
+    fill(field(p.app, 'name'), 'Jane Doe')
+    fill(field(p.app, 'password'), 'Secret123!')
+    await nextTick()
+    submit(p.app)
+    await settle()
+    expect(p.app.one('[data-testid="invite-invalid"]')).toBeDefined()
+    expect(p.app.one('[data-testid="invite-accept-form"]')).toBeUndefined()
     expect(p.navigateTo).not.toHaveBeenCalled()
     p.app.unmount()
   })

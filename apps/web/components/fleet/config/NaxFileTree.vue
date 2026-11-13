@@ -12,7 +12,7 @@ const shortPath = (path: string): string => path.replace(/^\.nax\//, '')
 <template>
   <nav class="space-y-4" data-testid="nax-file-tree" :aria-label="t('fleet.config.tree.label')">
     <div v-for="g in groups" :key="g.group" data-testid="nax-file-group" :data-group="g.group">
-      <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{{ t(`fleet.config.group.${g.group}`) }}</h3>
+      <h3 class="text-xs font-medium text-muted-foreground">{{ t(`fleet.config.group.${g.group}`) }}</h3>
       <ul class="mt-1 space-y-0.5">
         <li v-for="f in g.files" :key="f.path">
           <button

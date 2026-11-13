@@ -31,15 +31,6 @@ describe('fleet dispatch placement form runtime', () => {
         return () => Vue.h('button', { 'data-testid': `${props.testId}-input`, onClick: () => emit('update:modelValue', ['gpu']) })
       },
     }
-    const RadioGroup = {
-      emits: ['update:modelValue'],
-      setup(_props: unknown, { emit }: { emit: (event: string, value: string) => void }) {
-        return () => Vue.h('x-radio-group', [
-          Vue.h('button', { 'data-testid': 'mode-labels', onClick: () => emit('update:modelValue', 'labels') }),
-          Vue.h('button', { 'data-testid': 'mode-auto', onClick: () => emit('update:modelValue', 'auto') }),
-        ])
-      },
-    }
     const api = { dispatch: async (body: unknown) => {
       dispatched = [...dispatched, body]
       return { placement: { assigned: false, runnerId: null, misfits: [] }, job: { id: 'job-1' } }
@@ -48,7 +39,6 @@ describe('fleet dispatch placement form runtime', () => {
     const app = mountSfc(dispatchPage, {
       components: {
         FormField,
-        RadioGroup,
         FormItem: { setup: (_p: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
         FormControl: { setup: (_p: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
         FormLabel: 'label', FormMessage: 'span', Input: 'input', Button: 'button', Label: 'label',
@@ -87,12 +77,16 @@ describe('fleet dispatch placement form runtime', () => {
       if (typeof target.props.onClick !== 'function') throw new Error(`placement control is not clickable: ${testid}`)
       target.props.onClick()
     }
-    click('mode-labels')
+    const labelsRadio = app.one('[data-testid="placement-labels"]')
+    if (!labelsRadio) throw new Error('Missing labels radio')
+    ;(labelsRadio.props.onChange as () => void)()
     await Vue.nextTick()
     click('dispatch-labels-input')
     await Vue.nextTick()
     expect(fields.selectorLabels.value.value).toEqual(['gpu'])
-    click('mode-auto')
+    const autoRadio = app.one('[data-testid="placement-auto"]')
+    if (!autoRadio) throw new Error('Missing auto radio')
+    ;(autoRadio.props.onChange as () => void)()
     await Vue.nextTick()
 
     await submit({ preventDefault: () => undefined, stopPropagation: () => undefined } as unknown as Event)

@@ -58,7 +58,7 @@ async function retry(): Promise<void> {
   }
 }
 
-const { handleSubmit, isSubmitting, values, setFieldValue } = useForm({
+const { handleSubmit, isSubmitting, values, setFieldValue, errors } = useForm({
   validationSchema: toTypedSchema(buildDispatchSchema(t)),
   initialValues: { ...DISPATCH_DEFAULTS },
   keepValuesOnUnmount: true,
@@ -145,45 +145,45 @@ async function confirmPrConflict(): Promise<void> {
       <p v-if="prefilled" class="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm" data-testid="dispatch-prefilled">{{ prefilled === 'review' ? t('fleet.dispatch.prefilledReview') : prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled') }}</p>
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
-          <FormLabel>{{ t('fleet.dispatch.repo') }}</FormLabel>
+          <FormLabel for="dispatch-repo">{{ t('fleet.dispatch.repo') }}</FormLabel>
           <FormControl>
-            <FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.dispatch.repoPlaceholder')" testid="dispatch-repo" />
+            <FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.dispatch.repoPlaceholder')" id="dispatch-repo" :aria-invalid="!!errors.repoId" aria-describedby="dispatch-repo-error dispatch-repo-hint" testid="dispatch-repo" />
           </FormControl>
-          <p v-if="options.moreRepos.value" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.moreRepos') }}</p>
-          <FormMessage />
+          <p id="dispatch-repo-hint" v-if="options.moreRepos.value" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.moreRepos') }}</p>
+          <FormMessage id="dispatch-repo-error" />
         </FormItem>
       </FormField>
 
       <div class="grid gap-4 sm:grid-cols-2">
         <FormField v-slot="{ componentField }" name="command">
           <FormItem>
-            <FormLabel>{{ t('fleet.dispatch.command') }}</FormLabel>
+            <FormLabel for="dispatch-command">{{ t('fleet.dispatch.command') }}</FormLabel>
             <FormControl>
-              <FleetNativeSelect v-bind="componentField" :options="commandOptions" testid="dispatch-command" />
+              <FleetNativeSelect v-bind="componentField" :options="commandOptions" id="dispatch-command" :aria-invalid="!!errors.command" aria-describedby="dispatch-command-error" testid="dispatch-command" />
             </FormControl>
-            <FormMessage />
+            <FormMessage id="dispatch-command-error" />
           </FormItem>
         </FormField>
         <template v-if="values.command === 'RUN' || values.command === 'PLAN'">
           <FormField v-slot="{ componentField }" name="ref">
             <FormItem>
-              <FormLabel>{{ t('fleet.dispatch.ref') }}</FormLabel>
+              <FormLabel for="dispatch-ref">{{ t('fleet.dispatch.ref') }}</FormLabel>
               <FormControl>
-                <Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="dispatch-ref" />
+                <Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" id="dispatch-ref" :aria-invalid="!!errors.ref" aria-describedby="dispatch-ref-error dispatch-ref-hint" data-testid="dispatch-ref" />
               </FormControl>
-              <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.refHint') }}</p>
-              <FormMessage />
+              <p id="dispatch-ref-hint" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.refHint') }}</p>
+              <FormMessage id="dispatch-ref-error" />
             </FormItem>
           </FormField>
         </template>
         <FormField v-if="values.command === 'REVIEW' || values.command === 'FIX'" v-slot="{ componentField }" name="prNumber">
           <FormItem>
-            <FormLabel>{{ t('fleet.dispatch.prNumber') }}</FormLabel>
+            <FormLabel for="dispatch-pr-number">{{ t('fleet.dispatch.prNumber') }}</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" inputmode="numeric" data-testid="dispatch-pr-number" />
+              <Input v-bind="componentField" inputmode="numeric" id="dispatch-pr-number" :aria-invalid="!!errors.prNumber" aria-describedby="dispatch-pr-number-error dispatch-pr-number-hint" data-testid="dispatch-pr-number" />
             </FormControl>
-            <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.prNumberHint') }}</p>
-            <FormMessage />
+            <p id="dispatch-pr-number-hint" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.prNumberHint') }}</p>
+            <FormMessage id="dispatch-pr-number-error" />
           </FormItem>
         </FormField>
       </div>
@@ -191,11 +191,11 @@ async function confirmPrConflict(): Promise<void> {
       <template v-if="values.command === 'RUN' || values.command === 'PLAN'">
         <FormField v-slot="{ componentField }" name="feature">
           <FormItem>
-            <FormLabel>{{ t('fleet.dispatch.feature') }}</FormLabel>
+            <FormLabel for="dispatch-feature">{{ t('fleet.dispatch.feature') }}</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" data-testid="dispatch-feature" />
+              <Input v-bind="componentField" id="dispatch-feature" :aria-invalid="!!errors.feature" aria-describedby="dispatch-feature-error" data-testid="dispatch-feature" />
             </FormControl>
-            <FormMessage />
+            <FormMessage id="dispatch-feature-error" />
           </FormItem>
         </FormField>
       </template>
@@ -203,12 +203,12 @@ async function confirmPrConflict(): Promise<void> {
       <template v-if="values.command === 'PLAN'">
         <FormField v-if="values.command === 'PLAN'" v-slot="{ componentField }" name="planFrom">
           <FormItem>
-            <FormLabel>{{ t('fleet.dispatch.planFrom') }}</FormLabel>
+            <FormLabel for="dispatch-plan-from">{{ t('fleet.dispatch.planFrom') }}</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" data-testid="dispatch-plan-from" />
+              <Input v-bind="componentField" id="dispatch-plan-from" :aria-invalid="!!errors.planFrom" aria-describedby="dispatch-plan-from-error dispatch-plan-from-hint" data-testid="dispatch-plan-from" />
             </FormControl>
-            <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.planFromHint') }}</p>
-            <FormMessage />
+            <p id="dispatch-plan-from-hint" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.planFromHint') }}</p>
+            <FormMessage id="dispatch-plan-from-error" />
           </FormItem>
         </FormField>
       </template>
@@ -246,45 +246,46 @@ async function confirmPrConflict(): Promise<void> {
 
       <FormField v-slot="{ componentField }" name="maxCostUsd">
         <FormItem>
-          <FormLabel>{{ t('fleet.dispatch.maxCost') }}</FormLabel>
+          <FormLabel for="dispatch-max-cost">{{ t('fleet.dispatch.maxCost') }}</FormLabel>
           <FormControl>
-            <Input v-bind="componentField" type="number" min="0.0001" step="0.0001" data-testid="dispatch-max-cost" />
+            <Input v-bind="componentField" type="number" min="0.0001" step="0.0001" id="dispatch-max-cost" :aria-invalid="!!errors.maxCostUsd" aria-describedby="dispatch-max-cost-error dispatch-max-cost-hint" data-testid="dispatch-max-cost" />
           </FormControl>
-          <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.maxCostHint') }}</p>
-          <FormMessage />
+          <p id="dispatch-max-cost-hint" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.maxCostHint') }}</p>
+          <FormMessage id="dispatch-max-cost-error" />
         </FormItem>
       </FormField>
 
       <template v-if="values.command === 'RUN'">
         <FormField v-slot="{ componentField }" name="bashMode">
           <FormItem>
-            <FormLabel>{{ t('fleet.bash.modeLabel') }}</FormLabel>
+            <FormLabel for="dispatch-bash-mode">{{ t('fleet.bash.modeLabel') }}</FormLabel>
             <FormControl>
-              <FleetNativeSelect v-bind="componentField" :options="bashOptions" testid="dispatch-bash-mode" />
+              <FleetNativeSelect v-bind="componentField" :options="bashOptions" id="dispatch-bash-mode" :aria-invalid="!!errors.bashMode" aria-describedby="dispatch-bash-mode-error dispatch-bash-mode-hint" testid="dispatch-bash-mode" />
             </FormControl>
-            <p class="text-xs text-muted-foreground">{{ t('fleet.bash.modeHint') }}</p>
-            <FormMessage />
+            <p id="dispatch-bash-mode-hint" class="text-xs text-muted-foreground">{{ t('fleet.bash.modeHint') }}</p>
+            <FormMessage id="dispatch-bash-mode-error" />
           </FormItem>
         </FormField>
         <FormField v-if="values.bashMode !== 'raw'" v-slot="{ componentField }" name="approvalTimeoutMinutes">
           <FormItem>
-            <FormLabel>{{ t('fleet.bash.timeout') }}</FormLabel>
+            <FormLabel for="dispatch-approval-timeout">{{ t('fleet.bash.timeout') }}</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" inputmode="decimal" data-testid="dispatch-approval-timeout" />
+              <Input v-bind="componentField" inputmode="decimal" id="dispatch-approval-timeout" :aria-invalid="!!errors.approvalTimeoutMinutes" aria-describedby="dispatch-approval-timeout-error dispatch-approval-timeout-hint" data-testid="dispatch-approval-timeout" />
             </FormControl>
-            <p class="text-xs text-muted-foreground">{{ t('fleet.bash.timeoutHint') }}</p>
-            <FormMessage />
+            <p id="dispatch-approval-timeout-hint" class="text-xs text-muted-foreground">{{ t('fleet.bash.timeoutHint') }}</p>
+            <FormMessage id="dispatch-approval-timeout-error" />
           </FormItem>
         </FormField>
       </template>
 
-      <div class="space-y-3">
-        <Label>{{ t('fleet.dispatch.placement') }}</Label>
-        <RadioGroup :model-value="placementMode" class="flex flex-wrap gap-4" @update:model-value="setPlacementMode">
-          <label class="flex items-center gap-2 text-sm"><RadioGroupItem value="auto" data-testid="placement-auto" />{{ t('fleet.dispatch.placementAuto') }}</label>
-          <label class="flex items-center gap-2 text-sm"><RadioGroupItem value="labels" data-testid="placement-labels" />{{ t('fleet.dispatch.placementLabels') }}</label>
-          <label class="flex items-center gap-2 text-sm"><RadioGroupItem value="pin" data-testid="placement-pin" />{{ t('fleet.dispatch.placementPin') }}</label>
-        </RadioGroup>
+      <fieldset class="space-y-3">
+        <legend class="text-sm font-medium">{{ t('fleet.dispatch.placement') }}</legend>
+        <div class="flex flex-wrap gap-4">
+          <label v-for="mode in (['auto', 'labels', 'pin'] as const)" :key="mode" class="flex items-center gap-2 text-sm">
+            <input type="radio" name="dispatch-placement" :value="mode" :checked="placementMode === mode" :data-testid="`placement-${mode}`" class="h-4 w-4 accent-primary" @change="setPlacementMode(mode)">
+            {{ t(mode === 'auto' ? 'fleet.dispatch.placementAuto' : mode === 'labels' ? 'fleet.dispatch.placementLabels' : 'fleet.dispatch.placementPin') }}
+          </label>
+        </div>
 
         <FormField v-if="placementMode === 'labels'" name="selectorLabels">
           <FormItem>
@@ -302,13 +303,13 @@ async function confirmPrConflict(): Promise<void> {
         <FormField v-if="placementMode === 'pin'" v-slot="{ componentField }" name="pinnedRunnerId">
           <FormItem>
             <FormControl>
-              <FleetNativeSelect v-bind="componentField" :options="pinOptions" :placeholder="t('fleet.dispatch.pinPlaceholder')" testid="dispatch-pin" />
+              <FleetNativeSelect v-bind="componentField" :aria-label="t('fleet.dispatch.placementPin')" :options="pinOptions" :placeholder="t('fleet.dispatch.pinPlaceholder')" testid="dispatch-pin" />
             </FormControl>
             <p v-if="options.moreRunners.value" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.moreRunners') }}</p>
             <FormMessage />
           </FormItem>
         </FormField>
-      </div>
+      </fieldset>
 
       <Button type="submit" :disabled="isSubmitting" data-testid="dispatch-submit">
         {{ isSubmitting ? t('fleet.dispatch.submitting') : t('fleet.dispatch.submit') }}

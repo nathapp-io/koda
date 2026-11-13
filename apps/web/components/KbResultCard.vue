@@ -2,6 +2,7 @@
 import { useLocalDates } from '~/lib/local-dates'
 
 const i18n = useI18n()
+const { t } = i18n
 const dates = useLocalDates(i18n)
 
 defineProps<{
@@ -15,9 +16,9 @@ defineProps<{
 }>()
 
 const similarityConfig = {
-  high: { label: 'HIGH', classes: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' },
-  medium: { label: 'MED', classes: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' },
-  low: { label: 'LOW', classes: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+  high: { label: 'kb.similarity.high', classes: 'bg-status-rejected/10 text-foreground' },
+  medium: { label: 'kb.similarity.medium', classes: 'bg-status-review/10 text-foreground' },
+  low: { label: 'kb.similarity.low', classes: 'bg-muted text-muted-foreground' },
 }
 </script>
 
@@ -25,15 +26,15 @@ const similarityConfig = {
   <div class="flex items-start gap-4 rounded-lg border border-border bg-card p-4">
     <!-- Score pill -->
     <span
-      class="mt-0.5 flex-shrink-0 rounded px-2 py-0.5 text-xs font-bold"
+      class="mt-0.5 flex-shrink-0 rounded px-2 py-0.5 text-xs font-medium tabular-nums"
       :class="similarityConfig[similarity].classes"
     >
-      {{ similarityConfig[similarity].label }} {{ score.toFixed(2) }}
+      {{ t(similarityConfig[similarity].label) }} {{ score.toFixed(2) }}
     </span>
 
     <div class="min-w-0 flex-1">
       <!-- Source ID -->
-      <p class="text-sm font-semibold text-foreground">{{ sourceId }}</p>
+      <p class="text-sm font-medium text-foreground">{{ sourceId }}</p>
       <!-- Content snippet -->
       <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">{{ content }}</p>
       <!-- Meta -->

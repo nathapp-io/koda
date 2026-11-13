@@ -44,9 +44,9 @@ const { data, pending, error, refresh: refreshComments } = useAsyncData<Comment[
 const comments = computed(() => data.value ?? [])
 
 const typePillClass: Record<Comment['type'], string> = {
-  VERIFICATION: 'bg-blue-100 text-blue-800',
-  FIX_REPORT: 'bg-orange-100 text-orange-800',
-  REVIEW: 'bg-green-100 text-green-800',
+  VERIFICATION: 'border-status-active/40 bg-muted text-foreground',
+  FIX_REPORT: 'border-status-review/40 bg-muted text-foreground',
+  REVIEW: 'border-status-done/40 bg-muted text-foreground',
   RULING: 'bg-muted text-muted-foreground',
   GENERAL: 'bg-muted text-muted-foreground',
 }
@@ -133,7 +133,7 @@ async function deleteComment(comment: Comment) {
       >
         <div class="flex items-center gap-2">
           <span
-            class="rounded-full px-2 py-0.5 text-xs font-medium"
+            class="rounded-md border px-2 py-0.5 text-xs font-medium"
             :class="typePillClass[comment.type]"
           >
             {{ t(`comments.types.${comment.type}`) }}

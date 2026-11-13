@@ -99,7 +99,8 @@ async function mountPanel(options: MountOptions = {}): Promise<Mount> {
     components: uiStubs,
     globals: {
       useApi: () => ({ $api: { get, post, delete: del } }),
-      useI18n: () => enI18n(),
+      useHead: () => undefined,
+        useI18n: () => enI18n(),
       useAppToast: () => toast,
       useProjectPermissions,
       useProjectInvites,
@@ -254,6 +255,7 @@ describe('AC-4: the public invite page shows the preview roleName', () => {
         useApi: () => ({ $api: { get } }),
         useAuth: () => ({ isAuthenticated: ref(false), acceptInvite: jest.fn() }),
         navigateTo: jest.fn(),
+        useHead: () => undefined,
         useI18n: () => enI18n(),
         useAppToast: () => ({ error: jest.fn(), success: jest.fn() }),
         definePageMeta: () => undefined,

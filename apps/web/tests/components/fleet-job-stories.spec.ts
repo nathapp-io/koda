@@ -23,7 +23,7 @@ describe('FleetJobStories, the List view (S1b §1.4, D443)', () => {
     expect(textOf(rows[0])).toContain('Login form')
     expect(textOf(rows[0])).toContain('Passed')
     expect(textOf(rows[0])).toContain('Attempts: 1')
-    expect(find('[data-stub="badge"]').map(b => b.props.variant)).toEqual(['default', 'secondary'])
+    expect(find('[data-stub="badge"]').map(b => b.props.variant)).toEqual(['outline', 'secondary'])
     unmount()
   })
 
