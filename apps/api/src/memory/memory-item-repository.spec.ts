@@ -118,6 +118,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
         { subject: { contains: text, mode: 'insensitive' } },
         { predicate: { contains: text, mode: 'insensitive' } },
         { object: { contains: text, mode: 'insensitive' } },
+        { description: { contains: text, mode: 'insensitive' } },
       ],
     });
 
@@ -277,9 +278,9 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.$queryRaw.mock.calls.map((call) => call[0] as { sql: string; values: unknown[] });
 
     /** The probe found a lexeme, the page answers `ids` and the count answers `total`. */
-    const ranked = (ids: string[], total: number): void => {
+    const ranked = (ids: string[], total: number, query?: string | null): void => {
       mockPrismaClient.$queryRaw
-        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([{ lexemes: 1, ...(query !== undefined ? { query } : {}) }])
         .mockResolvedValueOnce(ids.map((id) => ({ id })))
         .mockResolvedValueOnce([{ total }]);
     };
@@ -292,6 +293,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 });
 
       expect(rawCalls()[0].sql).toContain('numnode(websearch_to_tsquery(');
+      expect(rawCalls()[0].sql).toContain('::text AS "query"');
       expect(rawCalls()[0].values).toContain('deploy');
       expect(rawCalls()[0].values).toContain('english');
     });
@@ -372,11 +374,69 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
                 { subject: { contains: '预算', mode: 'insensitive' } },
                 { predicate: { contains: '预算', mode: 'insensitive' } },
                 { object: { contains: '预算', mode: 'insensitive' } },
+                { description: { contains: '预算', mode: 'insensitive' } },
               ],
             },
           ],
         }),
       });
+    });
+
+    it('runs the any-word ranked query only after an eligible multi-word probe', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 2, query: "'deploy' & 'backup'" }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total: 0 }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy backup' }, { current: 1, size: 10 });
+
+      expect(rawCalls()).toHaveLength(5);
+      expect(rawCalls()[3].sql).toContain('replace(');
+      expect(rawCalls()[3].sql).toContain("' | ')::tsquery");
+      expect(mockPrismaClient.memoryItem.count).toHaveBeenCalled();
+    });
+
+    it('hydrates any-word matches in rank order without counting through Prisma', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 2, query: "'deploy' & 'backup'" }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([{ id: 'mem-2' }, { id: 'mem-1' }])
+        .mockResolvedValueOnce([{ total: 2 }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2')]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy backup' }, { current: 1, size: 10 },
+      );
+
+      expect(result.records.map((item) => item.id)).toEqual(['mem-2', 'mem-1']);
+      expect(result.total).toBe(2);
+      expect(mockPrismaClient.memoryItem.count).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, "'deploy' & !'backup'", "'deploy'"])(
+      'does not issue an any-word pass for probe query %s', async (query) => {
+        ranked([], 0, query);
+        mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+        mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+        await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 });
+
+        expect(rawCalls()).toHaveLength(3);
+      },
+    );
+
+    it('returns all-word matches without trying any-word search', async () => {
+      ranked(['mem-1'], 1, "'deploy' & 'backup'");
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1')]);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy backup' }, { current: 1, size: 10 });
+
+      expect(rawCalls()).toHaveLength(3);
     });
 
     it('never probes or ranks for a blank text', async () => {

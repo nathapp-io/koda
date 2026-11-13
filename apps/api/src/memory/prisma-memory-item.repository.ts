@@ -102,6 +102,10 @@ function searchText(text: string | undefined): string | undefined {
  * cast because a parameter has no type for Postgres to guess `regconfig` from.
  */
 const tsQuery = (text: string): Prisma.Sql => Prisma.sql`websearch_to_tsquery(${SEARCH_CONFIG}::regconfig, ${text})`;
+const anyWordTsQuery = (text: string): Prisma.Sql =>
+  Prisma.sql`replace(${tsQuery(text)}::text, ' & ', ' | ')::tsquery`;
+const anyWordAllowed = (query: string | null | undefined): boolean =>
+  typeof query === 'string' && query.includes(' & ') && !query.includes('!');
 
 /**
  * The requested `orderBy` as SQL, with the same tiebreakers the Prisma path applies. The unique `id`
@@ -545,19 +549,26 @@ export class PrismaMemoryItemRepository
    */
   async findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const text = searchText(query.text);
-    if (text !== undefined && (await this.hasSearchLexemes(text))) {
-      const ranked = await this.findRankedByText(query, text, page);
-      if (ranked.total > 0) return ranked;
+    if (text !== undefined) {
+      const probe = await this.searchProbe(text);
+      if (probe.lexemes > 0) {
+        const allWords = await this.findRankedByText(query, tsQuery(text), page);
+        if (allWords.total > 0) return allWords;
+        if (anyWordAllowed(probe.query)) {
+          const anyWord = await this.findRankedByText(query, anyWordTsQuery(text), page);
+          if (anyWord.total > 0) return anyWord;
+        }
+      }
     }
     return this.findByContains(query, page);
   }
 
-  /** Whether `websearch_to_tsquery` kept any lexeme: only then is a full-text query worth running. */
-  private async hasSearchLexemes(text: string): Promise<boolean> {
-    const rows = await this.prisma.client.$queryRaw<Array<{ lexemes: number }>>(
-      Prisma.sql`SELECT numnode(${tsQuery(text)}) AS "lexemes"`,
+  /** Probe both whether lexemes exist and the parsed query structure needed to safely build an OR query. */
+  private async searchProbe(text: string): Promise<{ lexemes: number; query?: string | null }> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ lexemes: number; query?: string | null }>>(
+      Prisma.sql`SELECT numnode(${tsQuery(text)}) AS "lexemes", ${tsQuery(text)}::text AS "query"`,
     );
-    return (rows[0]?.lexemes ?? 0) > 0;
+    return rows[0] ?? { lexemes: 0 };
   }
 
   /**
@@ -571,7 +582,7 @@ export class PrismaMemoryItemRepository
    */
   private async findRankedByText(
     query: ProjectMemoryQuery,
-    text: string,
+    textQuery: Prisma.Sql,
     page: IPageOption,
   ): Promise<IPageResult<MemoryItem>> {
     const { scope, ownerKey } = readScope(query);
@@ -589,12 +600,12 @@ export class PrismaMemoryItemRepository
     if (query.subject && query.subject.trim().length > 0) {
       conditions.push(Prisma.sql`starts_with(m."subject", ${query.subject})`);
     }
-    conditions.push(Prisma.sql`m."searchVector" @@ ${tsQuery(text)}`);
+    conditions.push(Prisma.sql`m."searchVector" @@ ${textQuery}`);
     const where = Prisma.join(conditions, ' AND ');
 
     // Order by rank only when the caller asked for no order: an explicit `orderBy` is answered as written.
     const order = query.orderBy === undefined
-      ? Prisma.sql`ts_rank(m."searchVector", ${tsQuery(text)}) DESC, m."updatedAt" DESC, m."id" DESC`
+      ? Prisma.sql`ts_rank(m."searchVector", ${textQuery}) DESC, m."updatedAt" DESC, m."id" DESC`
       : orderBySql(query.orderBy);
     const { current, size, skip, take } = resolvePageOption(page);
     const [pageRows, counted] = await Promise.all([
@@ -627,9 +638,8 @@ export class PrismaMemoryItemRepository
   }
 
   /**
-   * The pre-feature page (S5b US-004): filters in Prisma, `text` as a case-insensitive substring of
-   * subject, predicate or object. Kept as it was — it is the answer for a text with no lexeme and the
-   * fallback for a ranked query that matched nothing (memory-notes US-003).
+   * The fallback page: filters in Prisma, `text` as a case-insensitive substring of subject, predicate,
+   * object or description. It answers text with no lexeme and either ranked pass finding no matches.
    */
   private async findByContains(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const where: Record<string, unknown> = { deletedAt: null };
@@ -666,6 +676,7 @@ export class PrismaMemoryItemRepository
           { subject: { contains: query.text, mode: 'insensitive' } },
           { predicate: { contains: query.text, mode: 'insensitive' } },
           { object: { contains: query.text, mode: 'insensitive' } },
+          { description: { contains: query.text, mode: 'insensitive' } },
         ],
       });
     }
