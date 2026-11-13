@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <div class="text-center">
-      <h2 class="text-3xl font-bold tracking-tight">{{ t('auth.login.title') }}</h2>
+      <h2 class="text-[28px] font-medium tracking-tight">{{ t('auth.login.title') }}</h2>
       <p class="mt-2 text-sm text-muted-foreground">
         {{ t('auth.login.subtitle') }}
       </p>

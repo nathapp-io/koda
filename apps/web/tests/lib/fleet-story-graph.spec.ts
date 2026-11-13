@@ -161,7 +161,7 @@ describe('pipelineStages (spec §2.1, D442)', () => {
   test('postRun values map: not-run -> pending, known values kept', () => {
     const job = run({ postRun: { acceptance: 'passed', regression: 'running', finish: 'not-run' } })
     expect(states(job).slice(1)).toEqual([['acceptance', 'passed'], ['regression', 'running'], ['finish', 'pending']])
-    expect(pipelineStages(job).map(s => s.variant)).toEqual(['secondary', 'default', 'secondary', 'outline'])
+    expect(pipelineStages(job).map(s => s.variant)).toEqual(['secondary', 'outline', 'secondary', 'outline'])
   })
 
   test('an unknown nax value is kept raw and marked unknown to the copy', () => {

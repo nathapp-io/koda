@@ -182,30 +182,30 @@ describe('US-005-3 AC3: each comment displays a colored type pill', () => {
     expect(source).toContain('GENERAL')
   })
 
-  test('source applies blue styling for VERIFICATION type', () => {
+  test('source applies active token styling for VERIFICATION type', () => {
     const source = readFileSync(componentPath, 'utf-8')
     const hasBlue =
       source.includes('blue') ||
-      source.includes('bg-blue') ||
-      source.includes('text-blue')
+      source.includes('border-status-active') ||
+      source.includes('border-status-active/40')
     expect(hasBlue).toBe(true)
   })
 
-  test('source applies orange styling for FIX_REPORT type', () => {
+  test('source applies review token styling for FIX_REPORT type', () => {
     const source = readFileSync(componentPath, 'utf-8')
     const hasOrange =
       source.includes('orange') ||
-      source.includes('bg-orange') ||
-      source.includes('text-orange')
+      source.includes('border-status-review') ||
+      source.includes('border-status-review/40')
     expect(hasOrange).toBe(true)
   })
 
-  test('source applies green styling for REVIEW type', () => {
+  test('source applies done token styling for REVIEW type', () => {
     const source = readFileSync(componentPath, 'utf-8')
     const hasGreen =
       source.includes('green') ||
-      source.includes('bg-green') ||
-      source.includes('text-green')
+      source.includes('border-status-done') ||
+      source.includes('border-status-done/40')
     expect(hasGreen).toBe(true)
   })
 

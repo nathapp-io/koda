@@ -1,0 +1,1406 @@
+[
+  {
+    "file": "apps/web/pages/[project]/agents.vue",
+    "route": "/fleet-e2e/agents",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/agents",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/agents",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/agents",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/approval-policies.vue",
+    "route": "/fleet-e2e/approval-policies",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/approval-policies",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/approval-policies",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/approval-policies",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/approvals.vue",
+    "route": "/fleet-e2e/approvals",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/approvals",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/approvals",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/approvals",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/code-intel.vue",
+    "route": "/fleet-e2e/code-intel",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/code-intel",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/code-intel",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/code-intel",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/analytics.vue",
+    "route": "/fleet-e2e/fleet/analytics",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/analytics",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/analytics",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/analytics",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/budgets.vue",
+    "route": "/fleet-e2e/fleet/budgets",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/budgets",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/budgets",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/budgets",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/dispatch.vue",
+    "route": "/fleet-e2e/fleet/dispatch",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/dispatch",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/dispatch",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/dispatch",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/index.vue",
+    "route": "/fleet-e2e/fleet",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+    "route": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/jobs/[id]/logs.vue",
+    "route": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq/logs",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq/logs",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq/logs",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/jobs/cmweo0sk50006v8qmnses9qvq/logs",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/overview.vue",
+    "route": "/fleet-e2e/fleet/overview",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/overview",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/overview",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/overview",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/repos/[id]/config.vue",
+    "route": "/fleet-e2e/fleet/repos/cmwenl7rp000g8rqm5zetdm88/config",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/repos/cmwenl7rp000g8rqm5zetdm88/config",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/repos/cmwenl7rp000g8rqm5zetdm88/config",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/repos/cmwenl7rp000g8rqm5zetdm88/config",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/schedules/[id].vue",
+    "route": "/fleet-e2e/fleet/schedules/cmweo0skv0007v8qm36gxpw3j",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/schedules/cmweo0skv0007v8qm36gxpw3j",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/schedules/cmweo0skv0007v8qm36gxpw3j",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/schedules/cmweo0skv0007v8qm36gxpw3j",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/fleet/schedules/index.vue",
+    "route": "/fleet-e2e/fleet/schedules",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/schedules",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/schedules",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/fleet/schedules",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/flows/[id].vue",
+    "route": "/fleet-e2e/flows/cmweo0sl70008v8qmsoq3kf4l",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/flows/cmweo0sl70008v8qmsoq3kf4l",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/flows/cmweo0sl70008v8qmsoq3kf4l",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/flows/cmweo0sl70008v8qmsoq3kf4l",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/flows/index.vue",
+    "route": "/fleet-e2e/flows",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/flows",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/flows",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/flows",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/index.vue",
+    "route": "/fleet-e2e",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/kb.vue",
+    "route": "/fleet-e2e/kb",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/kb",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/kb",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/kb",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/labels.vue",
+    "route": "/fleet-e2e/labels",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/labels",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/labels",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/labels",
+        "title": "Koda",
+        "overflow": true
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/memory.vue",
+    "route": "/fleet-e2e/memory",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/memory",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/memory",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/memory",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/settings.vue",
+    "route": "/fleet-e2e/settings",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/settings",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/settings",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/settings",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/threads/[id].vue",
+    "route": "/fleet-e2e/threads/cmweo0slp000av8qmie8pm8hi",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/threads/cmweo0slp000av8qmie8pm8hi",
+        "title": "Review runner reconnect recovery",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/threads/cmweo0slp000av8qmie8pm8hi",
+        "title": "Review runner reconnect recovery",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/threads/cmweo0slp000av8qmie8pm8hi",
+        "title": "Review runner reconnect recovery",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/threads/index.vue",
+    "route": "/fleet-e2e/threads",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/threads",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/threads",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/threads",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/threads/new.vue",
+    "route": "/fleet-e2e/threads/new",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/threads/new",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/threads/new",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/threads/new",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/tickets/[ref].vue",
+    "route": "/fleet-e2e/tickets/FLTE-101",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/tickets/FLTE-101",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/tickets/FLTE-101",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/tickets/FLTE-101",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/[project]/timeline.vue",
+    "route": "/fleet-e2e/timeline",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/fleet-e2e/timeline",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/fleet-e2e/timeline",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/fleet-e2e/timeline",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/approval-policies.vue",
+    "route": "/admin/approval-policies",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/approval-policies",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/approval-policies",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/approval-policies",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/audit.vue",
+    "route": "/admin/audit",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/audit",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/audit",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/audit",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/analytics.vue",
+    "route": "/admin/fleet/analytics",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet/analytics",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet/analytics",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet/analytics",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/budgets.vue",
+    "route": "/admin/fleet/budgets",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet/budgets",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet/budgets",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet/budgets",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/credentials.vue",
+    "route": "/admin/fleet/credentials",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet/credentials",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet/credentials",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet/credentials",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/index.vue",
+    "route": "/admin/fleet",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/provider-keys.vue",
+    "route": "/admin/fleet/provider-keys",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet/provider-keys",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet/provider-keys",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet/provider-keys",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/repos.vue",
+    "route": "/admin/fleet/repos",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet/repos",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet/repos",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet/repos",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/fleet/runners.vue",
+    "route": "/admin/fleet/runners",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/fleet/runners",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/fleet/runners",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/fleet/runners",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/outbox.vue",
+    "route": "/admin/outbox",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/outbox",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/outbox",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/outbox",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/roles.vue",
+    "route": "/admin/roles",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/roles",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/roles",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/roles",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/skills.vue",
+    "route": "/admin/skills",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/skills",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/skills",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/skills",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/slos.vue",
+    "route": "/admin/slos",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/slos",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/slos",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/slos",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/admin/users.vue",
+    "route": "/admin/users",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/admin/users",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/admin/users",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/admin/users",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/agents.vue",
+    "route": "/agents",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/agents",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/agents",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/agents",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/approvals.vue",
+    "route": "/approvals",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/approvals",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/approvals",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/approvals",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/index.vue",
+    "route": "/",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/invite/[token].vue",
+    "route": "/invite/audit-invalid-token",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/invite/audit-invalid-token",
+        "title": "",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/invite/audit-invalid-token",
+        "title": "",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/invite/audit-invalid-token",
+        "title": "",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/login.vue",
+    "route": "/login",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/login",
+        "title": "Sign in \u00b7 Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/login",
+        "title": "Sign in \u00b7 Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/login",
+        "title": "Sign in \u00b7 Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/notifications.vue",
+    "route": "/notifications",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/notifications",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/notifications",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/notifications",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/projects.vue",
+    "route": "/projects",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/register.vue",
+    "route": "/register",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/register",
+        "title": "",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/register",
+        "title": "",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/register",
+        "title": "",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/settings/notifications.vue",
+    "route": "/settings/notifications",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/settings/notifications",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/settings/notifications",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/settings/notifications",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/threads/[id].vue",
+    "route": "/threads/cmweo0sm9000dv8qm06pliiep",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/threads/cmweo0sm9000dv8qm06pliiep",
+        "title": "Plan this week's review queue",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/threads/cmweo0sm9000dv8qm06pliiep",
+        "title": "Plan this week's review queue",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/threads/cmweo0sm9000dv8qm06pliiep",
+        "title": "Plan this week's review queue",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/threads/index.vue",
+    "route": "/threads",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/threads",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/threads",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/threads",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "file": "apps/web/pages/threads/new.vue",
+    "route": "/threads/new",
+    "views": [
+      {
+        "mode": "dark",
+        "status": 200,
+        "url": "/threads/new",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "light",
+        "status": 200,
+        "url": "/threads/new",
+        "title": "Koda",
+        "overflow": false
+      },
+      {
+        "mode": "mobile",
+        "status": 200,
+        "url": "/threads/new",
+        "title": "Koda",
+        "overflow": false
+      }
+    ]
+  }
+]

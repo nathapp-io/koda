@@ -29,10 +29,10 @@ export const PRIORITY_DOT: Record<string, string> = {
   LOW: 'bg-priority-low',
 }
 
-/** Tint applied to a chip's own border/text; the card keeps its token background. */
+/** Type is descriptive, not urgency: keep chips neutral beside priority and workflow state. */
 export const TYPE_CLASS: Record<string, string> = {
-  BUG: 'text-status-rejected border-status-rejected/40',
-  ENHANCEMENT: 'text-status-active border-status-active/40',
+  BUG: 'text-muted-foreground',
+  ENHANCEMENT: 'text-muted-foreground',
   TASK: 'text-muted-foreground',
   QUESTION: 'text-muted-foreground',
 }

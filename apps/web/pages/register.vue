@@ -1,7 +1,7 @@
 <template>
-  <div class="w-full max-w-md space-y-8">
+  <div class="w-full max-w-md space-y-6">
     <div class="text-center">
-      <h2 class="mt-6 text-3xl font-bold tracking-tight">{{ t('auth.register.title') }}</h2>
+      <h2 class="text-[28px] font-medium tracking-tight">{{ t('auth.register.title') }}</h2>
       <p class="mt-2 text-sm text-muted-foreground">
         {{ t('auth.register.subtitle') }}
       </p>
@@ -82,6 +82,7 @@ definePageMeta({ layout: 'auth' })
 
 const { t } = useI18n()
 const toast = useAppToast()
+useHead({ title: () => `${t('auth.register.signUp')} · Koda` })
 
 const {
   open: registrationOpen,

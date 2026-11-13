@@ -85,11 +85,10 @@ const showAdminNav = computed(() =>
 const projectSlug = computed(() => route.params.project as string | undefined)
 
 const navLinkClass =
-  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer'
-const activeClass = 'bg-accent text-accent-foreground'
-// Full muted-foreground, not an opacity step: at text-[11px] the /80 blend
-// fails WCAG AA (4.13:1 over the card in light); the solid token clears it.
-const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+  'flex items-center min-h-8 gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer'
+const activeClass = 'bg-muted text-foreground ring-1 ring-inset ring-border [&>svg]:text-link'
+// Sentence-case group labels keep navigation quiet; use the full contrast-tested text token.
+const sectionLabelClass = 'px-3 pb-2 pt-6 text-xs font-medium text-muted-foreground'
 
 /** The last crumb under `/:project/fleet/*`: overview, dispatch, budgets, analytics, a repo's nax config, or (anything else) a job. */
 function fleetLeaf(project: string, path: string): string {
@@ -281,7 +280,7 @@ const backTo = computed(() => {
         <!-- Project-scoped links: rendered after the global block in source, shown first via flex order -->
         <template v-if="projectSlug">
           <div class="order-first mb-1 flex flex-col border-b border-border pb-3">
-            <p class="truncate px-2.5 pb-1 pt-3 text-sm font-semibold text-foreground" :title="projectSlug">{{ projectSlug }}</p>
+            <p class="truncate px-3 pb-1 pt-3 text-sm font-medium text-foreground" :title="projectSlug">{{ projectSlug }}</p>
             <p :class="sectionLabelClass">{{ t('nav.sectionWork') }}</p>
             <NuxtLink
               :to="`/${projectSlug}`"
@@ -418,7 +417,7 @@ const backTo = computed(() => {
             @click="sidebarOpen = !sidebarOpen"
           >
             <span class="sr-only">{{ t('nav.toggleSidebar') }}</span>
-            <Menu class="h-5 w-5" />
+            <Menu class="h-4 w-4" />
           </Button>
 
           <button

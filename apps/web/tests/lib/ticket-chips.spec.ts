@@ -33,11 +33,10 @@ describe('ticket-chips token maps', () => {
     })
   })
 
-  test('type tints are token-based (no raw palette colors)', () => {
-    expect(TYPE_CLASS.BUG).toContain('text-status-rejected')
-    expect(TYPE_CLASS.BUG).toContain('border-status-rejected/40')
-    expect(TYPE_CLASS.ENHANCEMENT).toContain('text-status-active')
-    expect(TYPE_CLASS.ENHANCEMENT).toContain('border-status-active/40')
+  test('ticket types are neutral so color is reserved for workflow state and priority', () => {
+    for (const style of Object.values(TYPE_CLASS)) {
+      expect(style).toBe('text-muted-foreground')
+    }
     expect(JSON.stringify(TYPE_CLASS)).not.toMatch(/border-red|text-blue|bg-orange/)
   })
 

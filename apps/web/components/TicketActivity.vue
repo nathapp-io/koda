@@ -34,7 +34,7 @@ const renderedDescription = computed(() =>
     : '',
 )
 
-const sectionHeadingClass = 'text-xs font-semibold uppercase tracking-wide text-muted-foreground'
+const sectionHeadingClass = 'text-xs font-medium text-muted-foreground'
 </script>
 
 <template>

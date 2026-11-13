@@ -192,7 +192,7 @@ describe('storyRows', () => {
   test('one row per story; status picks the badge variant; the active job highlights its current story', () => {
     const rows = storyRows(job({ state: 'RUNNING', stories, currentStoryId: 'US-002', currentPhase: 'implement' }))
     expect(rows.map(r => [r.id, r.variant, r.current, r.phase])).toEqual([
-      ['US-001', 'default', false, null],
+      ['US-001', 'outline', false, null],
       ['US-002', 'secondary', true, 'implement'],
       ['US-003', 'destructive', false, null],
       ['US-004', 'outline', false, null],

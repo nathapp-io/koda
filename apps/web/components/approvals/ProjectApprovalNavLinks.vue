@@ -47,6 +47,6 @@ const canReadPolicies = computed(() => permissions.value.has('approval.policy.re
 // The sidebar's own link classes are script-local to layouts/default.vue (this component is handed
 // only its slug), so the two strings are mirrored here rather than passed in.
 const navLinkClass =
-  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer'
-const activeClass = 'bg-accent text-accent-foreground'
+  'flex items-center min-h-8 gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer'
+const activeClass = 'bg-muted text-foreground ring-1 ring-inset ring-border [&>svg]:text-link'
 </script>

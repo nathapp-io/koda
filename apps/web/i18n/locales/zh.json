@@ -693,6 +693,11 @@
     }
   },
   "kb": {
+    "similarity": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
     "pageDescription": "搜索并管理 {project} 项目的文档。",
     "verdict": {
       "likelyDuplicate": "可能重复",
@@ -2739,6 +2744,7 @@
     }
   },
   "invite": {
+    "loadFailed": "无法加载邀请，请重试。",
     "title": "你被邀请了",
     "subtitle": "加入 {projectName}",
     "role": "角色：{roleName}",

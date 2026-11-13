@@ -95,7 +95,7 @@ async function confirmUnlink(): Promise<void> {
 
 <template>
   <section v-if="runs.length > 0" class="overflow-hidden rounded-lg border bg-card" :aria-label="t('fleet.tickets.title')" data-testid="ticket-fleet-runs">
-    <h2 class="border-b px-3.5 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ t('fleet.tickets.title') }}</h2>
+    <h2 class="border-b px-3.5 py-2.5 text-xs font-medium text-muted-foreground">{{ t('fleet.tickets.title') }}</h2>
     <ul class="divide-y">
       <li v-for="row in rows" :key="row.run.id" class="flex flex-col gap-1.5 px-3.5 py-3 text-sm" data-testid="ticket-fleet-run" :data-job="row.run.id">
         <div class="flex flex-wrap items-center gap-2">

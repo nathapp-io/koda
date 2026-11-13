@@ -125,12 +125,12 @@ async function saveEdit(label: Label) {
     <template v-if="canCreate">
       <div class="rounded-md border border-border p-4 space-y-4">
         <h2 class="text-lg font-semibold">{{ t('labels.form.create') }}</h2>
-        <form @submit="onSubmit" class="flex items-end gap-4">
+        <form @submit="onSubmit" class="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end">
           <FormField name="name" v-slot="{ componentField }">
-            <FormItem class="flex-1">
-              <FormLabel>{{ t('labels.form.name') }}</FormLabel>
+            <FormItem class="min-w-0 flex-1">
+              <FormLabel for="label-name">{{ t('labels.form.name') }}</FormLabel>
               <FormControl>
-                <Input :placeholder="t('labels.form.namePlaceholder')" v-bind="componentField" />
+                <Input id="label-name" :placeholder="t('labels.form.namePlaceholder')" v-bind="componentField" />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -173,8 +173,8 @@ async function saveEdit(label: Label) {
             />
           </TableCell>
           <TableCell>
-            <div v-if="editingId === label.id" class="flex items-center gap-2">
-              <Input v-model="editName" class="max-w-[200px]" />
+            <div v-if="editingId === label.id" class="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+              <Input v-model="editName" class="w-40 sm:max-w-[200px]" />
               <ColorPicker v-model="editColor" defaultColor="#6366F1" :label="t('labels.form.color')" />
             </div>
             <span v-else>{{ label.name }}</span>

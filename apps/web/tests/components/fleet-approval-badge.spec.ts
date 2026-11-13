@@ -381,13 +381,13 @@ describe('us-006: lifecycle and failure handling', () => {
     m.app.unmount()
   })
 
-  test('announces the pending count and pulses while an ask waits', async () => {
+  test('announces the pending count without continuous animation', async () => {
     const m = mount(jest.fn(async () => counts(2)))
     await m.settle()
 
     const node = m.el()[0]
     expect(node.props['aria-live']).toBe('polite')
-    expect(String(node.props.class)).toContain('animate-pulse')
+    expect(String(node.props.class)).not.toContain('animate-pulse')
     m.app.unmount()
   })
 })

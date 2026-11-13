@@ -242,7 +242,7 @@ describe('US-011 AC-3/AC-4: listed comments expose edit only for GENERAL', () =>
     expect(generalEdit).toBeDefined()
     expect(fixEdit).toBeUndefined()
     expect(app.textOf(rows[1])).toContain('Fix Report')
-    expect(app.find('span', rows[1]).some((pill) => String(pill.props.class ?? '').includes('bg-orange-100 text-orange-800'))).toBe(true)
+    expect(app.find('span', rows[1]).some((pill) => String(pill.props.class ?? '').includes('border-status-review/40'))).toBe(true)
     app.unmount()
   })
 })

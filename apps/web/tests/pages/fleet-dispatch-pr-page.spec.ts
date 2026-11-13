@@ -81,6 +81,40 @@ describe('fleet dispatch PR commands', () => {
     expect(allowed.app.one('[data-testid="dispatch-no-permission"]')).toBeUndefined()
     allowed.app.unmount()
   })
+  test.each(['RUN', 'PLAN', 'REVIEW', 'FIX'])('%s fields have label associations', async (command) => {
+    const { app, fields } = mountDispatch()
+    await Vue.nextTick()
+    fields.command.value.value = command
+    await Vue.nextTick()
+    for (const name of ['repo', 'command', 'max-cost', ...(command === 'RUN' || command === 'PLAN' ? ['ref', 'feature'] : ['pr-number']), ...(command === 'PLAN' ? ['plan-from'] : []), ...(command === 'RUN' ? ['bash-mode'] : [])]) {
+      const control = app.one(`[data-testid="dispatch-${name}"]`)
+      expect(control).toBeDefined()
+      expect(control?.props.id).toBeTruthy()
+      expect(app.one(`[for="${control?.props.id}"]`)).toBeDefined()
+    }
+    app.unmount()
+  })
+
+  test('placement uses one native radio per choice and switches placement fields', async () => {
+    const { app } = mountDispatch()
+    await Vue.nextTick()
+    const labels = app.one('[data-testid="placement-labels"]')
+    if (!labels) throw new Error('Missing labels placement')
+    expect(labels.tag).toBe('input')
+    expect(labels.props.type).toBe('radio')
+    expect(labels.props.name).toBe('dispatch-placement')
+    ;(labels.props.onChange as () => void)()
+    await Vue.nextTick()
+    expect(app.one('[data-testid="dispatch-labels"]')).toBeDefined()
+    const pin = app.one('[data-testid="placement-pin"]')
+    if (!pin) throw new Error('Missing pin placement')
+    ;(pin.props.onChange as () => void)()
+    await Vue.nextTick()
+    expect(app.one('[data-testid="dispatch-pin"]')).toBeDefined()
+    expect(app.one('[data-testid="dispatch-labels"]')).toBeUndefined()
+    app.unmount()
+  })
+
   test('AC-1: command select offers RUN, PLAN, REVIEW and FIX', async () => {
     const { app } = mountDispatch()
     await Vue.nextTick()

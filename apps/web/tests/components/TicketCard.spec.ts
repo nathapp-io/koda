@@ -93,12 +93,11 @@ describe('US-004-1 AC3: type Badge uses Badge component', () => {
 // AC4 — priority Badge with correct variants
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-004-1 AC4: priority chip uses the shared token dots (slice 3)', () => {
+describe('US-004-1 AC4: priority stripe carries color beside a readable label', () => {
   test('source renders ticket.priority through the shared priority chip', () => {
     const source = readFileSync(cardPath, 'utf-8')
-    // Slice 3: the variant/class ladder (destructive/secondary/outline + orange fill) became the
-    // token dot+label chip; per-level classes are pinned in tests/lib/ticket-chips.spec.ts.
-    expect(source).toContain('priorityDotClass(ticket.priority)')
+    // The stripe carries priority color, so the label does not repeat it as another dot.
+    expect(source).not.toContain('priorityDotClass(ticket.priority)')
     expect(source).toContain('priorityStripeClass(ticket.priority)')
     expect(source).toContain('ticket.priority')
   })

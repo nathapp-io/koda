@@ -108,9 +108,10 @@ describe('US-004-2 AC3: Exactly 6 status columns rendered in order', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-004-2 AC4: Each column header shows status name and ticket count badge', () => {
-  test('source uses Badge component for count display', () => {
+  test('column count is plain tabular text beside its status label', () => {
     const source = readFileSync(boardPath, 'utf-8')
-    expect(source).toContain('Badge')
+    expect(source).toContain('font-mono text-xs tabular-nums text-muted-foreground')
+    expect(source).not.toContain('<Badge')
   })
 
   test('source derives per-column count (filter or groupBy pattern)', () => {
