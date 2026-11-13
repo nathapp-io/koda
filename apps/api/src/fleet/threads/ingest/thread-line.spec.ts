@@ -285,3 +285,9 @@ describe('parseThreadLine session_started mode (US-007)', () => {
     }))).toEqual({ type: 'session_started', at: '2026-11-24T00:00:00.000Z', resumed: false });
   });
 });
+
+describe('parseThreadLine ignored progress types', () => {
+  it.each(['thinking_delta', 'compaction', 'tool_progress', 'tool_input_delta'])('ignores %s rather than counting it as bad', type => {
+    expect(parseThreadLine(JSON.stringify({ type, round: 1, callId: 'c1', name: 'write', chars: 64 }))).toEqual({ ignored: true });
+  });
+});

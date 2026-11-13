@@ -180,7 +180,7 @@ export type ParsedThreadLine = ThreadLine | { bad: true } | { ignored: true };
 export const isIgnoredLine = (parsed: ParsedThreadLine): parsed is { ignored: true } =>
   !('type' in parsed) && 'ignored' in parsed;
 
-const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
+const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress', 'tool_input_delta']);
 const TURN_ID_MAX = 128;
 /** The thread modes a `session_started` line may carry (thread-agents-modes US-007); mirrors `ThreadMode`. */
 const THREAD_MODES: readonly ThreadMode[] = ['read', 'ask', 'full'];
