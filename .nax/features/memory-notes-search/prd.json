@@ -3,7 +3,7 @@
   "feature": "memory-notes-search",
   "branchName": "feat/memory-notes-search",
   "createdAt": "2026-11-13T12:22:07.085Z",
-  "updatedAt": "2026-11-13T12:37:50.415Z",
+  "updatedAt": "2026-11-13T12:49:00.669Z",
   "userStories": [
     {
       "id": "US-001",
@@ -90,14 +90,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One tool implementation and three existing unit suites, with a clear mapping and no new abstraction; strict security override applies to owner-id dropping and preservation of permission-gated supersession in preview/execute."
+        "reasoning": "One tool implementation and three existing unit suites, with a clear mapping and no new abstraction; strict security override applies to owner-id dropping and preservation of permission-gated supersession in preview/execute.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/tools/add-memory-tool.ts",
@@ -124,7 +127,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3217b296e71176e79121ed52b0a47ed0923432bb"
     },
     {
       "id": "US-003",
