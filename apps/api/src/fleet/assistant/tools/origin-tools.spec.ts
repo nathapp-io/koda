@@ -29,7 +29,7 @@ describe('origin-aware tools', () => {
   it('AC-10: MCP memory records actor provenance', async () => {
     const upsert = vi.fn(async () => ({ id: 'm1' }));
     const tool = addMemoryTool({ memory: { upsert } as unknown as PrismaMemoryItemRepository, guard, audit });
-    await tool.execute(context(), tool.parse({ kind: 'FACT', subject: 's', predicate: 'p' }));
+    await tool.execute(context(), tool.parse({ slug: 's', type: 'project', description: 'd', body: 'p' }));
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({ sourceType: 'mcp', sourceId: 'claude', ownerId: 'claude', ownerType: 'AGENT' }),
       expect.objectContaining({ beforeSupersede: expect.any(Function) }),

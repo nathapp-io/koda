@@ -102,6 +102,10 @@ function searchText(text: string | undefined): string | undefined {
  * cast because a parameter has no type for Postgres to guess `regconfig` from.
  */
 const tsQuery = (text: string): Prisma.Sql => Prisma.sql`websearch_to_tsquery(${SEARCH_CONFIG}::regconfig, ${text})`;
+const anyWordTsQuery = (text: string): Prisma.Sql =>
+  Prisma.sql`replace(${tsQuery(text)}::text, ' & ', ' | ')::tsquery`;
+const anyWordAllowed = (query: string | null | undefined): boolean =>
+  typeof query === 'string' && query.includes(' & ') && !query.includes('!');
 
 /**
  * The requested `orderBy` as SQL, with the same tiebreakers the Prisma path applies. The unique `id`
@@ -534,7 +538,7 @@ export class PrismaMemoryItemRepository
 
   /**
    * The project's memory page (permissions P1 US-008, S5b US-004), ranked by full text when the caller
-   * searches (memory-notes US-003).
+   * searches (memory-notes US-003/US-004).
    *
    * A non-blank `text` is first offered to PostgreSQL: when `websearch_to_tsquery('english', text)` has any
    * lexeme, `findRankedByText` answers the page by `ts_rank` over the generated `searchVector` — stemmed,
@@ -542,22 +546,36 @@ export class PrismaMemoryItemRepository
    * Without lexemes (stopwords, punctuation) the pre-feature `contains` path runs unchanged, and it also
    * runs when the ranked query matched nothing: an unsegmented text such as a Chinese phrase has lexemes
    * but segments nothing, so the substring matches it always found are still found here.
+   *
+   * Between those two, US-004 asks for recall: when the all-words pass found nothing and the probe's parsed
+   * `query` is a conjunction of two or more words with no negation (` & ` and no `!`), the same ranked query
+   * runs once more with the words ORed — `replace(<query>::text, ' & ', ' | ')::tsquery` — so a question
+   * whose extra word (`use`, `happens`) no note holds still finds the notes that hold the others, ranked by
+   * how many of them each one matches. A negated word skips that pass, because dropping the negation would
+   * answer what the caller excluded.
    */
   async findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const text = searchText(query.text);
-    if (text !== undefined && (await this.hasSearchLexemes(text))) {
-      const ranked = await this.findRankedByText(query, text, page);
-      if (ranked.total > 0) return ranked;
+    if (text !== undefined) {
+      const probe = await this.searchProbe(text);
+      if (probe.lexemes > 0) {
+        const allWords = await this.findRankedByText(query, tsQuery(text), page);
+        if (allWords.total > 0) return allWords;
+        if (anyWordAllowed(probe.query)) {
+          const anyWord = await this.findRankedByText(query, anyWordTsQuery(text), page);
+          if (anyWord.total > 0) return anyWord;
+        }
+      }
     }
     return this.findByContains(query, page);
   }
 
-  /** Whether `websearch_to_tsquery` kept any lexeme: only then is a full-text query worth running. */
-  private async hasSearchLexemes(text: string): Promise<boolean> {
-    const rows = await this.prisma.client.$queryRaw<Array<{ lexemes: number }>>(
-      Prisma.sql`SELECT numnode(${tsQuery(text)}) AS "lexemes"`,
+  /** Probe both whether lexemes exist and the parsed query structure needed to safely build an OR query. */
+  private async searchProbe(text: string): Promise<{ lexemes: number; query?: string | null }> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ lexemes: number; query?: string | null }>>(
+      Prisma.sql`SELECT numnode(${tsQuery(text)}) AS "lexemes", ${tsQuery(text)}::text AS "query"`,
     );
-    return (rows[0]?.lexemes ?? 0) > 0;
+    return rows[0] ?? { lexemes: 0 };
   }
 
   /**
@@ -571,7 +589,7 @@ export class PrismaMemoryItemRepository
    */
   private async findRankedByText(
     query: ProjectMemoryQuery,
-    text: string,
+    textQuery: Prisma.Sql,
     page: IPageOption,
   ): Promise<IPageResult<MemoryItem>> {
     const { scope, ownerKey } = readScope(query);
@@ -589,12 +607,12 @@ export class PrismaMemoryItemRepository
     if (query.subject && query.subject.trim().length > 0) {
       conditions.push(Prisma.sql`starts_with(m."subject", ${query.subject})`);
     }
-    conditions.push(Prisma.sql`m."searchVector" @@ ${tsQuery(text)}`);
+    conditions.push(Prisma.sql`m."searchVector" @@ ${textQuery}`);
     const where = Prisma.join(conditions, ' AND ');
 
     // Order by rank only when the caller asked for no order: an explicit `orderBy` is answered as written.
     const order = query.orderBy === undefined
-      ? Prisma.sql`ts_rank(m."searchVector", ${tsQuery(text)}) DESC, m."updatedAt" DESC, m."id" DESC`
+      ? Prisma.sql`ts_rank(m."searchVector", ${textQuery}) DESC, m."updatedAt" DESC, m."id" DESC`
       : orderBySql(query.orderBy);
     const { current, size, skip, take } = resolvePageOption(page);
     const [pageRows, counted] = await Promise.all([
@@ -627,9 +645,8 @@ export class PrismaMemoryItemRepository
   }
 
   /**
-   * The pre-feature page (S5b US-004): filters in Prisma, `text` as a case-insensitive substring of
-   * subject, predicate or object. Kept as it was — it is the answer for a text with no lexeme and the
-   * fallback for a ranked query that matched nothing (memory-notes US-003).
+   * The fallback page: filters in Prisma, `text` as a case-insensitive substring of subject, predicate,
+   * object or description. It answers text with no lexeme and either ranked pass finding no matches.
    */
   private async findByContains(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const where: Record<string, unknown> = { deletedAt: null };
@@ -666,6 +683,7 @@ export class PrismaMemoryItemRepository
           { subject: { contains: query.text, mode: 'insensitive' } },
           { predicate: { contains: query.text, mode: 'insensitive' } },
           { object: { contains: query.text, mode: 'insensitive' } },
+          { description: { contains: query.text, mode: 'insensitive' } },
         ],
       });
     }

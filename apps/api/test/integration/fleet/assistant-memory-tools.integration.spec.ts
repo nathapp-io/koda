@@ -334,6 +334,30 @@ describeIntegration('fleet assistant memory tool (PG, US-004)', () => {
     expect(memoryIds(ops.content)).not.toContain(seed.deploy.id);
   });
 
+  it('US-005 AC-9: koda_memory_search recalls a budget note from a natural-language question', async () => {
+    const note = await prisma.memoryItem.create({
+      data: {
+        projectId: world.projectId,
+        kind: 'NOTE',
+        subject: 'budget-window',
+        predicate: 'project',
+        description: 'Budget pause behavior',
+        object: 'When a budget window is exceeded, dispatch pauses.',
+        status: 'active',
+        confidence: 0.8,
+        updatedAt: new Date(T0.getTime() - 60_000),
+      },
+    });
+    try {
+      const result = await call('us005-ac9', { text: 'what happens when the budget is exceeded' });
+      expect(result.isError).toBe(false);
+      expect(memoryIds(result.content)).toContain(note.id);
+      expect(result.content).toContain(`memory:${note.id}`);
+    } finally {
+      await prisma.memoryItem.delete({ where: { id: note.id } });
+    }
+  });
+
   it('AC-13: the holder of a RUNNING THREAD job searches memory through the runner route', async () => {
     const res = await request(server)
       .post(toolUrl(thread.jobId, 'koda_memory_search'))

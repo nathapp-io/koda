@@ -38,7 +38,7 @@ const TOOL = 'koda_add_memory';
 const SEARCH_TOOL = 'koda_memory_search';
 const APPROVALS = '/api/approvals';
 /** The item every AC of this story proposes: `bun` is the word the search reads it back by. */
-const ITEM = { kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' };
+const ITEM = { slug: 'thread-memory-note', type: 'project', description: 'How this project runs tests', body: 'Use bun for API integration tests.' };
 /** The route's answer: `{ content, isError }` data, whatever the status. */
 interface ToolResultBody { content: string; isError: boolean }
 
@@ -63,16 +63,16 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
   const actionOf = (toolCallId: string) =>
     findThreadAction(prisma, { jobId: repo.jobId, toolCallId });
 
-  /** The active items of the key every AC uses. */
+  /** All active versions of the note slug every AC uses. */
   const storedItems = () =>
     prisma.memoryItem.findMany({
-      where: { projectId: world.projectId, kind: 'FACT', subject: 'api', predicate: 'runs on', status: 'active', deletedAt: null },
+      where: { projectId: world.projectId, kind: 'NOTE', subject: ITEM.slug, status: 'active', deletedAt: null },
     });
 
-  /** The one active item of that key, or a loud failure. */
+  /** The one active note of that slug, or a loud failure. */
   const storedItem = () =>
     prisma.memoryItem.findFirstOrThrow({
-      where: { projectId: world.projectId, kind: 'FACT', subject: 'api', predicate: 'runs on', status: 'active', deletedAt: null },
+      where: { projectId: world.projectId, kind: 'NOTE', subject: ITEM.slug, status: 'active', deletedAt: null },
     });
 
   /** One accepted proposal: answers the stored action, asserting the call itself was answered `pending`. */
@@ -122,7 +122,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
    */
   beforeEach(async () => {
     await prisma.memoryItem.deleteMany({
-      where: { projectId: world.projectId, kind: 'FACT', subject: 'api', predicate: 'runs on' },
+      where: { projectId: world.projectId, kind: 'NOTE', subject: ITEM.slug },
     });
   });
 
@@ -138,8 +138,9 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     const action = await actionOf('ac10');
     expect(action).toMatchObject({ tool: TOOL, status: 'pending', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev });
     expect(content).toBe(`pending ${action.id}: awaiting approval; do not retry`);
-    // The stored preview is the text the user approves: the project slug, the key and the object, no replacement line.
-    expect(action.preview).toBe('Remember in web: FACT api / runs on\nbun');
+    // The stored preview is the text the user approves: the project slug, the NOTE header, the index line and the
+    // body, and no replacement line.
+    expect(action.preview).toBe(`Remember in web: NOTE ${ITEM.slug} / ${ITEM.type}\n${ITEM.description}\n${ITEM.body}`);
     // The audit row proves the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({
       where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId: 'ac10' } },
@@ -149,10 +150,10 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
   it('AC-11: the proposal writes no memory item, so the key has no active item while the user decides', async () => {
     const action = await propose('ac11');
 
-    expect(await storedItems()).toEqual([]);
+    expect(await prisma.memoryItem.count({ where: { projectId: world.projectId, subject: ITEM.slug } })).toBe(0);
     expect(action).toMatchObject({ status: 'pending' });
     // The preview saw no active item of that key: it carries no replacement line.
-    expect(action.preview.split('\n')).toEqual(['Remember in web: FACT api / runs on', 'bun']);
+    expect(action.preview.split('\n')).toEqual([`Remember in web: NOTE ${ITEM.slug} / ${ITEM.type}`, ITEM.description, ITEM.body]);
   });
 
   it('AC-12: after dev approves, koda_memory_search answers the memory:<id> of the stored item', async () => {
@@ -164,7 +165,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     expect(stored).toHaveLength(1);
     const item = await storedItem();
     expect(item).toMatchObject({
-      kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun',
+      kind: 'NOTE', subject: ITEM.slug, predicate: ITEM.type, object: ITEM.body, description: ITEM.description,
       sourceType: 'thread', sourceId: repo.threadId, confidence: 0.8, ownerId: world.ids.dev,
     });
     expect(await findThreadAction(prisma, { requestId: action.id }))
@@ -174,5 +175,21 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
 
     expect(isError).toBe(false);
     expect(content).toContain(`memory:${item.id}`);
+  });
+
+  it('AC-5/6: approving a different type for the same slug supersedes the first note', async () => {
+    const firstAction = await propose('ac-us003-first');
+    await decide(firstAction.id, 'approve').expect(200);
+    const first = await storedItem();
+
+    const secondAction = await propose('ac-us003-second', {
+      ...ITEM, type: 'feedback', description: 'API test command', body: 'Run the suite with bun test.',
+    });
+    await decide(secondAction.id, 'approve').expect(200);
+
+    const active = await storedItems();
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({ kind: 'NOTE', subject: ITEM.slug, predicate: 'feedback' });
+    expect(await prisma.memoryItem.findUniqueOrThrow({ where: { id: first.id } })).toMatchObject({ status: 'superseded' });
   });
 });

@@ -1,5 +1,5 @@
 /**
- * memory-notes US-003 (#377) — ranked PostgreSQL full-text recall over a project's memory.
+ * memory-notes US-005 (#456) — prove PostgreSQL any-word recall and REST description fallback over a project's memory.
  *
  * A non-blank `text` no longer has to be a substring of one field: the repository asks Postgres whether
  * `websearch_to_tsquery('english', text)` has any lexeme, and with lexemes it ranks every row by
@@ -45,7 +45,7 @@ interface ItemOverrides {
   updatedAt?: Date;
 }
 
-describeIntegration('memory full-text search (memory-notes US-003)', () => {
+describeIntegration('memory full-text search (memory-notes US-003/US-005)', () => {
   let app: NathApplication;
   let db: PrismaClient;
   let world: FleetHttpWorld;
@@ -269,6 +269,92 @@ describeIntegration('memory full-text search (memory-notes US-003)', () => {
 
     expect(ids(page)).toEqual([item.id]);
     expect(page.records[0].object).toBe('回放预算保持不变');
+  });
+
+  // -------------------------------------------------------------------------
+  // memory-notes US-005 — search quality against Postgres, with its own AC ids (US-003 owns AC-1..AC-13)
+  // -------------------------------------------------------------------------
+
+  const addSpecifiedNotes = async () => {
+    const fixed = {
+      kind: MemoryKind.NOTE,
+      predicate: 'project',
+      status: 'active',
+    };
+    const a = await addItem({ ...fixed, subject: 'note-a', description: 'label a', object: 'API integration specs need the compose test Postgres on port 5433.' });
+    await addItem({ ...fixed, subject: 'note-b', description: 'label b', object: 'Run web unit tests with bunx jest.' });
+    await addItem({ ...fixed, subject: 'note-c', description: 'label c', object: 'When a budget window is exceeded, dispatch pauses.' });
+    const d = await addItem({ ...fixed, subject: 'note-d', description: 'label d', object: 'Deploy runs build-images then deploy.sh, which takes a backup.', updatedAt: new Date('2026-01-01T00:00:00.000Z') });
+    const e = await addItem({ ...fixed, subject: 'note-e', description: 'label e', object: 'Restore from the newest dump.', updatedAt: new Date('2026-06-01T00:00:00.000Z') });
+    return { a, d, e };
+  };
+
+  it('US-005 AC-1: any-word recall ranks the PostgreSQL note first', async () => {
+    const { a } = await addSpecifiedNotes();
+    const page = await search('which postgres port do api integration tests use');
+    expect(ids(page)[0]).toBe(a.id);
+  });
+
+  it('US-005 AC-2: rank puts the note matching two query words before one', async () => {
+    const { d, e } = await addSpecifiedNotes();
+    const page = await search('deploy backup restore');
+    expect(ids(page).slice(0, 2)).toEqual([d.id, e.id]);
+  });
+
+  it('US-005 AC-3: all-word match excludes single-word match', async () => {
+    const { d } = await addSpecifiedNotes();
+    const page = await search('deploy backup');
+    expect(ids(page)).toEqual([d.id]);
+  });
+
+  it('US-005 AC-4: any-word results exclude expired notes by default', async () => {
+    const { a } = await addSpecifiedNotes();
+    const expired = await addItem({
+      kind: MemoryKind.NOTE, subject: 'expired-note', predicate: 'project', description: 'expired',
+      object: 'Postgres was used before.', ttlAt: new Date('2020-01-01T00:00:00.000Z'),
+    });
+    const page = await search('postgres widget');
+    expect(ids(page)).toContain(a.id);
+    expect(ids(page)).not.toContain(expired.id);
+  });
+
+  it('US-005 AC-5: any-word results preserve the kind filter', async () => {
+    const { a } = await addSpecifiedNotes();
+    const fact = await addItem({ kind: MemoryKind.FACT, subject: 'postgres fact', predicate: 'uses', object: 'Postgres widget.' });
+    const page = await search('postgres widget', { current: 1, size: 20 }, { kind: MemoryKind.NOTE });
+    expect(ids(page)).toContain(a.id);
+    expect(ids(page)).not.toContain(fact.id);
+  });
+
+  it('US-005 AC-6: any-word results page without overlap and retain their total', async () => {
+    const { d, e } = await addSpecifiedNotes();
+    const first = await search('deploy backup restore', { current: 1, size: 1 });
+    const second = await search('deploy backup restore', { current: 2, size: 1 });
+    expect(first.records).toHaveLength(1);
+    expect(second.records).toHaveLength(1);
+    expect(ids(first)[0]).not.toBe(ids(second)[0]);
+    expect(first.total).toBe(2);
+    expect(second.total).toBe(2);
+    expect(new Set([ids(first)[0], ids(second)[0]])).toEqual(new Set([d.id, e.id]));
+  });
+
+  it('US-005 AC-7: explicit updatedAt ordering wins over relevance rank', async () => {
+    const { d, e } = await addSpecifiedNotes();
+    const page = await search('deploy backup restore', { current: 1, size: 20 }, { orderBy: 'updatedAt' });
+    expect(ids(page).slice(0, 2)).toEqual([e.id, d.id]);
+  });
+
+  it('US-005 AC-8: REST text search finds a Chinese description substring', async () => {
+    const item = await addItem({
+      kind: MemoryKind.NOTE, subject: 'chinese-search', predicate: 'project',
+      description: '中文搜索使用子串匹配', object: '全文检索找不到中文词时改用子串匹配',
+    });
+    const response = await request(server())
+      .get(`/api/projects/${projectSlug}/memory?text=${encodeURIComponent('中文搜索')}`)
+      .set(auth(world.tokens.dev))
+      .expect(200);
+    const page = data<IPageResult<{ id: string }>>(response);
+    expect(page.records.map((record) => record.id)).toContain(item.id);
   });
 
   it('AC-17: GET /projects/:slug/memory?text=deployed answers the ranked item for a member', async () => {
