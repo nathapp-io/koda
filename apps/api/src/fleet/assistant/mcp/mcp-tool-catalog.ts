@@ -54,9 +54,10 @@ export const MCP_DESCRIPTIONS: Readonly<Record<string, string>> = {
     `${MCP_PROJECT_SENTENCE}`,
 
   koda_add_memory:
-    "Remember one fact, preference, constraint, incident pattern or note in this project's memory. The call runs " +
-    'at once as the calling agent, so the item is stored by this call and the answer ends with the action id that ' +
-    `names it. A decision goes through koda_record_decision, never here. ${MCP_PROJECT_SENTENCE}`,
+    "Remember one note in this project's memory. The note type is `user` for information about a person, `feedback` " +
+    'for a rule or agreement on how to work, `project` for how this project works, or `reference` for where something ' +
+    'is or how a tool behaves. The call runs at once as the calling agent, so the item is stored by this call and the ' +
+    `answer ends with the action id that names it. A decision goes through koda_record_decision, never here. ${MCP_PROJECT_SENTENCE}`,
 
   koda_record_decision:
     'Record one decision of this project, as a topic and the decision taken on it. The call runs at once as the ' +

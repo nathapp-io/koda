@@ -1,5 +1,8 @@
 import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
 import {
+  MEMORY_NOTE_BODY_MAX_BYTES, MEMORY_NOTE_DESCRIPTION_MAX_CHARS, MEMORY_NOTE_SLUG_RE, MEMORY_NOTE_TYPES,
+} from '../../memory/memory-note';
+import {
   ACTION_TOOL_DESCRIPTORS, FLEET_TOOL_DESCRIPTORS, FLEET_WRITE_TOOL_DESCRIPTORS, KODA_ADD_COMMENT, KODA_ADD_MEMORY,
   KODA_CANCEL_JOB, KODA_RULE_PR_ITEM, KODA_CREATE_TICKETS, KODA_DISPATCH_JOB, KODA_GET_ACTION, KODA_GET_TICKET, KODA_LINK_TICKETS,
   KODA_MY_PROJECTS, KODA_RECORD_DECISION, KODA_REQUEUE_JOB, KODA_SEARCH_TICKETS, KODA_TOOL_DESCRIPTORS,
@@ -257,7 +260,7 @@ describe('US-002 (2b1-D3): the five write descriptors form the last group', () =
     expect(KODA_CREATE_TICKETS.inputSchema).toMatchObject({ additionalProperties: false, required: ['tickets'] });
     expect(KODA_UPDATE_TICKET.inputSchema).toMatchObject({ additionalProperties: false, required: ['ref'] });
     expect(KODA_LINK_TICKETS.inputSchema).toMatchObject({ additionalProperties: false, required: ['links'] });
-    expect(KODA_ADD_MEMORY.inputSchema).toMatchObject({ additionalProperties: false, required: ['kind', 'subject', 'predicate'] });
+    expect(KODA_ADD_MEMORY.inputSchema).toMatchObject({ additionalProperties: false, required: ['slug', 'type', 'description', 'body'] });
     expect(KODA_RECORD_DECISION.inputSchema).toMatchObject({ additionalProperties: false, required: ['topic', 'decision'] });
   });
 
@@ -290,19 +293,28 @@ describe('US-002 (2b1-D5): the write descriptors carry the parser bounds', () =>
     expect(KODA_UPDATE_TICKET.inputSchema).toMatchObject({ required: ['ref'] });
   });
 
-  it('AC-11: koda_add_memory takes the four non-decision kinds and NOTE, in order', () => {
-    expect(propertyOf(KODA_ADD_MEMORY, 'kind').enum).toEqual([
-      'FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE',
-    ]);
+  it('AC-11 (memory-notes US-001): requires only the note fields and closes the schema', () => {
+    expect(KODA_ADD_MEMORY.inputSchema).toMatchObject({
+      additionalProperties: false,
+      required: ['slug', 'type', 'description', 'body'],
+    });
+    expect(Object.keys((KODA_ADD_MEMORY.inputSchema as Schema).properties ?? {}).sort()).toEqual(
+      ['body', 'description', 'slug', 'type'],
+    );
   });
 
-  it('AC-7 (memory-notes US-002): the catalog pins the note kind and the index line bound', () => {
-    const schema = KODA_ADD_MEMORY.inputSchema as { properties?: Record<string, Record<string, unknown>> };
-
-    expect(schema.properties?.['kind']?.['enum']).toEqual([
-      'FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE',
-    ]);
-    expect(schema.properties?.['description']?.['maxLength']).toBe(200);
+  it('memory-notes US-001: pins note type, slug and field limits to shared constants', () => {
+    expect(propertyOf(KODA_ADD_MEMORY, 'type').enum).toEqual(MEMORY_NOTE_TYPES);
+    expect(propertyOf(KODA_ADD_MEMORY, 'slug')).toMatchObject({ pattern: MEMORY_NOTE_SLUG_RE.source });
+    expect(propertyOf(KODA_ADD_MEMORY, 'description')).toMatchObject({
+      minLength: 1, maxLength: MEMORY_NOTE_DESCRIPTION_MAX_CHARS,
+    });
+    expect(propertyOf(KODA_ADD_MEMORY, 'body')).toMatchObject({ minLength: 1, maxLength: MEMORY_NOTE_BODY_MAX_BYTES });
+    expect(propertyOf(KODA_ADD_MEMORY, 'kind')).toEqual({});
+    expect(KODA_ADD_MEMORY.description).toMatch(/`user`/);
+    expect(KODA_ADD_MEMORY.description).toMatch(/`feedback`/);
+    expect(KODA_ADD_MEMORY.description).toMatch(/`project`/);
+    expect(KODA_ADD_MEMORY.description).toMatch(/`reference`/);
   });
 
   it('bounds each item of the two batch tools', () => {
@@ -330,19 +342,13 @@ describe('US-002 (2b1-D5): the write descriptors carry the parser bounds', () =>
     expect(propertyOf(KODA_UPDATE_TICKET, 'description')).toMatchObject({ maxLength: 4000 });
     expect(propertyOf(KODA_UPDATE_TICKET, 'priority').enum).toEqual(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 
-    expect(propertyOf(KODA_ADD_MEMORY, 'subject')).toMatchObject({ minLength: 1, maxLength: 200 });
-    expect(propertyOf(KODA_ADD_MEMORY, 'predicate')).toMatchObject({ minLength: 1, maxLength: 200 });
-    // memory-notes US-002: the cap is the note body's 8192 bytes, so a note's body passes where a triple's 4000
-    // characters would not; the parser still refuses a triple over 4000 characters.
-    expect(propertyOf(KODA_ADD_MEMORY, 'object')).toMatchObject({ maxLength: 8192 });
-
     expect(propertyOf(KODA_RECORD_DECISION, 'topic')).toMatchObject({ minLength: 1, maxLength: 200 });
     expect(propertyOf(KODA_RECORD_DECISION, 'decision')).toMatchObject({ minLength: 1, maxLength: 4000 });
     expect(propertyOf(KODA_RECORD_DECISION, 'rationale')).toMatchObject({ maxLength: 4000 });
   });
 
-  it('never offers DECISION as a memory kind to write (2b-R5 ruling, 2b1-D5)', () => {
-    expect(propertyOf(KODA_ADD_MEMORY, 'kind').enum).not.toContain('DECISION');
+  it('AC-6 (memory-notes US-001): does not expose a legacy kind property', () => {
+    expect((KODA_ADD_MEMORY.inputSchema as Schema).properties).not.toHaveProperty('kind');
   });
 });
 

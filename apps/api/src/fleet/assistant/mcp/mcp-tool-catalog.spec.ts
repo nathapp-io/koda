@@ -109,6 +109,17 @@ describe('US-006 AC-5: MCP_DESCRIPTIONS names koda_get_action and the ten write 
   });
 });
 
+describe('memory-notes US-001 AC-9: MCP describes note types', () => {
+  it('names every supported note type in backticks', () => {
+    const description = byName('koda_add_memory')?.description ?? '';
+    for (const type of ['user', 'feedback', 'project', 'reference']) expect(description).toContain('`' + type + '`');
+    expect(description).toContain('runs at once as the calling agent');
+    expect(description).toContain('the answer ends with the action id');
+    expect(description).toContain(MCP_SENTENCE);
+    expect(description).toContain('A decision goes through koda_record_decision, never here.');
+  });
+});
+
 describe('US-006 AC-6, AC-7: over MCP a write runs at once, it is not proposed', () => {
   it('AC-6: no description keeps the approval wording', () => {
     for (const descriptor of mcp()) {

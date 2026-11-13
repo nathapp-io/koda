@@ -374,9 +374,6 @@ export const ACTION_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [KODA_GET_
 /** 2b1-D5: the four ticket types `koda_create_tickets` accepts, and the four priorities it and `koda_update_ticket` do. */
 const TICKET_TYPES = Object.values(TicketType);
 const PRIORITIES = Object.values(Priority);
-/** 2b1-D5: the memory kinds `koda_add_memory` may write — a decision goes through `koda_record_decision`. Since
- * memory-notes US-002 a note is one of them. */
-const MEMORY_WRITE_KINDS = ['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'] as const;
 /** 2b1-D5: the link kinds `koda_link_tickets` accepts, given or inferred by `TicketLinksService`. */
 const TICKET_LINK_TYPES = ['url', 'pr', 'commit', 'branch'] as const;
 /** The ref rule of `koda_get_ticket` (1b-D5), spelled out here so the catalog imports no service module. */
@@ -509,49 +506,29 @@ export const KODA_LINK_TICKETS: KodaToolDescriptor = {
 export const KODA_ADD_MEMORY: KodaToolDescriptor = {
   name: 'koda_add_memory',
   description:
-    "Remember one fact, preference, constraint, incident pattern or note in this project's memory. The item is " +
-    'stored only after the user approves it: this call proposes it and the user decides, so tell the user it is ' +
-    'waiting for their approval and do not call this tool again for the same item. A decision goes through ' +
-    'koda_record_decision, never here. A note is a slug, a type, a one-line index entry and a Markdown body: ' +
-    '`subject` is its slug, `predicate` its type, `object` its body and `description` the index entry.',
+    "Remember one note in this project's memory. Use `project` for how this project works, `feedback` for a rule or " +
+    'agreement on how to work, `reference` for where something is or how a tool behaves, and `user` for information ' +
+    'about a person. The note is stored only after the user approves it: this call proposes it and the user decides, ' +
+    'so tell the user it is waiting for their approval and do not call this tool again for the same note. A decision ' +
+    'goes through koda_record_decision, never here.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
-    required: ['kind', 'subject', 'predicate'],
+    required: ['slug', 'type', 'description', 'body'],
     properties: {
-      kind: { type: 'string', enum: [...MEMORY_WRITE_KINDS], description: 'Memory kind; DECISION is not accepted' },
-      subject: {
-        type: 'string',
-        minLength: 1,
-        maxLength: MAX_LABEL_CHARS,
-        description:
-          `What the item is about, 1 to ${MAX_LABEL_CHARS} characters after trim; a note's slug, ` +
-          `${MEMORY_NOTE_SLUG_RE.source}`,
-      },
-      predicate: {
-        type: 'string',
-        minLength: 1,
-        maxLength: MAX_LABEL_CHARS,
-        description:
-          `What is said about the subject, 1 to ${MAX_LABEL_CHARS} characters after trim; a note's type, one of ` +
-          `${MEMORY_NOTE_TYPES.join(', ')}`,
-      },
-      object: {
-        type: 'string',
-        maxLength: MEMORY_NOTE_BODY_MAX_BYTES,
-        description:
-          `The value as written: at most ${MAX_BODY_CHARS} characters for a fact, preference, constraint or ` +
-          `incident pattern, and a note's Markdown body, at most ${MEMORY_NOTE_BODY_MAX_BYTES} UTF-8 bytes and ` +
-          'never blank',
-      },
+      slug: { type: 'string', pattern: MEMORY_NOTE_SLUG_RE.source, description: 'Note slug' },
+      type: { type: 'string', enum: [...MEMORY_NOTE_TYPES], description: 'Note type' },
       description: {
         type: 'string',
         minLength: 1,
         maxLength: MEMORY_NOTE_DESCRIPTION_MAX_CHARS,
-        description:
-          "A note's one-line index entry, 1 to " +
-          `${MEMORY_NOTE_DESCRIPTION_MAX_CHARS} characters after trim; required for a note and refused for every ` +
-          'other kind',
+        description: 'One-line index entry',
+      },
+      body: {
+        type: 'string',
+        minLength: 1,
+        maxLength: MEMORY_NOTE_BODY_MAX_BYTES,
+        description: 'Markdown body in UTF-8 bytes',
       },
     },
   },
