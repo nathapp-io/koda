@@ -116,8 +116,8 @@
       "version": "0.1.0",
       "dependencies": {
         "@nathapp/fleet-protocol": "workspace:*",
-        "@nathapp/nax-agent": "0.91.7",
-        "@nathapp/nax-agent-acp": "0.91.7",
+        "@nathapp/nax-agent": "0.92.0",
+        "@nathapp/nax-agent-acp": "0.92.0",
         "commander": "^12.0.0",
       },
       "devDependencies": {
@@ -462,9 +462,11 @@
 
     "@dxup/unimport": ["@dxup/unimport@0.1.2", "", {}, "sha512-/B8YJGPzaYq1NbsQmwgP8EZqg40NpTw4ZB3suuI0TplbxKHeK94jeaawLmVhCv+YwUnOpiWEz9U6SeThku/8JQ=="],
 
-    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.4.0", "", { "dependencies": { "@anthropic-ai/sdk": "0.129.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-telemetry": "1.4.0", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "7.19.0", "partial-json": "0.1.7", "typebox": "1.3.27" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-hQM/C4+1w8rHYACzDDf+0vQMnEnpzIop1tptIERVgR3ZeT/hHSzBNG8PaWPgxWQjqSeKCyBZSyp8uTT6eKK1pQ=="],
+    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.5.0", "", { "dependencies": { "@anthropic-ai/sdk": "0.129.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-schema": "1.5.0", "@earendil-works/pi-telemetry": "1.5.0", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "7.19.0", "partial-json": "0.1.7" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/YoCSN/ZgDnIyCD3pqEXgRyQbzk4KV4uvjbg=="],
 
-    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.4.0", "", {}, "sha512-MLIfowwUYIY65jSjMX82paZOrX/NTvLk6D08h+3Jq42a99RzUOewzuCR0zOlPul3D6UBfddat76VT6LvsHEs1w=="],
+    "@earendil-works/pi-schema": ["@earendil-works/pi-schema@1.5.0", "", {}, "sha512-RW0MbT2tR65OY6xMsgB/yVBb7m/RTNwA+9hurSN1vVXfHZRVmVnXbruBPrx/PzbrQnW5yLVlMRWxErGDQtF1Hg=="],
+
+    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.5.0", "", {}, "sha512-VW3tcVdnNfl/Vk8wHPTzZdKkxcsCOM12ppiO4DXnd9wMxUCmOfLt/wvUnWeKWbTVlVSRg0uqKtnnhE2UCsG2Bw=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.4.3", "", {}, "sha512-ichuWTgtd4mOM1G4SpyGJa5trT03lWbMypDV0fUXUCXg5hiHqVAz/bZyV68NqmkLB7WcYmj1RMJVSp8HV/v/ZQ=="],
 
@@ -840,11 +842,11 @@
 
     "@nathapp/koda-web": ["@nathapp/koda-web@workspace:apps/web"],
 
-    "@nathapp/nax-agent": ["@nathapp/nax-agent@0.91.7", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.91.7", "zod": "^4.3.6" } }, "sha512-TkcIfRJr2IBC7MRBvf4sw1bB1qGrJIC1q7hrwSaCrYQ8OyMT6zXSMwvTvSB73gsFCHx1sgUA9c/d4579IJtNBw=="],
+    "@nathapp/nax-agent": ["@nathapp/nax-agent@0.92.0", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.92.0", "zod": "^4.6.6" } }, "sha512-BecM7GgLQEIBZj7DSA35lYuSiiHz+QDlCA4UglYLonZe9LxRvxCgyVsxBkwfXbf4JSc7wIJ5CuJYzWckO6KxsA=="],
 
-    "@nathapp/nax-agent-acp": ["@nathapp/nax-agent-acp@0.91.7", "", { "dependencies": { "@agentclientprotocol/sdk": "~1.7.0", "@modelcontextprotocol/sdk": "^1.32.1", "zod": "^4.3.6" }, "peerDependencies": { "@nathapp/nax-agent": "^0.91.7" }, "bin": { "nax-agent": "bin/nax-agent.js" } }, "sha512-wnCwZBvlsUv9CTOTDq8313uHYzGcBNCs7NBqH39rgoh47yimovaOiAA1AtwWc3/MIT1sXJs5AjxainLgRCwqvA=="],
+    "@nathapp/nax-agent-acp": ["@nathapp/nax-agent-acp@0.92.0", "", { "dependencies": { "@agentclientprotocol/sdk": "~1.7.0", "@modelcontextprotocol/sdk": "^1.32.1", "zod": "^4.6.6" }, "peerDependencies": { "@nathapp/nax-agent": "^0.92.0" }, "bin": { "nax-agent": "bin/nax-agent.js" } }, "sha512-XCOksIyixp2QR8Zy6dRzriGvDtaUumrZlpPinn1alwkFB8Cyxswa3xjOK3HkbpU8j11f2YdaadKxZZKYqGDtZQ=="],
 
-    "@nathapp/nax-ai": ["@nathapp/nax-ai@0.91.7", "", { "dependencies": { "@earendil-works/pi-ai": "1.4.0", "proper-lockfile": "4.1.2" } }, "sha512-LwwqQyQ4lBpyMeawV8ONhN4OmtCXY3fAZU1bTW6BqH2nOiytrNwJD0fWqSWZyIpJKToS+viO8Hmr6nnTs0YPsA=="],
+    "@nathapp/nax-ai": ["@nathapp/nax-ai@0.92.0", "", { "dependencies": { "@earendil-works/pi-ai": "1.5.0", "proper-lockfile": "4.1.2" } }, "sha512-DcEAlhox6594Gh2XTJt/LK9IihikolsHTnDf4y0FUngPoQC9tDKBal+T7JEIgXekVe3lvmadn1T+ZVf+uQvJGA=="],
 
     "@nathapp/nestjs-app": ["@nathapp/nestjs-app@4.2.4", "", { "dependencies": { "@nathapp/nestjs-auth": "^4.2.4", "@nathapp/nestjs-common": "^4.2.4", "nestjs-i18n": "^10.5.1" }, "peerDependencies": { "@fastify/helmet": "*", "@nathapp/auth": "^1.0.2", "@nathapp/nestjs-cache": "^4.0.0-rc.0", "@nathapp/nestjs-microservices": "^4.0.0-rc.0", "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/config": "^3.0.0 || ^4.0.0 || ^12.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/microservices": "*", "@nestjs/passport": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/platform-express": "*", "@nestjs/platform-fastify": "*", "@nestjs/swagger": "^7.1.1 || ^8.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/websockets": "*", "cache-manager": ">=6", "class-transformer": "*", "class-validator": "*", "helmet": "*", "rxjs": "*" }, "optionalPeers": ["@fastify/helmet", "@nathapp/nestjs-cache", "@nathapp/nestjs-microservices", "@nestjs/microservices", "@nestjs/platform-express", "@nestjs/platform-fastify", "@nestjs/websockets", "cache-manager", "helmet"] }, "sha512-LcrvmA4yGU5UQL2t53Erle91HGwqhjQ95ZEE50WOHn+6hLlPRI6AVPYlbJIyQch0gcHaRbFPKYcdXuZYbyLKbg=="],
 
@@ -3617,8 +3619,6 @@
     "type-is": ["type-is@2.1.0", "", { "dependencies": { "content-type": "^2.0.0", "media-typer": "^1.1.0", "mime-types": "^3.0.0" } }, "sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA=="],
 
     "type-level-regexp": ["type-level-regexp@0.1.17", "", {}, "sha512-wTk4DH3cxwk196uGLK/E9pE45aLfeKJacKmcEgEOA/q5dnPGNxXt0cfYdFxb57L+sEpf1oJH4Dnx/pnRcku9jg=="],
-
-    "typebox": ["typebox@1.3.27", "", {}, "sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

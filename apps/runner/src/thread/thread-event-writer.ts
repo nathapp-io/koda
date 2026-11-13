@@ -190,6 +190,10 @@ export class ThreadEventWriter {
       return;
     }
     const line = e as ThreadSessionRecord;
+    // nax-agent 0.92.0 emits one tool_input_delta per streamed tool-call fragment (a char count, no
+    // content). Nothing reads it, and one line per fragment would eat into the stream cap: drop it
+    // before it can flush held text or schedule a wake.
+    if (line.type === 'tool_input_delta') return;
     if (line.type === 'text_delta') this.onTextDelta(line);
     else if (line.type === 'stream_reset') this.onStreamReset(line);
     else if (line.type === 'turn_end') this.onTurnEnd(line);

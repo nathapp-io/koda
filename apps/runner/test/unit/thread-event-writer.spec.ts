@@ -85,6 +85,20 @@ describe('ThreadEventWriter (US-007)', () => {
     expect(lines.findIndex((line) => line.type === 'text_delta' && line.text === 'x'.repeat(100)) < lines.findIndex((line) => line.type === 'tool_call')).toBe(true);
   });
 
+  test('nax-agent 0.92.0: drops tool_input_delta progress events without flushing held text', async () => {
+    const setup = await makeWriter();
+    if (!setup) return;
+    setup.writer.event(textEvent('held'));
+    for (let i = 0; i < 50; i++) {
+      setup.writer.event({ type: 'tool_input_delta', ...base, round: 1, callId: 'call-1', name: 'write', chars: 64 });
+    }
+    expect(setup.writer.bytes()).toBe(0);
+    setup.writer.event({ type: 'tool_call', ...base, round: 1, toolCallId: 'call-1', name: 'write', input: {} });
+    const lines = await readLines(setup.path);
+    expect(lines.some((line) => line.type === 'tool_input_delta')).toBe(false);
+    expect(lines.map((line) => line.type)).toEqual(['text_delta', 'tool_call']);
+  });
+
   test('US-007 AC-4: discards the pending text for a reset round', async () => {
     const setup = await makeWriter();
     if (!setup) return;
