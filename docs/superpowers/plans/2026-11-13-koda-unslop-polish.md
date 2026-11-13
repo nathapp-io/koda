@@ -46,3 +46,7 @@ Uses unslop by Damir Sokolovsky (https://x.com/heydamir), CC BY 4.0.
 
 - Final populated-board browser check passed: 28px/500 title and 1.5px Lucide stroke in both themes, no document overflow at 1440px or 390px, priority stripe survives hover, mobile drawer closes with Escape. Screenshot: `/tmp/koda-unslop-after.png`. Temporary browser check moved outside repository after verification.
 - After final CSS placement correction: token contrast and ticket component/helper checks passed (64 tests).
+
+## Authorized commit and follow-up audit
+
+On 2026-11-13 the user requested a new branch and commit, superseding the earlier no-commit constraint. Created `style/koda-unslop-page-audit` and committed the polish as `ddfb7b4`. Fresh pre-commit verification passed: 25 targeted Jest suites / 224 tests and changed-file lint. The subsequent [page-by-page audit](../../ux/redesign/UNSLOP-AUDIT-2026-11-13.md) records new pending follow-ups; no product changes from that audit have been applied. No push was requested or performed.
