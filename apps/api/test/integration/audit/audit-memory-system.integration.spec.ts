@@ -202,7 +202,7 @@ describeIntegration('US-003 audited memory tools, outbox extraction and governan
 
   it('AC-1/2: an MCP add-memory call saves the item and records one memory.create entry as the agent', async () => {
     const answer = await callTool('koda_add_memory', {
-      project: SLUG, kind: 'FACT', subject: 'tool', predicate: 'owner', object: 'Private tool fact',
+      project: SLUG, slug: 'tool', type: 'project', description: 'Private tool note', body: 'Private tool fact',
     });
 
     const text = textOf(answer);
@@ -221,7 +221,7 @@ describeIntegration('US-003 audited memory tools, outbox extraction and governan
       actorType: 'AGENT',
       actorId: agentId,
       origin: 'mcp',
-      summary: 'created FACT',
+      summary: 'created NOTE',
     });
     // The entry names the item the tool actually stored.
     expect(await db.memoryItem.count({ where: { id: memoryId, projectId, subject: 'tool' } })).toBe(1);
@@ -258,7 +258,7 @@ describeIntegration('US-003 audited memory tools, outbox extraction and governan
   it('AC-5/6: a rejected memory.create entry fails the call and leaves no item behind', async () => {
     const spy = failAuditFor('memory.create');
     const answer = await callTool('koda_add_memory', {
-      project: SLUG, kind: 'FACT', subject: 'tool-fail', predicate: 'owner',
+      project: SLUG, slug: 'tool-fail', type: 'project', description: 'Failure-path note', body: 'This valid note reaches the audit failure.'
     }).finally(() => spy.mockRestore());
 
     expect(answer.isError).toBe(true);

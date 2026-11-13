@@ -393,16 +393,35 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-14: koda_add_memory over MCP is refused a key another principal owns, and the item stays active', async () => {
-    await postMemory('dev1', { subject: 'ac14:tool', predicate: 'uses', object: 'owned' }).expect(201);
-    const owned = await activeRow('ac14:tool', 'uses');
+    await postMemory('dev1', { subject: 'ac14-tool', predicate: 'project', object: 'owned' }, {
+      kind: 'NOTE', description: 'An existing project note',
+    }).expect(201);
+    const owned = await prisma.memoryItem.findFirst({
+      where: { projectId: p1Id, kind: 'NOTE', subject: 'ac14-tool', status: 'active' },
+      select: { id: true, ownerId: true, ownerType: true, status: true, object: true },
+    });
+    expect(owned).toBeDefined();
 
     const answer = await mcpCall(agentKeys['p1-mem-agent'], 'koda_add_memory', {
-      project: P1_SLUG, kind: 'FACT', subject: 'ac14:tool', predicate: 'uses', object: 'hijack',
+      project: P1_SLUG, slug: 'ac14-tool', type: 'feedback', description: 'Attempted replacement', body: 'hijack',
     });
 
     expect(textOf(answer)).toBe('forbidden: koda_add_memory needs memory.update on p1');
     expect(answer.isError).toBe(true);
-    expect(await activeRow('ac14:tool', 'uses')).toEqual(owned);
+    expect(await prisma.memoryItem.findFirst({
+      where: { projectId: p1Id, kind: 'NOTE', subject: 'ac14-tool', status: 'active' },
+      select: { id: true, ownerId: true, ownerType: true, status: true, object: true },
+    })).toEqual(owned);
+  }, TIMEOUT);
+
+  it('AC-7/8: MCP refuses a legacy FACT triple and creates no row for its subject', async () => {
+    const answer = await mcpCall(agentKeys['p1-mem-agent'], 'koda_add_memory', {
+      project: P1_SLUG, kind: 'FACT', subject: 'ac15:tool', predicate: 'uses', object: 'x',
+    });
+
+    expect(answer.isError).toBe(true);
+    expect(textOf(answer)).toContain('invalid_input: slug');
+    expect(await prisma.memoryItem.count({ where: { projectId: p1Id, subject: 'ac15:tool' } })).toBe(0);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
