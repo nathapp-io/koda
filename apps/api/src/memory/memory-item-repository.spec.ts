@@ -25,6 +25,16 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     isInTransaction: vi.fn(() => false),
   };
 
+  /** The substring term the fallback adds: a case-insensitive `contains` over every searchable field (#456). */
+  const textTerm = (text: string) => ({
+    OR: [
+      { subject: { contains: text, mode: 'insensitive' } },
+      { predicate: { contains: text, mode: 'insensitive' } },
+      { object: { contains: text, mode: 'insensitive' } },
+      { description: { contains: text, mode: 'insensitive' } },
+    ],
+  });
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -113,16 +123,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
   });
 
   describe('case-insensitive text filter', () => {
-    const textTerm = (text: string) => ({
-      OR: [
-        { subject: { contains: text, mode: 'insensitive' } },
-        { predicate: { contains: text, mode: 'insensitive' } },
-        { object: { contains: text, mode: 'insensitive' } },
-        { description: { contains: text, mode: 'insensitive' } },
-      ],
-    });
-
-    it('adds its own AND term over subject, predicate and object without replacing the TTL OR', async () => {
+    it('adds its own AND term over subject, predicate, object and description without replacing the TTL OR', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
@@ -397,7 +398,11 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       expect(rawCalls()).toHaveLength(5);
       expect(rawCalls()[3].sql).toContain('replace(');
       expect(rawCalls()[3].sql).toContain("' | ')::tsquery");
-      expect(mockPrismaClient.memoryItem.count).toHaveBeenCalled();
+      // Both ranked passes came back empty, so the substring path answers — over all four fields, the whole
+      // text as one term (AC-6). A fallback that dropped `description` would leave every other case green.
+      expect(mockPrismaClient.memoryItem.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({ AND: [textTerm('deploy backup')] }),
+      });
     });
 
     it('hydrates any-word matches in rank order without counting through Prisma', async () => {

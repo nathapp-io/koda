@@ -138,7 +138,8 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     const action = await actionOf('ac10');
     expect(action).toMatchObject({ tool: TOOL, status: 'pending', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev });
     expect(content).toBe(`pending ${action.id}: awaiting approval; do not retry`);
-    // The stored preview is the text the user approves: the project slug, the key and the object, no replacement line.
+    // The stored preview is the text the user approves: the project slug, the NOTE header, the index line and the
+    // body, and no replacement line.
     expect(action.preview).toBe(`Remember in web: NOTE ${ITEM.slug} / ${ITEM.type}\n${ITEM.description}\n${ITEM.body}`);
     // The audit row proves the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({

@@ -538,7 +538,7 @@ export class PrismaMemoryItemRepository
 
   /**
    * The project's memory page (permissions P1 US-008, S5b US-004), ranked by full text when the caller
-   * searches (memory-notes US-003).
+   * searches (memory-notes US-003/US-004).
    *
    * A non-blank `text` is first offered to PostgreSQL: when `websearch_to_tsquery('english', text)` has any
    * lexeme, `findRankedByText` answers the page by `ts_rank` over the generated `searchVector` — stemmed,
@@ -546,6 +546,13 @@ export class PrismaMemoryItemRepository
    * Without lexemes (stopwords, punctuation) the pre-feature `contains` path runs unchanged, and it also
    * runs when the ranked query matched nothing: an unsegmented text such as a Chinese phrase has lexemes
    * but segments nothing, so the substring matches it always found are still found here.
+   *
+   * Between those two, US-004 asks for recall: when the all-words pass found nothing and the probe's parsed
+   * `query` is a conjunction of two or more words with no negation (` & ` and no `!`), the same ranked query
+   * runs once more with the words ORed — `replace(<query>::text, ' & ', ' | ')::tsquery` — so a question
+   * whose extra word (`use`, `happens`) no note holds still finds the notes that hold the others, ranked by
+   * how many of them each one matches. A negated word skips that pass, because dropping the negation would
+   * answer what the caller excluded.
    */
   async findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const text = searchText(query.text);

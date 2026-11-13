@@ -516,19 +516,32 @@ export const KODA_ADD_MEMORY: KodaToolDescriptor = {
     additionalProperties: false,
     required: ['slug', 'type', 'description', 'body'],
     properties: {
-      slug: { type: 'string', pattern: MEMORY_NOTE_SLUG_RE.source, description: 'Note slug' },
-      type: { type: 'string', enum: [...MEMORY_NOTE_TYPES], description: 'Note type' },
+      slug: {
+        type: 'string',
+        pattern: MEMORY_NOTE_SLUG_RE.source,
+        description: 'The note\'s slug: lowercase letters, digits and hyphens, 1 to 64 characters, never starting with a hyphen',
+      },
+      type: {
+        type: 'string',
+        enum: [...MEMORY_NOTE_TYPES],
+        description: `The note's type, one of ${MEMORY_NOTE_TYPES.join(', ')}`,
+      },
       description: {
         type: 'string',
         minLength: 1,
         maxLength: MEMORY_NOTE_DESCRIPTION_MAX_CHARS,
-        description: 'One-line index entry',
+        description:
+          'The note\'s one-line index entry, 1 to ' +
+          `${MEMORY_NOTE_DESCRIPTION_MAX_CHARS} characters after trim; never blank`,
       },
       body: {
         type: 'string',
         minLength: 1,
         maxLength: MEMORY_NOTE_BODY_MAX_BYTES,
-        description: 'Markdown body in UTF-8 bytes',
+        description:
+          `The note's Markdown body, never blank: at most ${MEMORY_NOTE_BODY_MAX_BYTES} UTF-8 bytes, not ` +
+          `${MEMORY_NOTE_BODY_MAX_BYTES} characters, so non-ASCII text reaches the cap sooner than maxLength ` +
+          'suggests',
       },
     },
   },

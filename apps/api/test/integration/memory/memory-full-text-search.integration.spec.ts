@@ -271,6 +271,10 @@ describeIntegration('memory full-text search (memory-notes US-003/US-005)', () =
     expect(page.records[0].object).toBe('回放预算保持不变');
   });
 
+  // -------------------------------------------------------------------------
+  // memory-notes US-005 — search quality against Postgres, with its own AC ids (US-003 owns AC-1..AC-13)
+  // -------------------------------------------------------------------------
+
   const addSpecifiedNotes = async () => {
     const fixed = {
       kind: MemoryKind.NOTE,
@@ -285,25 +289,25 @@ describeIntegration('memory full-text search (memory-notes US-003/US-005)', () =
     return { a, d, e };
   };
 
-  it('AC-1: any-word recall ranks the PostgreSQL note first', async () => {
+  it('US-005 AC-1: any-word recall ranks the PostgreSQL note first', async () => {
     const { a } = await addSpecifiedNotes();
     const page = await search('which postgres port do api integration tests use');
     expect(ids(page)[0]).toBe(a.id);
   });
 
-  it('AC-2: rank puts the note matching two query words before one', async () => {
+  it('US-005 AC-2: rank puts the note matching two query words before one', async () => {
     const { d, e } = await addSpecifiedNotes();
     const page = await search('deploy backup restore');
     expect(ids(page).slice(0, 2)).toEqual([d.id, e.id]);
   });
 
-  it('AC-3: all-word match excludes single-word match', async () => {
+  it('US-005 AC-3: all-word match excludes single-word match', async () => {
     const { d } = await addSpecifiedNotes();
     const page = await search('deploy backup');
     expect(ids(page)).toEqual([d.id]);
   });
 
-  it('AC-4: any-word results exclude expired notes by default', async () => {
+  it('US-005 AC-4: any-word results exclude expired notes by default', async () => {
     const { a } = await addSpecifiedNotes();
     const expired = await addItem({
       kind: MemoryKind.NOTE, subject: 'expired-note', predicate: 'project', description: 'expired',
@@ -314,7 +318,7 @@ describeIntegration('memory full-text search (memory-notes US-003/US-005)', () =
     expect(ids(page)).not.toContain(expired.id);
   });
 
-  it('AC-5: any-word results preserve the kind filter', async () => {
+  it('US-005 AC-5: any-word results preserve the kind filter', async () => {
     const { a } = await addSpecifiedNotes();
     const fact = await addItem({ kind: MemoryKind.FACT, subject: 'postgres fact', predicate: 'uses', object: 'Postgres widget.' });
     const page = await search('postgres widget', { current: 1, size: 20 }, { kind: MemoryKind.NOTE });
@@ -322,7 +326,7 @@ describeIntegration('memory full-text search (memory-notes US-003/US-005)', () =
     expect(ids(page)).not.toContain(fact.id);
   });
 
-  it('AC-6: any-word results page without overlap and retain their total', async () => {
+  it('US-005 AC-6: any-word results page without overlap and retain their total', async () => {
     const { d, e } = await addSpecifiedNotes();
     const first = await search('deploy backup restore', { current: 1, size: 1 });
     const second = await search('deploy backup restore', { current: 2, size: 1 });
@@ -334,13 +338,13 @@ describeIntegration('memory full-text search (memory-notes US-003/US-005)', () =
     expect(new Set([ids(first)[0], ids(second)[0]])).toEqual(new Set([d.id, e.id]));
   });
 
-  it('AC-7: explicit updatedAt ordering wins over relevance rank', async () => {
+  it('US-005 AC-7: explicit updatedAt ordering wins over relevance rank', async () => {
     const { d, e } = await addSpecifiedNotes();
     const page = await search('deploy backup restore', { current: 1, size: 20 }, { orderBy: 'updatedAt' });
     expect(ids(page).slice(0, 2)).toEqual([e.id, d.id]);
   });
 
-  it('AC-8: REST text search finds a Chinese description substring', async () => {
+  it('US-005 AC-8: REST text search finds a Chinese description substring', async () => {
     const item = await addItem({
       kind: MemoryKind.NOTE, subject: 'chinese-search', predicate: 'project',
       description: '中文搜索使用子串匹配', object: '全文检索找不到中文词时改用子串匹配',

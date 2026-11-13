@@ -14,10 +14,10 @@ import { KODA_ADD_MEMORY } from '../koda-tool-descriptors';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { asRecord } from './tool-input';
 
-/**
+/*
  * `koda_add_memory` proposes one NOTE in the thread's project and, once approved, stores it as the requester.
  * Decisions are written through `koda_record_decision`; this tool's preview reads the note it would replace but never
- * writes. Its four input fields map to NOTE's subject, predicate, description and body fields.
+ * writes. Its four input fields are the note's own: the slug, the type, the index line and the Markdown body.
  */
 
 /** 2b1-D7: the confidence every memory a thread proposes is stored with. */
@@ -63,9 +63,9 @@ export function addMemoryTool(deps: {
      * requester.
      *
      * memory-notes US-002: a note (slug, type, body, index line) is judged by `noteFieldError` — the one note
-     * validator `POST /memory` also calls — so both write paths refuse the same field for the same bad input. Its
-     * body is capped in UTF-8 bytes by the note limit, never by the triple tool's 4000-character one; a triple can
-     * never carry an index line.
+     * validator `POST /memory` also calls — so both write paths refuse the same field for the same bad input. The
+     * field it names is translated to this tool's own name, and the body is capped in UTF-8 bytes by the note limit,
+     * not characters.
      */
     parse(input: unknown): AddMemoryInput {
       const raw = asRecord(input);
@@ -83,9 +83,9 @@ export function addMemoryTool(deps: {
       return { slug, type, description, body };
     },
     /**
-     * 2b1-D6: the text the user approves — the project slug, the key and then the object. When the project already
-     * holds an active item of that key, the last line shows the item this approval replaces, so the user can see
-     * what changes. The whole text is masked, because the key and the object are user-written.
+     * 2b1-D6: the text the user approves — the project slug, the NOTE header, the index line and then the body. When
+     * the project already holds an active note of that slug, the last line shows the item this approval replaces, so
+     * the user can see what changes. The whole text is masked, because every line is user-written.
      *
      * Permissions P1 US-008: the preview of a write that would supersede another principal's item is refused here,
      * before a proposal exists — `memory.update` with that item's owner is what an approval would need. The refusal is
@@ -150,9 +150,9 @@ export function addMemoryTool(deps: {
 }
 
 /**
- * The last line of a preview: the item this approval replaces. A triple shows its value, because that is what the
- * user compares; a note is named by its id alone, because its body is Markdown the approval text does not need to
- * repeat (US-002).
+ * The last line of a preview: the item this approval replaces. The note this tool proposes is named by its id alone,
+ * because its body is Markdown the approval text does not need to repeat (US-002); the triple form stays for the rows
+ * the REST write path stores, where the value is what the user compares.
  */
 function replacedLine(active: MemoryItem): string {
   // An item with no object is named alone; an empty string is no object (the read tool reads it the same way).

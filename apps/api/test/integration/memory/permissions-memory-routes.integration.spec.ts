@@ -57,6 +57,9 @@ const TICKET_READER_ROLE = 'p1-ticket-reader';
 /** One memory row as the database holds it, narrowed to the fields these cases assert. */
 interface MemoryRow { id: string; ownerId: string | null; ownerType: string | null; status: string; object: string | null }
 
+/** One NOTE row of a slug: every field the note case reads back, so a changed type or index line is noticed. */
+interface NoteRow extends MemoryRow { predicate: string; description: string | null }
+
 /** An MCP `tools/call` result: the SDK's text parts. */
 interface McpAnswer { isError: boolean; content: Array<{ type: string; text: string }> }
 
@@ -81,7 +84,10 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     return body === undefined ? req : req.send(body);
   };
 
-  /** `POST /memory` in `p1` with a FACT item of the named key. */
+  /**
+   * `POST /memory` in `p1`: a FACT item of the named key, unless `extra` overrides the kind — AC-14 seeds a NOTE
+   * this way, with its index line in `extra`.
+   */
   const postMemory = (who: string, key: { subject: string; predicate: string; object?: string }, extra: Record<string, unknown> = {}) =>
     as(who, 'post', '/api/memory', {
       projectId: p1Id, kind: 'FACT', subject: key.subject, predicate: key.predicate,
@@ -99,6 +105,18 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
   /** The one row of the key that is still active, if any. */
   const activeRow = async (subject: string, predicate: string): Promise<MemoryRow | undefined> =>
     (await rows(subject, predicate)).find((row) => row.status === 'active');
+
+  /**
+   * The active NOTE of one slug, if any. The `rows` / `activeRow` helpers above stay keyed on a FACT triple for the
+   * cases that use them; a note's active key is the slug alone (`NOTE:<slug>`), so this lookup keys on it alone.
+   */
+  const activeNote = (slug: string): Promise<NoteRow | null> =>
+    prisma.memoryItem.findFirst({
+      where: { projectId: p1Id, kind: 'NOTE', subject: slug, status: 'active' },
+      select: {
+        id: true, ownerId: true, ownerType: true, status: true, predicate: true, object: true, description: true,
+      },
+    });
 
   /** The refusal contract of one refused permission key: 403, code 40003, the exact sentence. */
   const expectPermissionsRefusal = (res: request.Response): void => {
@@ -396,11 +414,10 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     await postMemory('dev1', { subject: 'ac14-tool', predicate: 'project', object: 'owned' }, {
       kind: 'NOTE', description: 'An existing project note',
     }).expect(201);
-    const owned = await prisma.memoryItem.findFirst({
-      where: { projectId: p1Id, kind: 'NOTE', subject: 'ac14-tool', status: 'active' },
-      select: { id: true, ownerId: true, ownerType: true, status: true, object: true },
-    });
-    expect(owned).toBeDefined();
+    const owned = await activeNote('ac14-tool');
+    // `findFirst` answers null, not undefined, for a missing seed: assert the row itself, or the guard is vacuous.
+    expect(owned).not.toBeNull();
+    expect(owned).toMatchObject({ ownerId: ids.dev1, predicate: 'project', status: 'active', object: 'owned' });
 
     const answer = await mcpCall(agentKeys['p1-mem-agent'], 'koda_add_memory', {
       project: P1_SLUG, slug: 'ac14-tool', type: 'feedback', description: 'Attempted replacement', body: 'hijack',
@@ -408,10 +425,7 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
 
     expect(textOf(answer)).toBe('forbidden: koda_add_memory needs memory.update on p1');
     expect(answer.isError).toBe(true);
-    expect(await prisma.memoryItem.findFirst({
-      where: { projectId: p1Id, kind: 'NOTE', subject: 'ac14-tool', status: 'active' },
-      select: { id: true, ownerId: true, ownerType: true, status: true, object: true },
-    })).toEqual(owned);
+    expect(await activeNote('ac14-tool')).toEqual(owned);
   }, TIMEOUT);
 
   it('AC-7/8: MCP refuses a legacy FACT triple and creates no row for its subject', async () => {

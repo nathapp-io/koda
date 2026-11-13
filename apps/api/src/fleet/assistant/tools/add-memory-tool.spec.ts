@@ -92,7 +92,13 @@ describe('koda_add_memory notes (US-002)', () => {
       expect(reasonOf(() => toolDeps().tool.parse(missing))).toBe(expected);
       expect(reasonOf(() => toolDeps().tool.parse({ ...valid, [key]: 7 }))).toBe(expected);
     }
+    // Each earlier field wins over a later one that is bad too, so the order is pinned, not just slug-first.
     expect(reasonOf(() => toolDeps().tool.parse({ ...valid, slug: 7, type: 7, body: 7, description: 7 }))).toBe('slug');
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, type: 7, body: 7, description: 7 }))).toBe('type');
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, body: 7, description: 7 }))).toBe('body');
+    const missingBody = { ...valid, description: 7 } as Record<string, unknown>;
+    delete missingBody['body'];
+    expect(reasonOf(() => toolDeps().tool.parse(missingBody))).toBe('body');
   });
   it('AC-12: translates each noteFieldError result to the tool field', () => {
     expect(reasonOf(() => toolDeps().tool.parse({ ...valid, slug: 'Bad Slug' }))).toBe('slug');
@@ -170,5 +176,9 @@ describe('koda_add_memory notes (US-002)', () => {
   it('turns a concurrent replacement refusal into a forbidden action', async () => {
     const { tool } = toolDeps({ failsReplace: true });
     await expect(tool.execute(ctx, tool.parse(valid))).rejects.toBeInstanceOf(ToolActionError);
+    // The refusal the agent reads names the key an approval would need, as the decision tool's does.
+    await expect(tool.execute(ctx, tool.parse(valid))).rejects.toMatchObject({
+      text: 'forbidden: memory:m1 needs memory.update',
+    });
   });
 });
