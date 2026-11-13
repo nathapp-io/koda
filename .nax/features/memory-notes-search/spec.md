@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Memory notes from agents, and search that finds them
 
 Closes: #456
@@ -104,57 +103,68 @@ The any-word pass is plain Postgres full-text search over the existing generated
 - The any-word pass is not run for a text containing a negated word.
 - The web memory page and settings card are not changed.
 - `ContextBuilderService`'s memory read, which passes no text, is not changed.
-- US-001 only: the note limits (slug pattern, 200-character description, 8192-byte body) are not re-pinned through the tool; `noteFieldError`'s existing specs pin them, and the tool only translates the field name it reports.
-- US-001 only: the preview's `Replaces memory:<id>` line keeps its current behaviour; the existing cases that pin it are rewritten to note inputs under `### Modifies`, not re-specified.
-- US-002 only: the `forbidden` refusal for replacing another principal's note keeps its current behaviour; the existing permissions case that pins it is rewritten to note inputs under `### Modifies`, not re-specified.
-- US-004 only: the any-word pass reuses the all-words query's filter list unchanged, so the status, soft-delete, project-scope and subject-prefix filters are pinned by one representative case each in the existing full-text specs, not repeated per pass.
+- Approval requests for `koda_add_memory` that are still pending at deploy time and carry a legacy triple input are not migrated; approving one after deploy answers `invalid_input: slug`.
+- US-002 only: the note limits (slug pattern, 200-character description, 8192-byte body) are not re-pinned through the tool; `noteFieldError`'s existing specs pin them, and the tool only translates the field name it reports.
+- US-002 only: the preview's `Replaces memory:<id>` line keeps its current behaviour; the existing cases that pin it are rewritten to note inputs under `### Modifies`, not re-specified.
+- US-003 only: the `forbidden` refusal for replacing another principal's note keeps its current behaviour; the existing permissions case that pins it is rewritten to note inputs under `### Modifies`, not re-specified.
+- US-005 only: the any-word pass reuses the all-words query's filter list unchanged, so the status, soft-delete, project-scope and subject-prefix filters are pinned by one representative case each in the existing full-text specs, not repeated per pass.
 
 ## Stories
 
-### US-001: `koda_add_memory` takes notes only (descriptor, parser, preview, MCP text)
+### US-001: `koda_add_memory` descriptor and MCP text describe notes only
 
 No dependencies. Workdir: `apps/api`.
 
-Change the `KODA_ADD_MEMORY` descriptor, `addMemoryTool`'s `parse` and `preview`, and `MCP_DESCRIPTIONS.koda_add_memory` to the note-only target in Design § Integration: input `{ slug, type, description, body }`, all required, type-checked in the order `slug`, `type`, `body`, `description`, then judged by `noteFieldError` with its field names translated to the tool's own. `execute` writes the NOTE through the existing upsert. Remove both `MEMORY_WRITE_KINDS` definitions, `MemoryWriteKind`, `MAX_KEY_CHARS` and `MAX_OBJECT_CHARS`; verification note: `bunx turbo type-check` and `bunx turbo lint` report no remaining reference.
+Change `KODA_ADD_MEMORY` in `koda-tool-descriptors.ts` to the target input schema and description in Design § Integration (`slug`, `type`, `description`, `body`, all required, no `kind`), and `MCP_DESCRIPTIONS.koda_add_memory` in `mcp-tool-catalog.ts` to the note-only first sentence. Remove the descriptor file's `MEMORY_WRITE_KINDS`; verification note: `bunx turbo type-check` and `bunx turbo lint` report no remaining reference.
 
-### US-002: Thread and MCP notes end to end
+### US-002: `koda_add_memory` parses, previews and stores notes only
 
-Depends on US-001. Workdir: `apps/api`.
+No dependencies. Workdir: `apps/api`.
+
+Change `addMemoryTool`'s `parse`, `preview` and `execute` to the note-only target in Design § Integration: input `{ slug, type, description, body }`, type-checked in the order `slug`, `type`, `body`, `description`, then judged by `noteFieldError` with its field names translated to the tool's own; stored as a NOTE through the existing upsert. Remove `MEMORY_WRITE_KINDS`, `MemoryWriteKind`, `MAX_KEY_CHARS` and `MAX_OBJECT_CHARS` from `add-memory-tool.ts`; verification note: `bunx turbo type-check` and `bunx turbo lint` report no remaining reference.
+
+### US-003: Thread and MCP notes end to end
+
+Depends on US-001, US-002. Workdir: `apps/api`.
 
 Prove the note-only tool through its real entry points: the runner tool-call route a thread uses (propose, approve, stored NOTE, supersede by slug) and the MCP call path (a legacy triple is refused). Rewrite the existing integration specs that propose FACT triples through `koda_add_memory` to note inputs.
 
-### US-003: Search pass order and the description in the substring fallback
+### US-004: Search pass order and the description in the substring fallback
 
 No dependencies. Workdir: `apps/api`.
 
 Change `PrismaMemoryItemRepository.findByProjectMemory` to the three-step order in Design § Integration: all words, then any word (only when the probe's `query` holds ` & ` and no `!`), then the substring fallback, whose text term also matches `description` (#456). The probe selects the query's text form beside `numnode`.
 
-### US-004: Search quality against Postgres
+### US-005: Search quality against Postgres
 
-Depends on US-003. Workdir: `apps/api`.
+Depends on US-004. Workdir: `apps/api`.
 
-Prove the any-word pass and the description fallback against a real database: ranking by matched words, the default TTL filter, the kind filter, paging, the REST route (`GET /projects/:slug/memory?text=`) and the `koda_memory_search` tool.
+Prove the any-word pass and the description fallback against a real database: ranking by matched words, the default TTL filter, the kind filter, paging, an explicit order, the REST route (`GET /projects/:slug/memory?text=`) and the `koda_memory_search` tool.
 
 ### Context Files
 
 **US-001**
-- `apps/api/src/fleet/assistant/tools/add-memory-tool.ts` — the tool to change
 - `apps/api/src/fleet/assistant/koda-tool-descriptors.ts` — `KODA_ADD_MEMORY` and its `MEMORY_WRITE_KINDS`
-- `apps/api/src/memory/memory-note.ts` — `noteFieldError` and the note limits
-- `apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts` — `MCP_DESCRIPTIONS.koda_add_memory`
+- `apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts` — `MCP_DESCRIPTIONS.koda_add_memory`, `mcpToolDescriptors()`
+- `apps/api/src/memory/memory-note.ts` — the note constants the schema reuses
 
 **US-002**
-- `apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts` — the runner tool-call harness
-- `apps/api/test/integration/memory/permissions-memory-routes.integration.spec.ts` — the `mcpCall` helper and the MCP AC-14 case
-- `apps/api/test/integration/audit/audit-memory-system.integration.spec.ts` — the `callTool` MCP helper
+- `apps/api/src/fleet/assistant/tools/add-memory-tool.ts` — the tool to change
+- `apps/api/src/memory/memory-note.ts` — `noteFieldError` and the note limits
+- `apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts` — `toolDeps()`, the `upsert` spy and the `ctx` fixture
 
 **US-003**
+- `apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts` — the runner tool-call harness
+- `apps/api/test/integration/memory/permissions-memory-routes.integration.spec.ts` — the `mcpCall`, `postMemory`, `rows` and `activeRow` helpers
+- `apps/api/test/integration/audit/audit-memory-system.integration.spec.ts` — the `callTool` MCP helper
+
+**US-004**
 - `apps/api/src/memory/prisma-memory-item.repository.ts` — `findByProjectMemory`, `findRankedByText`, `findByContains`, `hasSearchLexemes`, `tsQuery`
 - `apps/api/src/memory/memory-item-repository.spec.ts` — the unit harness (`rawCalls`, `ranked`)
 
-**US-004**
+**US-005**
 - `apps/api/test/integration/memory/memory-full-text-search.integration.spec.ts` — the DB and REST harness (its AC-17 drives `GET /projects/:slug/memory?text=`)
-- `apps/api/test/integration/fleet/assistant-memory-tools.integration.spec.ts` — the `koda_memory_search` harness
+- `apps/api/test/integration/fleet/assistant-memory-tools.integration.spec.ts` — the `koda_memory_search` harness and its shared seed
 - `apps/api/src/fleet/assistant/tools/knowledge-tools.ts` — `koda_memory_search`
 
 ### Creates
@@ -175,30 +185,37 @@ None.
 
 None.
 
+**US-005**
+
+None.
+
 ### Modifies
 
 **US-001**
-- `apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts` — its parse, preview and execute cases build triple inputs (kind FACT with subject, predicate, object) and assert the five-kind list, the 4000-character triple object limit and that a triple carrying a description is refused; the tool now takes slug, type, description and body only, so these cases are rewritten to note inputs (the Replaces-line preview cases keep their assertions with a NOTE active item), and the triple-only cases are replaced by the note-field refusals in the US-001 ACs.
-- `apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts` — it asserts `KODA_ADD_MEMORY.inputSchema.required` is kind, subject, predicate (line ~260), the kind enum of five kinds (lines ~293-306), the subject and predicate 1..200 bounds and the object maxLength 8192 (lines ~333-337), and that kind excludes DECISION (line ~345); these become assertions on the slug, type, description and body properties (slug pattern, type enum, description 1..200, body maxLength 8192) and on the absence of a kind property, never deleted outright.
+- `apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts` — it asserts `KODA_ADD_MEMORY.inputSchema.required` is kind, subject, predicate (line ~260), the kind enum of five kinds (lines ~293-306), the subject and predicate 1..200 bounds and the object maxLength 8192 (lines ~333-337), and that kind excludes DECISION (line ~345); these become assertions on the slug, type, description and body properties as the US-001 ACs state, never deleted outright.
+- `apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts` — one new case for the `koda_add_memory` MCP description is added; no existing assertion changes, and the description keeps the sentences its existing cases check (runs at once as the calling agent, the action id, the MCP sentence).
+
+**US-002**
+- `apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts` — its parse, preview and execute cases build triple inputs (kind FACT with subject, predicate, object) and assert the five-kind list, the 4000-character triple object limit and that a triple carrying a description is refused; the tool now takes slug, type, description and body only, so these cases are rewritten to note inputs (the Replaces-line preview cases keep their assertions with a NOTE active item), and the triple-only cases are replaced by the note-field refusals in the US-002 ACs.
 - `apps/api/src/fleet/assistant/tools/origin-tools.spec.ts` — it parses the triple kind FACT, subject s, predicate p, which now refuses for slug; the input becomes a valid note (slug, type, description, body) and the origin assertion is unchanged.
 - `apps/api/src/fleet/assistant/assistant.module.spec.ts` — its per-key input map gives memory.create the triple kind FACT with subject, predicate and object; that entry becomes a valid note input so the write-tool registration cases keep parsing.
 
-**US-002**
-- `apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts` — its ITEM constant (line ~41), the storedItems/storedItem lookups (lines ~69, ~75) and the beforeEach cleanup (line ~125) key on the FACT triple api / runs on, and its preview assertion expects a header naming FACT; ITEM becomes a note with one fixed slug, the lookups and the cleanup key on kind NOTE and that slug (the cleanup deletes every row of the slug so no Replaces line leaks between cases), and the preview assertion expects the NOTE header followed by the description and body lines.
-- `apps/api/test/integration/memory/permissions-memory-routes.integration.spec.ts` — AC-14 seeds the FACT key ac14:tool through postMemory (which hardcodes kind FACT) and calls `koda_add_memory` over MCP with that triple; the seed passes extra kind NOTE with a valid slug and a description, the MCP call sends that slug as a note, and the assertion that the call is refused naming memory.update and the seeded item stays active is unchanged.
-- `apps/api/test/integration/audit/audit-memory-system.integration.spec.ts` — its `koda_add_memory` MCP calls send kind FACT triples and one assertion expects the audit summary created FACT (line ~219); the calls become valid note inputs (including the failure case at lines ~260-262, which must stay a valid note so it still reaches the audit failure path rather than an invalid_input refusal) and the summary assertion expects created NOTE.
-
 **US-003**
-- `apps/api/src/memory/memory-item-repository.spec.ts` — the substring cases (the textTerm helper and the falls-back-to-contains case) assert the text term is an OR over exactly subject, predicate and object; the term now also matches description, so those expected objects gain the description contains term with mode insensitive. The probe assertion (probe SQL contains numnode(websearch_to_tsquery( ) stays true by the Target's no-alias probe form.
+- `apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts` — its ITEM constant (line ~41), the storedItems/storedItem lookups (lines ~69, ~75) and the beforeEach cleanup (line ~125) key on the FACT triple api / runs on, and its preview assertion expects a header naming FACT; ITEM becomes a note with one fixed slug whose body keeps the word bun (its AC-12 searches text bun), the lookups and the cleanup key on kind NOTE and that slug (the cleanup deletes every row of the slug so no Replaces line leaks between cases), and the preview assertion expects the NOTE header followed by the description and body lines.
+- `apps/api/test/integration/memory/permissions-memory-routes.integration.spec.ts` — AC-14 seeds the FACT key ac14:tool / uses through postMemory (which hardcodes kind FACT) and reads it back through the rows and activeRow helpers (which filter kind FACT and key on subject and predicate); the seed passes extra kind NOTE with subject ac14-tool, predicate project and a description, the rows and activeRow helpers filter kind NOTE and key on the slug alone, the MCP call sends slug ac14-tool with type feedback and a body, and the case first asserts the seeded item is defined, then keeps the assertions that the call is refused naming memory.update and the seeded item is still active and unchanged.
+- `apps/api/test/integration/audit/audit-memory-system.integration.spec.ts` — its `koda_add_memory` MCP calls send kind FACT triples and one assertion expects the audit summary created FACT (line ~219); the calls become valid note inputs keeping the slugs tool (line ~227) and tool-fail (line ~266), the failure case stays a valid note so it still reaches the audit failure path rather than an invalid_input refusal, and the summary assertion expects created NOTE.
 
 **US-004**
+- `apps/api/src/memory/memory-item-repository.spec.ts` — the substring cases (the textTerm helper and the falls-back-to-contains case) assert the text term is an OR over exactly subject, predicate and object; the term now also matches description, so those expected objects gain the description contains term with mode insensitive. The ranked() helper gains an optional probe query value (default none, so existing cases keep a probe row without query). The probe assertion (probe SQL contains numnode(websearch_to_tsquery( ) stays true by the Target's no-alias probe form.
+
+**US-005**
 - `apps/api/test/integration/memory/memory-full-text-search.integration.spec.ts` — new any-word and description cases are added beside the existing ones; no existing assertion changes.
-- `apps/api/test/integration/fleet/assistant-memory-tools.integration.spec.ts` — one new `koda_memory_search` case for a question-shaped text is added; no existing assertion changes.
+- `apps/api/test/integration/fleet/assistant-memory-tools.integration.spec.ts` — one new `koda_memory_search` case is added that creates its own note C (updatedAt older than every shared seed row) and deletes it afterwards, so the shared seed's page and total assertions are unchanged.
 
 ### Seams
 
-- US-002 consumes US-001's tool change through the existing runner tool-call route and MCP path; US-001 adds no new exported symbol.
-- US-004 consumes US-003's repository change through `GET /projects/:slug/memory` and `koda_memory_search`; US-003 adds no new exported symbol.
+- US-003 consumes US-001's descriptor and US-002's tool through the existing runner tool-call route and MCP path; neither adds a new exported symbol.
+- US-005 consumes US-004's repository change through `GET /projects/:slug/memory` and `koda_memory_search`; US-004 adds no new exported symbol.
 
 ## Acceptance Criteria
 
@@ -206,19 +223,28 @@ None.
 
 - AC-1 [unit] `KODA_ADD_MEMORY.inputSchema.required` equals `['slug', 'type', 'description', 'body']`.
 - AC-2 [unit] `KODA_ADD_MEMORY.inputSchema.properties.type.enum` equals `MEMORY_NOTE_TYPES` (`user`, `feedback`, `project`, `reference`).
-- AC-3 [unit] `addMemoryTool(...).parse({ slug: 'deploy-steps', type: 'project', description: 'How to deploy', body: 'Run deploy.sh' })` returns exactly `{ slug: 'deploy-steps', type: 'project', description: 'How to deploy', body: 'Run deploy.sh' }`.
-- AC-4 [unit] `parse` given that valid note plus `ownerId: 'someone-else'` and `kind: 'FACT'` returns exactly the same four note fields.
-- AC-5 [unit] `parse` with `slug: 'Deploy Steps'` throws `ToolInputError` whose `reason` is `slug`.
-- AC-6 [unit] `parse` with `type: 'constraint'` throws `ToolInputError` whose `reason` is `type`.
-- AC-7 [unit] `parse` with no `description` throws `ToolInputError` whose `reason` is `description`.
-- AC-8 [unit] `parse` with `body: '   '` throws `ToolInputError` whose `reason` is `body`.
-- AC-9 [unit] `parse({ kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' })` throws `ToolInputError` whose `reason` is `slug`.
-- AC-10 [unit] `parse({ slug: 'Bad Slug', type: 5, description: 'd', body: 'b' })` throws `ToolInputError` whose `reason` is `type`, because type checks run before `noteFieldError`.
-- AC-11 [unit] `preview` of a valid note with no active note of that slug answers exactly `Remember in <projectSlug>: NOTE <slug> / <type>`, then the description, then the body, as three lines.
-- AC-12 [unit] `execute` of a valid note calls the repository `upsert` with `kind` NOTE, `subject` = slug, `predicate` = type, `object` = body and `description` as given.
-- AC-13 [unit] The MCP description of `koda_add_memory` returned by `mcpToolDescriptors()` names all four note types `user`, `feedback`, `project` and `reference`.
+- AC-3 [unit] `KODA_ADD_MEMORY.inputSchema.properties.slug.pattern` equals `MEMORY_NOTE_SLUG_RE.source`.
+- AC-4 [unit] `KODA_ADD_MEMORY.inputSchema.properties.description` has `minLength` 1 and `maxLength` 200.
+- AC-5 [unit] `KODA_ADD_MEMORY.inputSchema.properties.body.maxLength` equals `MEMORY_NOTE_BODY_MAX_BYTES` (8192).
+- AC-6 [unit] `KODA_ADD_MEMORY.inputSchema.properties` has no `kind` property.
+- AC-7 [unit] `KODA_ADD_MEMORY.inputSchema.additionalProperties` is false.
+- AC-8 [unit] `KODA_ADD_MEMORY.description` names each of `` `user` ``, `` `feedback` ``, `` `project` `` and `` `reference` `` in backticks.
+- AC-9 [unit] The `koda_add_memory` description returned by `mcpToolDescriptors()` names each of `` `user` ``, `` `feedback` ``, `` `project` `` and `` `reference` `` in backticks.
 
 ### US-002
+
+- AC-1 [unit] `addMemoryTool(...).parse({ slug: 'deploy-steps', type: 'project', description: 'How to deploy', body: 'Run deploy.sh' })` returns exactly `{ slug: 'deploy-steps', type: 'project', description: 'How to deploy', body: 'Run deploy.sh' }`.
+- AC-2 [unit] `parse` given that valid note plus `ownerId: 'someone-else'` and `kind: 'FACT'` returns exactly the same four note fields.
+- AC-3 [unit] `parse` with `slug: 'Deploy Steps'` throws `ToolInputError` whose `reason` is `slug`.
+- AC-4 [unit] `parse` with `type: 'constraint'` throws `ToolInputError` whose `reason` is `type`.
+- AC-5 [unit] `parse` with no `description` throws `ToolInputError` whose `reason` is `description`.
+- AC-6 [unit] `parse` with `body: '   '` throws `ToolInputError` whose `reason` is `body`.
+- AC-7 [unit] `parse({ kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' })` throws `ToolInputError` whose `reason` is `slug`.
+- AC-8 [unit] `parse({ slug: 'Bad Slug', type: 5, description: 'd', body: 'b' })` throws `ToolInputError` whose `reason` is `type`, because type checks run before `noteFieldError`.
+- AC-9 [unit] `preview` of a valid note with no active note of that slug answers exactly `Remember in <projectSlug>: NOTE <slug> / <type>`, then the description, then the body, as three lines.
+- AC-10 [unit] `execute` of a valid note calls the repository `upsert` with `kind` NOTE, `subject` = slug, `predicate` = type, `object` = body and `description` as given.
+
+### US-003
 
 - AC-1 [integration] Through the runner tool-call route that `assistant-add-memory-tool.integration.spec.ts` drives, the runner holding dev's RUNNING thread job calls `koda_add_memory` with a valid note and is answered pending.
 - AC-2 [integration] While that proposal waits for dev, the project has no memory item with that slug.
@@ -229,26 +255,26 @@ None.
 - AC-7 [integration] In `permissions-memory-routes.integration.spec.ts`, an agent's MCP `koda_add_memory` call with `{ project, kind: 'FACT', subject: 'ac15:tool', predicate: 'uses', object: 'x' }` answers `invalid_input: slug`.
 - AC-8 [integration] After that refused MCP call, the project has no memory item whose `subject` is `ac15:tool`.
 
-### US-003
+### US-004
 
 - AC-1 [unit] The lexeme probe's SQL selects `numnode(websearch_to_tsquery(` and `::text AS "query"`, binding the search text and `english`.
 - AC-2 [unit] When the probe answers `lexemes` 1 with no `query`, and the all-words ranked query matches nothing, `findByProjectMemory` issues exactly three raw queries before the substring path.
-- AC-3 [unit] When the probe answers `query` `'deploy' & !'backup'` and the all-words query matches nothing, no further ranked query runs before the substring path.
+- AC-3 [unit] When the probe answers `query` `'deploy' & !'backup'` and the all-words query matches nothing, no further raw query runs before the substring path.
 - AC-4 [unit] When the probe answers `query` `'deploy' & 'backup'` and the all-words query matches nothing, the fourth raw query's SQL contains `replace(` and `' | ')::tsquery`.
-- AC-5 [unit] In that case, when the any-word ids query answers ids `mem-2, mem-1` with count 2, `findByProjectMemory` returns records in the order `mem-2`, `mem-1` and the substring path is not called.
-- AC-6 [unit] When both ranked passes match nothing, the substring path's text term is an OR over `subject`, `predicate`, `object` and `description`, each a case-insensitive `contains` of the text.
-- AC-7 [unit] When the all-words query matches rows, no any-word query runs.
+- AC-5 [unit] In that case, when the any-word ids query answers ids `mem-2, mem-1` with count 2, `findByProjectMemory` returns records in the order `mem-2`, `mem-1` and `memoryItem.count` is not called.
+- AC-6 [unit] When the probe answers `query` `'deploy' & 'backup'` and both ranked passes match nothing, the substring path's text term is an OR over `subject`, `predicate`, `object` and `description`, each a case-insensitive `contains` of the text.
+- AC-7 [unit] When the probe answers `query` `'deploy' & 'backup'` and the all-words query matches rows, exactly three raw queries run.
 
-### US-004
+### US-005
 
-Fixtures: notes in one project, each `kind` NOTE, active, with these bodies (descriptions are short labels without query words): A `API integration specs need the compose test Postgres on port 5433.`; B `Run web unit tests with bunx jest.`; C `When a budget window is exceeded, dispatch pauses.`; D `Deploy runs build-images then deploy.sh, which takes a backup.`; E `Restore from the newest dump.`
+Fixtures: five notes in one project, each `kind` NOTE, active, `predicate` `project`, subjects `note-a` to `note-e`, descriptions `label a` to `label e`, with these bodies: A `API integration specs need the compose test Postgres on port 5433.`; B `Run web unit tests with bunx jest.`; C `When a budget window is exceeded, dispatch pauses.`; D `Deploy runs build-images then deploy.sh, which takes a backup.`; E `Restore from the newest dump.` E's `updatedAt` is set later than D's.
 
 - AC-1 [integration] `findByProjectMemory` with `text: 'which postgres port do api integration tests use'` (no note holds `use`) returns A as its first record.
 - AC-2 [integration] With `text: 'deploy backup restore'` (no note holds all three), D (two of the words) is listed before E (one word, `restore`).
 - AC-3 [integration] With `text: 'deploy backup'`, which D holds both words of, the result is D alone.
-- AC-4 [integration] With `status` not given, a NOTE whose `ttlAt` is in the past and whose body holds `postgres` is not returned for `text: 'postgres widget'`.
-- AC-5 [integration] With `kind: 'NOTE'` and `text: 'postgres widget'`, a FACT row whose object holds `postgres` is not returned.
+- AC-4 [integration] With `status` not given and `text: 'postgres widget'`, the result holds A and not a second NOTE whose `ttlAt` is in the past and whose body holds `postgres`.
+- AC-5 [integration] With `kind: 'NOTE'` and `text: 'postgres widget'`, the result holds A and not a FACT row whose object holds `postgres`.
 - AC-6 [integration] With `text: 'deploy backup restore'` and page size 1, page 1 and page 2 each answer one record, the two records differ, and `total` is 2.
-- AC-7 [integration] With `text: 'deploy backup restore'` and `orderBy: 'updatedAt'`, the more recently updated of D and E comes first.
+- AC-7 [integration] With `text: 'deploy backup restore'` and `orderBy: 'updatedAt'`, E comes before D.
 - AC-8 [integration] (#456) A note whose description is `中文搜索使用子串匹配` and whose body is `全文检索找不到中文词时改用子串匹配` is returned for `text: '中文搜索'` through `GET /projects/:slug/memory?text=`.
 - AC-9 [integration] `koda_memory_search` called in a thread with `text: 'what happens when the budget is exceeded'` answers the `memory:<id>` of C.
