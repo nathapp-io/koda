@@ -1,466 +1,159 @@
 import type { MemoryItem } from '../../../memory/memory-item-repository';
-import { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
-import { MemoryReplaceRefusedError, MemoryWriteGuard } from '../../../memory/memory-write.guard';
+import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import { MemoryReplaceRefusedError, type MemoryWriteGuard } from '../../../memory/memory-write.guard';
 import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
-import { KODA_ADD_MEMORY } from '../koda-tool-descriptors';
 import { addMemoryTool, type AddMemoryInput } from './add-memory-tool';
 
-/**
- * Fleet S5b 2b1 US-006: the memory tool's parser, its masked project-scoped preview (with the replacement line) and
- * its requester-attributed upsert. The tool is pure over one collaborator here — the DB-backed path (route, propose,
- * approve, `koda_memory_search`) is `test/integration/fleet/assistant-add-memory-tool.integration.spec.ts`.
- */
-
 const ctx = {
-  projectId: 'project-1',
-  projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
-  threadId: 'thread-1',
-  jobId: 'job-1',
-  now: new Date('2026-10-23T09:00:00.000Z'),
-  data: (text: string) => text,
+  projectId: 'project-1', projectSlug: 'web', actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
+  threadId: 'thread-1', jobId: 'job-1', now: new Date('2026-10-23T09:00:00.000Z'), data: (text: string) => text,
 } as unknown as ToolContext;
-
-/** A stored memory item, with the three fields the replacement line reads. */
-const item = (over: Partial<MemoryItem>): MemoryItem =>
-  ({
-    id: 'm1', projectId: 'project-1', kind: 'FACT', subject: 'api', predicate: 'runs on',
-    status: 'active', confidence: 0.8, createdAt: new Date(0), updatedAt: new Date(0), ...over,
-  }) as MemoryItem;
-
-/** The token a preview must never show: a GitHub PAT shape (`ghp_` plus 36 alphanumerics). */
-const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
-
+const item = (over: Partial<MemoryItem>): MemoryItem => ({
+  id: 'm1', projectId: 'project-1', kind: 'NOTE', subject: 'deploy-steps', predicate: 'project',
+  status: 'active', confidence: 0.8, createdAt: new Date(0), updatedAt: new Date(0), ...over,
+}) as MemoryItem;
 type UpsertArgs = Parameters<PrismaMemoryItemRepository['upsert']>[0];
 type UpsertOptions = NonNullable<Parameters<PrismaMemoryItemRepository['upsert']>[1]>;
-
-/**
- * The tool over its collaborators; the defaults answer "no active item" and "saved as m3". `US-008` added the
- * guard: `replaceCheck` answers a spy the upsert would run inside its transaction, and `refusesReplace` makes both
- * halves of the check refuse (the preview's `assertMayReplace` and the in-transaction callback).
- */
-function toolDeps(over: {
-  active?: MemoryItem | null;
-  saved?: MemoryItem;
-  refusesReplace?: boolean;
-  failsReplace?: boolean;
-} = {}) {
+function toolDeps(over: { active?: MemoryItem | null; saved?: MemoryItem; refusesReplace?: boolean; failsReplace?: boolean } = {}) {
   const findActive = vi.fn(async () => over.active ?? null);
-  const beforeSupersede = vi.fn(async (): Promise<void> => {
-    if (over.refusesReplace) throw new MemoryReplaceRefusedError('m1');
-  });
+  const beforeSupersede = vi.fn(async (): Promise<void> => { if (over.refusesReplace) throw new MemoryReplaceRefusedError('m1'); });
   const upsert = vi.fn(async (_item: UpsertArgs, _options?: UpsertOptions) => {
     if (over.failsReplace) throw new MemoryReplaceRefusedError('m1');
     return over.saved ?? item({ id: 'm3' });
   });
   const guard = {
-    assertMayReplace: vi.fn(async () => {
-      if (over.refusesReplace) throw new MemoryReplaceRefusedError('m1');
-    }),
+    assertMayReplace: vi.fn(async () => { if (over.refusesReplace) throw new MemoryReplaceRefusedError('m1'); }),
     replaceCheck: vi.fn(() => beforeSupersede),
   };
   const memory = { findActive, upsert } as unknown as PrismaMemoryItemRepository;
   const record = vi.fn(async (): Promise<void> => undefined);
   const audit = { record } as unknown as AuditRecorder;
-  return {
-    findActive,
-    upsert,
-    guard,
-    beforeSupersede,
-    record,
-    tool: addMemoryTool({ memory, guard: guard as unknown as MemoryWriteGuard, audit }),
-  };
+  return { findActive, upsert, guard, beforeSupersede, record,
+    tool: addMemoryTool({ memory, guard: guard as unknown as MemoryWriteGuard, audit }) };
 }
-
-/** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
 function reasonOf(run: () => unknown): string {
-  try {
-    run();
-  } catch (error) {
+  try { run(); } catch (error) {
     expect(error).toBeInstanceOf(ToolInputError);
     return (error as ToolInputError).reason;
   }
   throw new Error('expected the parser to refuse this input');
 }
-
-/** The tool's preview; fails loudly when a write tool declares none. */
 function previewOf(tool: AssistantTool<AddMemoryInput>, input: AddMemoryInput): Promise<string> {
-  const preview = tool.preview;
-  if (!preview) throw new Error('koda_add_memory declares no preview');
-  return preview(ctx, input);
+  if (!tool.preview) throw new Error('koda_add_memory declares no preview');
+  return tool.preview(ctx, input);
 }
+const valid = { slug: 'deploy-steps', type: 'project', description: 'How to deploy', body: 'Run deploy.sh' };
+const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 
-/** A valid input, with the fields each test overrides. */
-const draft = (over: Record<string, unknown> = {}): Record<string, unknown> =>
-  ({ kind: 'FACT', subject: 'api', predicate: 'runs on', ...over });
-
-describe('koda_add_memory parse (US-006)', () => {
-  it('AC-1: kind DECISION refuses with reason kind', () => {
-    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'DECISION', subject: 's', predicate: 'p' }))).toBe('kind');
+describe('koda_add_memory notes (US-002)', () => {
+  it('AC-1: parses a valid note exactly', () => {
+    expect(toolDeps().tool.parse(valid)).toEqual(valid);
   });
-
-  it('accepts the four non-decision kinds and refuses every other kind', () => {
-    const tool = toolDeps().tool;
-
-    for (const kind of ['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN']) {
-      expect(tool.parse({ kind, subject: 's', predicate: 'p' }).kind).toBe(kind);
-    }
-    for (const kind of ['decision', 'MEMO', 7, undefined, null]) {
-      expect(reasonOf(() => tool.parse({ kind, subject: 's', predicate: 'p' }))).toBe('kind');
-    }
+  it('AC-2: drops all keys except the four note fields', () => {
+    expect(toolDeps().tool.parse({ ...valid, ownerId: 'someone-else', kind: 'FACT', subject: 'legacy' })).toEqual(valid);
   });
-
-  it('AC-2: a blank subject refuses with reason subject', () => {
-    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'FACT', subject: ' ', predicate: 'p' }))).toBe('subject');
+  it('AC-3: invalid slug is refused as slug', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, slug: 'Deploy Steps' }))).toBe('slug');
   });
-
-  it('judges subject and predicate on their trimmed length, and keeps them as written', () => {
-    const tool = toolDeps().tool;
-    const long = 'a'.repeat(200);
-
-    expect(reasonOf(() => tool.parse(draft({ subject: '' })))).toBe('subject');
-    expect(reasonOf(() => tool.parse(draft({ subject: 7 })))).toBe('subject');
-    expect(reasonOf(() => tool.parse(draft({ subject: `${long}a` })))).toBe('subject');
-    expect(reasonOf(() => tool.parse(draft({ predicate: '   ' })))).toBe('predicate');
-    expect(reasonOf(() => tool.parse(draft({ predicate: 7 })))).toBe('predicate');
-    expect(reasonOf(() => tool.parse(draft({ predicate: `${long}a` })))).toBe('predicate');
-
-    const parsed = tool.parse(draft({ subject: `  ${long}  `, predicate: '  runs on  ' }));
-    expect(parsed.subject).toBe(`  ${long}  `);
-    expect(parsed.predicate).toBe('  runs on  ');
+  it('AC-4: invalid type is refused as type', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, type: 'constraint' }))).toBe('type');
   });
-
-  it('AC-3: a caller-supplied ownerId is dropped before the proposal (2b-R5)', () => {
-    const parsed = toolDeps().tool.parse({ kind: 'FACT', subject: 's', predicate: 'p', ownerId: 'someone' });
-
-    expect(parsed).toEqual({ kind: 'FACT', subject: 's', predicate: 'p' });
-    expect(Object.keys(parsed)).toEqual(['kind', 'subject', 'predicate']);
-    expect('ownerId' in parsed).toBe(false);
+  it('AC-5: missing description is refused as description', () => {
+    const { description: _description, ...input } = valid;
+    expect(reasonOf(() => toolDeps().tool.parse(input))).toBe('description');
   });
-
-  it('takes an optional object of at most 4000 characters after trim, kept as written', () => {
-    const tool = toolDeps().tool;
-    const who = 'a'.repeat(4_000);
-
-    expect(tool.parse(draft()).object).toBeUndefined();
-    expect(tool.parse(draft({ object: who })).object).toBe(who);
-    expect(tool.parse(draft({ object: `  ${who}  ` })).object).toBe(`  ${who}  `);
-    expect(tool.parse(draft({ object: '' })).object).toBe('');
-    expect(reasonOf(() => tool.parse(draft({ object: `${who}a` })))).toBe('object');
-    expect(reasonOf(() => tool.parse(draft({ object: 7 })))).toBe('object');
+  it('AC-6: blank body is refused as body', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, body: '   ' }))).toBe('body');
   });
-
-  it('is a write tool for project members, with the memory write descriptor (2b1-D4, 2b1-D8)', () => {
-    const tool = toolDeps().tool;
-    expect(tool.descriptor).toBe(KODA_ADD_MEMORY);
-    expect(tool.descriptor.name).toBe('koda_add_memory');
-    expect(tool.kind).toBe('write');
-    expect(tool.key).toBe('memory.create');
+  it('AC-7: a legacy triple without slug is refused as slug', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' }))).toBe('slug');
   });
-});
-
-describe('koda_add_memory preview (US-006)', () => {
-  it('AC-4: with no active item it answers exactly the header and the object line', async () => {
-    const { findActive, tool } = toolDeps();
-
-    const preview = await previewOf(tool, tool.parse(draft({ object: 'bun' })));
-
-    expect(preview).toBe('Remember in web: FACT api / runs on\nbun');
-    expect(findActive.mock.calls).toEqual([['project-1', 'FACT', 'api', 'runs on']]);
+  it('AC-8: required field type checks finish before note validation', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ slug: 'Bad Slug', type: 5, description: 'd', body: 'b' }))).toBe('type');
   });
-
-  it('AC-5: an active item with an object is the last line, as Replaces memory:<id>: <object>', async () => {
-    const { tool } = toolDeps({ active: item({ id: 'm1', object: 'node' }) });
-
-    const preview = await previewOf(tool, tool.parse(draft({ object: 'bun' })));
-
-    expect(preview).toBe('Remember in web: FACT api / runs on\nbun\nReplaces memory:m1: node');
-    expect(preview.split('\n').at(-1)).toBe('Replaces memory:m1: node');
+  it('AC-9: preview is exactly the three requested note lines', async () => {
+    expect(await previewOf(toolDeps().tool, toolDeps().tool.parse(valid)))
+      .toBe('Remember in web: NOTE deploy-steps / project\nHow to deploy\nRun deploy.sh');
   });
-
-  it('AC-6: an active item without an object is the last line, as Replaces memory:<id>', async () => {
-    const { tool } = toolDeps({ active: item({ id: 'm1' }) });
-
-    const preview = await previewOf(tool, tool.parse(draft()));
-
-    expect(preview.split('\n').at(-1)).toBe('Replaces memory:m1');
-    expect(preview).toBe('Remember in web: FACT api / runs on\nReplaces memory:m1');
-  });
-
-  it('names the project slug and the kind and leaves the object line out when there is no object', async () => {
-    const { tool } = toolDeps();
-
-    const preview = await previewOf(tool, tool.parse({ kind: 'CONSTRAINT', subject: 'deploys', predicate: 'need' }));
-
-    expect(preview).toBe('Remember in web: CONSTRAINT deploys / need');
-  });
-
-  it('reads the replacement through the project-scoped key, never a cross-project query', async () => {
-    const { findActive, tool } = toolDeps({ active: item({ id: 'm1' }) });
-
-    await previewOf(tool, tool.parse({ kind: 'PREFERENCE', subject: '  tabs  ', predicate: 'over spaces' }));
-
-    expect(findActive.mock.calls).toEqual([['project-1', 'PREFERENCE', '  tabs  ', 'over spaces']]);
-  });
-
-  it('masks a token written into the object, and writes nothing', async () => {
+  it('AC-10: execute upserts the mapped NOTE and preserves attribution, replacement and audit hooks', async () => {
     const { upsert, tool } = toolDeps();
-
-    const preview = await previewOf(tool, tool.parse(draft({ object: `token=${TOKEN}` })));
-
+    await tool.execute(ctx, tool.parse(valid));
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-1', kind: 'NOTE', subject: 'deploy-steps', predicate: 'project',
+      object: 'Run deploy.sh', description: 'How to deploy', sourceType: 'thread', sourceId: 'thread-1',
+      confidence: 0.8, ownerId: 'dev-1', ownerType: 'USER',
+    }), { beforeSupersede: expect.any(Function), onWritten: expect.any(Function) });
+  });
+  it('AC-11: the first missing or non-string required field is refused in specified order', () => {
+    for (const [key, expected] of [['slug', 'slug'], ['type', 'type'], ['body', 'body'], ['description', 'description']] as const) {
+      const missing = { ...valid } as Record<string, unknown>;
+      delete missing[key];
+      expect(reasonOf(() => toolDeps().tool.parse(missing))).toBe(expected);
+      expect(reasonOf(() => toolDeps().tool.parse({ ...valid, [key]: 7 }))).toBe(expected);
+    }
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, slug: 7, type: 7, body: 7, description: 7 }))).toBe('slug');
+  });
+  it('AC-12: translates each noteFieldError result to the tool field', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, slug: 'Bad Slug' }))).toBe('slug');
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, type: 'misc' }))).toBe('type');
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, body: '' }))).toBe('body');
+    expect(reasonOf(() => toolDeps().tool.parse({ ...valid, description: ' ' }))).toBe('description');
+  });
+  it('shows replacement by note id and masks secrets without writing during preview', async () => {
+    const { findActive, upsert, tool } = toolDeps({ active: item({ id: 'm9', object: 'old body' }) });
+    const preview = await previewOf(tool, tool.parse({ ...valid, body: `token=${TOKEN}` }));
+    expect(preview).toContain('Replaces memory:m9');
     expect(preview).not.toContain(TOKEN);
     expect(preview).toContain('token=[masked]');
+    expect(findActive).toHaveBeenCalledWith('project-1', 'NOTE', valid.slug, valid.type);
     expect(upsert).not.toHaveBeenCalled();
   });
-
-  // -------------------------------------------------------------------------
-  // Permissions P1 US-008 — the preview refuses a supersede it may not make
-  // -------------------------------------------------------------------------
-
-  it('US-008: the preview asks the guard about the item\'s own key before anything is proposed', async () => {
-    const { guard, tool } = toolDeps();
-
-    await previewOf(tool, tool.parse(draft({ object: 'bun' })));
-
+  it('checks the NOTE key in the preview and carries the transaction replace check into upsert', async () => {
+    const { guard, beforeSupersede, upsert, tool } = toolDeps();
+    await previewOf(tool, tool.parse(valid));
     expect(guard.assertMayReplace).toHaveBeenCalledWith(ctx.actor, 'project-1', {
-      kind: 'FACT', subject: 'api', predicate: 'runs on',
+      kind: 'NOTE', subject: valid.slug, predicate: valid.type,
     });
-  });
-
-  it('US-008: a refused replace is a forbidden refusal naming memory.update, not a proposal', async () => {
-    const { guard, upsert, tool } = toolDeps({ refusesReplace: true });
-
-    await expect(previewOf(tool, tool.parse(draft()))).rejects.toThrow(ToolForbiddenError);
-    await expect(previewOf(tool, tool.parse(draft()))).rejects.toMatchObject({ need: 'memory.update' });
-    expect(guard.replaceCheck).not.toHaveBeenCalled();
-    expect(upsert).not.toHaveBeenCalled();
-  });
-});
-
-describe('koda_add_memory execute (US-006)', () => {
-  it('AC-7: upserts once, attributed to the requester, in the thread, with confidence 0.8 (2b-R5, 2b1-D7)', async () => {
-    const { upsert, tool } = toolDeps();
-
-    await tool.execute(ctx, tool.parse(draft({ object: 'bun' })));
-
-    expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert).toHaveBeenCalledWith(
-      {
-        projectId: 'project-1',
-        kind: 'FACT',
-        subject: 'api',
-        predicate: 'runs on',
-        object: 'bun',
-        sourceType: 'thread',
-        sourceId: 'thread-1',
-        confidence: 0.8,
-        ownerId: 'dev-1',
-        // US-008: every principal-driven write records which table its owner names.
-        ownerType: 'USER',
-      },
-      { beforeSupersede: expect.any(Function), onWritten: expect.any(Function) },
-    );
-  });
-
-  it('AC-8: the stored item answers memory:<id> saved', async () => {
-    const { tool } = toolDeps({ saved: item({ id: 'm3' }) });
-
-    expect(await tool.execute(ctx, tool.parse(draft({ object: 'bun' })))).toBe('memory:m3 saved');
-  });
-
-  it('omits the object key when the parser saw none, so the item is stored without one', async () => {
-    const { upsert, tool } = toolDeps();
-
-    await tool.execute(ctx, tool.parse(draft()));
-
-    const input = upsert.mock.calls[0]?.[0] as UpsertArgs;
-    expect(Object.keys(input)).toEqual([
-      'projectId', 'kind', 'subject', 'predicate', 'sourceType', 'sourceId', 'confidence', 'ownerId', 'ownerType',
-    ]);
-  });
-
-  it('ignores a caller-supplied ownerId: the upsert still carries the requester', async () => {
-    const { upsert, tool } = toolDeps();
-
-    await tool.execute(ctx, tool.parse(draft({ ownerId: 'someone' })));
-
-    expect(upsert.mock.calls[0]?.[0]).toMatchObject({ ownerId: 'dev-1' });
-  });
-
-  // -------------------------------------------------------------------------
-  // Permissions P1 US-008 — the replace check and the owner type
-  // -------------------------------------------------------------------------
-
-  it('US-008: hands the upsert the guard\'s replace check for its own transaction', async () => {
-    const { upsert, guard, beforeSupersede, tool } = toolDeps();
-
-    await tool.execute(ctx, tool.parse(draft()));
-
+    await tool.execute(ctx, tool.parse(valid));
     expect(guard.replaceCheck).toHaveBeenCalledWith(ctx.actor, 'project-1');
     expect(upsert.mock.calls[0]?.[1]).toEqual({ beforeSupersede, onWritten: expect.any(Function) });
   });
-
-  it('US-008: an agent stores its item with ownerType AGENT', async () => {
+  it('stores an agent owner as AGENT', async () => {
     const { upsert, tool } = toolDeps();
     const agentCtx = { ...ctx, actor: { ...ctx.actor, actorType: 'agent', id: 'agent-1' } } as unknown as ToolContext;
-
-    await tool.execute(agentCtx, tool.parse(draft()));
-
+    await tool.execute(agentCtx, tool.parse(valid));
     expect(upsert.mock.calls[0]?.[0]).toMatchObject({ ownerId: 'agent-1', ownerType: 'AGENT' });
   });
-
-  it('US-008: a supersede the store refuses is a forbidden action, never a generic failure', async () => {
-    const { tool } = toolDeps({ failsReplace: true });
-
-    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toThrow(ToolActionError);
-    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toMatchObject({
-      text: 'forbidden: memory:m1 needs memory.update',
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// memory-notes US-002 — a NOTE through the same parser, preview and upsert
-// ---------------------------------------------------------------------------
-
-/** A valid note input, with the fields each test overrides. */
-const note = (over: Record<string, unknown> = {}): Record<string, unknown> =>
-  ({ kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'b', description: 'd', ...over });
-
-describe('koda_add_memory notes (US-002)', () => {
-  it('AC-1: a note input is returned with its description', () => {
-    const parsed = toolDeps().tool.parse(note());
-
-    expect(parsed).toEqual({
-      kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'b', description: 'd',
-    });
-  });
-
-  it('AC-2: the note validator judges the slug and the type, naming each field', () => {
-    expect(reasonOf(() => toolDeps().tool.parse(note({ subject: 'Bad Slug' })))).toBe('subject');
-    expect(reasonOf(() => toolDeps().tool.parse(note({ predicate: 'misc' })))).toBe('predicate');
-  });
-
-  it('AC-3: a note without a description is refused for description', () => {
-    const { kind: _kind, subject, predicate, object } = note();
-
-    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'NOTE', subject, predicate, object }))).toBe('description');
-  });
-
-  it('AC-4: a triple carrying a description is refused for description', () => {
-    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'FACT', subject: 's', predicate: 'p', description: 'd' })))
-      .toBe('description');
-    // The same input without one is accepted, so the refusal is the description and nothing else.
-    expect(toolDeps().tool.parse({ kind: 'FACT', subject: 's', predicate: 'p' })).toEqual({
-      kind: 'FACT', subject: 's', predicate: 'p',
-    });
-  });
-
-  it('AC-5: a note body is capped by the note limit, a triple object by the tool limit', () => {
-    const body = 'a'.repeat(8_000);
-
-    expect(toolDeps().tool.parse(note({ object: body })).object).toBe(body);
-    expect(reasonOf(() => toolDeps().tool.parse(draft({ object: 'a'.repeat(4_001) })))).toBe('object');
-    // The 8192-byte cap is still the note's own: 4097 two-byte characters are 8194 bytes.
-    expect(reasonOf(() => toolDeps().tool.parse(note({ object: 'é'.repeat(4_097) })))).toBe('object');
-  });
-
-  it('AC-18: a body or description the note validator refuses names that field', () => {
-    expect(reasonOf(() => toolDeps().tool.parse(note({ object: '   ' })))).toBe('object');
-    expect(reasonOf(() => toolDeps().tool.parse(note({ description: 'd'.repeat(201) })))).toBe('description');
-    expect(reasonOf(() => toolDeps().tool.parse(note({ description: 7 })))).toBe('description');
-  });
-
-  it('AC-9: the preview names the note in its first line and carries the description', async () => {
-    const { tool } = toolDeps();
-
-    const preview = await previewOf(tool, tool.parse(note({ description: 'replay budget' })));
-
-    expect(preview.split('\n')[0]).toBe('Remember in web: NOTE replay-budget / project');
-    expect(preview).toContain('replay budget');
-  });
-
-  it('AC-6: while another type of the same slug is active, the preview ends with the note it replaces', async () => {
-    const { findActive, tool } = toolDeps({
-      active: item({
-        id: 'm9', kind: 'NOTE', subject: 'replay-budget', predicate: 'project',
-        object: 'the old body', description: 'old budget',
-      }),
-    });
-
-    const preview = await previewOf(tool, tool.parse(note({ predicate: 'feedback', description: 'new budget' })));
-
-    // The slug is what keys a note (US-001), so a changed type still names the active note.
-    expect(findActive.mock.calls).toEqual([['project-1', 'NOTE', 'replay-budget', 'feedback']]);
-    expect(preview.split('\n').at(-1)).toBe('Replaces memory:m9');
-  });
-
-  it('AC-8: execute stores the note with its description and answers memory:<id> saved', async () => {
-    const { upsert, tool } = toolDeps({ saved: item({ id: 'm4', kind: 'NOTE' }) });
-
-    expect(await tool.execute(ctx, tool.parse(note()))).toBe('memory:m4 saved');
-
-    const input = upsert.mock.calls[0]?.[0] as UpsertArgs;
-    expect(input).toMatchObject({ kind: 'NOTE', subject: 'replay-budget', predicate: 'project', description: 'd' });
-    expect(input.description).toBe('d');
-  });
-
-  it('never stores a note without the index line the parser required', async () => {
-    const { upsert, tool } = toolDeps();
-
-    await tool.execute(ctx, tool.parse(note({ description: 'replay budget' })));
-
-    const input = upsert.mock.calls[0]?.[0] as UpsertArgs;
-    expect(input.description).toBe('replay budget');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Permissions P2 US-003 — the tool records the write it made, in the store's transaction
-// ---------------------------------------------------------------------------
-
-describe('koda_add_memory audit (US-003)', () => {
-  it('AC-14: execute hands the upsert an onWritten that records memory.create for the new item', async () => {
-    const record = vi.fn(async (): Promise<void> => undefined);
-    const audit = { record } as unknown as AuditRecorder;
+  it('propagates audit failures instead of hiding them', async () => {
     const beforeSupersede = vi.fn(async (): Promise<void> => undefined);
-    const upsert = vi.fn(async (_item: UpsertArgs, options?: UpsertOptions) => {
-      await options?.onWritten?.({
-        item: { id: 'm-1', projectId: 'p-1', kind: 'FACT' } as MemoryItem,
-        superseded: null,
-      });
+    const upsert = vi.fn(async (_input: UpsertArgs, options?: UpsertOptions) => {
+      await options?.onWritten?.({ item: { id: 'm-1', projectId: 'project-1', kind: 'NOTE' } as MemoryItem, superseded: null });
       return item({ id: 'm-1' });
     });
     const guard = { assertMayReplace: vi.fn(async () => undefined), replaceCheck: vi.fn(() => beforeSupersede) };
     const tool = addMemoryTool({
       memory: { findActive: vi.fn(async () => null), upsert } as unknown as PrismaMemoryItemRepository,
       guard: guard as unknown as MemoryWriteGuard,
-      audit,
+      audit: { record: vi.fn(async () => { throw new Error('audit down'); }) } as unknown as AuditRecorder,
     });
-
-    await tool.execute(ctx, tool.parse(draft()));
-
-    expect(record).toHaveBeenCalledTimes(1);
-    expect(record).toHaveBeenCalledWith({
-      key: 'memory.create',
-      resourceType: 'memory-item',
-      resourceId: 'm-1',
-      projectId: 'p-1',
-      summary: 'created FACT',
-    });
+    await expect(tool.execute(ctx, tool.parse(valid))).rejects.toThrow('audit down');
   });
-
-  it('US-003: a refused memory.create entry propagates, so the store rolls the write back', async () => {
-    const record = vi.fn(async (): Promise<void> => {
-      throw new Error('audit down');
-    });
+  it('refuses a replacement without memory.update during preview', async () => {
+    const { guard, upsert, tool } = toolDeps({ refusesReplace: true });
+    await expect(previewOf(tool, tool.parse(valid))).rejects.toBeInstanceOf(ToolForbiddenError);
+    expect(guard.replaceCheck).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+  it('returns the saved memory id', async () => {
+    const { tool } = toolDeps({ saved: item({ id: 'm4' }) });
+    await expect(tool.execute(ctx, tool.parse(valid))).resolves.toBe('memory:m4 saved');
+  });
+  it('runs the audit hook through upsert and records a NOTE creation', async () => {
+    const record = vi.fn(async (): Promise<void> => undefined);
     const beforeSupersede = vi.fn(async (): Promise<void> => undefined);
-    const upsert = vi.fn(async (_item: UpsertArgs, options?: UpsertOptions) => {
-      await options?.onWritten?.({
-        item: { id: 'm-1', projectId: 'p-1', kind: 'FACT' } as MemoryItem,
-        superseded: null,
-      });
+    const upsert = vi.fn(async (_input: UpsertArgs, options?: UpsertOptions) => {
+      await options?.onWritten?.({ item: { id: 'm-1', projectId: 'project-1', kind: 'NOTE' } as MemoryItem, superseded: null });
       return item({ id: 'm-1' });
     });
     const guard = { assertMayReplace: vi.fn(async () => undefined), replaceCheck: vi.fn(() => beforeSupersede) };
@@ -469,9 +162,13 @@ describe('koda_add_memory audit (US-003)', () => {
       guard: guard as unknown as MemoryWriteGuard,
       audit: { record } as unknown as AuditRecorder,
     });
-
-    // Not a MemoryReplaceRefusedError, so it is not re-labelled as a forbidden action.
-    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toThrow('audit down');
-    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.not.toBeInstanceOf(ToolActionError);
+    await tool.execute(ctx, tool.parse(valid));
+    expect(record).toHaveBeenCalledWith({
+      key: 'memory.create', resourceType: 'memory-item', resourceId: 'm-1', projectId: 'project-1', summary: 'created NOTE',
+    });
+  });
+  it('turns a concurrent replacement refusal into a forbidden action', async () => {
+    const { tool } = toolDeps({ failsReplace: true });
+    await expect(tool.execute(ctx, tool.parse(valid))).rejects.toBeInstanceOf(ToolActionError);
   });
 });

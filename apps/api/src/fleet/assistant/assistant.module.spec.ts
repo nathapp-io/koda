@@ -20,7 +20,7 @@ const commandSamples: Record<string, unknown> = {
   'ticket.create': { tickets: [{ title: 'A ticket', type: 'TASK' }] },
   'ticket.update': { ref: 'KODA-1', title: 'Updated' },
   'ticket.link.add': { links: [{ ref: 'KODA-1', url: 'https://example.com' }] },
-  'memory.create': { kind: 'FACT', subject: 'subject', predicate: 'predicate', object: 'value' },
+  'memory.create': { slug: 'subject', type: 'project', description: 'A memory note', body: 'value' },
   'memory.decision.record': { topic: 'topic', decision: 'decision' },
   'fleet.job.dispatch': { repo: 'owner/repo', command: 'RUN', feature: 'feature', maxCostUsd: 1 },
   'fleet.job.cancel': { jobId: 'j1' },
