@@ -15,8 +15,8 @@ defineProps<{
         <slot name="icon" />
       </div>
       <div class="min-w-0">
-        <h1 class="text-3xl font-bold tracking-tight">{{ title }}</h1>
-        <p v-if="subtitle" class="mt-2 text-muted-foreground">{{ subtitle }}</p>
+        <h1 class="text-[28px] font-medium leading-8 tracking-tight">{{ title }}</h1>
+        <p v-if="subtitle" class="mt-2 text-sm leading-6 text-muted-foreground">{{ subtitle }}</p>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 sm:justify-end">

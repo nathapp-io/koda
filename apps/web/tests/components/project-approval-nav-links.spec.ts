@@ -104,8 +104,8 @@ describe('us-006: the slug the link points at', () => {
   test('the links carry the sidebar\'s link and active classes', () => {
     const m = mountLinks('koda', ['approval.decide'])
 
-    expect(String(m.anchors()[0]?.props.class)).toContain('rounded-md px-2.5 py-1.5')
-    expect(m.anchors()[0]?.props['data-active-class']).toBe('bg-accent text-accent-foreground')
+    expect(String(m.anchors()[0]?.props.class)).toContain('rounded-md px-3 py-1.5')
+    expect(m.anchors()[0]?.props['data-active-class']).toBe('bg-muted text-foreground ring-1 ring-inset ring-border [&>svg]:text-link')
     m.app.unmount()
   })
 

@@ -48,13 +48,13 @@ function ticketsForStatus(status: string): Ticket[] {
         v-for="status in COLUMNS"
         :key="status"
         :data-testid="`board-column-${status}`"
-        class="w-72 flex flex-col gap-2 rounded-lg bg-muted/50 border border-border/60 p-2.5"
+        class="w-72 flex flex-col gap-2 rounded-lg bg-muted/50 border border-border/60 p-3"
       >
         <div :data-testid="`board-column-header-${status}`" class="flex h-8 items-center justify-between mb-1">
           <div class="flex items-center gap-2">
             <span :class="[TICKET_DOT_CLASS, statusDotClass(status)]" aria-hidden="true" />
-            <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
-            <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
+            <span class="text-sm font-medium">{{ t(`tickets.status.${status}`) }}</span>
+            <span class="font-mono text-xs tabular-nums text-muted-foreground">{{ ticketsForStatus(status).length }}</span>
           </div>
           <Button
             v-if="status === 'CREATED'"

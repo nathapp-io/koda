@@ -34,7 +34,7 @@ Based on Tailwind defaults + shadcn conventions.
 
 | Element | Class | Usage |
 |:--------|:------|:------|
-| Page title | `text-3xl font-bold tracking-tight` | One per page, top of content area |
+| Page title | `text-[28px] font-medium leading-8 tracking-tight` | One per page, top of content area |
 | Page subtitle | `text-muted-foreground mt-2` | Optional description below title |
 | Section heading | `text-xl font-semibold` | Card titles, section dividers |
 | Body text | `text-sm` | Default for all content |
@@ -64,6 +64,8 @@ classes through `tailwind.config.ts`. Never hardcode hex or palette classes (`bg
 ### Core tokens
 `background foreground card muted accent primary destructive border input ring` — one indigo
 accent (`--primary: 243 75% 55%` light / `243 80% 64%` dark); semantic colors only for state.
+
+Dark surfaces use low-saturation slate (6–10% saturation). Hover surfaces are neutral; active sidebar rows use a quiet hairline and an indigo icon.
 
 `--primary` is a fill color. Text and icon accents on a surface (links, "New ticket", active icons) use
 `text-link` (`--link`: equal to primary in light, `243 80% 74%` in dark) so they clear 4.5:1 on dark
@@ -99,7 +101,7 @@ classes come from `lib/ticket-chips.ts` (`TICKET_CHIP_CLASS`, `TICKET_DOT_CLASS`
   <span :class="[TICKET_DOT_CLASS, statusDotClass(ticket.status)]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}
 </span>
 ```
-Ticket cards additionally carry a left priority stripe (`priorityStripeClass`).
+Ticket cards additionally carry a left priority stripe (`priorityStripeClass`). Their priority label omits the repeated dot; type chips use neutral text. Board column counts are plain, muted tabular figures.
 
 ---
 
@@ -142,7 +144,7 @@ Ticket cards additionally carry a left priority stripe (`priorityStripeClass`).
 ## Icons
 
 - **Library**: `lucide-vue-next` (already installed).
-- **Size**: `h-4 w-4` for inline, `h-5 w-5` for nav/header, `h-8 w-8` or larger for empty states.
+- **Size**: `h-4 w-4` for inline and navigation icons; larger sizes remain for contextual illustrations and empty states. Lucide stroke width is 1.5 throughout.
 - **Never** use emoji in components — always use Lucide icons.
 
 ### Common Icons
@@ -205,3 +207,9 @@ Ticket cards additionally carry a left priority stripe (`priorityStripeClass`).
 ---
 
 *Created: 2026-03-29. Update when visual decisions change.*
+
+## Focused polish — 2026-11-13
+
+Sidebar group labels use sentence case, 12px/500, 24px above and 8px below. Compact links remain at least 32px high; the existing mobile drawer and 224px sidebar are retained. Board columns have 12px padding and 8px card gaps. Shared page titles use 28px/500. Keep existing translations, system font, chart colors, semantic workflow colors and keyboard focus.
+
+Audit and treatment informed by unslop by [Damir Sokolovsky](https://x.com/heydamir), CC BY 4.0.

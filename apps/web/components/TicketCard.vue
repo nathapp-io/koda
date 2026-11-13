@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, priorityDotClass, priorityStripeClass, typeChipClass } from '~/lib/ticket-chips'
+import { TICKET_CHIP_CLASS, priorityStripeClass, typeChipClass } from '~/lib/ticket-chips'
 
 interface Assignee {
   kind: 'user' | 'agent'
@@ -53,11 +53,11 @@ const githubPrWithState = computed(() => {
 })
 
 function prStateVariant(state: string): string {
-  if (state === 'merged') return 'bg-green-500'
-  if (state === 'open') return 'bg-blue-500'
-  if (state === 'draft') return 'bg-gray-400'
-  if (state === 'closed') return 'bg-red-500'
-  return 'bg-gray-400'
+  if (state === 'merged') return 'bg-status-done'
+  if (state === 'open') return 'bg-status-active'
+  if (state === 'draft') return 'bg-status-todo'
+  if (state === 'closed') return 'bg-status-rejected'
+  return 'bg-status-todo'
 }
 </script>
 
@@ -65,7 +65,7 @@ function prStateVariant(state: string): string {
   <Card
     role="button"
     tabindex="0"
-    :class="['cursor-pointer border-l-4 shadow-none transition-colors hover:border-ring/60 hover:bg-accent/40', priorityStripeClass(ticket.priority)]"
+    :class="['cursor-pointer border-l-4 shadow-none transition-colors hover:bg-muted/40', priorityStripeClass(ticket.priority)]"
     @click="emit('open')"
     @keydown.enter.self="emit('open')"
     @keydown.space.self.prevent="emit('open')"
@@ -80,7 +80,7 @@ function prStateVariant(state: string): string {
               {{ t(`tickets.type.${ticket.type}`) }}
             </span>
             <span :class="TICKET_CHIP_CLASS">
-              <span :class="[TICKET_DOT_CLASS, priorityDotClass(ticket.priority)]" aria-hidden="true" />{{ t(`tickets.priority.${ticket.priority}`) }}
+              {{ t(`tickets.priority.${ticket.priority}`) }}
             </span>
             <Badge v-if="ticket.externalVcsUrl" variant="outline">
               {{ t('tickets.vcs.github') }} #{{ extractIssueNumber(ticket.externalVcsUrl) }}

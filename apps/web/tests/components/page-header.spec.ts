@@ -18,8 +18,8 @@ describe('PageHeader icon slot', () => {
     expect(source).toContain('bg-muted/40')
   })
 
-  test('title, subtitle and actions slots are unchanged', () => {
-    expect(source).toContain('text-3xl font-bold tracking-tight')
+  test('title uses the approved quieter hierarchy while subtitle and actions remain available', () => {
+    expect(source).toContain('text-[28px] font-medium leading-8 tracking-tight')
     expect(source).toContain('v-if="subtitle"')
     expect(source).toContain('<slot name="actions" />')
   })
