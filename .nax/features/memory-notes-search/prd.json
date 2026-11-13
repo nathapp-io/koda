@@ -3,7 +3,7 @@
   "feature": "memory-notes-search",
   "branchName": "feat/memory-notes-search",
   "createdAt": "2026-11-13T12:22:07.085Z",
-  "updatedAt": "2026-11-13T12:49:00.669Z",
+  "updatedAt": "2026-11-13T13:01:19.822Z",
   "userStories": [
     {
       "id": "US-001",
@@ -156,14 +156,17 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three existing integration suites already provide runner, approval, MCP and audit harnesses; fixture conversion and added supersession/refusal cases need no new integration abstraction, while the ownership-permission regression requires the security override."
+        "reasoning": "Three existing integration suites already provide runner, approval, MCP and audit harnesses; fixture conversion and added supersession/refusal cases need no new integration abstraction, while the ownership-permission regression requires the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts",
@@ -190,7 +193,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e464a04f7677078c2659099a85337a58cd79250b"
     },
     {
       "id": "US-004",
