@@ -33,6 +33,16 @@ export class PrismaProjectRepository {
     };
   }
 
+  async findLiveById(id: string): Promise<ProjectDomain | null> {
+    const model = await this.prisma.client.project.findFirst({ where: { id, deletedAt: null } });
+    return model ? this.toDomain(model) : null;
+  }
+
+  async isAccessible(principal: PrincipalRef, projectId: string): Promise<boolean> {
+    const ids = await accessibleProjectIds(this.prisma.client, principal);
+    return ids.includes(projectId);
+  }
+
   async findBySlug(slug: string): Promise<ProjectDomain | null> {
     const model = await this.prisma.client.project.findUnique({ where: { slug } });
     return model ? this.toDomain(model) : null;
