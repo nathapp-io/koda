@@ -35,6 +35,8 @@ export const BOOKKEEPING_REASONS = {
   'context.query-metric': "A context query's latency and result metric row.",
   'approval.request-open': 'An approval request opened by the gate; the decision records `approval.decide`.',
   'approval.request-settle': "An approval request's terminal status and result; the command records its own key and the expiry records `system.approval.expire`.",
+  'auth.session-start': 'The session and first refresh token rows that a login, registration or invite acceptance writes; registration and invite acceptance record their own entries.',
+  'auth.session-rotate': 'A refresh token rotation: the used mark, the next token, the sliding expiry and the cleanup of old used tokens; a reuse revocation records `session.refresh` itself.',
 } as const;
 
 export type BookkeepingReason = keyof typeof BOOKKEEPING_REASONS;
