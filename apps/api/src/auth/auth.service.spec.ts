@@ -1,5 +1,6 @@
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Mock } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { CacheManager } from '@nathapp/nestjs-cache';
@@ -549,6 +550,7 @@ describe('AuthService', () => {
   describe('refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
       mockAuthRepository.findUserById.mockResolvedValue(mockUser);
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'rotated' });
 
       const result = await service.refresh({
         id: mockUser.id,
@@ -556,7 +558,7 @@ describe('AuthService', () => {
         blacklisted: false,
         revoked: false,
         authorities: [],
-        extra: {},
+        extra: { sessionId: 's1', tokenId: 't1' },
       });
 
       expect(result).toHaveProperty('accessToken');
@@ -575,8 +577,10 @@ describe('AuthService', () => {
 
     it('still refreshes for a non-revoked principal', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 3, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'rotated' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
       const out = await service.refresh(principal);
       expect(out.accessToken).toBeDefined();
@@ -626,6 +630,9 @@ describe('AuthService', () => {
       } as unknown as IPrincipal;
 
       await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      // An invalid session is not evidence of theft: nothing is recorded.
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+      expect(mockAuditRecorder.audited).not.toHaveBeenCalled();
     });
 
     it('refuses and evicts the session cache when the rotation detects reuse', async () => {
@@ -639,6 +646,33 @@ describe('AuthService', () => {
       await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
       // The reuse revoked the session; the cached `{ active: true }` must not outlive it.
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
+      // The revocation committed inside `rotate`, so the entry is recorded after it, in its own transaction.
+      expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: 'user-1',
+        projectId: null,
+        summary: 'refresh token reuse; session revoked',
+      });
+    });
+
+    // AC-13: the revocation is already committed when the entry is written, so a failed record must not
+    // turn a 401 into a 500 — and must not go unreported.
+    it('AC-13: a rejecting reuse audit still answers 401 and logs the failure', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'reused', userId: 'user-1' });
+      const auditError = new Error('audit storage unavailable');
+      mockAuditRecorder.record.mockRejectedValue(auditError);
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuditRecorder.record).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
+      warn.mockRestore();
     });
 
     it('refuses a token that names a session but no token id', async () => {
@@ -653,16 +687,20 @@ describe('AuthService', () => {
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
     });
 
-    it('keeps the pre-sessions path for a token that names no session', async () => {
+    // A refresh JWT minted before sessions names neither claim: it is refused before any write, so every
+    // user signs in once after the deploy instead of the API guessing at a session for it.
+    it('refuses a legacy refresh token that names no session, writing nothing', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: {},
       } as unknown as IPrincipal;
 
-      await service.refresh(principal);
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
 
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
-      expect(mockAuthSessions.start).toHaveBeenCalledOnce();
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+      expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
+      expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
     });
   });
 
@@ -677,7 +715,21 @@ describe('AuthService', () => {
     it('refresh refuses to mint tokens for a disabled user', async () => {
       mockAuthRepository.findUserById.mockResolvedValueOnce({ ...mockUser, disabled: true });
 
-      await expect(service.refresh({ id: mockUser.id, revoked: false } as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      // A session-bound token reaches the user lookup, so the refusal is the disabled check and not a
+      // missing claim.
+      await expect(service.refresh({
+        id: mockUser.id, revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
+    });
+
+    it('refresh refuses when the user row is gone', async () => {
+      mockAuthRepository.findUserById.mockResolvedValueOnce(null);
+
+      await expect(service.refresh({
+        id: 'deleted-user', revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -35,6 +35,8 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync('koda-timing-equalizer', 12);
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private authRepo: PrismaAuthRepository,
     private jwtStrategyProvider: JwtStrategyProvider,
@@ -153,12 +155,12 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    // A token this feature issues names both its session and its own token row. A token that names only
-    // one of them is not a pair this service minted, so it is refused rather than guessed at.
+    // A pair this feature issues names both its session and its own token row. A token carrying neither
+    // claim predates sessions, and one carrying only one of them is not a pair this service minted: both
+    // are refused before any write rather than guessed at, so every user signs in once after the deploy.
     const sessionId = principal.extra?.['sessionId'];
     const tokenId = principal.extra?.['tokenId'];
-    const sessionBound = typeof sessionId === 'string' && typeof tokenId === 'string';
-    if ((sessionId !== undefined || tokenId !== undefined) && !sessionBound) {
+    if (typeof sessionId !== 'string' || typeof tokenId !== 'string') {
       throw new AuthException({}, 'auth');
     }
 
@@ -169,17 +171,11 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    // A refresh token issued before this feature names no session: it keeps the pre-sessions path, which
-    // mints a new session (the legacy refusal belongs to US-004).
-    if (!sessionBound) {
-      return this.issueSession(user);
-    }
-
-    // auth-sessions US-003 (fix round 1): the session is continued, not replaced, and the store's
-    // conditional rotation is the fence against logout. `rotate` slides a live session and marks the
-    // presented token used in one transaction, so it either loses to a concurrent revoke — and this call
-    // then answers 401 with nothing written — or it wins and the pair it authorises belongs to the very
-    // session the logout revokes next. A standalone liveness read could not give that guarantee.
+    // auth-sessions US-003/4: the session is continued, not replaced, and the store's conditional
+    // rotation is the fence against logout. `rotate` slides a live session and marks the presented token
+    // used in one transaction, so it either loses to a concurrent revoke — and this call then answers 401
+    // with nothing written — or it wins and the pair it authorises belongs to the very session the logout
+    // revokes next. A standalone liveness read could not give that guarantee.
     const role = await this.roleClaim(user.id);
     const nextTokenId = randomUUID();
     const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, nextTokenId);
@@ -192,14 +188,43 @@ export class AuthService {
       nextExpiresAt: this.refreshExpiryOf(refreshToken),
       now: new Date(),
     });
-    if (outcome.kind !== 'rotated') {
-      // The session ended (a logout, an expiry) or the presented token was replayed: mint nothing. The
-      // cached activity answer must not outlive a session the store has just ended.
+
+    // The session ended (a logout, an expiry): mint nothing and record nothing — a dead session is not
+    // evidence of theft.
+    if (outcome.kind === 'invalid') {
+      throw new AuthException({}, 'auth');
+    }
+
+    if (outcome.kind === 'reused') {
+      // The presented token was already spent: the session is revoked by now, so the cached activity
+      // answer must not outlive it, and the theft goes on the record after that revocation has committed.
       await this.cache.invalidate(authSessionCacheKey(sessionId));
+      await this.recordRefreshReuse(outcome.userId);
       throw new AuthException({}, 'auth');
     }
 
     return { accessToken, refreshToken, user: UserResponseDto.from(user, role) };
+  }
+
+  /**
+   * Records the reuse revocation `AuthSessionService.rotate` has already committed.
+   *
+   * `AuditRecorder.record` must run inside a transaction and the rotation's own is closed, so this opens
+   * one of its own. A failed write is logged and swallowed: the session is revoked either way, and the
+   * caller's answer must stay the 401 that revocation earned, not a 500 about its bookkeeping.
+   */
+  private async recordRefreshReuse(userId: string): Promise<void> {
+    try {
+      await this.txManager.run(() => this.audit.record({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: userId,
+        projectId: null,
+        summary: 'refresh token reuse; session revoked',
+      }));
+    } catch (error) {
+      this.logger.warn(`failed to record session.refresh for reused token of user ${userId}: ${String(error)}`);
+    }
   }
 
   /** Display/compatibility claim only; authorization uses permission keys. */
