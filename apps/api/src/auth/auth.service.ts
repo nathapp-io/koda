@@ -152,14 +152,16 @@ export class AuthService {
     if (principal.revoked) {
       throw new AuthException({}, 'auth');
     }
-    // auth-sessions US-003: a session-scoped refresh token is only good while its session is live, so a
-    // per-device logout cannot be side-stepped by refreshing — the device would otherwise mint a new
-    // session and stay signed in. A token that names no session keeps the pre-sessions behaviour.
-    // US-004 replaces this with `AuthSessionService.rotate`'s own verdict.
+
+    // A token this feature issues names both its session and its own token row. A token that names only
+    // one of them is not a pair this service minted, so it is refused rather than guessed at.
     const sessionId = principal.extra?.['sessionId'];
-    if (typeof sessionId === 'string' && !(await this.authSessions.isActive(sessionId, new Date()))) {
+    const tokenId = principal.extra?.['tokenId'];
+    const sessionBound = typeof sessionId === 'string' && typeof tokenId === 'string';
+    if ((sessionId !== undefined || tokenId !== undefined) && !sessionBound) {
       throw new AuthException({}, 'auth');
     }
+
     // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
     const user = await this.authRepo.findUserById(principal.id);
 
@@ -167,7 +169,37 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    return this.issueSession(user);
+    // A refresh token issued before this feature names no session: it keeps the pre-sessions path, which
+    // mints a new session (the legacy refusal belongs to US-004).
+    if (!sessionBound) {
+      return this.issueSession(user);
+    }
+
+    // auth-sessions US-003 (fix round 1): the session is continued, not replaced, and the store's
+    // conditional rotation is the fence against logout. `rotate` slides a live session and marks the
+    // presented token used in one transaction, so it either loses to a concurrent revoke — and this call
+    // then answers 401 with nothing written — or it wins and the pair it authorises belongs to the very
+    // session the logout revokes next. A standalone liveness read could not give that guarantee.
+    const role = await this.roleClaim(user.id);
+    const nextTokenId = randomUUID();
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, nextTokenId);
+    const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
+
+    const outcome = await this.authSessions.rotate({
+      sessionId,
+      presentedTokenId: tokenId,
+      nextTokenId,
+      nextExpiresAt: this.refreshExpiryOf(refreshToken),
+      now: new Date(),
+    });
+    if (outcome.kind !== 'rotated') {
+      // The session ended (a logout, an expiry) or the presented token was replayed: mint nothing. The
+      // cached activity answer must not outlive a session the store has just ended.
+      await this.cache.invalidate(authSessionCacheKey(sessionId));
+      throw new AuthException({}, 'auth');
+    }
+
+    return { accessToken, refreshToken, user: UserResponseDto.from(user, role) };
   }
 
   /** Display/compatibility claim only; authorization uses permission keys. */
@@ -188,17 +220,22 @@ export class AuthService {
     const tokenId = randomUUID();
     const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, tokenId);
     const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
-    const refreshClaims = JSON.parse(Buffer.from(refreshToken.split('.')[1] ?? '', 'base64url').toString()) as { exp?: number };
-    if (typeof refreshClaims.exp !== 'number' || !Number.isFinite(refreshClaims.exp)) {
-      throw new Error('Signed refresh token did not contain a valid exp claim');
-    }
     await this.authSessions.start({
       userId: user.id,
       sessionId,
       tokenId,
-      expiresAt: new Date(refreshClaims.exp * 1000),
+      expiresAt: this.refreshExpiryOf(refreshToken),
     });
     return { accessToken, refreshToken, user: response };
+  }
+
+  /** The `exp` of a signed refresh token, as the session expiry both start and rotate persist. */
+  private refreshExpiryOf(refreshToken: string): Date {
+    const claims = JSON.parse(Buffer.from(refreshToken.split('.')[1] ?? '', 'base64url').toString()) as { exp?: number };
+    if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) {
+      throw new Error('Signed refresh token did not contain a valid exp claim');
+    }
+    return new Date(claims.exp * 1000);
   }
 
   async validateUser(principal: IPrincipal) {

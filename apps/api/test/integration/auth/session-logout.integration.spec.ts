@@ -136,6 +136,57 @@ describeIntegration('per-session logout (PG)', () => {
     expect(await me(second.accessToken)).toBe(200);
   }, TIMEOUT);
 
+  // Fix round 1 (F1): the access-activity check must not be a read that a logout can slip behind. A
+  // refresh therefore continues the *same* session through the store's conditional rotation, which is the
+  // lock: either the rotate loses to the logout's revoke and answers 401, or it wins and the session it
+  // extended is the one the logout revokes.
+  describe('a refresh is fenced on the session', () => {
+    const refresh = (refreshToken: string) =>
+      request(server).post('/api/auth/refresh').set('Authorization', `Bearer ${refreshToken}`);
+
+    it('keeps the presented session, so a later logout ends the refreshed pair as well', async () => {
+      const pair = await login();
+      const sessionId = sessionIdOf(pair);
+      const sessionsBefore = await db.authSession.count({ where: { userId } });
+
+      const rotated = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+
+      // No second session: the refreshed pair belongs to the device that refreshed.
+      expect(sessionIdOf(rotated)).toBe(sessionId);
+      expect(await db.authSession.count({ where: { userId } })).toBe(sessionsBefore);
+
+      await request(server).post('/api/auth/logout').set('Authorization', `Bearer ${rotated.accessToken}`).expect(200);
+
+      expect(await me(rotated.accessToken)).toBe(401);
+      // The rotated refresh token died with the session it was minted for — this is what the standalone
+      // read could not guarantee.
+      await refresh(rotated.refreshToken).expect(401);
+    }, TIMEOUT);
+
+    it('cannot leave the caller signed in when it races a logout', async () => {
+      const pair = await login();
+      const sessionId = sessionIdOf(pair);
+
+      const [refreshed] = await Promise.all([
+        refresh(pair.refreshToken),
+        request(server).post('/api/auth/logout').set('Authorization', `Bearer ${pair.accessToken}`),
+      ]);
+
+      // Whichever transaction committed last, the session is ended…
+      expect((await sessionRow(sessionId)).revokedAt).not.toBeNull();
+      expect(await me(pair.accessToken)).toBe(401);
+      // …and any pair the refresh returned is dead with it, because it carries the same `sid`.
+      if (refreshed.status === 200) {
+        const raced = data<TokenPair>(refreshed);
+        expect(sessionIdOf(raced)).toBe(sessionId);
+        expect(await me(raced.accessToken)).toBe(401);
+        await refresh(raced.refreshToken).expect(401);
+      } else {
+        expect(refreshed.status).toBe(401);
+      }
+    }, TIMEOUT);
+  });
+
   it("AC-10: revoke answers false for another owner's session and leaves it untouched", async () => {
     const now = new Date();
 

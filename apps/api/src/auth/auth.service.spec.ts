@@ -86,6 +86,7 @@ describe('AuthService', () => {
 
   const mockAuthSessions = {
     start: vi.fn(),
+    rotate: vi.fn(),
     revoke: vi.fn(),
     isActive: vi.fn(),
   };
@@ -100,6 +101,7 @@ describe('AuthService', () => {
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
     mockAuthSessions.start.mockReset();
+    mockAuthSessions.rotate.mockReset();
     mockAuthSessions.revoke.mockReset();
     mockAuthSessions.isActive.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
@@ -581,32 +583,77 @@ describe('AuthService', () => {
       expect(out.refreshToken).toBeDefined();
     });
 
-    // auth-sessions US-003: a per-device logout must not leave the device able to mint a fresh pair.
-    it('refuses to mint a pair from a token whose session is no longer live', async () => {
+    // auth-sessions US-003 + fix round 1 (F1): a session-carrying refresh continues the *same* session
+    // through the store's conditional rotation, so a concurrent logout either wins the row or loses to it.
+    it('rotates the presented session instead of starting a new one', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
-      mockAuthSessions.isActive.mockResolvedValue(false);
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'rotated' });
+      const decode = (token: string): Record<string, unknown> =>
+        JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as Record<string, unknown>;
+      mockJwtStrategyProvider.sign.mockImplementation((payload: Record<string, unknown>) =>
+        `e30.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`);
+      mockJwtRefreshStrategyProvider.sign.mockImplementation((payload: Record<string, unknown>) =>
+        `e30.${Buffer.from(JSON.stringify({ ...payload, exp: 2_000_000_000 })).toString('base64url')}.sig`);
       const principal = {
-        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: { sessionId: 's1' },
-      } as unknown as IPrincipal;
-
-      await expect(service.refresh(principal)).rejects.toThrow(AuthException);
-      expect(mockAuthSessions.isActive).toHaveBeenCalledWith('s1', expect.any(Date));
-    });
-
-    it('refreshes a token whose session is still live', async () => {
-      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
-      mockAuthSessions.isActive.mockResolvedValue(true);
-      const principal = {
-        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: { sessionId: 's1' },
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
       const out = await service.refresh(principal);
 
-      expect(out.accessToken).toBeDefined();
-      expect(mockAuthSessions.isActive).toHaveBeenCalledWith('s1', expect.any(Date));
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+      expect(mockAuthSessions.rotate).toHaveBeenCalledOnce();
+      const input = mockAuthSessions.rotate.mock.calls[0][0] as {
+        sessionId: string; presentedTokenId: string; nextTokenId: string; nextExpiresAt: Date; now: Date;
+      };
+      expect(input).toMatchObject({ sessionId: 's1', presentedTokenId: 't1' });
+      expect(typeof input.nextTokenId).toBe('string');
+      expect(input.nextExpiresAt).toEqual(new Date(2_000_000_000 * 1000));
+      expect(input.now).toBeInstanceOf(Date);
+      // The returned pair names the session it continued, and the token the rotation inserted.
+      expect(decode(out.accessToken)['sid']).toBe('s1');
+      expect(decode(out.refreshToken)['sid']).toBe('s1');
+      expect(decode(out.refreshToken)['jti']).toBe(input.nextTokenId);
+      expect(out.user).toBeDefined();
     });
 
-    it('asks no session store for a token that names no session', async () => {
+    it('refuses a pair when the rotation answers invalid (dead or expired session)', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'invalid' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+    });
+
+    it('refuses and evicts the session cache when the rotation detects reuse', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'reused', userId: 'user-1' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      // The reuse revoked the session; the cached `{ active: true }` must not outlive it.
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
+    });
+
+    it('refuses a token that names a session but no token id', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+    });
+
+    it('keeps the pre-sessions path for a token that names no session', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: {},
@@ -614,7 +661,8 @@ describe('AuthService', () => {
 
       await service.refresh(principal);
 
-      expect(mockAuthSessions.isActive).not.toHaveBeenCalled();
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
+      expect(mockAuthSessions.start).toHaveBeenCalledOnce();
     });
   });
 
