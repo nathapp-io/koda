@@ -104,9 +104,10 @@ describeIntegration('gated fleet dispatch and requeue', () => {
     const pending = await open('ac-9');
     expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: pending.id } })).toMatchObject({ variant: 'rest:fleet-jobs.dispatch', input: { slug: 'web', projectId: world.projectId, dispatch: body('ac-9') } });
   });
-  it('AC-15: agent dispatch without a policy is immediate with no request', async () => {
-    await dispatch('ac-15').expect(201);
-    expect(await db.approvalRequest.count()).toBe(0);
-    expect(await db.fleetJob.findFirstOrThrow({ where: { feature: 'ac-15' } })).toMatchObject({ requestedById: agent.id });
+  it('AC-15: agent dispatch without a policy waits without creating a job', async () => {
+    const pending = data<Pending>(await dispatch('ac-15').expect(202));
+    expect(pending).toMatchObject({ permissionKey: 'fleet.job.dispatch', projectId: world.projectId });
+    expect(await db.approvalRequest.count({ where: { actorId: agent.id, permissionKey: 'fleet.job.dispatch', status: 'pending' } })).toBe(1);
+    expect(await db.fleetJob.count({ where: { feature: 'ac-15' } })).toBe(0);
   });
 });

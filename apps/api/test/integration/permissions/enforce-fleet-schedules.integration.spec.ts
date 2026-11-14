@@ -232,11 +232,23 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
     expect(await reload(created.id)).toEqual(expect.objectContaining({ createdById: ids.devBind, createdByType: 'USER' }));
   }, TIMEOUT);
 
-  it('AC-5: an agent rostered in p1 with AgentRoleEntry DEVELOPER creates a schedule (201)', async () => {
-    await as('p1-schedule-agent', 'post', schedulesUrl(), createBody('agent-create')).expect(201);
+  it('AC-5: an agent without an approval policy gets a pending schedule request', async () => {
+    const res = await as('p1-schedule-agent', 'post', schedulesUrl(), createBody('agent-create')).expect(202);
+    expect(data<{ permissionKey: string; status: string }>(res)).toMatchObject({ permissionKey: 'fleet.schedule.create', status: 'pending' });
+    expect(await prisma.jobSchedule.count({ where: { projectId: p1Id } })).toBe(0);
   }, TIMEOUT);
 
+  const seedScheduleNonePolicy = () => prisma.approvalPolicy.upsert({
+    where: { selector: `${p1Id}|fleet.schedule.create|type:AGENT` },
+    create: {
+      selector: `${p1Id}|fleet.schedule.create|type:AGENT`, projectId: p1Id, permissionPattern: 'fleet.schedule.create',
+      principalType: 'AGENT', mode: 'none', updatedByType: 'SYSTEM', updatedById: 'test',
+    },
+    update: { mode: 'none' },
+  });
+
   it('AC-6: that agent\'s create stores the agent as creator, typed AGENT', async () => {
+    await seedScheduleNonePolicy();
     const res = await as('p1-schedule-agent', 'post', schedulesUrl(), createBody('agent-stored')).expect(201);
     const created = data<ScheduleItem>(res);
 
