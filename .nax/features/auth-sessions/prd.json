@@ -3,7 +3,7 @@
   "feature": "auth-sessions",
   "branchName": "feat/auth-sessions",
   "createdAt": "2026-11-14T11:30:19.103Z",
-  "updatedAt": "2026-11-14T13:00:50.257Z",
+  "updatedAt": "2026-11-14T13:17:03.628Z",
   "userStories": [
     {
       "id": "US-001",
@@ -264,14 +264,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Refresh composes the already-built rotation store with direct cache invalidation and a separate audited transaction, including failure isolation and concurrent HTTP lifecycles; JWT/session security mandates strict three-session TDD."
+        "reasoning": "Refresh composes the already-built rotation store with direct cache invalidation and a separate audited transaction, including failure isolation and concurrent HTTP lifecycles; JWT/session security mandates strict three-session TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/auth/auth.service.ts",
@@ -298,6 +301,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
+      "storyGitRef": "31053c59d720715f19678dc251d63bd1a05dea20",
       "outOfScope": [
         "expiry of the refresh JWT itself is enforced by `JwtRefreshGuard`'s signature and `exp` check, which this story does not change; disabled users and `tokenVersion` bumps keep refusing through `KodaJwtRefreshStrategyProvider`'s existing check."
       ]
