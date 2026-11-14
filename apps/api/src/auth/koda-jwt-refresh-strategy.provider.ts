@@ -31,6 +31,10 @@ export class KodaJwtRefreshStrategyProvider extends JwtRefreshStrategyProvider {
     const user = await this.authRepo.findUserById(payload.sub);
     const revoked = !user || user.disabled || user.tokenVersion > tokenVersion;
 
+    const claims = payload as RefreshJwtPayload & { sid?: unknown; jti?: unknown };
+    const extra = typeof claims.sid === 'string' && typeof claims.jti === 'string'
+      ? { sessionId: claims.sid, tokenId: claims.jti }
+      : {};
     const principal: IPrincipal = {
       id: payload.sub,
       username: payload.username,
@@ -38,6 +42,7 @@ export class KodaJwtRefreshStrategyProvider extends JwtRefreshStrategyProvider {
       blacklisted: false,
       revoked,
       hashToken: refreshToken,
+      extra,
       // Matches the library's own DefaultJwtRefreshStrategyProvider: authorities are passed
       // through as-is, not narrowed to strings, since IPrincipal allows object-shaped entries too.
       authorities: (payload.authorities ?? []) as IPrincipal['authorities'],

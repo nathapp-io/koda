@@ -353,12 +353,67 @@ describeIntegration('API Integration Tests', () => {
       expect(logoutEntries[0].actorId).toBe(loggedOutUser.id);
       expect(logoutEntries[0].summary).toBe('logged out');
 
-      // The refresh token issued before logout is signed with a stale
-      // tokenVersion — the refresh strategy marks it revoked and the
-      // service must refuse to mint a new pair from it.
+      // The refresh token names a session the logout revoked: rotation loses the conditional slide
+      // (the session's `revokedAt` is set), so the pair is refused rather than replaced.
       await request(httpServer)
         .post('/api/auth/refresh')
         .set('Authorization', `Bearer ${loginData.refreshToken}`)
+        .expect(401);
+    });
+
+    it('refresh → reuse of a spent token after the grace window → 401, session revoked and audited', async () => {
+      resetThrottle(app);
+      const email = 'reuse-after-grace@koda.test';
+      await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email, name: 'Reuse After Grace', password: 'Reuse1234!Aa' })
+        .expect(201);
+
+      const loginRes = await request(httpServer)
+        .post('/api/auth/login')
+        .send({ email, password: 'Reuse1234!Aa' })
+        .expect(200);
+      const loginData = body<{ accessToken: string; refreshToken: string }>(loginRes);
+
+      const rotatedRes = await request(httpServer)
+        .post('/api/auth/refresh')
+        .set('Authorization', `Bearer ${loginData.refreshToken}`)
+        .expect(200);
+      const rotated = body<{ accessToken: string; refreshToken: string }>(rotatedRes);
+
+      const claimsOf = (token: string): { sid?: unknown; jti?: unknown } =>
+        JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as { sid?: unknown; jti?: unknown };
+      const presentedTokenId = claimsOf(loginData.refreshToken).jti;
+      expect(typeof presentedTokenId).toBe('string');
+      // Outside the 30 s grace window: backdate the token row through the guarded fixture client
+      // instead of sleeping.
+      await prismaClient().refreshToken.update({
+        where: { id: presentedTokenId as string },
+        data: { usedAt: new Date(Date.now() - 31_000) },
+      });
+      const reuseUser = await prismaClient().user.findUniqueOrThrow({ where: { email } });
+
+      // The replay is refused, and the session it named is revoked as a reuse.
+      await request(httpServer)
+        .post('/api/auth/refresh')
+        .set('Authorization', `Bearer ${loginData.refreshToken}`)
+        .expect(401);
+
+      const reuseEntries = await prismaClient().auditEntry.findMany({
+        where: { key: 'session.refresh', resourceId: reuseUser.id },
+      });
+      expect(reuseEntries).toHaveLength(1);
+      expect(reuseEntries[0]).toMatchObject({
+        key: 'session.refresh',
+        resourceType: 'user',
+        projectId: null,
+        summary: 'refresh token reuse; session revoked',
+      });
+
+      // The newest token of that session died with the revocation.
+      await request(httpServer)
+        .post('/api/auth/refresh')
+        .set('Authorization', `Bearer ${rotated.refreshToken}`)
         .expect(401);
     });
   });

@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -12,17 +13,19 @@ import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import type { KodaUserRole } from './principal/koda-principal.types';
 import { UserDomain } from './domain/auth.domain';
-import { userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
+import { authSessionCacheKey, userAuthStateCacheKey, userTokenVersionCacheTag, withAuthSessionCacheLock } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
+import { AuthSessionService } from './sessions/auth-session.service';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
   tokenVersion: number;
+  sid: string;
 }
 
 // BUG-12: same-cost bcrypt hash compared against when the email is unknown,
@@ -32,6 +35,8 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync('koda-timing-equalizer', 12);
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private authRepo: PrismaAuthRepository,
     private jwtStrategyProvider: JwtStrategyProvider,
@@ -41,6 +46,7 @@ export class AuthService {
     private readonly membership: MembershipService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
+    private readonly authSessions: AuthSessionService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -148,6 +154,16 @@ export class AuthService {
     if (principal.revoked) {
       throw new AuthException({}, 'auth');
     }
+
+    // A pair this feature issues names both its session and its own token row. A token carrying neither
+    // claim predates sessions, and one carrying only one of them is not a pair this service minted: both
+    // are refused before any write rather than guessed at, so every user signs in once after the deploy.
+    const sessionId = principal.extra?.['sessionId'];
+    const tokenId = principal.extra?.['tokenId'];
+    if (typeof sessionId !== 'string' || typeof tokenId !== 'string') {
+      throw new AuthException({}, 'auth');
+    }
+
     // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
     const user = await this.authRepo.findUserById(principal.id);
 
@@ -155,7 +171,62 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    return this.issueSession(user);
+    // auth-sessions US-003/4: the session is continued, not replaced, and the store's conditional
+    // rotation is the fence against logout. `rotate` slides a live session and marks the presented token
+    // used in one transaction, so it either loses to a concurrent revoke — and this call then answers 401
+    // with nothing written — or it wins and the pair it authorises belongs to the very session the logout
+    // revokes next. A standalone liveness read could not give that guarantee.
+    const role = await this.roleClaim(user.id);
+    const nextTokenId = randomUUID();
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, nextTokenId);
+    const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
+
+    const outcome = await this.authSessions.rotate({
+      sessionId,
+      presentedTokenId: tokenId,
+      nextTokenId,
+      nextExpiresAt: this.refreshExpiryOf(refreshToken),
+      now: new Date(),
+    });
+
+    // The session ended (a logout, an expiry): mint nothing and record nothing — a dead session is not
+    // evidence of theft.
+    if (outcome.kind === 'invalid') {
+      throw new AuthException({}, 'auth');
+    }
+
+    if (outcome.kind === 'reused') {
+      // The presented token was already spent: the session is revoked by now, so the cached activity
+      // answer must not outlive it, and the theft goes on the record after that revocation has committed.
+      // The eviction takes the session's cache lock, so a lookup that read the store before this revoke
+      // cannot repopulate the key after it (see `withAuthSessionCacheLock`).
+      await withAuthSessionCacheLock(sessionId, () => this.cache.invalidate(authSessionCacheKey(sessionId)));
+      await this.recordRefreshReuse(outcome.userId);
+      throw new AuthException({}, 'auth');
+    }
+
+    return { accessToken, refreshToken, user: UserResponseDto.from(user, role) };
+  }
+
+  /**
+   * Records the reuse revocation `AuthSessionService.rotate` has already committed.
+   *
+   * `AuditRecorder.record` must run inside a transaction and the rotation's own is closed, so this opens
+   * one of its own. A failed write is logged and swallowed: the session is revoked either way, and the
+   * caller's answer must stay the 401 that revocation earned, not a 500 about its bookkeeping.
+   */
+  private async recordRefreshReuse(userId: string): Promise<void> {
+    try {
+      await this.txManager.run(() => this.audit.record({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: userId,
+        projectId: null,
+        summary: 'refresh token reuse; session revoked',
+      }));
+    } catch (error) {
+      this.logger.warn(`failed to record session.refresh for reused token of user ${userId}: ${String(error)}`);
+    }
   }
 
   /** Display/compatibility claim only; authorization uses permission keys. */
@@ -172,11 +243,26 @@ export class AuthService {
     // Derive once so the JWT and response describe the same binding snapshot.
     const role = await this.roleClaim(user.id);
     const response = UserResponseDto.from(user, role);
-    return {
-      accessToken: this.generateAccessToken(user.id, user.email, role, user.tokenVersion),
-      refreshToken: this.generateRefreshToken(user.id, user.tokenVersion),
-      user: response,
-    };
+    const sessionId = randomUUID();
+    const tokenId = randomUUID();
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, tokenId);
+    const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
+    await this.authSessions.start({
+      userId: user.id,
+      sessionId,
+      tokenId,
+      expiresAt: this.refreshExpiryOf(refreshToken),
+    });
+    return { accessToken, refreshToken, user: response };
+  }
+
+  /** The `exp` of a signed refresh token, as the session expiry both start and rotate persist. */
+  private refreshExpiryOf(refreshToken: string): Date {
+    const claims = JSON.parse(Buffer.from(refreshToken.split('.')[1] ?? '', 'base64url').toString()) as { exp?: number };
+    if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) {
+      throw new Error('Signed refresh token did not contain a valid exp claim');
+    }
+    return new Date(claims.exp * 1000);
   }
 
   async validateUser(principal: IPrincipal) {
@@ -185,7 +271,37 @@ export class AuthService {
     return user || null;
   }
 
-  async logout(userId: string): Promise<void> {
+  /**
+   * Ends the caller's session, or — for a token issued before sessions — every session of the user.
+   *
+   * With a `sessionId` (auth-sessions US-003) the revoke is the audited work, so the session row and the
+   * `session.logout` entry commit or roll back together, and `tokenVersion` is untouched: logging out one
+   * device must leave the others signed in. A revoke that matches nothing (already ended, or a session
+   * another user owns) is not an error — the request still answers 200 and still records the entry.
+   *
+   * Without one (a legacy access token, or an agent principal) the `tokenVersion` bump stays as before,
+   * together with the user-cache evictions the bump needs.
+   */
+  async logout(userId: string, sessionId?: string): Promise<void> {
+    if (sessionId !== undefined) {
+      await this.audit.audited(
+        () => this.authSessions.revoke(sessionId, userId, 'logout', new Date()),
+        () => ({
+          key: 'session.logout',
+          resourceType: 'user',
+          resourceId: userId,
+          projectId: null,
+          summary: 'logged out',
+        }),
+      );
+      // The activity answer is cached for 60 s as an object; evict it by its direct key, because the
+      // MEMORY strategy has no tag registry (see the note below) and would never match a tag. The
+      // eviction takes the session's cache lock, so a lookup that read the store before this revoke
+      // cannot repopulate the key after it (see `withAuthSessionCacheLock`).
+      await withAuthSessionCacheLock(sessionId, () => this.cache.invalidate(authSessionCacheKey(sessionId)));
+      return;
+    }
+
     await this.audit.audited(
       () => this.authRepo.bumpTokenVersion(userId),
       () => ({
@@ -203,12 +319,12 @@ export class AuthService {
     await this.cache.invalidate(userAuthStateCacheKey(userId));
   }
 
-  generateAccessToken(userId: string, email: string, role: string, tokenVersion: number): string {
-    const payload: JwtPayload = { sub: userId, email, role, tokenVersion };
+  generateAccessToken(userId: string, email: string, role: string, tokenVersion: number, sessionId: string): string {
+    const payload: JwtPayload = { sub: userId, email, role, tokenVersion, sid: sessionId };
     return this.jwtStrategyProvider.sign(payload);
   }
 
-  generateRefreshToken(userId: string, tokenVersion: number): string {
-    return this.jwtRefreshStrategyProvider.sign({ sub: userId, tokenVersion });
+  generateRefreshToken(userId: string, tokenVersion: number, sessionId: string, tokenId: string): string {
+    return this.jwtRefreshStrategyProvider.sign({ sub: userId, tokenVersion, sid: sessionId, jti: tokenId });
   }
 }

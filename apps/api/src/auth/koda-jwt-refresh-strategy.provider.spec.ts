@@ -55,11 +55,34 @@ describe('KodaJwtRefreshStrategyProvider', () => {
     expect(principal.revoked).toBe(true);
   });
 
-  it('is revoked when the user is disabled, even with a current tokenVersion', async () => {
-    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 0, disabled: true });
+  it('AC-8: propagates session and refresh token claims into extra', async () => {
+    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 0, disabled: false });
+
+    const principal = await provider.validate({ headers: {} }, {
+      sub: 'user-1', tokenVersion: 0, sid: 's1', jti: 't1',
+    } as never);
+
+    expect(principal.extra).toEqual({ sessionId: 's1', tokenId: 't1' });
+  });
+
+  it('AC-9: legacy claims yield no session or token ids in extra', async () => {
+    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 0, disabled: false });
 
     const principal = await provider.validate({ headers: {} }, { sub: 'user-1', tokenVersion: 0 });
 
+    expect(principal.extra).toEqual({});
+    expect(principal.extra).not.toHaveProperty('sessionId');
+    expect(principal.extra).not.toHaveProperty('tokenId');
+  });
+
+  it('AC-11: disabled users remain revoked even with current tokenVersion and session claims', async () => {
+    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 0, disabled: true });
+
+    const principal = await provider.validate({ headers: {} }, {
+      sub: 'user-1', tokenVersion: 0, sid: 's1', jti: 't1',
+    } as never);
+
     expect(principal.revoked).toBe(true);
+    expect(principal.extra).toEqual({ sessionId: 's1', tokenId: 't1' });
   });
 });

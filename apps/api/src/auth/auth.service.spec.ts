@@ -1,9 +1,11 @@
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Mock } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
+import { AuthSessionService } from './sessions/auth-session.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException, AuthException, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -83,6 +85,13 @@ describe('AuthService', () => {
     invalidate: vi.fn(),
   };
 
+  const mockAuthSessions = {
+    start: vi.fn(),
+    rotate: vi.fn(),
+    revoke: vi.fn(),
+    isActive: vi.fn(),
+  };
+
   beforeEach(async () => {
     mockAuditRecorder.record.mockReset();
     mockAuditRecorder.audited.mockReset().mockImplementation(async <T>(fn: () => Promise<T>) => fn());
@@ -92,6 +101,10 @@ describe('AuthService', () => {
     mockJwtStrategyProvider.sign.mockReset();
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
+    mockAuthSessions.start.mockReset();
+    mockAuthSessions.rotate.mockReset();
+    mockAuthSessions.revoke.mockReset();
+    mockAuthSessions.isActive.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = moduleRef = await Test.createTestingModule({
@@ -106,6 +119,7 @@ describe('AuthService', () => {
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
+        { provide: AuthSessionService, useValue: mockAuthSessions },
       ],
     }).compile();
 
@@ -114,7 +128,9 @@ describe('AuthService', () => {
 
     // Default mock values
     mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
-    mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
+    mockJwtRefreshStrategyProvider.sign.mockReturnValue(
+      `e30.${Buffer.from(JSON.stringify({ exp: 2_000_000_000 })).toString('base64url')}.signature`,
+    );
     mockMembership.isGlobalAdmin.mockResolvedValue(false);
     mockAuthRepository.findUserById.mockResolvedValue(mockUser);
     mockAuthRepository.findAnyUser.mockResolvedValue(null);
@@ -144,6 +160,24 @@ describe('AuthService', () => {
       await expect(service.login({ email: mockUser.email, password: 'Password123!' })).rejects.toBe(error);
       expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
       expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
+    });
+
+    it('US-002 AC-12: issues one session and preserves exactly the response keys', async () => {
+      const response = await service.issueSession(mockUser);
+
+      expect(Object.keys(response).sort()).toEqual(['accessToken', 'refreshToken', 'user']);
+      expect(mockAuthSessions.start).toHaveBeenCalledWith(expect.objectContaining({
+        userId: mockUser.id,
+        expiresAt: expect.any(Date),
+      }));
+      const refreshClaims = (mockJwtRefreshStrategyProvider.sign as Mock).mock.calls[0][0];
+      const accessClaims = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
+      expect(refreshClaims).toEqual(expect.objectContaining({ sid: expect.any(String), jti: expect.any(String) }));
+      expect(accessClaims).toEqual(expect.objectContaining({ sid: refreshClaims.sid }));
+      expect(mockAuthSessions.start).toHaveBeenCalledWith({
+        userId: mockUser.id, sessionId: refreshClaims.sid, tokenId: refreshClaims.jti,
+        expiresAt: expect.any(Date),
+      });
     });
 
     it.each([true, false])('uses one role lookup for the response and claim (admin=%s)', async (admin) => {
@@ -245,7 +279,7 @@ describe('AuthService', () => {
       expect(result.user.email).toBe(mockUser.email);
       expect(result.user.name).toBe(mockUser.name);
       expect(result.accessToken).toBe('mock-token');
-      expect(result.refreshToken).toBe('mock-token');
+      expect(result.refreshToken).toMatch(/^e30\..+\.signature$/);
     });
 
     it('trusts the repository to handle the existence-check + create atomically', async () => {
@@ -516,6 +550,7 @@ describe('AuthService', () => {
   describe('refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
       mockAuthRepository.findUserById.mockResolvedValue(mockUser);
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'rotated' });
 
       const result = await service.refresh({
         id: mockUser.id,
@@ -523,7 +558,7 @@ describe('AuthService', () => {
         blacklisted: false,
         revoked: false,
         authorities: [],
-        extra: {},
+        extra: { sessionId: 's1', tokenId: 't1' },
       });
 
       expect(result).toHaveProperty('accessToken');
@@ -542,12 +577,130 @@ describe('AuthService', () => {
 
     it('still refreshes for a non-revoked principal', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 3, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'rotated' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
       const out = await service.refresh(principal);
       expect(out.accessToken).toBeDefined();
       expect(out.refreshToken).toBeDefined();
+    });
+
+    // auth-sessions US-003 + fix round 1 (F1): a session-carrying refresh continues the *same* session
+    // through the store's conditional rotation, so a concurrent logout either wins the row or loses to it.
+    it('rotates the presented session instead of starting a new one', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'rotated' });
+      const decode = (token: string): Record<string, unknown> =>
+        JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as Record<string, unknown>;
+      mockJwtStrategyProvider.sign.mockImplementation((payload: Record<string, unknown>) =>
+        `e30.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`);
+      mockJwtRefreshStrategyProvider.sign.mockImplementation((payload: Record<string, unknown>) =>
+        `e30.${Buffer.from(JSON.stringify({ ...payload, exp: 2_000_000_000 })).toString('base64url')}.sig`);
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      const out = await service.refresh(principal);
+
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+      expect(mockAuthSessions.rotate).toHaveBeenCalledOnce();
+      const input = mockAuthSessions.rotate.mock.calls[0][0] as {
+        sessionId: string; presentedTokenId: string; nextTokenId: string; nextExpiresAt: Date; now: Date;
+      };
+      expect(input).toMatchObject({ sessionId: 's1', presentedTokenId: 't1' });
+      expect(typeof input.nextTokenId).toBe('string');
+      expect(input.nextExpiresAt).toEqual(new Date(2_000_000_000 * 1000));
+      expect(input.now).toBeInstanceOf(Date);
+      // The returned pair names the session it continued, and the token the rotation inserted.
+      expect(decode(out.accessToken)['sid']).toBe('s1');
+      expect(decode(out.refreshToken)['sid']).toBe('s1');
+      expect(decode(out.refreshToken)['jti']).toBe(input.nextTokenId);
+      expect(out.user).toBeDefined();
+    });
+
+    it('refuses a pair when the rotation answers invalid (dead or expired session)', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'invalid' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      // An invalid session is not evidence of theft: nothing is recorded.
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+      expect(mockAuditRecorder.audited).not.toHaveBeenCalled();
+    });
+
+    it('refuses and evicts the session cache when the rotation detects reuse', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'reused', userId: 'user-1' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      // The reuse revoked the session; the cached `{ active: true }` must not outlive it.
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
+      // The revocation committed inside `rotate`, so the entry is recorded after it, in its own transaction.
+      expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: 'user-1',
+        projectId: null,
+        summary: 'refresh token reuse; session revoked',
+      });
+    });
+
+    // auth-sessions US-004 AC-13: the revocation is already committed when the entry is written, so a
+    // failed record must not turn a 401 into a 500 — and must not go unreported.
+    it('US-004 AC-13: a rejecting reuse audit still answers 401 and logs the failure', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'reused', userId: 'user-1' });
+      const auditError = new Error('audit storage unavailable');
+      mockAuditRecorder.record.mockRejectedValue(auditError);
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuditRecorder.record).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
+      warn.mockRestore();
+    });
+
+    it('refuses a token that names a session but no token id', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+    });
+
+    // A refresh JWT minted before sessions names neither claim: it is refused before any write, so every
+    // user signs in once after the deploy instead of the API guessing at a session for it.
+    it('refuses a legacy refresh token that names no session, writing nothing', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: {},
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+      expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
+      expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
     });
   });
 
@@ -562,7 +715,21 @@ describe('AuthService', () => {
     it('refresh refuses to mint tokens for a disabled user', async () => {
       mockAuthRepository.findUserById.mockResolvedValueOnce({ ...mockUser, disabled: true });
 
-      await expect(service.refresh({ id: mockUser.id, revoked: false } as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      // A session-bound token reaches the user lookup, so the refusal is the disabled check and not a
+      // missing claim.
+      await expect(service.refresh({
+        id: mockUser.id, revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
+    });
+
+    it('refresh refuses when the user row is gone', async () => {
+      mockAuthRepository.findUserById.mockResolvedValueOnce(null);
+
+      await expect(service.refresh({
+        id: 'deleted-user', revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
     });
   });
 
@@ -599,7 +766,7 @@ describe('AuthService', () => {
 
   describe('JWT token generation', () => {
     it('should generate access token with correct payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'MEMBER', mockUser.tokenVersion);
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'MEMBER', mockUser.tokenVersion, 's1');
 
       expect(token).toBe('mock-token');
       expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith({
@@ -607,21 +774,24 @@ describe('AuthService', () => {
         email: mockUser.email,
         role: 'MEMBER',
         tokenVersion: mockUser.tokenVersion,
+        sid: 's1',
       });
     });
 
     it('should generate refresh token', () => {
-      const token = service.generateRefreshToken(mockUser.id, mockUser.tokenVersion);
+      const token = service.generateRefreshToken(mockUser.id, mockUser.tokenVersion, 's1', 't1');
 
-      expect(token).toBe('mock-token');
+      expect(token).toMatch(/^e30\..+\.signature$/);
       expect(mockJwtRefreshStrategyProvider.sign).toHaveBeenCalledWith({
         sub: mockUser.id,
         tokenVersion: mockUser.tokenVersion,
+        sid: 's1',
+        jti: 't1',
       });
     });
 
     it('should include sub, email, role, and tokenVersion in JWT payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN', 2);
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN', 2, 's1');
 
       expect(token).toBe('mock-token');
       const callArgs = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
@@ -629,6 +799,7 @@ describe('AuthService', () => {
       expect(callArgs.email).toBe(mockUser.email);
       expect(callArgs.role).toBe('ADMIN');
       expect(callArgs.tokenVersion).toBe(2);
+      expect(callArgs.sid).toBe('s1');
     });
   });
 
@@ -663,6 +834,53 @@ describe('AuthService', () => {
 
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
+    });
+
+    // auth-sessions US-003 — a logout that names a session ends that session only.
+    it('US-003 AC-12: without a sessionId it bumps tokenVersion and calls no session method', async () => {
+      mockAuthRepository.bumpTokenVersion.mockResolvedValue(1);
+
+      await service.logout(mockUser.id);
+
+      expect(authRepo.bumpTokenVersion).toHaveBeenCalledWith(mockUser.id);
+      expect(mockAuthSessions.revoke).not.toHaveBeenCalled();
+      expect(mockAuthSessions.isActive).not.toHaveBeenCalled();
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+    });
+
+    it('US-003 AC-13: a refused revoke (already ended, or another owner) still records the logout entry', async () => {
+      mockAuthSessions.revoke.mockResolvedValue(false);
+
+      await service.logout(mockUser.id, 's1');
+
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(1);
+      const [work, entriesOf] = mockAuditRecorder.audited.mock.calls[0] as unknown as [
+        () => Promise<boolean>,
+        (result: boolean) => unknown,
+      ];
+      await expect(work()).resolves.toBe(false);
+      expect(entriesOf(false)).toEqual({
+        key: 'session.logout', resourceType: 'user', resourceId: mockUser.id,
+        projectId: null, summary: 'logged out',
+      });
+      expect(mockAuthRepository.bumpTokenVersion).not.toHaveBeenCalled();
+    });
+
+    it('revokes the named session for its owner inside the audited transaction and evicts its cache key', async () => {
+      mockAuthSessions.revoke.mockResolvedValue(true);
+
+      await service.logout(mockUser.id, 's1');
+
+      expect(mockAuthSessions.revoke).toHaveBeenCalledWith('s1', mockUser.id, 'logout', expect.any(Date));
+      // The revoke is the audited work, so both commit or roll back together.
+      const [work] = mockAuditRecorder.audited.mock.calls[0] as unknown as [() => Promise<boolean>];
+      await work();
+      expect(mockAuthSessions.revoke).toHaveBeenCalledTimes(2);
+      // One device ending must not end the others: no tokenVersion bump, no user cache eviction.
+      expect(mockAuthRepository.bumpTokenVersion).not.toHaveBeenCalled();
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
     });
   });
 });

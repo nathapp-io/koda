@@ -80,11 +80,16 @@ describeIntegration('registration open (REGISTRATION_ENABLED=true)', () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
-  it('5 concurrent registrations: all succeed, exactly one ADMIN', async () => {
+  // auth-sessions US-002 AC-6: every registration starts exactly one session — five concurrent
+  // registrations leave five sessions, one per new user, which is the one-session-per-sign-in rule here.
+  it('US-002 AC-6 / 5 concurrent registrations: all succeed, one session each, exactly one ADMIN', async () => {
     const results = await registerAll(app.getHttpServer(), 5);
 
     expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
     expect(await prisma.user.count()).toBe(5);
+    const sessions = await prisma.authSession.findMany({ select: { userId: true } });
+    expect(sessions).toHaveLength(5);
+    expect(new Set(sessions.map((session) => session.userId)).size).toBe(5);
     const adminBindings = await prisma.roleBinding.findMany({
       where: { principalType: 'USER', projectId: null, role: { key: { in: ['owner', 'admin'] } } },
       select: { principalId: true },

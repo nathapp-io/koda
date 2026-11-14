@@ -8,6 +8,7 @@ import { KodaJwtRefreshStrategyProvider } from './koda-jwt-refresh-strategy.prov
 import { CombinedAuthGuard } from './guards/combined-auth.guard';
 import { AgentAuthProvider } from './agent-auth.provider';
 import { AuthRepositoryModule } from './auth-repository.module';
+import { AuthSessionsModule } from './sessions/auth-sessions.module';
 
 type JwtFromRequestFunction = (req: unknown) => string | null;
 
@@ -101,8 +102,9 @@ export { KODA_TOKEN_COOKIE, KODA_REFRESH_COOKIE };
 @Module({
   imports: [
     AuthRepositoryModule,
+    AuthSessionsModule,
     NathappAuthModule.forRootAsync({
-      imports: [ConfigModule, AuthRepositoryModule],
+      imports: [ConfigModule, AuthRepositoryModule, AuthSessionsModule],
       inject: [ConfigService],
       authProvider: { useClass: JwtAuthProvider },
       refreshStrategyProvider: { useClass: KodaJwtRefreshStrategyProvider },
@@ -142,6 +144,6 @@ export { KODA_TOKEN_COOKIE, KODA_REFRESH_COOKIE };
     CombinedAuthGuard,
   ],
   controllers: [AuthController],
-  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaJwtRefreshStrategyProvider, JwtAuthProvider],
+  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaJwtRefreshStrategyProvider, JwtAuthProvider, AuthSessionsModule],
 })
 export class AuthModule {}

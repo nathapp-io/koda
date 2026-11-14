@@ -20,6 +20,7 @@ import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { AUTH_LOGIN_LIMIT, AUTH_LOGIN_TTL_MS } from './auth-throttle';
+import { KodaPrincipal, isUserPrincipal } from './principal/koda-principal.types';
 
 /**
  * Permissions P1 (US-010): every auth route states its catalog key. The four session-starting routes
@@ -113,14 +114,16 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Revoke all outstanding access and refresh tokens for the current user' })
+  @ApiOperation({ summary: 'Revoke the current session (all sessions for a token issued before sessions)' })
   @ApiResponse({ status: 200, description: 'Tokens revoked' })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
   @UseGuards(RequiresGuard)
   @Requires('session.logout')
   @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: AUTH_LOGIN_TTL_MS } })
-  async logout(@Principal() user: IPrincipal) {
-    await this.authService.logout(user.id);
+  async logout(@Principal() user: KodaPrincipal) {
+    // auth-sessions US-003: a user token names its session, so only that device is signed out; a legacy
+    // user token and every agent principal carry no session and keep the all-sessions behaviour.
+    await this.authService.logout(user.id, isUserPrincipal(user) ? user.sessionId : undefined);
     return JsonResponse.Ok({});
   }
 }

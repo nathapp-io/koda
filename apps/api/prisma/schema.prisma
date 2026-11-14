@@ -39,6 +39,7 @@ model User {
   ticketWatches                   TicketWatcher[]
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
+  authSessions                    AuthSession[]
 }
 
 model Agent {
@@ -423,6 +424,37 @@ model NotificationCategoryPreference {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, category, channel])
+}
+
+// ---------------------------------------------------------------------------
+// Auth sessions (auth-sessions US-001)
+// ---------------------------------------------------------------------------
+
+/// One sign-in: a refresh token chain. `id` is the refresh JWT's `sid` and is generated (randomUUID)
+/// before signing, so the row carries the id the token carries. `expiresAt` slides with each rotation.
+model AuthSession {
+  id            String         @id
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime       @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String? // logout | reuse | password-change | password-reset
+  tokens        RefreshToken[]
+
+  @@index([userId])
+}
+
+/// One refresh token of a session; `id` is the refresh JWT's `jti`. `usedAt` is set by the rotation that
+/// presents it, so a second use — or one inside the grace window — is detectable.
+model RefreshToken {
+  id        String      @id
+  sessionId String
+  session   AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  usedAt    DateTime?
+
+  @@index([sessionId])
 }
 
 // ---------------------------------------------------------------------------

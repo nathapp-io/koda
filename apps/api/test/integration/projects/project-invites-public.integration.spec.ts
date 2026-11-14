@@ -210,7 +210,9 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   });
 
   // ── US-005 AC-3 ───────────────────────────────────────────────────────────
-  it('US-005 AC-3: accept creates one MEMBER account for the invite email with a bcrypt-verifiable password', async () => {
+  // auth-sessions US-002 AC-7: accepting an invite signs the new user in, so the acceptance starts
+  // exactly one session for them (alongside the US-005 AC-3 account assertions this case carries).
+  it('US-002 AC-7 / US-005 AC-3: accept creates one MEMBER account for the invite email with a bcrypt-verifiable password', async () => {
     const { token, row } = await freshInvite();
 
     const res = await accept(token);
@@ -222,6 +224,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
+    expect(await prisma.authSession.count({ where: { userId: users[0].id } })).toBe(1);
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     expect(await require('bcrypt').compare(TEST_PASSWORD, users[0].passwordHash)).toBe(true);
   });

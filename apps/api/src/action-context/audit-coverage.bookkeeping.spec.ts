@@ -44,6 +44,8 @@ const EXPECTED_REASON_IDS = [
   'fleet.analytics-progress',
   'approval.request-open',
   'approval.request-settle',
+  'auth.session-start',
+  'auth.session-rotate',
 ] as const;
 
 const EXPECTED_UNAUDITED_SURFACES = [
@@ -133,6 +135,13 @@ describe('audit coverage bookkeeping', () => {
   it('AC-10: gives every catalogue id a non-empty sentence', () => {
     for (const sentence of Object.values(BOOKKEEPING_REASONS)) {
       expect(sentence.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('AC-14: covers the auth session start and rotation writes with their own reasons', () => {
+    const reasons: Readonly<Record<string, string>> = BOOKKEEPING_REASONS;
+    for (const id of ['auth.session-start', 'auth.session-rotate']) {
+      expect(reasons[id]?.trim()).toBeTruthy();
     }
   });
 
