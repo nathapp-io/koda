@@ -1,0 +1,565 @@
+{
+  "project": "koda",
+  "feature": "review-1114-fix-bundle",
+  "branchName": "feat/review-1114-fix-bundle",
+  "createdAt": "2026-11-14T05:35:31.930Z",
+  "updatedAt": "2026-11-14T07:46:56.403Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Catalog tiers for agent spend and account writes",
+      "description": "**Goal** — Raise the five named catalog risks while preserving all other permissions and the catalog's existing approval derivation.\n\n**Motivation** — `classifyRisk` in `apps/api/src/permissions/catalog.ts` returns `medium` for any key that matches no rule, and `medium` gives the approval default `none`.\n\n**Approach** — `classifyRisk(key)` in `apps/api/src/permissions/catalog.ts`.\n- Target: additionally `fleet.thread.preapprove` is `critical`, and the members of a new exported `SPEND_AND_ACCOUNT_WRITE_KEYS: ReadonlySet<string>` (`fleet.job.dispatch`, `fleet.job.config.edit`, `fleet.schedule.create`, `user.update`) are `high`. `buildEntry` is unchanged.\nTiers follow the owner's 2026-11-14 rulings. Other spend-adjacent keys keep their tier (see Out of Scope).\nMaking the key user-only is not possible: `RoleAdminService.assertPrincipalType` would then refuse binding the Developer role to any agent. Risk `critical` gives the key the `human` approval floor instead.\n\nUpdate `apps/api/src/permissions/catalog.spec.ts`: the test's own `expectedRisk(key)` mirror of `classifyRisk`, checked against every catalog key, must return `critical` for `fleet.thread.preapprove` and `high` for `fleet.job.dispatch`, `fleet.job.config.edit`, `fleet.schedule.create` and `user.update`; every other key's expected risk stays. High keys retain their existing floor and default to agent approval; thread preapproval retains both principal types. Direct humans remain governed by the existing gate branch that satisfies every mode.\n\n**Scope** — In: catalog set/classification, its independent unit mirror and unchanged undefined results for unknown-key lookups. Out: route regression updates belong to US-002; the preapproval controller remains unchanged.\n- Retiering `fleet.schedule.update`, `fleet.schedule.enable`, `fleet.job.requeue` or any key other than the five named in this spec; they keep their current risk.\n\n**Interface** — `SPEND_AND_ACCOUNT_WRITE_KEYS: ReadonlySet<string>`; `classifyRisk(key)`; `findCatalogEntry(key: string): PermissionCatalogEntry | undefined`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] findCatalogEntry('fleet.job.dispatch') returns risk: 'high' and approval.default: 'agent'.",
+        "AC-2 [unit] findCatalogEntry('fleet.job.config.edit') returns risk: 'high' and approval.default: 'agent'.",
+        "AC-3 [unit] findCatalogEntry('fleet.schedule.create') returns risk: 'high' and approval.default: 'agent'.",
+        "AC-4 [unit] findCatalogEntry('user.update') returns risk: 'high' and approval.default: 'agent'.",
+        "AC-5 [unit] findCatalogEntry('fleet.thread.preapprove') returns risk: 'critical' and approval.floor: 'human'.",
+        "AC-6 [unit] findCatalogEntry('fleet.thread.preapprove').principals equals ['user', 'agent'].",
+        "AC-7 [unit] SPEND_AND_ACCOUNT_WRITE_KEYS is importable from permissions/catalog.ts with exactly the members fleet.job.dispatch, fleet.job.config.edit, fleet.schedule.create and user.update.",
+        "AC-8 [unit] findCatalogEntry('fleet.schedule.update').risk and findCatalogEntry('fleet.job.requeue').risk are both 'medium'.",
+        "AC-9 [unit, negative regression] findCatalogEntry('fleet.job.not-a-permission') returns undefined rather than synthesizing an entry for an unknown permission key."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "permissions",
+        "approvals"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small catalog and mirror change with broad approval/access-control consequences; security override requires isolated test writing.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/catalog.spec.ts",
+        "apps/api/src/approvals/approval-gate.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the test's own `expectedRisk(key)` mirror of `classifyRisk`, checked against every catalog key, must return `critical` for `fleet.thread.preapprove` and `high` for `fleet.job.dispatch`, `fleet.job.config.edit`, `fleet.schedule.create` and `user.update`; every other key's expected risk stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "411d4551a3de099feb099fa2d4365aa6f177db44"
+    },
+    {
+      "id": "US-002",
+      "title": "Routes honour the new approval tiers",
+      "description": "**Goal** — Make the existing route and MCP contracts honor the new no-policy agent approval defaults without changing immediate direct-human execution.\n\n**Motivation** — An agent with global Admin can disable other admins with no approval.\n\n**Approach** — `apps/api/src/approvals/approval-gate.service.ts`: a direct human satisfies every mode; only non-human callers open an approval request.\n`apps/api/src/fleet/jobs/fleet-jobs.controller.ts`: `POST projects/:slug/fleet/jobs` is `@ApprovalGated()` and runs through `ApprovalRouteGate`, which returns `202` with the pending request.\nAn authorized agent holding the route's required permission key (and project reach where applicable), calling the dispatch, schedule-create or admin user PATCH route with no approval policy now gets `202` and a pending request; an authorized human still runs at once. A caller missing the required key still receives `403` without an approval request; approval does not substitute for permission. The existing agent-dispatch and agent-schedule tests move to the new expectation.\n\nPreserve the specified regressions individually: in `enforce-fleet-jobs.integration.spec.ts`, AC-4 now expects `202` with a pending `fleet.job.dispatch` request and no job row; AC-5 and AC-6 keep their stored-actor and activity assertions by seeding a `none` approval policy for the agent in their setup. In `enforce-fleet-schedules.integration.spec.ts`, AC-5 now expects `202` with a pending `fleet.schedule.create` request, and AC-6 keeps its stored-creator assertion by seeding a `none` approval policy for the agent. In `gated-fleet-job-routes.integration.spec.ts`, existing AC-15 changes from immediate/no request to `202`, exactly one pending `fleet.job.dispatch` request and no job row for feature `ac-15`. In `permissions-assistant-tools.integration.spec.ts`, existing AC-6 seeds a `none` policy for `fleet.job.dispatch` for that agent in p1 and retains its QUEUED-job/requested-by-agent assertions through `koda_dispatch_job`. In `gated-admin-write-routes.integration.spec.ts`, add the no-policy agent user PATCH case; existing explicit-wait-policy cases stay. Use isolated policy fixtures so no-policy cases genuinely have no override. The catalog change should activate existing gate wiring; repair production wiring only if the route fails to honor that established contract, not by introducing a parallel gate.\n\n**Scope** — In: route behavior and real HTTP/Postgres regression updates explicitly assigned to this binding story. Out: catalog risk definitions belong to US-001; project reach optimization and runner identity belong to US-006 and US-008.\n\n**Interface** — `POST /api/projects/:slug/fleet/jobs`; `POST /api/projects/:slug/fleet/schedules`; `PATCH /api/admin/users/:id`; `koda_dispatch_job`. Existing pending approval envelopes and permissionKey identifiers are unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] An agent holding fleet.job.dispatch in the project, with no approval policy seeded, calling POST /api/projects/:slug/fleet/jobs with a valid RUN body gets 202 with a pending request whose permissionKey is fleet.job.dispatch.",
+        "AC-2 [integration] After that 202, no FleetJob row exists for the request.",
+        "AC-3 [integration] A user holding fleet.job.dispatch, with no approval policy seeded, calling the same route with the same body gets 201.",
+        "AC-4 [integration] An agent holding fleet.schedule.create in the project, with no approval policy seeded, calling POST /api/projects/:slug/fleet/schedules with a valid body gets 202 with a pending fleet.schedule.create request.",
+        "AC-5 [integration] An agent holding user.update globally, with no approval policy seeded, calling PATCH /api/admin/users/:id with { \"disabled\": true } gets 202 with a pending user.update request, and the target user's disabled stays false.",
+        "AC-6 [integration, negative regression] When an authenticated project-member agent lacks fleet.job.dispatch, POST /api/projects/:slug/fleet/jobs with a valid RUN body returns 403 without opening an approval request."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "integration"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing ApprovalRouteGate wiring already supplies the behavior; scoped policy fixtures and HTTP/MCP expectation updates are standard changes, while permission enforcement requires the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/test/integration/permissions/enforce-fleet-jobs.integration.spec.ts",
+        "apps/api/test/integration/permissions/enforce-fleet-schedules.integration.spec.ts",
+        "apps/api/test/integration/permissions/gated-admin-write-routes.integration.spec.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.controller.ts",
+        "apps/api/test/integration/fleet/gated-fleet-job-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-jobs.integration.spec.ts",
+          "reason": "AC-4, AC-5 and AC-6 expect a DEVELOPER agent's dispatch to return `201`; with `fleet.job.dispatch` at `high` it returns `202`. AC-4 now expects `202` with a pending `fleet.job.dispatch` request and no job row; AC-5 and AC-6 keep their stored-actor and activity assertions by seeding a `none` approval policy for the agent in their setup."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-schedules.integration.spec.ts",
+          "reason": "AC-5 and AC-6 expect an agent's schedule create to return `201`; AC-5 now expects `202` with a pending `fleet.schedule.create` request, and AC-6 keeps its stored-creator assertion by seeding a `none` approval policy for the agent."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/gated-fleet-job-routes.integration.spec.ts",
+          "reason": "AC-15 (\"agent dispatch without a policy is immediate with no request\") expects `201` and no approval request; with `fleet.job.dispatch` at `high` it returns `202`. It now expects `202`, exactly one pending `fleet.job.dispatch` request and no job row for feature `ac-15`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-assistant-tools.integration.spec.ts",
+          "reason": "AC-6 (\"an MCP dispatch naming p1 by a developer binding creates a QUEUED job requested by the agent\") expects `koda_dispatch_job` to queue a job at once; the MCP write goes through the gate, so it now returns pending. The case seeds a `none` approval policy for `fleet.job.dispatch` for that agent in p1 and keeps its job assertions."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/gated-admin-write-routes.integration.spec.ts",
+          "reason": "gains a case for an agent's admin user PATCH with no seeded policy (this story's AC-5); the existing cases, which seed a wait policy, stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "27f259ff13e17cc27f02181ebe0bb6665fde9339"
+    },
+    {
+      "id": "US-003",
+      "title": "Stop a failed flow with internal_error",
+      "description": "**Goal** — Add a locked, audited internal-error stop primitive for live and waiting-merge flows.\n\n**Motivation** — A flow that hits an undeclared error never changes state, so `listAdvanceable` returns it again every `flowTickMs` (30 s).\n\n**Approach** — `FlowStopReason` in `apps/api/src/fleet/flows/flow-step-decision.ts` gains `'internal_error'`.\n`awaitedFeatures(flow)` in `apps/api/src/fleet/flows/fleet-flow-feature-passes.ts`.\n- Target: exported, unchanged otherwise. The same file gains an exported pure function `failureStopFeature(flow: FleetFlowRecord): FleetFlowFeatureRecord`: for a WAITING_MERGE flow the first awaited feature, otherwise the active feature, and in both cases the first feature by position when there is none.\n`FleetFlowAdvanceService` gains `stopFailedFlow(flowId: string, detail: string, now: Date): Promise<boolean>`. It reads the flow; for APPROVED or RUNNING it writes the stop through `writeStop`, for WAITING_MERGE it takes `lockWaitingMerge` and writes the stop through `writeDecision`, in both cases with reason `internal_error` and the feature `failureStopFeature` picks. It returns `true` when a stop was written and `false` when the flow is gone or in any other state. An empty `detail` is stored as `internal error`.\n\nReuse the existing parent/flow lock ordering and approval-generation checks, and ensure the boolean reflects a real write even if the flow changes state between the read and lock. `writeDecision` bounds `detail` to `FLOW_STOP_DETAIL_MAX` and records the `flow.stopped` activity; retain its audit and stopped outbox behavior rather than writing the row directly. Exercise `failureStopFeature` through this new public method, including WAITING_MERGE, and expose `awaitedFeatures` without changing its selection rule. Add `apps/api/test/integration/fleet/fleet-flow-failure-stop.integration.spec.ts` using the existing advance integration fixture pattern; pure selectors can be covered in an existing adjacent unit spec.\n\n**Scope** — In: reason union, exported selection helpers, public stop primitive and transactional persistence behavior. Out: retry counting/cursor belongs to US-004 and watch throttling to US-005.\n- Web i18n labels for the `internal_error` stop reason; the web flow page and notifications fall back to `humanizeCode`, which renders \"Internal error\".\n- Splitting `fleet-flow-advance.service.ts` (1008 lines) below the 800-line limit; new flow-stop selection logic goes into `fleet-flow-feature-passes.ts` instead of growing the service further.\n\n**Interface** — `failureStopFeature(flow: FleetFlowRecord): FleetFlowFeatureRecord`; `stopFailedFlow(flowId: string, detail: string, now: Date): Promise<boolean>`; exported `awaitedFeatures(flow)`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] stopFailedFlow(flowId, 'boom', now) on a RUNNING flow returns true.",
+        "AC-2 [integration] After that call the flow row has state STOPPED, stopReason internal_error and stopDetail boom.",
+        "AC-3 [integration] After that call a flow.stopped activity row exists for the flow.",
+        "AC-4 [integration] stopFailedFlow on a WAITING_MERGE flow returns true and leaves the row with state STOPPED and stopReason internal_error.",
+        "AC-5 [integration] stopFailedFlow on a flow already in state STOPPED returns false and leaves its stopReason and endedAt unchanged.",
+        "AC-6 [unit] failureStopFeature on a WAITING_MERGE flow whose features are MERGED at position 0 and awaiting at position 1 returns the position-1 feature.",
+        "AC-7 [unit] failureStopFeature on a RUNNING flow with no active feature returns the feature at the lowest position.",
+        "AC-8 [integration] stopFailedFlow(flowId, '', now) on a RUNNING flow stores stopDetail internal error.",
+        "AC-9 [unit] awaitedFeatures is importable from fleet-flow-feature-passes.ts and returns the awaiting features of a flow in position order.",
+        "AC-10 [integration, failure handling] When the flow is gone or has left APPROVED, RUNNING and WAITING_MERGE before the stop, stopFailedFlow returns false and writes nothing."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "reliability"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The new public method and pure selector reuse existing lockLive, lockWaitingMerge and writeDecision paths; no new transaction abstraction or integration is needed, so ordinary TDD with real-DB stop tests is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-feature-passes.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-active-feature.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-failure-stop.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ad5072db56bdbf453345a0a0d9834b1aa6774b15"
+    },
+    {
+      "id": "US-004",
+      "title": "Bound flow failures and resume ticker pagination fairly",
+      "description": "**Goal** — Stop repeatedly failing flows after five consecutive errors and carry fair pagination across bounded ticks.\n\n**Motivation** — Each tick starts from the lowest flow id and stops at 500 flows, so flows beyond 500 are never reached while lower ids stay advanceable.\n\n**Approach** — `FleetFlowTicker.tick(now)` in `apps/api/src/fleet/flows/fleet-flow.ticker.ts`.\n- Target: the first `listAdvanceable` call of a tick uses the cursor the previous tick left: the last listed id after a tick that hit the page limit, `null` after a tick that reached a short page. A `listAdvanceable` that throws leaves the cursor unchanged. The ticker counts consecutive advance failures per flow id; a resolved advance deletes the count. When a count reaches the exported `FLOW_FAILURE_STOP_AFTER` (`5`), the ticker calls `engine.stopFailedFlow(flowId, <that error's message>, now)` inside the same `runAsSystem('flow', ..., { onBehalfOf: <flow creator> })` it uses for `advance`, and deletes the count when the call resolves. A rejected `stopFailedFlow` is logged and the count kept.\n\nThe flow failure counts, the ticker cursor and the merge-watch timestamps live in process memory. The API is single-replica by ruling, so no column or migration is added. A restart resets them.\n- failure counts: after a tick that started at `afterId` `null` and reached a short page (so it listed every advanceable flow), the ticker deletes the count of every flow id that tick did not list. A tick that resumed from a cursor prunes nothing, because it never saw the lower ids;\n- the cursor is a single value.\n\nRetain PAGE_SIZE 50, MAX_PAGES 10, the existing interval entry point and poll single-flight behavior. Commit a cursor update only after successful listing for the entire tick; a failure on any page preserves the cursor left before this tick. Fewer than five consecutive failures are logged and retried next tick; a resolved stop, including false, clears the count. A rejected stop cannot reject the tick or prevent later flows advancing; retry stopping on the next failure. Every stop must execute in the same system writer/onBehalfOf attribution as the advance, not outside that context. Extend the ticker's mocked engine with stopFailedFlow and use multi-tick tests on one ticker instance; capture context inside the stub and assert outside the catchable callback.\n\n**Scope** — In: ticker cursor, consecutive-failure bookkeeping, explicit pruning and consuming US-003's stop seam. Out: public stop implementation is US-003; merge-watch timestamp/config logic is US-005.\n- A database column or migration for the flow failure counts, the ticker cursor or the merge-watch timestamps; they are in-memory because the API is single-replica by ruling.\n\n**Interface** — exported `FLOW_FAILURE_STOP_AFTER` (`5`); `FleetFlowTicker.tick(now)`; `listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]>`; `stopFailedFlow(flowId: string, detail: string, now: Date): Promise<boolean>`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] FLOW_FAILURE_STOP_AFTER is importable from fleet-flow.ticker.ts and equals 5.",
+        "AC-2 [unit] With engine.advance rejecting for flow F on 4 consecutive tick calls, engine.stopFailedFlow is never called.",
+        "AC-3 [unit] With engine.advance rejecting for flow F with message boom-5 on the 5th consecutive tick, engine.stopFailedFlow is called once with ('F', 'boom-5', now).",
+        "AC-4 [unit] Inside that stopFailedFlow call, currentContext() reports the system writer flow acting on behalf of the flow's creator.",
+        "AC-5 [unit] Four rejecting ticks for F, one resolving tick, then four rejecting ticks call engine.stopFailedFlow zero times.",
+        "AC-6 [unit] After engine.stopFailedFlow resolves for F, one more rejecting tick for F does not call stopFailedFlow.",
+        "AC-7 [unit] When engine.stopFailedFlow rejects for F, tick resolves and still advances the next listed flow G in that tick.",
+        "AC-8 [unit] After a rejected stopFailedFlow for F, the next rejecting tick for F calls stopFailedFlow again.",
+        "AC-9 [unit] Five rejecting ticks for F interleaved with resolving advances for G call stopFailedFlow for F only.",
+        "AC-10 [unit] A flow F with 4 recorded failures that a tick starting at afterId null and ending on a short page does not list, then listed and rejecting again, needs 5 more rejecting ticks before stopFailedFlow is called.",
+        "AC-14 [unit] A flow F with 4 recorded failures that a tick resumed from a non-null cursor does not list keeps its count: the next rejecting tick for F calls stopFailedFlow.",
+        "AC-11 [unit] After a tick whose listAdvanceable calls returned 10 full pages, the next tick's first listAdvanceable call has afterId equal to the id of the last flow of the 10th page.",
+        "AC-12 [unit] After a tick whose listAdvanceable returned a short page, the next tick's first listAdvanceable call has afterId null.",
+        "AC-13 [unit] After a tick in which listAdvanceable threw, the next tick's first listAdvanceable call has the same afterId as the tick that threw.",
+        "AC-15 [unit, failure handling] When listAdvanceable throws, tick rejects with that error, preserving the previously committed cursor."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "reliability",
+        "fairness"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Changes are confined to one existing ticker and its injected unit harness: a counter map, a cursor and existing system-context calls; deterministic multi-tick TDD covers the specified state sequences without a new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
+        "apps/api/src/fleet/flows/fleet-flow.ticker.spec.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bd3576f426f02e943482d42a49f8f04d1283b808"
+    },
+    {
+      "id": "US-005",
+      "title": "Throttle completed flow merge watches",
+      "description": "**Goal** — Limit successful per-flow merge watches to the configured interval without hiding errors from the failure budget.\n\n**Motivation** — Each `WAITING_MERGE` flow polls every awaited PR on GitHub every tick.\n\n**Approach** — `IFleetConfig` gains `flowMergePollMs: number`, read from `FLEET_FLOW_MERGE_POLL_MS` (default `120_000`), with the same validation as `FLEET_FLOW_TICK_MS`: an integer from `1_000` to `3_600_000` in the Joi schema (`env.validation.ts`) and an optional string in the env DTO (`fleet.config.ts`). The advance service's `FLEET_CFG` pick gains `'flowMergePollMs'`.\n`FleetFlowAdvanceService.advance(flowId, now)`.\n- Target: it skips `runMergeWatch` when a timestamp recorded for the flow is less than `flowMergePollMs` before `now`. The timestamp is recorded (as `now`) only when `runMergeWatch` resolves with `kind: 'watched'`.\nA merge watch records its timestamp only when `runMergeWatch` resolves with outcome `kind: 'watched'`. A watch that throws, or resolves `retry` (a transient forge or token failure) or `idle`, records nothing, so the next tick runs it again; a throwing watch therefore still reaches the 5-failure stop. A skipped watch resolves `advance` normally and resets the count, which is correct because a skip only follows a completed watch.\n- merge-watch timestamps: each time a timestamp is recorded, entries older than `flowMergePollMs` are deleted (an expired entry means the same as no entry);\nThe flow failure counts, the ticker cursor and the merge-watch timestamps live in process memory. The API is single-replica by ruling, so no column or migration is added. A restart resets them.\n\nAdd `apps/api/src/fleet/flows/fleet-flow-merge-poll.spec.ts`, driving the real advance service with the existing merge-watch harness as precedent. Add `flowMergePollMs: 0` to `testFleetConfig`, so unrelated unit specs do not skip watches. Extend `fleet.config.spec.ts` parsing/rejection tables alongside flowTickMs, including environment restoration. In `fleet-flow-features.integration.spec.ts`, set `FLEET_FLOW_MERGE_POLL_MS=1000` before `bootHttpApp` and restore it after: its existing one-second ticks must still poll. Add the real ticker/advance seam case there with a non-forge getPullRequest error on every call, proving STOPPED/internal_error on tick five. Keep forge I/O outside transactions and treat retry, idle and exceptions distinctly from watched.\n\n**Scope** — In: merge interval config, completed-watch timestamp retention, polling boundary behavior and real ticker error-stop integration. Out: ticker counting/cursor implementation is US-004; stop primitive is US-003.\n- A database column or migration for the flow failure counts, the ticker cursor or the merge-watch timestamps; they are in-memory because the API is single-replica by ruling.\n- Splitting `fleet-flow-advance.service.ts` (1008 lines) below the 800-line limit; new flow-stop selection logic goes into `fleet-flow-feature-passes.ts` instead of growing the service further.\n\n**Interface** — `flowMergePollMs: number`; `FLEET_FLOW_MERGE_POLL_MS`; `FleetFlowAdvanceService.advance(flowId, now)`; `runMergeWatch` outcome `kind: 'watched' | 'retry' | 'idle'`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] fleetConfig() with FLEET_FLOW_MERGE_POLL_MS unset returns flowMergePollMs: 120000.",
+        "AC-2 [unit] fleetConfig() with FLEET_FLOW_MERGE_POLL_MS=60000 returns flowMergePollMs: 60000.",
+        "AC-3 [unit] Env validation rejects FLEET_FLOW_MERGE_POLL_MS=999 and FLEET_FLOW_MERGE_POLL_MS=3600001.",
+        "AC-4 [unit] Two advance calls for one WAITING_MERGE flow whose merge watch resolves with kind watched for an open awaited PR, the second flowMergePollMs - 1 ms after the first, call getPullRequest on the first call only.",
+        "AC-5 [unit] Two advance calls for one WAITING_MERGE flow whose merge watch resolves with kind watched for an open awaited PR, the second exactly flowMergePollMs ms after the first, call getPullRequest on both.",
+        "AC-6 [unit] When the first advance for a WAITING_MERGE flow rejects because getPullRequest throws a non-forge Error, a second advance 1 ms later calls getPullRequest again.",
+        "AC-7 [unit] advance for WAITING_MERGE flow A and then immediately for WAITING_MERGE flow B calls getPullRequest for both.",
+        "AC-9 [unit] When the first advance for a WAITING_MERGE flow ends with merge-watch outcome retry (the PR read fails with provider_unreachable), a second advance 1 ms later calls getPullRequest again.",
+        "AC-8 [integration] In fleet-flow-features.integration.spec.ts, driving the real FleetFlowTicker.tick with FLEET_FLOW_MERGE_POLL_MS=1000, ticks 1 s apart, and a WAITING_MERGE flow whose getPullRequest stub throws a non-forge Error on every call, the flow reaches state STOPPED with stopReason internal_error on the 5th tick.",
+        "AC-10 [unit, failure handling] Given flowMergePollMs=1000 and a WAITING_MERGE flow whose first advance produces merge-watch outcome idle, when the same flow has an awaited PR on a second advance 1 ms later, getPullRequest is called for that PR rather than the watch being skipped."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "performance",
+        "config"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The implementation mirrors the existing interval config and adds a local timestamp check around the existing watched/retry/idle union; existing merge-watch and ticker fixtures support direct TDD despite several mechanical config/test updates.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/config/fleet.config.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/fleet/flows/fleet-flow-merge-watch.spec.ts",
+        "apps/api/test/integration/fleet/fleet-flow-features.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-merge-poll.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-features.integration.spec.ts",
+          "reason": "its ticks are 1 s apart on one app and re-tick a WAITING_MERGE flow expecting a fresh `getPullRequest`; set `FLEET_FLOW_MERGE_POLL_MS=1000` before `bootHttpApp` (and restore it after), so every 1 s tick still polls. It also gains this story's AC-8 case (a WAITING_MERGE flow whose `getPullRequest` throws on every call), reusing the file's fixtures."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/fleet-config.ts",
+          "reason": "`testFleetConfig` returns a full `IFleetConfig`; add `flowMergePollMs: 0` so unit specs that use it never skip a merge watch."
+        },
+        {
+          "path": "apps/api/src/config/fleet.config.spec.ts",
+          "reason": "the parsing and rejection tables gain `FLEET_FLOW_MERGE_POLL_MS` rows mirroring the `FLEET_FLOW_TICK_MS` rows."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d8e0985fb17b257536814112e0518b63228126f9"
+    },
+    {
+      "id": "US-006",
+      "title": "Resolve a flow's reachable project directly",
+      "description": "**Goal** — Replace the GET flow endpoint's full project-domain listing with a direct reachable-project lookup while retaining its authorization semantics.\n\n**Motivation** — `FleetFlowsController.get` calls `ProjectsService.findAllForPrincipal` and searches the list for the flow's project, so its cost grows with the caller's project count.\n\n**Approach** — `ProjectsService` gains `findReachableById(principal: KodaPrincipal, projectId: string): Promise<ProjectDomain | null>`: the live project when `readsEveryProject(principal)` or `accessibleProjectIds` for the principal includes it, else `null`. A new `PrismaProjectRepository.findLiveById(id)` and `isAccessible(principal: PrincipalRef, projectId)` back it.\n`FleetFlowsController.get(flowId, principal)`: calls `projects.findReachableById(principal, flow.projectId)` instead of scanning `findAllForPrincipal`. `null` gives `404 fleet.flows.notFound` with no permission probe; a reachable project without `fleet.flow.read` gives `403`, as today.\nThe flow-lookup reach check keeps today's semantics exactly: a project is reachable when it is live and the caller either reads every project or holds an access binding for it, the same rule `findAllForPrincipal` applies, now evaluated for one project id. A global Owner or Admin returns at the `readsEveryProject` check without reading any project list; a caller with a `projectId`-null PROJECT binding still pays the `accessibleProjectIds` read, so the gain is largest for global admins and for callers with few bindings.\n\nReuse membership.queries.ts's binding-only accessibleProjectIds semantics and the existing principal conversions; do not add a new role-claim or legacy-membership check. The repository lookup must filter soft-deleted projects, even for global admins. Update `fleet-flow-read-stop.spec.ts` existing AC-4 and AC-5 to stub `projects.findReachableById` (project and null respectively) and keep their assertions, including no permission probe in AC-5. Cover the service/repository against Postgres and consume the new service through real GET /api/fleet/flows/:flowId. HTTP error checks must account for the normal Nathapp/i18n envelope rather than inventing a new error format.\n\n**Scope** — In: repository/service direct reach seam, GET consumption and user/agent/admin authorization regressions. Out: approval defaults and routes belong to US-001/US-002; flow stopping and polling belong to US-003–US-005. The create endpoint's separate lookup is not part of this optimization.\n\n**Interface** — `findReachableById(principal: KodaPrincipal, projectId: string): Promise<ProjectDomain | null>`; `PrismaProjectRepository.findLiveById(id)`; `isAccessible(principal: PrincipalRef, projectId)`; `FleetFlowsController.get(flowId, principal)`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] GET /api/fleet/flows/:flowId by a project member holding fleet.flow.read returns 200 with the flow's project slug.",
+        "AC-2 [integration] GET /api/fleet/flows/:flowId by a user with no access binding to the flow's project returns 404 with fleet.flows.notFound.",
+        "AC-3 [integration] GET /api/fleet/flows/:flowId for a flow whose project is soft-deleted returns 404 with fleet.flows.notFound.",
+        "AC-4 [integration] GET /api/fleet/flows/:flowId by a member holding project.read but not fleet.flow.read returns 403.",
+        "AC-5 [unit] FleetFlowsController.get calls projects.findReachableById(principal, flow.projectId) and never calls projects.findAllForPrincipal.",
+        "AC-6 [integration] ProjectsService.findReachableById for an agent with a project-scoped binding in project P returns P, and for the same agent and a project Q it has no binding in returns null.",
+        "AC-7 [integration] ProjectsService.findReachableById for a global Admin user returns any live project and null for a soft-deleted one."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "access-control",
+        "fleet",
+        "performance"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four existing production files gain thin lookup wrappers using readsEveryProject and accessibleProjectIds rather than a new authorization model; visibility and non-disclosure ordering still require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/projects/prisma-project.repository.ts",
+        "apps/api/src/permissions/membership.queries.ts",
+        "apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts",
+          "reason": "AC-4 and AC-5 stub `projects.findAllForPrincipal`; they now stub `projects.findReachableById` (AC-4 resolves the project, AC-5 resolves `null`) and keep their assertions, including \"no permission probe\" in AC-5."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "410f02b2606d3a9967861de4f8a825abaf24a49f"
+    },
+    {
+      "id": "US-007",
+      "title": "Retry note upserts that lose a concurrent write race",
+      "description": "**Goal** — Recover bounded same-slug note upsert races with new serializable transactions and unchanged final exception shapes.\n\n**Motivation** — Two concurrent writers of the same slug both see no active row; the loser fails with a unique violation on `activeKey` or a serialization failure (`P2034`), which reaches the caller as a 500.\n\n**Approach** — `isSerializationFailure(error: unknown): boolean` (new, `apps/api/src/common/utils/prisma-errors.ts`): `true` for a `PrismaClientKnownRequestError` with code `P2034`.\n`PrismaMemoryItemRepository.upsert(item, options)`.\n- Target: each attempt runs through `this.tx.run(callback, { isolationLevel: 'Serializable' })`. When an attempt rejects with `isUniqueViolation(error, 'activeKey')` or `isSerializationFailure(error)`, it waits `protected retryDelay(attempt: number): Promise<void>` (which sleeps `memoryUpsertBackoffMs(attempt, Math.random)` ms) and runs again, up to the exported `MEMORY_UPSERT_MAX_ATTEMPTS` (`3`) attempts. Inside an outer transaction (`this.tx.isInTransaction()`) it makes one attempt. The error that leaves `upsert` is `PrismaErrorMapper.map(error)` for a `P*` error and the error itself otherwise. The exported pure function `memoryUpsertBackoffMs(attempt: number, random: () => number): number` returns `attempt * Math.round(10 + 40 * random())`.\nA note upsert retries in a new transaction with the same jittered backoff as `runWithTicketNumberRetry` (`attempt * round(10 + 40 * random())` ms). Each attempt re-runs the whole transaction callback, including `beforeWrite`, `beforeSupersede` and `onWritten`; their writes belong to the failed transaction and roll back with it.\nThe retry cannot sit on `PrismaService.withTransaction`: that method maps every `P*` error through `PrismaErrorMapper.map` (`@nathapp/nestjs-prisma` 4.1 `prisma.service.js`), so a P2002 arrives as a `PrismaAppException` `DUPLICATE_ENTRY` and a P2034 as an unidentifiable `DATABASE_ERROR`. The attempts run through the repository's transaction manager, `this.tx.run(callback, { isolationLevel: 'Serializable' })`, which joins the same AsyncLocalStorage `AuditRecorder` reads and passes errors through unmapped; the callback writes through `this.tx.getClient()`. The error that finally leaves `upsert` is mapped with `PrismaErrorMapper.map` when it is a `P*` error, so callers see the same exception shapes as before.\n\nPreserve the active-key construction, normalized identical-restatement no-op, supersede and audit callbacks. Retrying an already-aborted outer transaction is forbidden: detect the outer transaction before attempts and run once. Other errors propagate on their first attempt; when three eligible conflicts exhaust retries, propagate the final error with the required final mapping and do not delay after the last attempt. Reuse isUniqueViolation for adapter index metadata. Prisma 7 with @prisma/adapter-pg reports SQLSTATE 40001/40P01 as P2034.\n\nIn `prisma-memory-item.repository.additional.spec.ts`, upsert cases must control the transaction manager's run and return mockPrismaClient from getClient, retaining no-op, supersede and audit assertions. In `outbox-fanout-extraction.integration.spec.ts`, make the TRANSACTION_MANAGER mock's getClient return mockPrismaClient (the existing mock currently returns undefined). Add `apps/api/test/integration/memory/memory-note-concurrent-upsert.integration.spec.ts` for three identical and two different-description concurrent project-note writers. Use real transactions and the shared DB gate; a retry must rerun hooks inside the transaction rather than outside it.\n\n**Scope** — In: upsert conflict recognition, bounded retry/backoff, transaction client/ALS correctness, final error mapping and same-slug persistence. Out: flow failures belong to US-003–US-005.\n- US-007 only: retrying any memory write other than `PrismaMemoryItemRepository.upsert`, and more than 3 concurrent same-slug writers (a 4th racer can exhaust its attempts and receive the error).\n\n**Interface** — `isSerializationFailure(error: unknown): boolean`; exported `MEMORY_UPSERT_MAX_ATTEMPTS` (`3`); `protected retryDelay(attempt: number): Promise<void>`; `memoryUpsertBackoffMs(attempt: number, random: () => number): number`; `PrismaMemoryItemRepository.upsert(item, options)`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] MEMORY_UPSERT_MAX_ATTEMPTS is importable from prisma-memory-item.repository.ts and equals 3.",
+        "AC-2 [unit] isSerializationFailure returns true for a PrismaClientKnownRequestError with code P2034.",
+        "AC-3 [unit] isSerializationFailure returns false for a PrismaClientKnownRequestError with code P2002.",
+        "AC-4 [unit] When the transaction manager's first run rejects with a raw P2002 unique violation on activeKey and the second resolves, upsert resolves with the second attempt's item.",
+        "AC-5 [unit] When the first run rejects with a raw P2034 error and the second resolves, upsert resolves after exactly 2 run calls, each with isolationLevel Serializable.",
+        "AC-6 [unit] When all three run calls reject with a raw P2002 violation on activeKey, upsert rejects after exactly 3 run calls with a PrismaAppException whose code is DUPLICATE_ENTRY.",
+        "AC-7 [unit] When run rejects with a raw P2003 foreign-key error, upsert rejects after exactly 1 run call with a PrismaAppException whose code is INVALID_REFERENCE.",
+        "AC-8 [unit] When isInTransaction() is true and run rejects with a raw P2002 violation on activeKey, upsert rejects after exactly 1 run call.",
+        "AC-9 [unit] When the first run rejects with a raw P2034 error, upsert calls retryDelay(1) once before the second run.",
+        "AC-10 [unit] memoryUpsertBackoffMs(2, () => 0.5) returns 60.",
+        "AC-11 [integration] Three concurrent upsert calls for one project note slug with identical fields all resolve, and exactly one active row has that activeKey afterwards.",
+        "AC-12 [integration] Two concurrent upsert calls for one project note slug with different descriptions both resolve, exactly one active row has that activeKey, and the other row has status superseded.",
+        "AC-13 [unit, failure handling] When an upsert attempt fails with an error other than an activeKey unique violation or serialization failure, upsert propagates it on the first attempt, mapping P* errors with PrismaErrorMapper.map and preserving a non-Prisma error itself.",
+        "AC-14 [unit, failure handling] When all three upsert attempts fail with eligible conflicts, upsert propagates the last error, mapped with PrismaErrorMapper.map for a P* error, without starting a fourth transaction."
+      ],
+      "tags": [
+        "api",
+        "memory",
+        "prisma",
+        "concurrency",
+        "reliability"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Serializable races, raw-error versus mapped-error seams, ALS callbacks and outer-transaction behavior require isolated test/implementation/verification stages.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/common/utils/prisma-errors.ts",
+        "apps/api/src/common/utils/ticket-number-retry.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.additional.spec.ts",
+        "apps/api/test/integration/memory/outbox-fanout-extraction.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/memory/memory-note-concurrent-upsert.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.additional.spec.ts",
+          "reason": "its upsert cases stub `prisma.withTransaction`; they now stub the transaction manager's `run` (the mock already declares `isInTransaction`) and `getClient`, and keep their no-op, supersede and audit assertions."
+        },
+        {
+          "path": "apps/api/test/integration/memory/outbox-fanout-extraction.integration.spec.ts",
+          "reason": "its `TRANSACTION_MANAGER` mock (`run: (fn) => fn()`) has no `getClient`, and the upsert now writes through `this.tx.getClient()`; the mock gains `getClient` returning the test's `mockPrismaClient`, keeping its assertions."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3d452ddb6f75aae7b5ed7df463b51d403a6e2146"
+    },
+    {
+      "id": "US-008",
+      "title": "Use shim-backed login-only identity for GitHub RUN",
+      "description": "**Goal** — Give GitHub RUN a login-only forge identity backed by per-call credential shims instead of a startup token file.\n\n**Motivation** — The API ignores `fresh` for RUN, so a readopted RUN waits the full 120 s token wait and then starts without an identity (D/BUG-9), and a RUN longer than the token's life cannot publish.\n\n**Approach** — `HostExecutor.runIdentityEnv(job, jobDir)` in `apps/runner/src/executor/host-executor.ts`.\n- Target: a GitHub RUN whose acquired credentials carry a `binDir` returns `{ NAX_FORGE_IDENTITY: 'login-only', NAX_FORGE_LOGIN: job.assign.gitIdentity.name }`, calls no fresh-token method and writes no file. A GitHub RUN with no `binDir` returns `{}` and logs `RUN starts without a forge identity`. A GitLab RUN returns `{}`. REVIEW and FIX keep `reviewEnv` unchanged. The `binDir` is passed in from the spawn path that already acquires credentials.\n`CREDENTIAL_ENV_VARS` in `apps/runner/src/credentials/credential-env.ts` also lists `NAX_FORGE_IDENTITY`.\nThe RUN identity is login-only only when the job's credential shim directory is on nax's `PATH`. Without the shim, nax's `gh` would use the operator's own `gh` login, so the RUN starts with no injected identity.\n`apps/runner/src/credentials/shim.ts` `tokenEnv('gh', reply)`: the `gh` shim sets `GH_TOKEN` from the job's credential-socket reply.\nnax `packages/nax/src/forge/identity.ts` `captureForgeIdentity`: `NAX_FORGE_IDENTITY=login-only` requires `NAX_FORGE_LOGIN` and refuses `NAX_FORGE_TOKEN_FILE`.\n\nPass the binDir already used to build the spawned PATH into the RUN helper; adapt its private parameters as necessary rather than performing another acquire or freshToken call. Overlay the identity after withoutCredentialVars strips inherited identity/token values. Keep token files, fresh waits and cleanup intact for REVIEW and both FIX steps, but RUN must not create forge-token even when spawn fails.\n\nUpdate the existing Injection harness in `test/unit/host-executor.spec.ts` to return an optional Injection.binDir. Replace #395's fresh-token-file RUN test with login-only/login/no-token-file/no-freshToken assertions; replace refused-fresh-token with the no-binDir warning-and-start case. Replace failed-start cleanup with error propagation and no token file. Remove the obsolete RUN cancelled-token-wait and token-file-write-failure cases. Replace no-fresh-token-provider with a binDir-present case that gets login-only identity and no warning. Replace RUN leftover-token cleanup expectations with no file to remove. In the inherited NAX_FORGE_TOKEN_FILE AC-9, the github row now expects no token file env at all; preserve the gitlab row. Add NAX_FORGE_IDENTITY to credential-env.spec.ts's stripped-variable list.\n\n**Scope** — In: RUN-only identity transport, existing spawn/binDir connection, inherited env sanitization and executor regressions. Out: release secret handling belongs to US-009.\n- Changing the REVIEW or FIX forge identity (token file plus bot login); only RUN moves to login-only.\n- Making the API honour `fresh` for RUN token requests in `sync.service.ts`; the login-only RUN no longer asks for a fresh token.\n- A runner check of the installed nax version; login-only needs nax >= 0.91.8, and the runner already runs 0.92.x.\n\n**Interface** — RUN overlay `{ NAX_FORGE_IDENTITY: 'login-only', NAX_FORGE_LOGIN: job.assign.gitIdentity.name }` or `{}`; `HostExecutor.runIdentityEnv(job, jobDir)` is the existing private seam, extended to consume acquired binDir; `withoutCredentialVars(env)` strips `NAX_FORGE_IDENTITY`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Spawning a GitHub RUN whose credentials acquire returns a binDir passes nax an env with NAX_FORGE_IDENTITY login-only and NAX_FORGE_LOGIN equal to job.assign.gitIdentity.name.",
+        "AC-2 [unit] Spawning that GitHub RUN passes no NAX_FORGE_TOKEN_FILE and never calls credentials.freshToken.",
+        "AC-3 [unit] Spawning that GitHub RUN leaves no forge-token file in the job directory.",
+        "AC-4 [unit] Spawning a GitHub RUN whose credentials acquire returns no binDir passes nax neither NAX_FORGE_IDENTITY nor NAX_FORGE_LOGIN, starts nax, and logs RUN starts without a forge identity.",
+        "AC-5 [unit] Spawning a GitLab RUN passes nax neither NAX_FORGE_IDENTITY nor NAX_FORGE_LOGIN.",
+        "AC-6 [unit] Spawning a REVIEW job still passes NAX_FORGE_TOKEN_FILE and the bot login as NAX_FORGE_LOGIN, and no NAX_FORGE_IDENTITY.",
+        "AC-7 [unit] withoutCredentialVars({ NAX_FORGE_IDENTITY: 'login-only', HOME: '/h' }) returns { HOME: '/h' }."
+      ],
+      "tags": [
+        "runner",
+        "security",
+        "credentials",
+        "fleet",
+        "forge"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing executor and sanitizer seams keep scope bounded, but identity/token handling is security-critical and requires strict test isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/credentials/credential-env.ts",
+        "apps/runner/src/credentials/shim.ts",
+        "apps/runner/test/unit/host-executor.spec.ts",
+        "apps/runner/src/credentials/credential-env.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "the `Injection` harness hardcodes `binDir: null` in `acquire`; add an `Injection.binDir` option that the stub returns."
+        },
+        {
+          "path": "apps/runner/src/credentials/credential-env.spec.ts",
+          "reason": "the list of stripped variables gains `NAX_FORGE_IDENTITY`."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "811f7718e313995f5e059533e86a550be545ea17"
+    },
+    {
+      "id": "US-009",
+      "title": "Fix release secrets, deploy preflight and review severity",
+      "description": "**Goal** — Pass release cache credentials as BuildKit secrets, refuse URL-unsafe deploy passwords and correct the review's RUN-token assessment.\n\n**Motivation** — `.github/workflows/release.yml` passes `TURBO_TOKEN` as a build-arg that neither Dockerfile declares, while the Dockerfiles read it from `--mount=type=secret,id=TURBO_TOKEN`.\n\n**Approach** — `.github/workflows/release.yml` — remove the `TURBO_TOKEN=` line from both `build-args` blocks and add `secrets: |` with `TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}` to both build steps.\n`deployments/example/deploy.sh` — add the `POSTGRES_PASSWORD` check to the pre-deploy safety checks.\n`deployments/example/README.md` — document the allowed `POSTGRES_PASSWORD` characters.\n`docs/20261114-review-whole-repo.md` — record D/SEC-14 as downgraded to LOW wherever it is listed or discussed as MEDIUM, update the MEDIUM and LOW counts, and correct the D gap row that says \"See SEC-14\" for the TURBO token to \"See SEC-15\".\n\nBefore the pre-deploy backup, the script takes POSTGRES_PASSWORD from the environment when set (compose gives the environment precedence), else from the .env file's POSTGRES_PASSWORD= line with surrounding quotes and any trailing # comment removed. A set but empty environment value must not fall back to .env. When the resulting value is empty or contains anything outside ASCII A-Z a-z 0-9 . _ ~ -, print a rule naming the allowed characters and exit 1 before backup, pull or migration, including --no-backup invocations. Do not echo the secret value or add compose percent-encoding. Preserve the rest of the release arguments, Dockerfile secret mounts and deploy ordering.\n\nCorrect every MEDIUM discussion of D/SEC-14 in consolidation notes, summary, findings index, rulings, Priority Fix Order and the area D finding heading, explaining that nax reads and deletes the token file at startup (rather than leaving a file the raw RUN agent can read). The findings index must read MEDIUM (2 new) and LOW (15 new); move/classify D/SEC-14 consistently as LOW and fix the area D TURBO row to SEC-15. This correction does not remove the RUN fresh-wait/expiry defects addressed by US-008.\n\n**No-test** — a CI workflow, a deploy shell script and a review document; no test loads them. The binding spec explicitly designates this story review-only. Review the workflow inputs and shell control flow, and manually check preflight resolution/rejection without permitting real deployment effects.\n\n**Scope** — In: release.yml, example deploy script/README and review corrections. Out: RUN implementation belongs to US-008.\n- Percent-encoding `POSTGRES_PASSWORD` inside the compose files; the deploy script refuses an unsafe password instead.\n- The repo-root `docker-compose.yml`, which also interpolates `POSTGRES_PASSWORD` into `DATABASE_URL`; it is the local development stack, and only `deployments/example` gets the password check.\n- The remaining 2026-11-14 review items (P1 auth, deploy and webhook bundles, the other rulings).\n\n**Interface** — docker/build-push-action `secrets: |` with `TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}`; `POSTGRES_PASSWORD` rule `A-Z a-z 0-9 . _ ~ -`; `deploy.sh` exits 1 for an unset/empty/unsafe effective password before deployment effects.",
+      "acceptanceCriteria": [
+        "AC-1 [review] .github/workflows/release.yml, api image build step: build-args has no TURBO_TOKEN entry, and the step has a secrets input with TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}.",
+        "AC-2 [review] .github/workflows/release.yml, web image build step: build-args has no TURBO_TOKEN entry, and the step has a secrets input with TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}.",
+        "AC-3 [review] deployments/example/deploy.sh: before the pre-deploy backup, the script takes POSTGRES_PASSWORD from the environment when set (compose gives the environment precedence), else from the .env file's POSTGRES_PASSWORD= line with surrounding quotes and any trailing # comment removed.",
+        "AC-4 [review] deployments/example/deploy.sh: when that value is empty or has a character outside A-Z a-z 0-9 . _ ~ -, the script prints a message naming the allowed characters and exits 1 before the backup.",
+        "AC-5 [review] deployments/example/README.md, the POSTGRES_PASSWORD line: it states the allowed characters and that deploy.sh refuses others.",
+        "AC-6 [review] docs/20261114-review-whole-repo.md: every place that lists or discusses D/SEC-14 as MEDIUM (the consolidation notes, the summary, the MEDIUM index, the rulings, the Priority Fix Order and the area D finding heading) marks it downgraded to LOW, with the reason that nax reads and deletes the token file at startup.",
+        "AC-7 [review] docs/20261114-review-whole-repo.md: the findings index reads MEDIUM (2 new) and LOW (15 new).",
+        "AC-8 [review] docs/20261114-review-whole-repo.md, area D gap table: the TURBO token row refers to SEC-15."
+      ],
+      "tags": [
+        "release",
+        "deploy",
+        "security",
+        "review-only"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "no-test",
+        "reasoning": "Bounded root-level CI/deploy/document edits; use the spec's explicit review-only designation, with secret handling and shell failure ordering reviewed directly.",
+        "noTestJustification": "The binding US-009 spec explicitly requires no-test and supplies review ACs for workflow inputs, the example deploy shell preflight and review-document corrections; no existing test loads these artifacts. Retain that explicit exception and verify the password guard's runtime rejection/ordering by review and safe manual preflight rather than adding an automated suite or another story.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        ".github/workflows/release.yml",
+        "apps/api/Dockerfile",
+        "deployments/example/deploy.sh",
+        "deployments/example/README.md",
+        "docs/20261114-review-whole-repo.md"
+      ],
+      "modifiedFiles": [
+        {
+          "path": ".github/workflows/release.yml",
+          "reason": "remove the `TURBO_TOKEN=` line from both `build-args` blocks and add `secrets: |` with `TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}` to both build steps."
+        },
+        {
+          "path": "deployments/example/deploy.sh",
+          "reason": "add the `POSTGRES_PASSWORD` check to the pre-deploy safety checks."
+        },
+        {
+          "path": "deployments/example/README.md",
+          "reason": "document the allowed `POSTGRES_PASSWORD` characters."
+        },
+        {
+          "path": "docs/20261114-review-whole-repo.md",
+          "reason": "record D/SEC-14 as downgraded to LOW wherever it is listed or discussed as MEDIUM, update the MEDIUM and LOW counts, and correct the D gap row that says \"See SEC-14\" for the TURBO token to \"See SEC-15\"."
+        }
+      ],
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "22755c470a7191aed06a9645ffacc0d7156d0739"
+    }
+  ],
+  "analysis": "Repository inspection and constraints\nThis is an enhancement/fix bundle over existing code, not a greenfield project. The execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. codebase-memory MCP is not exposed in this session; discovery therefore used direct file reads, Glob and literal/regex Grep. Citations below refer to the inspected worktree rather than assuming the spec's baseline commit is the current interface. No implementation or test execution was performed during PRD preparation. Exactly the nine binding stories are retained; US-002 remains its own integration-oriented story as explicitly required. US-009 spans repository-root workflow, deployment and documentation files and consequently has no workdir.\n\nArchitecture and guidance\nThe API owns persistence, authorization, approval routing, flow transitions and memory writes. The runner is a Bun-only executor/client with credential transport isolated behind its socket/shims. Read .nax/mono/apps/api/context.md and .nax/mono/apps/runner/context.md before app-local implementation; follow the nathapp-nestjs-patterns skill before NestJS changes. The root guidance identifies the web as Nuxt SSR, not the Next.js label in the supplied automatic package inventory; there is no web application implementation work in this bundle. Generated AGENTS.md and generated client files must not be edited manually. The runner guidance currently documents the old RUN token-file exception; the feature intentionally replaces that RUN behavior while retaining REVIEW/FIX. If app guidance is updated to reflect this architecture change, edit its .nax/mono/apps/runner/context.md source, never generated instructions. No database schema change, migration, new dependency or multi-replica coordination is required. In-memory stores reset at restart by owner ruling. Explicit map eviction is mandatory (.nax/rules/api-core.md:32).\n\nUS-001: catalog risk and downstream approval impact\napps/api/src/permissions/catalog.ts:450 classifies fleet.flow.start as critical, then role/policy keys, reads, credential writes, delete/remove verbs and high-risk prefixes, falling through to medium. The five keys named in the spec do not receive the target tiers today. Add the exported exact four-member SPEND_AND_ACCOUNT_WRITE_KEYS set and classify its members high; classify fleet.thread.preapprove critical without changing principal eligibility. buildEntry at apps/api/src/permissions/catalog.ts:482 already derives default agent for high, default/floor human for critical, and grants both users and agents except role.binding.owner. Preserve that derivation unchanged. The catalog is consumed by permission/role expansion, approvable-key discovery and the gate; changing principals instead would break Developer-role bindings for agents. apps/api/src/permissions/catalog.spec.ts:1 imports the catalog and approvableKeys, and its expectedRisk mirror independently derives every catalog entry. Update that mirror with exactly the five tier changes, not a broad fleet.job or fleet.schedule prefix. This is a deliberate behavior change for agent callers without an overriding policy, not a new permission grant or database migration. Existing explicit none policies remain usable for high-risk keys because their floor remains none; the critical preapproval key still has a human floor and its controller remains human-only.\n\nUS-002: route gates and regression fixtures\nThe dispatch route already declares Requires('fleet.job.dispatch') and ApprovalGated at apps/api/src/fleet/jobs/fleet-jobs.controller.ts:39-51 and runs ApprovalRouteGate. ApprovalGateService's existing direct-human branch at apps/api/src/approvals/approval-gate.service.ts:127-140 satisfies every non-none mode without opening a request; do not replace or weaken it. The new defaults should flow through the existing routes and MCP gate, so avoid unnecessary gate changes. apps/api/test/integration/permissions/enforce-fleet-jobs.integration.spec.ts:119-130 constructs real authenticated dispatch requests; its fixture agents receive binding-only Developer grants at :105-115 and :187-188. Update its existing AC-4 to pending plus no job; preserve the existing stored-actor/activity assertions in AC-5/6 by narrowly seeding none policies. apps/api/test/integration/permissions/enforce-fleet-schedules.integration.spec.ts:235-240 currently expects immediate agent schedule creation; convert AC-5 to pending and use a scoped none policy only for AC-6's creator assertion. apps/api/test/integration/fleet/gated-fleet-job-routes.integration.spec.ts:107 has the obsolete immediate-without-policy AC-15; require exactly one pending dispatch request and no ac-15 job. apps/api/test/integration/fleet/permissions-assistant-tools.integration.spec.ts:327 must retain its QUEUED-agent-job assertion by seeding a none policy for that agent/key in p1. Do not make no-policy acceptance fixtures inherit those opt-outs. apps/api/test/integration/permissions/gated-admin-write-routes.integration.spec.ts:32-49 grants an agent user.update globally and currently tests only explicitly seeded wait policy; its beforeEach removes approval policies at :38-42, making a separate no-policy target-disable case straightforward. Existing approved-execution, last-admin protection, missing-key refusal and JWT-only outbox cases at :53-91 remain unchanged. These source-compatible tier changes intentionally change HTTP outcomes for no-policy agents from 201 to 202; consumers must honor the existing pending envelope and no side effects before approval.\n\nUS-003: transactional failure-stop primitive\napps/api/src/fleet/flows/flow-step-decision.ts:46 defines the stop-reason union; append internal_error without adding Prisma enums or web labels. apps/api/src/fleet/flows/fleet-flow-feature-passes.ts:284 contains module-private awaitedFeatures, already selecting unmerged awaited dependencies in position order. Export it unchanged and add failureStopFeature in this helper file, not another large block in the 1008-line advance service. The service's current WAITING_MERGE branch is at apps/api/src/fleet/flows/fleet-flow-advance.service.ts:84-92. Existing writeStop at :491-499 runs a transaction, locks parent/flow via lockLive and delegates to writeDecision; lockLive at :502-510 checks APPROVED/RUNNING and the approval generation. lockWaitingMerge at :515-521 provides the WAITING_MERGE equivalent. writeDecision at :882-910 bounds detail, persists the stop, records flow.stopped through audit/activity and enqueues the existing stopped outbox event. Reuse those paths and lock order so a racing stop/reapproval does not get overwritten. An implementation detail to resolve carefully: writeStop currently returns Promise<void> and silently does nothing when lockLive loses the race; the new public boolean must report whether a stop was actually written, not merely whether an initial read found a live state. Preserve existing callers if minimally adjusting the private helper to expose that result. Feature selection must use awaitedFeatures for WAITING_MERGE, otherwise the active feature, with lowest-position fallback. apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts:29-66 is the fixture precedent for a booted app, real flow, guarded action context and Postgres. Add the specified new failure-stop integration file, with pure selector tests in an existing adjacent flow spec. Exercise STOPPED idempotence, empty detail and activity persistence rather than only stubbing the repository.\n\nUS-004: ticker fairness, consecutive failure state and attribution\napps/api/src/fleet/flows/fleet-flow.ticker.ts:8-10 fixes page size at 50 and max pages at 10. poll at :38-47 already enforces process-local single flight and releases it on errors. tick at :49-66 always begins afterId null, logs advance errors without a budget and caps processing at 500. The repository query at apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:65-74 already lists APPROVED/RUNNING/WAITING_MERGE in id order and accepts afterId; no query interface change is necessary. Keep cursor changes transactional at the tick level: use a local pagination variable, committing the new cursor only when all listing for that tick completed successfully. A list failure on a later page must leave the prior tick's cursor unchanged too. A full ten-page pass saves its last listed id, whereas a short page resets to null. Count errors independently per flow; any resolved advance, including a throttled watch skip, clears that flow's count. At the fifth and later consecutive error, call the new stop method under the same system flow/onBehalfOf context. A resolved true or false clears the count; a rejected stop logs, preserves the count and cannot prevent the next flow's advance. Prune missing ids only after a pass that STARTED at null and reached a short page; neither resumed passes nor failed/incomplete scans prove absence for lower ids. Counts, visited-id tracking and the single cursor are process-local; the prescribed full-scan pruning is their retention policy, not a database migration. apps/api/src/fleet/flows/fleet-flow.ticker.spec.ts:20-31 constructs a fresh ticker and a mocked advance service per case; add stopFailedFlow to the harness and new multi-tick sequences. Existing action-context assertions at :94-113 provide a safe pattern: collect context inside callbacks and assert outside, rather than assertions that a catch can swallow.\n\nUS-005: completed merge-watch throttling\napps/api/src/fleet/flows/fleet-flow-feature-passes.ts:240-276 returns watched, idle or retry; its PR polling at :322-332 rethrows non-RepoCheckException errors, while transient provider errors return retry. Timestamp only watched, never a generic resolved advance or an attempted watch. This preserves rapid retry for transient errors and allows real thrown merge errors to count toward US-004's five-error stop. In the service's WAITING_MERGE branch, compare now to this flow's last completed-watch timestamp; suppress only when age is strictly less than flowMergePollMs. On recording, delete expired entries older than the interval; expiration is equivalent to no cache entry. Preserve outside-transaction forge I/O and the existing locked recording path. Configuration is defined at apps/api/src/config/fleet.config.ts:71-72, DTO strings at :114 and parsing at :180-181; mirror flowTickMs for flowMergePollMs with default 120000. Joi's interval bounds are at apps/api/src/config/env.validation.ts:117. Extend parsing/rejection tables in apps/api/src/config/fleet.config.spec.ts:15-58, and add flowMergePollMs: 0 to apps/api/src/common/test-helpers/fleet-config.ts so unrelated unit tests keep immediate polling. Zero is a test-only injected override, not an accepted production environment value. The new poll spec should drive the real advance method using the existing merge-watch harness at apps/api/src/fleet/flows/fleet-flow-merge-watch.spec.ts:23-104. apps/api/test/integration/fleet/fleet-flow-features.integration.spec.ts:53 boots one app and :126 advances ticks by one second; stub FLEET_FLOW_MERGE_POLL_MS=1000 before boot and restore after teardown to preserve its existing PR-call expectations. Add the cross-story seam case there: real tick and real advance, non-forge getPullRequest failure, STOPPED/internal_error on tick five.\n\nUS-006: direct reachable-project lookup without authorization drift\napps/api/src/fleet/flows/fleet-flows.controller.ts:43-51 reads every reachable project to find one flow project, then performs fleet.flow.read authorization. Change only get to call findReachableById; the create route's separate scan at :83 is not this story. apps/api/src/projects/projects.service.ts:88-96 distinguishes global project-read reach from user/agent binding lists. apps/api/src/projects/project-access.service.ts:50-53 implements readsEveryProject through PermissionService rather than trusting role claims. apps/api/src/projects/prisma-project.repository.ts:114-124 currently calls accessibleProjectIds then materializes all project domains. Add findLiveById and isAccessible; the latter must use the SAME accessibleProjectIds semantics, not introduce a stricter permission decision or legacy-membership lookup. apps/api/src/permissions/membership.queries.ts:90-99 includes PROJECT bindings with projectId null; :116-134 pages live project ids exhaustively. Global Owner/Admin should bypass all project-list reads; projectId-null PROJECT bindings may still enumerate live ids by design. Convert KodaPrincipal to the proper uppercase USER/AGENT PrincipalRef as existing paths do. The result must be null for missing, deleted or unreachable projects; the controller returns fleet.flows.notFound without probing fleet.flow.read for those cases, but still returns 403 for a reachable project lacking that key. apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts:41-45 currently supplies findAllForPrincipal and :88-93 asserts refusal without a permission probe; update those stubs and preserve that regression anchor. Add HTTP and real-repository coverage using existing fleet integration fixtures, and verify user/agent/global-admin reach separately. This is access-control-sensitive despite being a performance fix.\n\nUS-007: bounded retry around raw serializable transactions\napps/api/src/memory/prisma-memory-item.repository.ts:347-444 implements the complete upsert transaction: beforeWrite, active-key read, normalized no-op comparison, beforeSupersede, old-row supersede, new-row insert and onWritten audit callback. Do not change those paths' semantics. Its current prisma.withTransaction at :353 maps raw Prisma errors before a retry can recognize them. Move EACH attempt to the existing repository transaction manager this.tx.run with Serializable and take the callback's client from this.tx.getClient(). This preserves the transaction manager's AsyncLocalStorage used by AuditRecorder and also works with bare test PrismaService instances. The comment at :348 describes transaction-manager participation, but the actual current call is still withTransaction; follow the target raw-error seam, not the stale comment. apps/api/src/common/utils/prisma-errors.ts:9-17 already handles Prisma 7 adapter unique targets via getUniqueConstraintTarget; reuse isUniqueViolation(error, 'activeKey'), never inspect error.meta.target directly. Add isSerializationFailure checking the generated Prisma known-request-error class and code P2034. apps/api/src/common/utils/ticket-number-retry.ts:34-53 is the retry precedent: new transaction per attempt, one attempt when already in a transaction, jittered attempt * round(10 + 40 * random()) delay. Memory's independent cap is exactly three, and unlike ticket retry it maps the final P* error through PrismaErrorMapper.map instead of returning a ticket-specific 409. Preserve arbitrary non-Prisma errors unchanged and do not retry other unique constraints or foreign-key errors. Callbacks rerun with every whole transaction attempt; their database writes roll back with the losing transaction. Ensure hooks do not get moved outside the transaction. apps/api/src/memory/prisma-memory-item.repository.additional.spec.ts:48-68 declares withTransaction and transaction-manager mocks; getClient must now return the mock client and run must be independently controllable. Preserve no-op, supersede and audit assertions. apps/api/test/integration/memory/outbox-fanout-extraction.integration.spec.ts:51-56 already has a getClient mock but it returns undefined; configure it to return mockPrismaClient (rather than merely adding another property). The specified new concurrency integration file must use real Postgres and cover three identical and two differing same-slug writers. Prefer deterministic synchronization of first attempts; never put a barrier on every retry that could deadlock once some writers have completed. Existing replay/write suites remain relevant regression consumers. The feature promises only the specified upsert races, not generic write retries or four-writer convergence.\n\nUS-008: shim-backed login-only RUN identity\napps/runner/src/executor/host-executor.ts:192-202 already acquires credentials, computes binDir, prepends it to PATH and sanitizes inherited variables before overlaying the job identity. Pass that already-acquired binDir into runIdentityEnv; do not acquire a second token or infer shim availability from an operator environment. The current helper at :294-311 waits for freshToken, propagates cancellation and writes a best-effort forge-token file. Replace that RUN-only behavior with the login-only/login pair when GitHub plus binDir is present, or an empty overlay plus the exact warning when GitHub lacks binDir. GitLab and non-RUN paths remain empty. REVIEW/FIX reviewEnv at :280-284 and spawnFixStep at :216-250 keep their token-file exception, fresh-token acquisition and cleanup unchanged. apps/runner/src/credentials/shim.ts:13-17 maps socket reply tokens to GH_TOKEN, and :75 supplies them only to the gh child; this existing per-call refresh path is why a login-only identity can publish beyond a startup token's life. apps/runner/src/credentials/credential-env.ts:7-10 strips inherited token/login variables; add NAX_FORGE_IDENTITY to prevent operator configuration leaking into GitLab, REVIEW/FIX or no-shim jobs. apps/runner/test/unit/host-executor.spec.ts:852-883 declares Injection and currently hardcodes binDir null; make that injectable and replace the #395 token-file tests at :910-977 exactly as the spec describes. Remove obsolete cancelled-token-wait and token-file-write-failure RUN tests, retain failed-spawn propagation with no file, update cleanup expectations and the inherited-token github row at :1193. Add NAX_FORGE_IDENTITY to credential-env.spec.ts's stripped set. This is credential-sensitive and requires strict three-session TDD. nax >=0.91.8 is the external login-only prerequisite; the spec says deployed nax is already 0.92.x, so no runner version check or dependency bump belongs here.\n\nUS-009: static release/deploy changes and review correction\n.github/workflows/release.yml:184-193 and :232-241 pass TURBO_TOKEN as a build arg in both image builds, but apps/api/Dockerfile:62-63 already consumes a BuildKit secret, as does the web Dockerfile per the review. Replace only each token build-arg line with the build action's secrets input; retain other build args, pinned actions, tag checkout and image dependency order. No Dockerfile ARG TURBO_TOKEN should be added. deployments/example/deploy.sh:39-49 builds compose arguments and runs safety checks, :51 starts the optional backup, :62 pulls images and :72 migrates. Validate the effective password in the safety checks before any backup, pull or migration, even with --no-backup. A set environment value, including an empty one, takes precedence over .env. Otherwise read only the POSTGRES_PASSWORD assignment, remove surrounding quotes and a trailing # comment without executing untrusted .env content for this check. Reject empty values or anything outside ASCII letters, digits, dot, underscore, tilde and hyphen; name the allowed characters without exposing the password. The example README password line is deployments/example/README.md:27. docs/20261114-review-whole-repo.md has D/SEC-14 references at :27 (consolidation), :68 (summary), :80-86 (MEDIUM index), :159 (ruling), :214 (priority), :661 (area count), :731 (finding) and :829 (area ruling); correct all relevant severity discussions with the nax startup-read-and-delete explanation rather than retaining the original cat-token claim. Its LOW index at :97-104 must include the downgrade, counts must read MEDIUM (2 new) and LOW (15 new), and the TURBO gap row at :706 must refer to SEC-15. This story is expressly designated no-test/review by the spec; retain that exception rather than creating a test-only tenth story. Its password guard is a shell runtime behavior, so the no-test designation must not be interpreted as no verification: review/manual preflight should establish environment precedence, quote/comment removal, allowed characters and exit-before-effects.\n\nDependencies, migration and verification\nExecute US-001 before US-002, US-003 before US-004 before US-005; all remaining stories are independent. The new seams must be consumed in their owning story or dependent story: failureStopFeature through stopFailedFlow; stopFailedFlow through real ticker calls; merge errors through real tick plus advance; findReachableById through HTTP GET; isSerializationFailure through upsert. Source-level and behavioral compatibility are preserved except for intentional agent approval defaults, stopped flows after five consecutive errors, bounded merge polling, retry recovery and RUN identity transport. Do not store counts/timestamps/cursor in Prisma or introduce Redis. No endpoint/DTO shape changes are planned; if implementation changes an API contract, regenerate openapi.json and the CLI through the root generate command, never hand-edit generated clients.\nAPI unit specs use Vitest vi.*, hoisted mocks as needed and await import() rather than require() for TS modules. DB-backed specs must use canRunDbTests(); run scoped integration suites outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1 and the test Postgres (compose port 5433 or Testcontainers). A skipped DB suite is not verification. DB-mode runs force-reset their database, so never run two against the same DB concurrently; a second checkout should use KODA_TEST_DB_CONTAINER=1. Co-locate unit tests and use test/integration for real persistence behavior. Runner tests use Bun, injected dependencies, temporary files and isolated real git; they must not depend on host credentials or live nax. New acceptance files are pipeline-generated artifacts and must not be copied into normal test roots or edited. The three explicitly new files are owned by US-003, US-005 and US-007; other coverage can extend the inspected existing files. Security-critical catalog, route access, project reach and credential stories use three-session-tdd. After rechecking the existing seams, US-003, US-004 and US-005 use medium/tdd-simple: they reuse established locks, ticker injection, outcome unions and config parsing rather than introducing new abstractions. US-002 and US-006 are also medium, retaining the strict security strategy. US-007 remains complex/three-session-tdd-lite because raw-error mapping, ALS participation, retryable serializable races and outer-transaction behavior interact. US-009 retains its explicit review-only exception. All story descriptions carry target algorithms and regression updates so agents do not need the original spec.\n\nSecond-pass adversarial audit\nRe-read .nax/features/review-1114-fix-bundle/spec.md in full and rechecked the existing catalog, dispatch guards/gate, flow locks/merge outcomes/ticker, project reach wrappers, memory transaction callback and error helpers, runner spawn/identity/sanitizer and deployment ordering. No codebase-memory tools or command-execution/JSON-parser tool are exposed, so this audit used direct source and JSON text reads; it does not claim executed tests or parser validation. The production helpers proposed as additions are all explicitly required by the spec; no new unlisted source module, dependency or call surface was introduced.\nAcceptance preservation inventory: all 79 original spec criteria remain in their original story. US-001: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8 (8). US-002: AC-1, AC-2, AC-3, AC-4, AC-5 (5). US-003: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9 (9). US-004: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-14, AC-11, AC-12, AC-13 (14, including the spec's out-of-order AC-14). US-005: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-9, AC-8 (9). US-006: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7 (7). US-007: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12 (12). US-008: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7 (7). US-009: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8 (8). Original qualifying clauses survive, including US-003 AC-5's already-STOPPED unchanged stopReason/endedAt, US-005 AC-9's provider_unreachable retry, US-006 AC-6's same-agent/no-binding contrast, US-008 AC-6's still-token-file REVIEW behavior and no identity mode, and US-009 AC-3's environment precedence and AC-6's full location list/startup-deletion explanation. There were no deprecated grep/file/verbatim tags to rewrite.\nOnly semantic clarification to original ACs: US-005 AC-4/5 now explicitly use a watched outcome for an open awaited PR, rather than ambiguous resolving merge watch wording that could include idle or retry; the original timing boundaries and getPullRequest assertions are unchanged. The idle failure-handling criterion now observes a second advance's getPullRequest call with an awaited PR instead of requiring inspection of private timestamps. Every criterion is observable through a return value, error, call capture, log, file content or persisted state.\nNegative-path inventory: US-001 AC-9 adds unchanged unknown-key undefined behavior; US-002 AC-6 adds existing missing-key 403/no-approval behavior. Those are the only new audit-requested negative regressions; the description now explicitly limits pending requests to authorized callers. US-003 AC-5/10 cover already-stopped/gone/nonlive flows; US-004 AC-2/7/8/15 cover failed advances, failed stops and listing errors; US-005 AC-3/6/9/10 cover invalid config and throwing/retry/idle outcomes; US-006 AC-2/3/4 cover no access, deletion and missing flow-read permission; US-007 AC-6/7/8/13/14 cover exhaustion, nonretryable errors and outer transactions; US-008 AC-4/5/7 cover missing shims, GitLab and inherited env removal; US-009 AC-4/9 cover empty/unsafe passwords before effects. The draft's six failure-table additions remain alongside the two added negative regressions, making 87 criteria in total. Every failure-handling row is represented: subthreshold/fifth-tick errors and rejected stop in US-003/004, nonlive stop in US-003, list rejection in US-004, all three uncached merge outcomes in US-005, other/exhausted note errors in US-007, missing RUN shim in US-008 and rejected effective deploy password in US-009.\nRegression anchors remain in every story: unchanged unrelated catalog tiers, direct-human dispatch and missing-key refusal, idempotent stopped flows/exported selector behavior, continuing later flows after a rejected stop and short-page reset, interval-boundary polling with existing test config overrides, unchanged reach/403/404 semantics, mapped exception shapes and identical-note no-op/supersede behavior, REVIEW/GitLab identity preservation, and replacement of the inert release token build argument with the existing Dockerfile secret interface. Existing fixture regression updates remain assigned to their original stories, not made into extra stories.\nContext alignment: all spec-recommended context files are included within each story's five-file limit. US-002 now includes fleet-jobs.controller.ts as explicitly recommended; permissions-assistant-tools.integration.spec.ts remains implementation scope in its description and this shared analysis, but is not one of the five initial context reads. New failure-stop integration, merge-poll unit and concurrent-note integration files remain outputs only, never self-context. Binding IDs, workdirs and dependency arrays are unchanged: US-002 -> US-001; US-004 -> US-003; US-005 -> US-004; all other arrays empty. All references resolve to existing story IDs.\nOut-of-scope inventory: all 11 feature exclusions remain verbatim in the top-level array: (1) other permission retiering; (2) durable flow maps/cursor/timestamps; (3) web internal_error labels; (4) REVIEW/FIX identity changes; (5) API RUN fresh handling; (6) installed-nax version checking; (7) splitting the advance service; (8) other memory writes or more than three racers; (9) compose password percent-encoding; (10) root development compose; (11) remaining review bundles/rulings. Nearby story Scope/Out sections now echo the exact relevant exclusions. There are no story-local deferrals hoisted into the feature exclusions. Scope and ACs remain consistent: HTTP/MCP fixture updates stay in US-002, stop selection in US-003, ticker state in US-004, merge config/cache/seam in US-005, direct GET reach in US-006, transaction retry in US-007, RUN identity in US-008 and root release/deploy/review corrections in US-009.",
+  "outOfScope": [
+    "Retiering `fleet.schedule.update`, `fleet.schedule.enable`, `fleet.job.requeue` or any key other than the five named in this spec; they keep their current risk.",
+    "A database column or migration for the flow failure counts, the ticker cursor or the merge-watch timestamps; they are in-memory because the API is single-replica by ruling.",
+    "Web i18n labels for the `internal_error` stop reason; the web flow page and notifications fall back to `humanizeCode`, which renders \"Internal error\".",
+    "Changing the REVIEW or FIX forge identity (token file plus bot login); only RUN moves to login-only.",
+    "Making the API honour `fresh` for RUN token requests in `sync.service.ts`; the login-only RUN no longer asks for a fresh token.",
+    "A runner check of the installed nax version; login-only needs nax >= 0.91.8, and the runner already runs 0.92.x.",
+    "Splitting `fleet-flow-advance.service.ts` (1008 lines) below the 800-line limit; new flow-stop selection logic goes into `fleet-flow-feature-passes.ts` instead of growing the service further.",
+    "US-007 only: retrying any memory write other than `PrismaMemoryItemRepository.upsert`, and more than 3 concurrent same-slug writers (a 4th racer can exhaust its attempts and receive the error).",
+    "Percent-encoding `POSTGRES_PASSWORD` inside the compose files; the deploy script refuses an unsafe password instead.",
+    "The repo-root `docker-compose.yml`, which also interpolates `POSTGRES_PASSWORD` into `DATABASE_URL`; it is the local development stack, and only `deployments/example` gets the password check.",
+    "The remaining 2026-11-14 review items (P1 auth, deploy and webhook bundles, the other rulings)."
+  ],
+  "routingProfile": "native-codex-dsm"
+}

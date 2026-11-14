@@ -39,7 +39,7 @@ async function projectController(service: FleetFlowsService, gate = { run: vi.fn
   return { controller: new ProjectFlowsController(service, gate as never), gate, ProjectFlowsController };
 }
 function globalController(service: FleetFlowsService) {
-  const projects = { findAllForPrincipal: vi.fn().mockResolvedValue([{ id: 'project', slug: 'web' }]) };
+  const projects = { findReachableById: vi.fn().mockResolvedValue({ id: 'project', slug: 'web' }), findAllForPrincipal: vi.fn() };
   const permissions = { can: vi.fn().mockResolvedValue({ allowed: true }) };
   const controller = new FleetFlowsController({} as never, projects as never, permissions as never, {} as never, {} as never, service);
   return { controller, projects, permissions };
@@ -79,14 +79,16 @@ describe('fleet flow read and stop (no database)', () => {
   });
   it('AC-4: global detail resolves project visibility and enforces the read in that project', async () => {
     const { service, row } = setup();
-    const { controller, permissions } = globalController(service);
+    const { controller, permissions, projects } = globalController(service);
     expect((await controller.get('flow', principal as never)).data).toEqual(FleetFlowDto.from(row, 'web'));
+    expect(projects.findReachableById).toHaveBeenCalledWith(principal, 'project');
+    expect(projects.findAllForPrincipal).not.toHaveBeenCalled();
     expect(permissions.can).toHaveBeenCalledWith(principal, 'fleet.flow.read', { projectId: 'project' });
   });
   it('AC-5: unrostered agent sees the same notFound and no permission probe', async () => {
     const { service } = setup();
     const { controller, projects, permissions } = globalController(service);
-    projects.findAllForPrincipal.mockResolvedValue([]);
+    projects.findReachableById.mockResolvedValue(null);
     await expect(controller.get('flow', principal as never)).rejects.toMatchObject({ status: 404, response: { prefix: 'fleet.flows.notFound' } });
     expect(permissions.can).not.toHaveBeenCalled();
   });

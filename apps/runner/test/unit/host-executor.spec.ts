@@ -859,6 +859,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     acquireFailureReason?: string;
     review?: NonNullable<AssignPayload['review']>;
     provider?: 'github' | 'gitlab';
+    binDir?: string | null;
   }
 
   /**
@@ -880,7 +881,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
     const credentials: CredentialProvider = {
       acquire: async () => over.acquireFailureReason === undefined
-        ? { ok: true, credentials: { helper: null, binDir: null } }
+        ? { ok: true, credentials: { helper: null, binDir: over.binDir ?? null } }
         : { ok: false, reason: over.acquireFailureReason },
       release: async () => undefined,
       ...(over.omitCurrentToken === true ? {} : { currentToken: () => (over.currentToken === undefined ? TOKEN : over.currentToken) }),
@@ -907,79 +908,53 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     return { ...w, row, calls, freshCalls, ex, tokenPath };
   }
 
-  test('#395: a GitHub RUN hands nax a fresh token file and the bot login from gitIdentity', async () => {
-    const w = await injectedWorld('RUN', { freshToken: { ok: true, token: 'fresh-run' } });
-    await w.ex.spawn(w.row);
-    expect(w.freshCalls).toEqual([{ job: w.row, minRemainingMs: FORGE_TOKEN_MIN_REMAINING_MS }]);
-    expect(await readFile(w.tokenPath, 'utf8')).toBe('fresh-run');
-    expect(w.calls).toHaveLength(1);
-    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
-    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe(w.row.assign.gitIdentity.name);
-    expect(w.calls[0]?.argv).toEqual(buildNaxArgv(['bun', FAKE], w.row.assign, {}));
-  });
-
-  test('#395: a GitLab RUN gets no injected identity and mints no token', async () => {
-    const w = await injectedWorld('RUN', { provider: 'gitlab' });
+  test('US-008 AC-1/2/3: GitHub RUN uses shim-backed login-only identity without token calls or files', async () => {
+    const w = await injectedWorld('RUN', { binDir: 'shim-bin' });
     await w.ex.spawn(w.row);
     expect(w.freshCalls).toEqual([]);
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBe('login-only');
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe(w.row.assign.gitIdentity.name);
+    expect(w.calls[0]?.options.env['PATH']).toStartWith('shim-bin');
     expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
-    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBeUndefined();
     await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  test('#395: a GitHub RUN whose fresh token is refused still starts, without the identity, and warns', async () => {
-    const w = await injectedWorld('RUN', { freshToken: { ok: false, reason: 'git token: timeout' } });
+  test('US-008 AC-4: GitHub RUN without shims starts without identity and warns', async () => {
+    const w = await injectedWorld('RUN');
     await w.ex.spawn(w.row);
     expect(w.calls).toHaveLength(1);
-    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
+    expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBeUndefined();
     expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBeUndefined();
-    await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(w.log.lines).toContainEqual(expect.objectContaining({
-      level: 'warn', message: 'RUN starts without a forge identity', fields: { jobId: 'rjob1', reason: 'git token: timeout' },
-    }));
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'RUN starts without a forge identity' }));
   });
 
-  test('#395: a GitHub RUN whose start fails removes the token file and propagates the error', async () => {
-    const w = await injectedWorld('RUN', { spawnError: new Error('ENOENT nax') });
+  test('US-008 AC-5: GitLab RUN gets no injected identity', async () => {
+    const w = await injectedWorld('RUN', { provider: 'gitlab', binDir: 'shim-bin' });
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBeUndefined();
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBeUndefined();
+  });
+
+  test('US-008: a failed GitHub RUN start propagates and leaves no forge-token file', async () => {
+    const w = await injectedWorld('RUN', { binDir: 'shim-bin', spawnError: new Error('ENOENT nax') });
     await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');
     await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  test('#395: a GitHub RUN whose token wait was cancelled (runner stopping) starts nothing', async () => {
-    const w = await injectedWorld('RUN', { freshToken: { ok: false, reason: 'cancelled' } });
-    await expect(w.ex.spawn(w.row)).rejects.toThrow('cancelled');
-    expect(w.calls).toEqual([]);
+  test('US-008: GitHub RUN with shims needs no fresh-token provider and does not warn', async () => {
+    const w = await injectedWorld('RUN', { binDir: 'shim-bin', omitCurrentToken: true });
+    await w.ex.spawn(w.row);
+    expect(w.freshCalls).toEqual([]);
+    expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBe('login-only');
+    expect(w.log.lines).not.toContainEqual(expect.objectContaining({ level: 'warn', message: 'RUN starts without a forge identity' }));
+  });
+
+  test('US-008: RUN cleanup has no forge-token file to remove', async () => {
+    const w = await injectedWorld('RUN', { binDir: 'shim-bin' });
+    await w.ex.spawn(w.row);
     await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  test('#395: a GitHub RUN with no fresh-token provider starts without the identity and warns', async () => {
-    const w = await injectedWorld('RUN', { omitCurrentToken: true });
-    await w.ex.spawn(w.row);
-    expect(w.calls).toHaveLength(1);
-    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
-    expect(w.log.lines).toContainEqual(expect.objectContaining({
-      level: 'warn', message: 'RUN starts without a forge identity', fields: { jobId: 'rjob1', reason: 'git token: none' },
-    }));
-  });
-
-  test('#395: a GitHub RUN whose token file cannot be written still starts, without the identity, and warns', async () => {
-    const w = await injectedWorld('RUN');
-    await mkdir(join(w.tokenPath, 'blocker'), { recursive: true });   // a directory where the file must go
-    await w.ex.spawn(w.row);
-    expect(w.calls).toHaveLength(1);
-    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
-    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBeUndefined();
-    expect(w.log.lines).toContainEqual(expect.objectContaining({
-      level: 'warn', message: 'RUN starts without a forge identity', fields: expect.objectContaining({ jobId: 'rjob1' }),
-    }));
-  });
-
-  test('#395: cleanup removes a GitHub RUN token file nax never consumed', async () => {
-    const w = await injectedWorld('RUN');
-    await w.ex.spawn(w.row);
-    expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);
     await w.ex.cleanup(w.row);
-    await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   test('US-008 AC-8: FIX spawn hands caller rulings to review only', async () => {
@@ -1170,6 +1145,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     expect([...(w.calls[0]?.argv ?? [])]).toEqual(expect.arrayContaining(['bot', 'review', '42']));
     expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(join(w.row.jobDir, 'forge-token'));
     expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
+    expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBeUndefined();
     expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);                       // nax reads this, then deletes it
     expect((await stat(w.tokenPath)).mode & 0o777).toBe(0o600);
   });
@@ -1188,8 +1164,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     expect(JSON.stringify(w.calls[0]?.options.env)).not.toContain(TOKEN);          // nor inside PATH, argv or a blob
   });
 
-  // AC-9 (amended by #395): an inherited NAX_FORGE_* copy never reaches nax. A GitLab RUN gets no identity at all;
-  // a GitHub RUN gets only the runner's own job token file and the App bot login.
+  // An inherited NAX_FORGE_* copy never reaches nax. RUN identity is supplied only when this job has shims.
   test.each(['gitlab', 'github'] as const)('AC-9: a %s RUN never passes an inherited NAX_FORGE_TOKEN_FILE through', async (provider) => {
     const w = await injectedWorld('RUN', { provider });
     const inherited = process.env['NAX_FORGE_TOKEN_FILE'];                         // restore, never delete: this process is shared
@@ -1206,8 +1181,8 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
       expect('NAX_FORGE_TOKEN_FILE' in env).toBe(false);
       expect('NAX_FORGE_LOGIN' in env).toBe(false);
     } else {
-      expect(env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
-      expect(env['NAX_FORGE_LOGIN']).toBe(w.row.assign.gitIdentity.name);
+      expect('NAX_FORGE_TOKEN_FILE' in env).toBe(false);
+      expect('NAX_FORGE_LOGIN' in env).toBe(false);
     }
   });
 

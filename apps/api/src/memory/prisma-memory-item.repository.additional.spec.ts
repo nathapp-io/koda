@@ -1,7 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaService, PrismaAppException, PRISMA_ERROR_CODES } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaMemoryItemRepository, buildActiveKey } from './prisma-memory-item.repository';
+import {
+  PrismaMemoryItemRepository,
+  buildActiveKey,
+  MEMORY_UPSERT_MAX_ATTEMPTS,
+  memoryUpsertBackoffMs,
+} from './prisma-memory-item.repository';
+import { Prisma } from '../generated/prisma/client';
 import { MemoryKind } from '../common/enums';
 
 const makeModelRow = (overrides: Record<string, unknown> = {}) => ({
@@ -79,7 +85,25 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
     repository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
 
     vi.clearAllMocks();
+    // Review 1114 US-007: `upsert` writes through the transaction manager, not `PrismaService.withTransaction`
+    // — `run` enters the callback once and `getClient` answers the transaction's client, exactly as the real
+    // manager does inside `run`. A case controls the write through `mockMemoryItem` and the attempt through
+    // `mockTransactionManager.run`.
+    mockTransactionManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
+    mockTransactionManager.isInTransaction.mockReturnValue(false);
+    mockTransactionManager.getClient.mockReturnValue(mockPrismaClient);
   });
+
+  /**
+   * Enters the transaction `upsert` opens, with `mockMemoryItem` answering the active-row read, the supersede
+   * and the insert. Returns the client the attempt writes through.
+   */
+  const enterTransaction = (existingRow: unknown, created: unknown = makeModelRow({ id: 'new-mem' })) => {
+    mockMemoryItem.findFirst.mockResolvedValue(existingRow);
+    mockMemoryItem.create.mockResolvedValue(created);
+    mockMemoryItem.update.mockResolvedValue({});
+    return mockMemoryItem;
+  };
 
   describe('findByProject', () => {
     it('passes skip 0 and take 20 for the first page of 20', async () => {
@@ -251,17 +275,8 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   });
 
   describe('upsert', () => {
-    it('runs inside a serializable transaction', async () => {
-      mockWithTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
-        const mockClient = {
-          memoryItem: {
-            findFirst: vi.fn().mockResolvedValue(null),
-            create: vi.fn().mockResolvedValue(makeModelRow()),
-            update: vi.fn(),
-          },
-        };
-        return fn(mockClient);
-      });
+    it('runs on the transaction manager with Serializable isolation', async () => {
+      enterTransaction(null);
 
       await repository.upsert({
         projectId: 'project-123',
@@ -272,25 +287,17 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         confidence: 0.9,
       });
 
-      expect(mockWithTransaction).toHaveBeenCalledWith(
+      expect(mockTransactionManager.run).toHaveBeenCalledWith(
         expect.any(Function),
         { isolationLevel: 'Serializable' },
       );
+      // The write never opens a transaction behind the manager's back.
+      expect(mockTransaction).not.toHaveBeenCalled();
     });
 
     it('supersedes existing active item before creating new one', async () => {
       const existingItem = makeModelRow({ id: 'old-mem' });
-      const newItem = makeModelRow({ id: 'new-mem' });
-
-      const mockClientMemoryItem = {
-        findFirst: vi.fn().mockResolvedValue(existingItem),
-        create: vi.fn().mockResolvedValue(newItem),
-        update: vi.fn().mockResolvedValue({}),
-      };
-
-      mockWithTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
-        return fn({ memoryItem: mockClientMemoryItem });
-      });
+      const client = enterTransaction(existingItem, makeModelRow({ id: 'new-mem' }));
 
       const result = await repository.upsert({
         projectId: 'project-123',
@@ -300,26 +307,18 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         object: 'updated',
       });
 
-      expect(mockClientMemoryItem.update).toHaveBeenCalledWith(
+      expect(client.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'old-mem' },
           data: expect.objectContaining({ activeKey: null, status: 'superseded' }),
         }),
       );
-      expect(mockClientMemoryItem.create).toHaveBeenCalled();
+      expect(client.create).toHaveBeenCalled();
       expect(result.id).toBe('new-mem');
     });
 
     it('creates item with default confidence 0.8 and status active when not provided', async () => {
-      const mockClientMemoryItem = {
-        findFirst: vi.fn().mockResolvedValue(null),
-        create: vi.fn().mockResolvedValue(makeModelRow()),
-        update: vi.fn(),
-      };
-
-      mockWithTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
-        return fn({ memoryItem: mockClientMemoryItem });
-      });
+      const client = enterTransaction(null, makeModelRow());
 
       await repository.upsert({
         projectId: 'project-123',
@@ -328,7 +327,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         predicate: 'status',
       });
 
-      expect(mockClientMemoryItem.create).toHaveBeenCalledWith(
+      expect(client.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             confidence: 0.8,
@@ -352,12 +351,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         sourceType: 'manual',
         sourceId: null,
       });
-      const client = {
-        findFirst: vi.fn().mockResolvedValue(existingRow),
-        create: vi.fn(),
-        update: vi.fn(),
-      };
-      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+      const client = enterTransaction(existingRow);
 
       const result = await repository.upsert({
         projectId: 'project-123',
@@ -381,15 +375,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
   describe('ownerType (US-008)', () => {
     /** One upsert against a client whose active-row read answers `existing`. */
-    const withClient = (existing: unknown, created: unknown = makeModelRow()) => {
-      const client = {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        create: vi.fn().mockResolvedValue(created),
-        update: vi.fn().mockResolvedValue({}),
-      };
-      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
-      return client;
-    };
+    const withClient = (existing: unknown, created: unknown = makeModelRow()) => enterTransaction(existing, created);
 
     it('maps a USER ownerType onto the domain item', async () => {
       mockMemoryItem.findFirst.mockResolvedValue(makeModelRow({ ownerType: 'USER' }));
@@ -446,15 +432,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   describe('upsert beforeSupersede hook (US-008)', () => {
     const existing = makeModelRow({ id: 'old-mem', ownerId: 'user-2', ownerType: 'USER' });
 
-    const withClient = (existingRow: unknown) => {
-      const client = {
-        findFirst: vi.fn().mockResolvedValue(existingRow),
-        create: vi.fn().mockResolvedValue(makeModelRow({ id: 'new-mem' })),
-        update: vi.fn().mockResolvedValue({}),
-      };
-      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
-      return client;
-    };
+    const withClient = (existingRow: unknown) => enterTransaction(existingRow);
 
     it('runs the hook with the active item, after reading it and before superseding it', async () => {
       const client = withClient(existing);
@@ -518,16 +496,8 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   // -------------------------------------------------------------------------
 
   describe('upsert transaction and onWritten hook (US-002)', () => {
-    /** A PrismaService whose withTransaction enters the callback with one mocked client. */
-    const withTransactionClient = (existingRow: unknown) => {
-      const client = {
-        findFirst: vi.fn().mockResolvedValue(existingRow),
-        create: vi.fn().mockResolvedValue(makeModelRow({ id: 'new-mem' })),
-        update: vi.fn().mockResolvedValue({}),
-      };
-      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
-      return client;
-    };
+    /** The transaction manager's client for one upsert: the active-row read answers `existingRow`. */
+    const withTransactionClient = (existingRow: unknown) => enterTransaction(existingRow);
 
     /** The identical-restatement row the no-op path answers with. */
     const restatement = makeModelRow({ object: 'active', sourceType: 'ticket_event', sourceId: 'evt-1' });
@@ -541,7 +511,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
       await repository.upsert(restatementInput);
 
-      expect(mockWithTransaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+      expect(mockTransactionManager.run).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
       // The raw client transaction is never entered behind the transaction manager's back.
       expect(mockTransaction).not.toHaveBeenCalled();
     });
@@ -553,7 +523,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
       const result = await repository.upsert(restatementInput, { onWritten, beforeSupersede });
 
-      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(1);
       expect(onWritten).not.toHaveBeenCalled();
       expect(beforeSupersede).not.toHaveBeenCalled();
       expect(result.id).toBe('mem-1');
@@ -600,8 +570,8 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         ),
       ).rejects.toBe(refusal);
 
-      // The update and the create ran before the hook threw; withTransaction is what rolls them back.
-      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+      // The update and the create ran before the hook threw; the transaction manager is what rolls them back.
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(1);
       expect(client.create).toHaveBeenCalledTimes(1);
     });
   });
@@ -626,6 +596,205 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       mockTicket.count.mockResolvedValue(0);
 
       await expect(repository.ticketInProject('project-123', 'ticket-other-project')).resolves.toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Review 1114 US-007 — a note upsert that lost a same-slug race retries a new transaction
+  // -------------------------------------------------------------------------
+
+  describe('upsert conflict retry (US-007)', () => {
+    /** The P2002 Postgres raises for the loser of a same-slug race: the active-key index. */
+    const uniqueOnActiveKey = (): Prisma.PrismaClientKnownRequestError =>
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['projectId', 'activeKey'] },
+      });
+
+    /** The P2034 the serializable isolation level raises when two writers conflict. */
+    const serializationFailure = (): Prisma.PrismaClientKnownRequestError =>
+      new Prisma.PrismaClientKnownRequestError('write conflict or deadlock', {
+        code: 'P2034',
+        clientVersion: 'test',
+      });
+
+    /** A P2003 that is neither eligible conflict, so it must propagate on its first attempt. */
+    const foreignKeyViolation = (): Prisma.PrismaClientKnownRequestError =>
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+        code: 'P2003',
+        clientVersion: 'test',
+        meta: { field_name: 'MemoryItem_projectId_fkey' },
+      });
+
+    /** The note every retry case upserts. */
+    const noteInput = () => ({
+      projectId: 'project-123',
+      kind: MemoryKind.NOTE,
+      subject: 'replay-budget',
+      predicate: 'project',
+      object: 'Budget stays 2,048 MiB.',
+      description: 'replay budget',
+    });
+
+    /** The delay the retry takes, recorded instead of slept. */
+    let delays: number[];
+    let retryDelay: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      delays = [];
+      mockTransactionManager.run.mockReset();
+      mockTransactionManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
+      mockTransactionManager.isInTransaction.mockReturnValue(false);
+      // Inside `run` the manager's client is the transaction client; the same view serves every attempt.
+      mockTransactionManager.getClient.mockReturnValue(mockPrismaClient);
+      mockMemoryItem.findFirst.mockResolvedValue(null);
+      mockMemoryItem.create.mockResolvedValue(makeModelRow({ id: 'created-1' }));
+      mockMemoryItem.update.mockResolvedValue({});
+      retryDelay = vi
+        .spyOn(repository as unknown as { retryDelay: (attempt: number) => Promise<void> }, 'retryDelay')
+        .mockImplementation(async (attempt: number) => {
+          delays.push(attempt);
+        });
+    });
+
+    afterEach(() => {
+      retryDelay.mockRestore();
+    });
+
+    it('AC-1: exports MEMORY_UPSERT_MAX_ATTEMPTS as 3', () => {
+      expect(MEMORY_UPSERT_MAX_ATTEMPTS).toBe(3);
+    });
+
+    it('AC-4: an activeKey unique violation retries and answers the second attempt', async () => {
+      mockMemoryItem.create.mockResolvedValue(makeModelRow({ id: 'second-attempt' }));
+      mockTransactionManager.run.mockRejectedValueOnce(uniqueOnActiveKey());
+
+      const result = await repository.upsert(noteInput());
+
+      expect(result.id).toBe('second-attempt');
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('AC-5: a serialization failure retries in a new Serializable transaction', async () => {
+      mockMemoryItem.create.mockResolvedValue(makeModelRow({ id: 'second-attempt' }));
+      mockTransactionManager.run.mockRejectedValueOnce(serializationFailure());
+
+      const result = await repository.upsert(noteInput());
+
+      expect(result.id).toBe('second-attempt');
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(2);
+      expect(mockTransactionManager.run).toHaveBeenNthCalledWith(1, expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+      expect(mockTransactionManager.run).toHaveBeenNthCalledWith(2, expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+    });
+
+    it('AC-6: three lost races reject as DUPLICATE_ENTRY after exactly three attempts', async () => {
+      mockTransactionManager.run.mockRejectedValue(uniqueOnActiveKey());
+
+      const error = await repository.upsert(noteInput()).catch((e: unknown) => e);
+
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(3);
+      expect(error).toBeInstanceOf(PrismaAppException);
+      expect((error as PrismaAppException).code).toBe(PRISMA_ERROR_CODES.DUPLICATE_ENTRY);
+    });
+
+    it('AC-7: a foreign-key violation is not a conflict, so it propagates mapped after one attempt', async () => {
+      mockTransactionManager.run.mockRejectedValue(foreignKeyViolation());
+
+      const error = await repository.upsert(noteInput()).catch((e: unknown) => e);
+
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(1);
+      expect(error).toBeInstanceOf(PrismaAppException);
+      expect((error as PrismaAppException).code).toBe(PRISMA_ERROR_CODES.INVALID_REFERENCE);
+    });
+
+    it('AC-8: inside an outer transaction it makes one attempt and never retries the aborted transaction', async () => {
+      mockTransactionManager.isInTransaction.mockReturnValue(true);
+      mockTransactionManager.run.mockRejectedValue(uniqueOnActiveKey());
+
+      const error = await repository.upsert(noteInput()).catch((e: unknown) => e);
+
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(1);
+      expect(delays).toEqual([]);
+      expect((error as PrismaAppException).code).toBe(PRISMA_ERROR_CODES.DUPLICATE_ENTRY);
+    });
+
+    it('AC-9: waits before the second attempt, once, naming the first attempt', async () => {
+      let runsWhenDelayed = -1;
+      retryDelay.mockImplementation(async (attempt: number) => {
+        delays.push(attempt);
+        runsWhenDelayed = mockTransactionManager.run.mock.calls.length;
+      });
+      mockTransactionManager.run.mockRejectedValueOnce(serializationFailure());
+
+      await repository.upsert(noteInput());
+
+      expect(delays).toEqual([1]);
+      expect(runsWhenDelayed).toBe(1);
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('AC-10: the backoff is attempt × round(10 + 40 × random)', () => {
+      expect(memoryUpsertBackoffMs(2, () => 0.5)).toBe(60);
+      expect(memoryUpsertBackoffMs(1, () => 0)).toBe(10);
+      expect(memoryUpsertBackoffMs(3, () => 1)).toBe(150);
+    });
+
+    it('AC-13: a non-Prisma error propagates as itself on the first attempt', async () => {
+      const refusal = new Error('beforeWrite refused');
+      mockMemoryItem.findFirst.mockRejectedValue(refusal);
+
+      await expect(repository.upsert(noteInput())).rejects.toBe(refusal);
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(1);
+      expect(delays).toEqual([]);
+    });
+
+    it('AC-13: a P2002 on another index is mapped but not retried', async () => {
+      mockTransactionManager.run.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['ownerKey', 'otherKey'] },
+        }),
+      );
+
+      const error = await repository.upsert(noteInput()).catch((e: unknown) => e);
+
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(1);
+      expect(error).toBeInstanceOf(PrismaAppException);
+      expect((error as PrismaAppException).code).toBe(PRISMA_ERROR_CODES.DUPLICATE_ENTRY);
+    });
+
+    it('AC-14: the last of three conflicts is the error that leaves, and no fourth transaction starts', async () => {
+      mockTransactionManager.run
+        .mockRejectedValueOnce(serializationFailure())
+        .mockRejectedValueOnce(uniqueOnActiveKey())
+        .mockRejectedValueOnce(serializationFailure());
+
+      const error = await repository.upsert(noteInput()).catch((e: unknown) => e);
+
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(3);
+      // The last failure is a P2034, so the mapping — not the earlier P2002 — is what the caller sees.
+      expect(error).toBeInstanceOf(PrismaAppException);
+      expect((error as PrismaAppException).code).toBe(PRISMA_ERROR_CODES.DATABASE_ERROR);
+      // No delay after the last attempt.
+      expect(delays).toEqual([1, 2]);
+    });
+
+    it('AC-14: the final eligible conflict is mapped, never the first', async () => {
+      mockTransactionManager.run
+        .mockRejectedValueOnce(serializationFailure())
+        .mockRejectedValueOnce(serializationFailure())
+        .mockRejectedValueOnce(uniqueOnActiveKey());
+
+      const error = await repository.upsert(noteInput()).catch((e: unknown) => e);
+
+      expect(mockTransactionManager.run).toHaveBeenCalledTimes(3);
+      expect((error as PrismaAppException).code).toBe(PRISMA_ERROR_CODES.DUPLICATE_ENTRY);
     });
   });
 });

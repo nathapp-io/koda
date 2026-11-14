@@ -69,6 +69,7 @@ export interface IFleetConfig {
   reviewMintPollMs: number;
   prReviewMaxDispatch: number;
   flowTickMs: number;
+  flowMergePollMs: number;
   flowPrWaitMs: number;
   flowReviewAgent: string;
 }
@@ -112,6 +113,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_REVIEW_MINT_POLL_MS: string;
   @IsOptional() @IsString() FLEET_PR_REVIEW_MAX_DISPATCH: string;
   @IsOptional() @IsString() FLEET_FLOW_TICK_MS: string;
+  @IsOptional() @IsString() FLEET_FLOW_MERGE_POLL_MS: string;
   @IsOptional() @IsString() FLEET_FLOW_PR_WAIT_MS: string;
   @IsOptional() @IsString() FLEET_FLOW_REVIEW_AGENT: string;
 }
@@ -178,6 +180,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     prReviewMaxDispatch: int('FLEET_PR_REVIEW_MAX_DISPATCH', 10),
     // Joi accepts numeric notation such as 1e3; preserve that value rather than parseInt's prefix.
     flowTickMs: Number(process.env['FLEET_FLOW_TICK_MS'] ?? 30_000),
+    flowMergePollMs: Number(process.env['FLEET_FLOW_MERGE_POLL_MS'] ?? 120_000),
     flowPrWaitMs: Number(process.env['FLEET_FLOW_PR_WAIT_MS'] ?? 1_800_000),
     flowReviewAgent: process.env['FLEET_FLOW_REVIEW_AGENT'] ?? 'Explore',
   };

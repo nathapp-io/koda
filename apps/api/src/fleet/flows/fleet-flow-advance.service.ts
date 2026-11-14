@@ -21,7 +21,7 @@ import {
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService, type FleetFlowCallsTarget } from './fleet-flow-calls.service';
-import { runFeatureStart, runMergeWatch, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
+import { failureStopFeature, runFeatureStart, runMergeWatch, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
 import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
@@ -61,6 +61,7 @@ interface DispatchPass<A extends FlowPassAction = FlowPassAction> {
 @Injectable()
 export class FleetFlowAdvanceService {
   private readonly logger = new Logger(FleetFlowAdvanceService.name);
+  private readonly mergeWatchAt = new Map<string, number>();
 
   constructor(
     @Inject(FLEET_FLOW_REPOSITORY) private readonly flows: IFleetFlowRepository,
@@ -75,11 +76,29 @@ export class FleetFlowAdvanceService {
     private readonly flowService: FleetFlowsService,
     private readonly github: GitHubAppClient,
     private readonly reviews: FleetReviewClaimService,
-    @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent'>,
+    @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent' | 'flowMergePollMs'>,
     private readonly calls: FleetFlowCallsService,
     private readonly outbox: OutboxService,
     private readonly rulings: FleetPrRulingsService,
   ) {}
+
+  async stopFailedFlow(flowId: string, detail: string, now: Date): Promise<boolean> {
+    const previous = await this.flows.findById(flowId);
+    if (!previous || !['APPROVED', 'RUNNING', 'WAITING_MERGE'].includes(previous.state)) return false;
+    const feature = failureStopFeature(previous);
+    let stopped = false;
+    await this.txManager.run(async () => {
+      const current = previous.state === 'WAITING_MERGE'
+        ? await this.lockWaitingMerge(previous)
+        : await this.lockLive(previous);
+      if (!current) return;
+      await this.writeDecision(current, feature, null, {
+        kind: 'stop', reason: 'internal_error', detail: detail || 'internal error',
+      }, now);
+      stopped = true;
+    });
+    return stopped;
+  }
 
   async advance(flowId: string, now: Date): Promise<void> {
     const live = await this.flows.findById(flowId);
@@ -87,7 +106,10 @@ export class FleetFlowAdvanceService {
     // US-012: a flow that waits for a merge is watched, not decided: the pass polls the awaited
     // PRs and resumes the flow when the next feature can start.
     if (live.state === 'WAITING_MERGE') {
-      await runMergeWatch(this.featurePassDeps(), { flow: live, now });
+      const lastWatchedAt = this.mergeWatchAt.get(flowId);
+      if (lastWatchedAt !== undefined && now.getTime() - lastWatchedAt < this.config.flowMergePollMs) return;
+      const outcome = await runMergeWatch(this.featurePassDeps(), { flow: live, now });
+      if (outcome.kind === 'watched') this.recordMergeWatch(flowId, now.getTime());
       return;
     }
     const pass = await this.decide(live, now);
@@ -139,6 +161,14 @@ export class FleetFlowAdvanceService {
     });
     if (outcome.kind === 'stop') {
       await this.writeStop(pass.flow, pass.feature, outcome.reason, outcome.detail, now);
+    }
+  }
+
+  private recordMergeWatch(flowId: string, timestamp: number): void {
+    this.mergeWatchAt.set(flowId, timestamp);
+    const expiredBefore = timestamp - this.config.flowMergePollMs;
+    for (const [id, watchedAt] of this.mergeWatchAt) {
+      if (watchedAt < expiredBefore) this.mergeWatchAt.delete(id);
     }
   }
 

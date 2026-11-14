@@ -70,6 +70,13 @@ describeIntegration('gated project fleet routes', () => {
     expect(await db.jobSchedule.findUnique({ where: { id: row.id } })).not.toBeNull();
   });
   it('AC-3: own-only agent deleting its own schedule waits and succeeds on approval', async () => {
+    // `fleet.schedule.create` is a `high` key: a no-policy agent waits for an approval. This case needs the
+    // schedule the delete acts on, so the p1 agents' create policy is `none` and the create runs at once.
+    await db.approvalPolicy.create({ data: {
+      selector: `${world.projectId}|fleet.schedule.create|type:AGENT`, projectId: world.projectId,
+      permissionPattern: 'fleet.schedule.create', principalType: 'AGENT', mode: 'none',
+      updatedByType: 'SYSTEM', updatedById: 'test',
+    } });
     const row = await schedule(ownAgent.apiKey);
     expect((await db.jobSchedule.findUniqueOrThrow({ where: { id: row.id } })).createdById).toBe(ownAgent.id);
     const summary = pending(await request(server()).delete(`${schedules}/${row.id}`).set(auth(ownAgent.apiKey)), 'fleet.schedule.delete');

@@ -7,6 +7,7 @@ import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 10;
+export const FLOW_FAILURE_STOP_AFTER = 5;
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 /** The only flow trigger: a bounded pass, single-flight within this API process. */
@@ -16,6 +17,8 @@ export class FleetFlowTicker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FleetFlowTicker.name);
   private timer: NodeJS.Timeout | null = null;
   private polling = false;
+  private afterId: string | null = null;
+  private readonly failures = new Map<string, number>();
 
   constructor(
     @Inject(FLEET_FLOW_STEP_REPOSITORY) private readonly steps: IFleetFlowStepRepository,
@@ -47,21 +50,51 @@ export class FleetFlowTicker implements OnModuleInit, OnModuleDestroy {
   }
 
   async tick(now: Date): Promise<void> {
-    let afterId: string | null = null;
+    const startingAfterId = this.afterId;
+    const listed = new Set<string>();
+    let afterId = startingAfterId;
+    let reachedShortPage = false;
+
     for (let page = 0; page < MAX_PAGES; page++) {
       const flows = await this.steps.listAdvanceable(PAGE_SIZE, afterId);
       for (const flow of flows) {
+        listed.add(flow.id);
+        const behalf = { type: flow.createdByType, id: flow.createdById };
         try {
-          await runAsSystem('flow', () => this.engine.advance(flow.id, now), {
-            onBehalfOf: { type: flow.createdByType, id: flow.createdById },
-          });
+          await runAsSystem('flow', () => this.engine.advance(flow.id, now), { onBehalfOf: behalf });
+          this.failures.delete(flow.id);
         } catch (error) {
           this.logger.error(`Flow ${flow.id} failed: ${messageOf(error)}`);
+          const failures = (this.failures.get(flow.id) ?? 0) + 1;
+          this.failures.set(flow.id, failures);
+          if (failures >= FLOW_FAILURE_STOP_AFTER) {
+            try {
+              await runAsSystem('flow', () => this.engine.stopFailedFlow(flow.id, messageOf(error), now), {
+                onBehalfOf: behalf,
+              });
+              this.failures.delete(flow.id);
+            } catch (stopError) {
+              this.logger.error(`Flow ${flow.id} failed to stop: ${messageOf(stopError)}`);
+            }
+          }
         }
       }
-      if (flows.length < PAGE_SIZE) return;
+      if (flows.length < PAGE_SIZE) {
+        reachedShortPage = true;
+        afterId = null;
+        break;
+      }
       afterId = flows[flows.length - 1].id;
     }
-    this.logger.warn(`Flow tick reached its ${PAGE_SIZE * MAX_PAGES}-flow limit; remaining flows wait for the next tick`);
+
+    if (startingAfterId === null && reachedShortPage) {
+      for (const flowId of this.failures.keys()) {
+        if (!listed.has(flowId)) this.failures.delete(flowId);
+      }
+    }
+    this.afterId = afterId;
+    if (!reachedShortPage) {
+      this.logger.warn(`Flow tick reached its ${PAGE_SIZE * MAX_PAGES}-flow limit; remaining flows wait for the next tick`);
+    }
   }
 }

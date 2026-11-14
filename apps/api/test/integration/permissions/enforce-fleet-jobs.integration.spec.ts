@@ -188,6 +188,12 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
     await app?.close();
   });
 
+  beforeEach(async () => {
+    // AC-4 needs no approval policy and AC-5/AC-6 seed a `none` one. Approval policies outlive a test
+    // in this file, so clear that selector first and keep the cases order-independent.
+    await db.approvalPolicy.deleteMany({ where: { selector: `${p1Id}|fleet.job.dispatch|type:AGENT` } });
+  });
+
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
@@ -238,6 +244,14 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
     expectPermissionsRefusal(res);
   }, TIMEOUT);
 
+  it('AC-6: a roster-only project-member agent without dispatch is refused without an approval request', async () => {
+    const before = await db.approvalRequest.count();
+    const res = await dispatch('p1-roster-agent');
+    expectPermissionsRefusal(res);
+    // Counted before and after: AC-4 opens a pending request, so a zero total would depend on order.
+    expect(await db.approvalRequest.count()).toBe(before);
+  }, TIMEOUT);
+
   it('AC-2: the refused viewer dispatch creates no FleetJob', async () => {
     const before = await jobCount();
     await dispatch('viewer');
@@ -254,12 +268,24 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
   // AC-4 / AC-5 / AC-6 — an agent's legacy DEVELOPER entry decides its keys
   // -------------------------------------------------------------------------
 
-  it('AC-4: an agent rostered in p1 with AgentRoleEntry DEVELOPER dispatches a job (201)', async () => {
-    const res = await dispatch('p1-developer-agent').expect(201);
-    expect(data<{ job: JobRow }>(res).job.state).toBe('QUEUED');
+  it('AC-4: an agent rostered in p1 without an approval policy gets a pending request', async () => {
+    const before = await jobCount();
+    const res = await dispatch('p1-developer-agent').expect(202);
+    expect(data<{ permissionKey: string; status: string }>(res)).toMatchObject({ permissionKey: 'fleet.job.dispatch', status: 'pending' });
+    expect(await jobCount()).toBe(before);
   }, TIMEOUT);
 
+  const seedDispatchNonePolicy = () => db.approvalPolicy.upsert({
+    where: { selector: `${p1Id}|fleet.job.dispatch|type:AGENT` },
+    create: {
+      selector: `${p1Id}|fleet.job.dispatch|type:AGENT`, projectId: p1Id, permissionPattern: 'fleet.job.dispatch',
+      principalType: 'AGENT', mode: 'none', updatedByType: 'SYSTEM', updatedById: 'test',
+    },
+    update: { mode: 'none' },
+  });
+
   it('AC-5: that agent dispatch stores requestedById the agent and requestedByType AGENT', async () => {
+    await seedDispatchNonePolicy();
     const created = data<{ job: JobRow }>(await dispatch('p1-developer-agent').expect(201)).job;
 
     const row = await db.fleetJob.findUniqueOrThrow({ where: { id: created.id } });
@@ -267,6 +293,7 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
   }, TIMEOUT);
 
   it('AC-6: the agent dispatch writes the job.dispatched activity as the agent', async () => {
+    await seedDispatchNonePolicy();
     const created = data<{ job: JobRow }>(await dispatch('p1-developer-agent').expect(201)).job;
 
     const row = await db.fleetActivity.findFirstOrThrow({ where: { jobId: created.id, action: 'job.dispatched' } });

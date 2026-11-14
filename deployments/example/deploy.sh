@@ -40,6 +40,55 @@ if [[ -f "$ENV_FILE" ]]; then
   COMPOSE_ARGS=( --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" )
 fi
 
+is_url_safe_postgres_password() {
+  local LC_ALL=C
+  [[ -n "$1" && "$1" =~ ^[A-Za-z0-9._~-]+$ ]]
+}
+
+if [[ ${POSTGRES_PASSWORD+x} ]]; then
+  effective_postgres_password="$POSTGRES_PASSWORD"
+else
+  effective_postgres_password=''
+  if [[ -f "$ENV_FILE" ]]; then
+    while IFS= read -r env_line || [[ -n "$env_line" ]]; do
+      if [[ "$env_line" =~ ^[[:space:]]*POSTGRES_PASSWORD[[:space:]]*=(.*)$ ]]; then
+        effective_postgres_password="${BASH_REMATCH[1]}"
+      fi
+    done < "$ENV_FILE"
+
+    # Strip whitespace around the value, quotes, and comments without sourcing the file.
+    effective_postgres_password="${effective_postgres_password#"${effective_postgres_password%%[![:space:]]*}"}"
+    effective_postgres_password="${effective_postgres_password%"${effective_postgres_password##*[![:space:]]}"}"
+    if [[ "${effective_postgres_password:0:1}" == '"' || "${effective_postgres_password:0:1}" == "'" ]]; then
+      password_quote="${effective_postgres_password:0:1}"
+      quoted_password="${effective_postgres_password:1}"
+      if [[ "$quoted_password" == *"$password_quote"* ]]; then
+        password_trailer="${quoted_password#*"$password_quote"}"
+        effective_postgres_password="${quoted_password%%"$password_quote"*}"
+        password_trailer="${password_trailer#"${password_trailer%%[![:space:]]*}"}"
+        if [[ -n "$password_trailer" && "${password_trailer:0:1}" != '#' ]]; then
+          effective_postgres_password+='!'
+        fi
+      else
+        effective_postgres_password+='!'
+      fi
+    else
+      # docker compose ends an unquoted value at a `#` only when it starts the value or follows
+      # whitespace, so `unsafe#fragment` keeps its `#` and must fail the safety check below. Only a
+      # whitespace-separated comment is stripped here; trimming happens after it.
+      if [[ "$effective_postgres_password" =~ [[:space:]]# ]]; then
+        effective_postgres_password="${effective_postgres_password%%"${BASH_REMATCH[0]}"*}"
+      fi
+      effective_postgres_password="${effective_postgres_password%"${effective_postgres_password##*[![:space:]]}"}"
+    fi
+  fi
+fi
+
+if ! is_url_safe_postgres_password "$effective_postgres_password"; then
+  echo "❌ POSTGRES_PASSWORD must be non-empty and contain only A-Z, a-z, 0-9, ., _, ~, or -"
+  exit 1
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "❌ docker is required"
   exit 1

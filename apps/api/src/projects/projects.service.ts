@@ -85,6 +85,15 @@ export class ProjectsService {
    *
    * Returns domain objects; callers wrap them in the HTTP DTO at the boundary.
    */
+  async findReachableById(principal: KodaPrincipal, projectId: string): Promise<ProjectDomain | null> {
+    const project = await this.projectRepo.findLiveById(projectId);
+    if (!project) return null;
+    if (await this.access.readsEveryProject(principal)) return project;
+    const type = principal.actorType === 'agent' ? 'AGENT' : principal.actorType === 'user' ? 'USER' : null;
+    if (!type || !(await this.projectRepo.isAccessible({ type, id: principal.id }, projectId))) return null;
+    return project;
+  }
+
   async findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]> {
     if (await this.access.readsEveryProject(principal)) {
       return this.projectRepo.findAll();

@@ -1,10 +1,18 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { AbstractPrismaRepository, Paginate, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
+import {
+  AbstractPrismaRepository,
+  Paginate,
+  PrismaClientLike,
+  PrismaErrorMapper,
+  PrismaModelDelegate,
+  PrismaService,
+} from '@nathapp/nestjs-prisma';
 import { Page, resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryItem as MemoryItemModel, Prisma, PrismaClient } from '../generated/prisma/client';
 import { MemoryKind, MemoryScope } from '../common/enums';
+import { isSerializationFailure, isUniqueViolation } from '../common/utils/prisma-errors';
 import {
   MemoryQuery,
   ProjectMemoryQuery,
@@ -28,6 +36,38 @@ import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
  */
 export function buildActiveKey(_projectId: string | null, kind: string, subject: string, predicate: string): string {
   return kind === MemoryKind.NOTE ? `${MemoryKind.NOTE}:${subject}` : `${kind}:${subject}:${predicate}`;
+}
+
+/**
+ * Review 1114 US-007: how many serializable attempts one `upsert` makes before it gives up.
+ *
+ * Three is enough for the races this exists for — a slug written by up to three concurrent writers — and a
+ * fourth racer is out of scope by design: it can exhaust its attempts and receive the error.
+ */
+export const MEMORY_UPSERT_MAX_ATTEMPTS = 3;
+
+/**
+ * Review 1114 US-007: the wait before `attempt` is retried, in milliseconds — `attempt * round(10 + 40 *
+ * random())`, the same jittered backoff `runWithTicketNumberRetry` uses. The jitter matters: without it,
+ * writers that collided once would collide again in lockstep.
+ */
+export function memoryUpsertBackoffMs(attempt: number, random: () => number): number {
+  return attempt * Math.round(10 + 40 * random());
+}
+
+/** The two errors a lost same-slug race raises: the active-key P2002 and a P2034 transaction conflict. */
+function isUpsertConflict(error: unknown): boolean {
+  return isUniqueViolation(error, 'activeKey') || isSerializationFailure(error);
+}
+
+/**
+ * The exception that finally leaves `upsert`: a `P*` Prisma error keeps the mapped shape every caller
+ * already handles (`DUPLICATE_ENTRY` for a lost race), and anything else — a hook's refusal, a bug — is
+ * rethrown as itself.
+ */
+function finalMemoryError(error: unknown): unknown {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && code.startsWith('P') ? PrismaErrorMapper.map(error) : error;
 }
 
 export interface MemoryDedupKey {
@@ -345,98 +385,124 @@ export class PrismaMemoryItemRepository
   }
 
   async upsert(item: MemoryItemInput, options?: MemoryUpsertOptions): Promise<MemoryItem> {
-    // Permissions P2 US-002: the write runs on the transaction manager rather than a bare
-    // `client.$transaction`, so the callback runs in the AsyncLocalStorage the transaction manager (and
-    // thus `AuditRecorder.record`) reads — `onWritten` records its entry in this same transaction. The
-    // callback still writes through its own `tx`: a `PrismaService` that is not wired with the module's
-    // proxy (a bare one in a test) resolves `client` to the root client inside a transaction.
-    return this.prisma.withTransaction(
-      async (tx) => {
-        const db = tx as unknown as PrismaClient;
-        await options?.beforeWrite?.();
+    // Review 1114 US-007: two writers of one slug can both read no active row, and the loser's insert hits
+    // the active-key unique index (P2002) or a serializable write conflict (P2034). Postgres aborts the
+    // loser's transaction in both cases, so the retry must open a NEW one — `this.tx.run` is what opens it.
+    // It joins an outer transaction instead of opening another, and retrying an already-aborted outer
+    // transaction is forbidden, so an outer transaction gets exactly one attempt.
+    const maxAttempts = this.tx.isInTransaction() ? 1 : MEMORY_UPSERT_MAX_ATTEMPTS;
 
-        const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.tx.run(() => this.writeInTransaction(item, options), { isolationLevel: 'Serializable' });
+      } catch (error) {
+        if (!isUpsertConflict(error) || attempt >= maxAttempts) throw finalMemoryError(error);
+        // No delay after the last attempt: a conflict that ends the loop is thrown, never waited behind.
+        await this.retryDelay(attempt);
+      }
+    }
+  }
 
-        // US-004: a user-scoped row is keyed on its owner, not on a project — the row has no project at all.
-        const scope = item.scope ?? MemoryScope.PROJECT;
-        const ownerKey = scope === MemoryScope.USER ? userOwnerKey(item) : null;
+  /** The wait before `attempt` is retried: the ticket-number retry's jittered backoff, in milliseconds. */
+  protected async retryDelay(attempt: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, memoryUpsertBackoffMs(attempt, Math.random)));
+  }
 
-        // US-001: the active row is found by its key, never by the triple, so a note (whose key is the slug
-        // alone) is replaced when the same slug comes back with another type. US-004: a user row is found by
-        // `(ownerKey, activeKey)`, so the same slug written by two principals, or from two projects, is two
-        // keys of a different kind — one principal's note never supersedes another's or a project's.
-        const existingActive = await db.memoryItem.findFirst({
-          where: {
-            ...(scope === MemoryScope.USER ? { ownerKey } : { projectId: item.projectId }),
-            activeKey,
-            deletedAt: null,
-          },
-        });
+  /**
+   * One attempt of `upsert`, inside the transaction `this.tx.run` opened.
+   *
+   * Permissions P2 US-002: the write runs on the transaction manager rather than a bare
+   * `client.$transaction`, so the callback runs in the AsyncLocalStorage the manager (and thus
+   * `AuditRecorder.record`) reads — `onWritten` records its entry in this same transaction. It writes
+   * through `this.tx.getClient()`, the transaction's own client: `this.prisma.client` is the root client
+   * inside a transaction when the service is not wired with the module's proxy (a bare one in a test).
+   *
+   * Review 1114 US-007: every attempt re-runs this whole callback, so `beforeWrite`, `beforeSupersede` and
+   * `onWritten` write into the attempt that owns them and roll back with it.
+   */
+  private async writeInTransaction(item: MemoryItemInput, options?: MemoryUpsertOptions): Promise<MemoryItem> {
+    const db = this.tx.getClient<PrismaClient>();
+    await options?.beforeWrite?.();
 
-        // Outbox replays re-run this handler: restating the same fact from the
-        // same source is a no-op instead of superseding an identical row. A note
-        // compares its type and index line too (US-001), so a restatement of the
-        // whole note is the no-op while a changed type or description supersedes.
-        //
-        // Every optional field is compared in its stored form: the row holds `null` where the input says
-        // `undefined`, so a raw `===` would call an omitted `sourceId` a change and supersede the row it is
-        // restating (US-001 AC-14, re-saved from the REST route with no source at all).
-        if (
-          existingActive &&
-          existingActive.object === (item.object ?? null) &&
-          existingActive.predicate === item.predicate &&
-          existingActive.description === (item.description ?? null) &&
-          (existingActive.sourceType ?? null) === (item.sourceType ?? null) &&
-          (existingActive.sourceId ?? null) === (item.sourceId ?? null)
-        ) {
-          return this.toDomain(existingActive);
-        }
+    const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 
-        if (existingActive) {
-          // Permissions P1 US-008: the supersede check runs here — inside the transaction, after the active
-          // row was read and before it is touched — so a refusal rolls the whole transaction back and
-          // nothing (the supersede, the insert) is written. The no-op path above never supersedes, so it
-          // never asks.
-          await options?.beforeSupersede?.(this.toDomain(existingActive));
-          await db.memoryItem.update({
-            where: { id: existingActive.id },
-            data: { activeKey: null, status: 'superseded', supersededBy: undefined },
-          });
-        }
+    // US-004: a user-scoped row is keyed on its owner, not on a project — the row has no project at all.
+    const scope = item.scope ?? MemoryScope.PROJECT;
+    const ownerKey = scope === MemoryScope.USER ? userOwnerKey(item) : null;
 
-        const created = await db.memoryItem.create({
-          data: {
-            projectId: scope === MemoryScope.USER ? null : item.projectId,
-            kind: item.kind,
-            subject: item.subject,
-            predicate: item.predicate,
-            object: item.object,
-            description: item.description ?? null,
-            activeKey,
-            ownerId: item.ownerId,
-            ownerType: item.ownerType ?? null,
-            scope,
-            ownerKey,
-            sourceType: item.sourceType,
-            sourceId: item.sourceId,
-            status: item.status ?? 'active',
-            confidence: item.confidence ?? 0.8,
-            ttlAt: item.ttlAt ?? null,
-            supersededBy: item.supersededBy,
-          },
-        });
-
-        // Permissions P2 US-002: last, so the audit entry names an item that exists, and inside the
-        // transaction, so a refused entry takes the insert (and the supersede above) with it.
-        await options?.onWritten?.({
-          item: this.toDomain(created),
-          superseded: existingActive ? this.toDomain(existingActive) : null,
-        });
-
-        return this.toDomain(created);
+    // US-001: the active row is found by its key, never by the triple, so a note (whose key is the slug
+    // alone) is replaced when the same slug comes back with another type. US-004: a user row is found by
+    // `(ownerKey, activeKey)`, so the same slug written by two principals, or from two projects, is two
+    // keys of a different kind — one principal's note never supersedes another's or a project's.
+    const existingActive = await db.memoryItem.findFirst({
+      where: {
+        ...(scope === MemoryScope.USER ? { ownerKey } : { projectId: item.projectId }),
+        activeKey,
+        deletedAt: null,
       },
-      { isolationLevel: 'Serializable' },
-    );
+    });
+
+    // Outbox replays re-run this handler: restating the same fact from the
+    // same source is a no-op instead of superseding an identical row. A note
+    // compares its type and index line too (US-001), so a restatement of the
+    // whole note is the no-op while a changed type or description supersedes.
+    //
+    // Every optional field is compared in its stored form: the row holds `null` where the input says
+    // `undefined`, so a raw `===` would call an omitted `sourceId` a change and supersede the row it is
+    // restating (US-001 AC-14, re-saved from the REST route with no source at all).
+    if (
+      existingActive &&
+      existingActive.object === (item.object ?? null) &&
+      existingActive.predicate === item.predicate &&
+      existingActive.description === (item.description ?? null) &&
+      (existingActive.sourceType ?? null) === (item.sourceType ?? null) &&
+      (existingActive.sourceId ?? null) === (item.sourceId ?? null)
+    ) {
+      return this.toDomain(existingActive);
+    }
+
+    if (existingActive) {
+      // Permissions P1 US-008: the supersede check runs here — inside the transaction, after the active
+      // row was read and before it is touched — so a refusal rolls the whole transaction back and
+      // nothing (the supersede, the insert) is written. The no-op path above never supersedes, so it
+      // never asks.
+      await options?.beforeSupersede?.(this.toDomain(existingActive));
+      await db.memoryItem.update({
+        where: { id: existingActive.id },
+        data: { activeKey: null, status: 'superseded', supersededBy: undefined },
+      });
+    }
+
+    const created = await db.memoryItem.create({
+      data: {
+        projectId: scope === MemoryScope.USER ? null : item.projectId,
+        kind: item.kind,
+        subject: item.subject,
+        predicate: item.predicate,
+        object: item.object,
+        description: item.description ?? null,
+        activeKey,
+        ownerId: item.ownerId,
+        ownerType: item.ownerType ?? null,
+        scope,
+        ownerKey,
+        sourceType: item.sourceType,
+        sourceId: item.sourceId,
+        status: item.status ?? 'active',
+        confidence: item.confidence ?? 0.8,
+        ttlAt: item.ttlAt ?? null,
+        supersededBy: item.supersededBy,
+      },
+    });
+
+    // Permissions P2 US-002: last, so the audit entry names an item that exists, and inside the
+    // transaction, so a refused entry takes the insert (and the supersede above) with it.
+    await options?.onWritten?.({
+      item: this.toDomain(created),
+      superseded: existingActive ? this.toDomain(existingActive) : null,
+    });
+
+    return this.toDomain(created);
   }
 
   /**

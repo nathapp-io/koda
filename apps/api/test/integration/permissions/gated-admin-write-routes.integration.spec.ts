@@ -43,6 +43,13 @@ describeIntegration('gated admin writes', () => {
   });
   afterAll(async () => { await app?.close(); });
 
+  it('US-002 AC-5: an agent without a policy waits to disable a user', async () => {
+    const user = await target();
+    const res = await disable(user.id).expect(202);
+    expect(data<Pending>(res)).toMatchObject({ permissionKey: 'user.update', projectId: null });
+    expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).disabled).toBe(false);
+  });
+
   it('AC-1: user disable waits globally for an agent', async () => {
     const user = await target();
     await seedWaitPolicy(db, 'user.update', null);

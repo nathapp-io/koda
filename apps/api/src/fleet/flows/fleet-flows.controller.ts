@@ -42,7 +42,7 @@ export class FleetFlowsController {
   @ApiResponse({ status: 404, description: 'fleet.flows.notFound' })
   async get(@Param('flowId') flowId: string, @Principal() principal: KodaPrincipal) {
     const flow = await this.flows.findById(flowId);
-    const project = (await this.projects.findAllForPrincipal(principal)).find((candidate) => candidate.id === flow.projectId);
+    const project = await this.projects.findReachableById(principal, flow.projectId);
     if (!project) throw new NotFoundAppException({}, 'fleet.flows.notFound');
     if (!(await this.permissions.can(principal, 'fleet.flow.read', { projectId: project.id })).allowed) {
       throw new ForbiddenAppException({}, 'permissions');

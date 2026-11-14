@@ -41,6 +41,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     reviewMintPollMs: 300_000,
     prReviewMaxDispatch: 10,
     flowTickMs: 30_000,
+    flowMergePollMs: 0,
     flowPrWaitMs: 1_800_000,
     flowReviewAgent: 'Explore',
     ...overrides,

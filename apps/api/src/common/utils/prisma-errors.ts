@@ -17,6 +17,15 @@ export function isUniqueViolation(error: unknown, field: string): boolean {
 }
 
 /**
+ * True for `P2034` — Postgres aborted the transaction for a write conflict or a deadlock. Under
+ * `Serializable` (Prisma 7 with `@prisma/adapter-pg`) SQLSTATE 40001 and 40P01 both arrive as this
+ * code, so one check covers the serialization failure and the deadlock.
+ */
+export function isSerializationFailure(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
+}
+
+/**
  * True for `P2025` — the record a statement targeted no longer exists (a concurrent delete).
  */
 export function isRecordNotFound(error: unknown): boolean {
