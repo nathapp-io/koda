@@ -51,7 +51,9 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
           provide: TRANSACTION_MANAGER,
           useValue: {
             run: vi.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: vi.fn(),
+            // Review 1114 US-007: `upsert` writes through the manager's own client inside `run`, so
+            // `getClient` answers the same client the callback above hands to `withTransaction`.
+            getClient: vi.fn(() => mockPrismaClient),
             isInTransaction: vi.fn(() => false),
           },
         },

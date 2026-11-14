@@ -1,5 +1,5 @@
 import { Prisma } from '../../generated/prisma/client';
-import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from './prisma-errors';
+import { isForeignKeyViolation, isRecordNotFound, isSerializationFailure, isUniqueViolation } from './prisma-errors';
 
 function p2002(target: unknown) {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
@@ -98,5 +98,30 @@ describe('isRecordNotFound', () => {
     expect(isRecordNotFound(missing)).toBe(true);
     expect(isRecordNotFound(p2002('Role_key_key'))).toBe(false);
     expect(isRecordNotFound(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isSerializationFailure', () => {
+  const p2034 = () =>
+    new Prisma.PrismaClientKnownRequestError('Transaction failed due to a write conflict or a deadlock', {
+      code: 'P2034', clientVersion: 'test',
+    });
+
+  it('AC-2: matches a P2034 transaction conflict', () => {
+    expect(isSerializationFailure(p2034())).toBe(true);
+  });
+
+  it('AC-3: ignores a P2002 unique violation', () => {
+    expect(isSerializationFailure(p2002('MemoryItem_projectId_activeKey_key'))).toBe(false);
+  });
+
+  it('ignores other codes and non-Prisma errors', () => {
+    expect(isSerializationFailure(
+      new Prisma.PrismaClientKnownRequestError('x', { code: 'P2025', clientVersion: 'test' }),
+    )).toBe(false);
+    // A bare object that merely carries a `P*` code is not a Prisma error this helper trusts.
+    expect(isSerializationFailure({ code: 'P2034' })).toBe(false);
+    expect(isSerializationFailure(new Error('boom'))).toBe(false);
+    expect(isSerializationFailure(undefined)).toBe(false);
   });
 });

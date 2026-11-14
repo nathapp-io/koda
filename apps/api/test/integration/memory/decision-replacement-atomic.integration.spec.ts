@@ -15,7 +15,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/memory/decision-replacement-atomic.integration.spec.ts
  */
 import { PrismaClient } from '../../../src/generated/prisma/client';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaService, PrismaTransactionManager } from '@nathapp/nestjs-prisma';
 import { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { ExtractionService } from '../../../src/memory/extraction.service';
@@ -112,12 +112,12 @@ describeIntegration('ExtractionService.recordDecision replacement atomicity (B1)
     expect(rows.find((row) => row.id === before.id)).toMatchObject({ status: 'superseded', activeKey: null });
   });
 
-  /** The transaction manager of a run with no ambient transaction: every call is its own. */
+  /**
+   * The transaction manager of a run with no ambient transaction: every `run` opens a real one, which is what
+   * `upsert` relies on to roll a failed replacement's supersession back (review 1114 US-007 moved the write onto
+   * the manager, so a fake `run` that only calls its callback would commit the supersession outside a transaction).
+   */
   function transactionManager(prisma: PrismaClient): ITransactionManager {
-    return {
-      run: <T>(fn: () => Promise<T>): Promise<T> => fn(),
-      getClient: <C = unknown>(): C => prisma as unknown as C,
-      isInTransaction: () => false,
-    };
+    return new PrismaTransactionManager(prisma);
   }
 });
