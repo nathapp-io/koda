@@ -3,7 +3,7 @@
   "feature": "auth-sessions",
   "branchName": "feat/auth-sessions",
   "createdAt": "2026-11-14T11:30:19.103Z",
-  "updatedAt": "2026-11-14T11:52:56.295Z",
+  "updatedAt": "2026-11-14T12:02:54.798Z",
   "userStories": [
     {
       "id": "US-001",
@@ -105,14 +105,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three existing source files gain standard leaf-module wiring, signing claims and the shared issuance call, without a new abstraction; strict three-session TDD is mandatory for JWT issuance and refresh-principal validation."
+        "reasoning": "Three existing source files gain standard leaf-module wiring, signing claims and the shared issuance call, without a new abstraction; strict three-session TDD is mandatory for JWT issuance and refresh-principal validation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/auth/auth.service.ts",
@@ -139,7 +142,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "66f3b92a460b809ee650ff73f611278b0ab7f8d7"
     },
     {
       "id": "US-003",
