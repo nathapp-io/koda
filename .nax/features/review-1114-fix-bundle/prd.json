@@ -3,7 +3,7 @@
   "feature": "review-1114-fix-bundle",
   "branchName": "feat/review-1114-fix-bundle",
   "createdAt": "2026-11-14T05:35:31.930Z",
-  "updatedAt": "2026-11-14T06:47:27.743Z",
+  "updatedAt": "2026-11-14T07:02:21.567Z",
   "userStories": [
     {
       "id": "US-001",
@@ -325,14 +325,17 @@
         "performance"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Four existing production files gain thin lookup wrappers using readsEveryProject and accessibleProjectIds rather than a new authorization model; visibility and non-disclosure ordering still require the security override."
+        "reasoning": "Four existing production files gain thin lookup wrappers using readsEveryProject and accessibleProjectIds rather than a new authorization model; visibility and non-disclosure ordering still require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.controller.ts",
@@ -351,7 +354,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "410f02b2606d3a9967861de4f8a825abaf24a49f"
     },
     {
       "id": "US-007",
