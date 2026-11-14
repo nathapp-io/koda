@@ -238,6 +238,12 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
     expectPermissionsRefusal(res);
   }, TIMEOUT);
 
+  it('AC-6: a roster-only project-member agent without dispatch is refused without an approval request', async () => {
+    const res = await dispatch('p1-roster-agent');
+    expectPermissionsRefusal(res);
+    expect(await db.approvalRequest.count()).toBe(0);
+  }, TIMEOUT);
+
   it('AC-2: the refused viewer dispatch creates no FleetJob', async () => {
     const before = await jobCount();
     await dispatch('viewer');
