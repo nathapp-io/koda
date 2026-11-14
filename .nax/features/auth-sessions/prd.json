@@ -3,7 +3,7 @@
   "feature": "auth-sessions",
   "branchName": "feat/auth-sessions",
   "createdAt": "2026-11-14T11:30:19.103Z",
-  "updatedAt": "2026-11-14T12:02:54.798Z",
+  "updatedAt": "2026-11-14T13:00:50.257Z",
   "userStories": [
     {
       "id": "US-001",
@@ -176,14 +176,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Session activity and logout cross the existing provider, cache, repository, audit and controller boundaries, but reuse established patterns rather than redesigning auth; the security override requires strict three-session TDD."
+        "reasoning": "Session activity and logout cross the existing provider, cache, repository, audit and controller boundaries, but reuse established patterns rather than redesigning auth; the security override requires strict three-session TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/auth/jwt-auth.provider.ts",
@@ -225,7 +228,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "21f86e9d82f9d5e7153691e0c76c986885fc0319"
     },
     {
       "id": "US-004",
