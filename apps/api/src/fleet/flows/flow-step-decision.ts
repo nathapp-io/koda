@@ -57,7 +57,8 @@ export type FlowStopReason =
   | 'budget_paused'
   | 'dispatch_refused'
   | 'pr_closed'
-  | 'spec_changed';
+  | 'spec_changed'
+  | 'internal_error';
 
 export type FlowStepAction =
   | { kind: 'wait' }

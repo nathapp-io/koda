@@ -281,13 +281,26 @@ export async function runMergeWatch(
  * The features the flow waits for: the named dependencies that are not merged yet, in the order
  * the features run.
  */
-function awaitedFeatures(flow: FleetFlowRecord): FleetFlowFeatureRecord[] {
+export function awaitedFeatures(flow: FleetFlowRecord): FleetFlowFeatureRecord[] {
   const next = nextFlowFeature(flow.features);
   if (next.kind !== 'wait_merge') return [];
   const ids = new Set(next.featureIds);
   return [...flow.features]
     .filter((feature) => ids.has(feature.id) && feature.state !== 'MERGED')
     .sort((left, right) => left.position - right.position);
+}
+
+/** Select the feature whose work most directly caused a flow-level failure. */
+export function failureStopFeature(flow: FleetFlowRecord): FleetFlowFeatureRecord {
+  const ordered = [...flow.features].sort((left, right) => left.position - right.position);
+  const active = nextFlowFeature(ordered);
+  const selected = flow.state === 'WAITING_MERGE'
+    ? awaitedFeatures(flow)[0]
+    : active.kind === 'active' ? ordered.find((feature) => feature.id === active.featureId) : undefined;
+  const fallback = ordered[0];
+  const feature = selected ?? fallback;
+  if (!feature) throw new Error(`Flow ${flow.id} has no features to stop`);
+  return feature;
 }
 
 /**

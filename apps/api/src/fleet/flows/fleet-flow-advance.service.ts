@@ -21,7 +21,7 @@ import {
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService, type FleetFlowCallsTarget } from './fleet-flow-calls.service';
-import { runFeatureStart, runMergeWatch, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
+import { failureStopFeature, runFeatureStart, runMergeWatch, type FeaturePassDeps, type FeatureStartBase } from './fleet-flow-feature-passes';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
 import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
@@ -80,6 +80,24 @@ export class FleetFlowAdvanceService {
     private readonly outbox: OutboxService,
     private readonly rulings: FleetPrRulingsService,
   ) {}
+
+  async stopFailedFlow(flowId: string, detail: string, now: Date): Promise<boolean> {
+    const previous = await this.flows.findById(flowId);
+    if (!previous || !['APPROVED', 'RUNNING', 'WAITING_MERGE'].includes(previous.state)) return false;
+    const feature = failureStopFeature(previous);
+    let stopped = false;
+    await this.txManager.run(async () => {
+      const current = previous.state === 'WAITING_MERGE'
+        ? await this.lockWaitingMerge(previous)
+        : await this.lockLive(previous);
+      if (!current) return;
+      await this.writeDecision(current, feature, null, {
+        kind: 'stop', reason: 'internal_error', detail: detail || 'internal error',
+      }, now);
+      stopped = true;
+    });
+    return stopped;
+  }
 
   async advance(flowId: string, now: Date): Promise<void> {
     const live = await this.flows.findById(flowId);
