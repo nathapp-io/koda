@@ -3,7 +3,7 @@
   "feature": "review-1114-fix-bundle",
   "branchName": "feat/review-1114-fix-bundle",
   "createdAt": "2026-11-14T05:35:31.930Z",
-  "updatedAt": "2026-11-14T06:26:57.528Z",
+  "updatedAt": "2026-11-14T06:37:04.334Z",
   "userStories": [
     {
       "id": "US-001",
@@ -209,14 +209,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Changes are confined to one existing ticker and its injected unit harness: a counter map, a cursor and existing system-context calls; deterministic multi-tick TDD covers the specified state sequences without a new abstraction."
+        "reasoning": "Changes are confined to one existing ticker and its injected unit harness: a counter map, a cursor and existing system-context calls; deterministic multi-tick TDD covers the specified state sequences without a new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
@@ -229,7 +232,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bd3576f426f02e943482d42a49f8f04d1283b808"
     },
     {
       "id": "US-005",
