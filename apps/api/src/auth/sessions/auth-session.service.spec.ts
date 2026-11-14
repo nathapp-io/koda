@@ -203,7 +203,7 @@ describe('AuthSessionService', () => {
   // auth-sessions US-003: `revoke` opens no transaction and records nothing — its caller (logout)
   // owns both — so it forwards straight to the repository's owner-checked conditional update.
   describe('revoke', () => {
-    it('revokes the owner-changed, not-yet-revoked session and answers the repository result', async () => {
+    it('revokes the owner-checked, not-yet-revoked session and answers the repository result', async () => {
       const { service, repository, txManager } = build();
 
       await expect(service.revoke('s1', 'u1', 'logout', at(1_000))).resolves.toBe(true);
