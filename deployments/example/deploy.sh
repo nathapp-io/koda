@@ -73,7 +73,12 @@ else
         effective_postgres_password+='!'
       fi
     else
-      effective_postgres_password="${effective_postgres_password%%#*}"
+      # docker compose ends an unquoted value at a `#` only when it starts the value or follows
+      # whitespace, so `unsafe#fragment` keeps its `#` and must fail the safety check below. Only a
+      # whitespace-separated comment is stripped here; trimming happens after it.
+      if [[ "$effective_postgres_password" =~ [[:space:]]# ]]; then
+        effective_postgres_password="${effective_postgres_password%%"${BASH_REMATCH[0]}"*}"
+      fi
       effective_postgres_password="${effective_postgres_password%"${effective_postgres_password##*[![:space:]]}"}"
     fi
   fi

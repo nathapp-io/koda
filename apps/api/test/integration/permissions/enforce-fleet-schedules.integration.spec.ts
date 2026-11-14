@@ -177,6 +177,8 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
     await prisma.jobSchedule.deleteMany();
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetActivity.deleteMany();
+    // AC-5 needs no approval policy and AC-6 seeds a `none` one; approval policies outlive a test.
+    await prisma.approvalPolicy.deleteMany({ where: { selector: `${p1Id}|fleet.schedule.create|type:AGENT` } });
   });
 
   it('writes need an action context', async () => {

@@ -188,6 +188,12 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
     await app?.close();
   });
 
+  beforeEach(async () => {
+    // AC-4 needs no approval policy and AC-5/AC-6 seed a `none` one. Approval policies outlive a test
+    // in this file, so clear that selector first and keep the cases order-independent.
+    await db.approvalPolicy.deleteMany({ where: { selector: `${p1Id}|fleet.job.dispatch|type:AGENT` } });
+  });
+
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
@@ -239,9 +245,11 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
   }, TIMEOUT);
 
   it('AC-6: a roster-only project-member agent without dispatch is refused without an approval request', async () => {
+    const before = await db.approvalRequest.count();
     const res = await dispatch('p1-roster-agent');
     expectPermissionsRefusal(res);
-    expect(await db.approvalRequest.count()).toBe(0);
+    // Counted before and after: AC-4 opens a pending request, so a zero total would depend on order.
+    expect(await db.approvalRequest.count()).toBe(before);
   }, TIMEOUT);
 
   it('AC-2: the refused viewer dispatch creates no FleetJob', async () => {
