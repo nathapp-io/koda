@@ -327,6 +327,13 @@ describeIntegration('assistant tools check their key (US-004)', () => {
   it('AC-6: an MCP dispatch naming p1 by a developer binding creates a QUEUED job requested by the agent', async () => {
     const feature = 'us004-ac6-dispatch';
 
+    // `fleet.job.dispatch` is a `high` key: a no-policy agent waits for an approval. This case is about the
+    // tool's own key, so the p1 agents' dispatch policy is `none` and the tool queues the job at once.
+    await prisma.approvalPolicy.create({ data: {
+      selector: `${p1Id}|fleet.job.dispatch|type:AGENT`, projectId: p1Id, permissionPattern: 'fleet.job.dispatch',
+      principalType: 'AGENT', mode: 'none', updatedByType: 'SYSTEM', updatedById: 'test',
+    } });
+
     const answer = await mcpCall(agentKeys['p1-mcp-dev-agent'], 'koda_dispatch_job', {
       project: P1_SLUG, repo: 'acme/app', command: 'RUN', feature, maxCostUsd: 0.5,
     });

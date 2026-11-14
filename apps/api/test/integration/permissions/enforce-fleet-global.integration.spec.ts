@@ -207,6 +207,8 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
     await prisma.fleetCommand.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
+    // AC-20 seeds a `none` `fleet.job.dispatch` policy for the p1 agents; approval rows outlive a test.
+    await prisma.approvalPolicy.deleteMany({ where: { selector: `${p1Id}|fleet.job.dispatch|type:AGENT` } });
   });
 
   it('writes need an action context', async () => {
@@ -404,6 +406,13 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
   // -------------------------------------------------------------------------
 
   it('AC-20: a global admin\'s feed lists the AGENT dispatch row of a job an agent requested', async () => {
+    // `fleet.job.dispatch` is a `high` key: a no-policy agent waits for an approval. This case needs the job
+    // the feed row names, so the p1 agents' dispatch policy is `none` and the dispatch runs at once.
+    await prisma.approvalPolicy.create({ data: {
+      selector: `${p1Id}|fleet.job.dispatch|type:AGENT`, projectId: p1Id, permissionPattern: 'fleet.job.dispatch',
+      principalType: 'AGENT', mode: 'none', updatedByType: 'SYSTEM', updatedById: 'test',
+    } });
+
     const created = await as('p1-activity-dev-agent', 'post', `/api/projects/${P1_SLUG}/fleet/jobs`, {
       repoId, command: 'RUN', maxCostUsd: 5, feature: 'us008-agent-dispatch',
     }).expect(201);
