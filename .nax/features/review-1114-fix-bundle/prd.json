@@ -3,7 +3,7 @@
   "feature": "review-1114-fix-bundle",
   "branchName": "feat/review-1114-fix-bundle",
   "createdAt": "2026-11-14T05:35:31.930Z",
-  "updatedAt": "2026-11-14T07:02:21.567Z",
+  "updatedAt": "2026-11-14T07:24:04.587Z",
   "userStories": [
     {
       "id": "US-001",
@@ -385,14 +385,17 @@
         "reliability"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Serializable races, raw-error versus mapped-error seams, ALS callbacks and outer-transaction behavior require isolated test/implementation/verification stages."
+        "reasoning": "Serializable races, raw-error versus mapped-error seams, ALS callbacks and outer-transaction behavior require isolated test/implementation/verification stages.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-memory-item.repository.ts",
@@ -418,7 +421,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3d452ddb6f75aae7b5ed7df463b51d403a6e2146"
     },
     {
       "id": "US-008",
