@@ -11,6 +11,8 @@ export interface UserPrincipal extends IPrincipal {
   readonly sub?: string;
   role: KodaUserRole;
   email: string;
+  /** The access token's `sid` claim: the session this request belongs to. Absent on a legacy token. */
+  readonly sessionId?: string;
 }
 
 export interface AgentPrincipal extends IPrincipal {

@@ -3,7 +3,14 @@ import { AuthProvider } from '@nathapp/nestjs-auth';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { UserPrincipal, KodaUserRole } from './principal/koda-principal.types';
 import { PrismaAuthRepository } from './prisma-auth.repository';
-import { UserAuthState, userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
+import {
+  SessionActivity,
+  UserAuthState,
+  authSessionCacheKey,
+  userAuthStateCacheKey,
+  userTokenVersionCacheTag,
+} from './token-version.cache';
+import { AuthSessionService } from './sessions/auth-session.service';
 
 /**
  * Custom AuthProvider that preserves JWT claims (role, email) in the principal.
@@ -15,14 +22,18 @@ import { UserAuthState, userAuthStateCacheKey, userTokenVersionCacheTag } from '
  * without breaking the IPrincipal contract.
  *
  * SECURITY: the claim allow-list below is the whole threat model. Permission decisions read keys
- * from `PermissionService`, never a claim; this provider still copies only `role`, `email`, `sub`
- * and `tokenVersion` so a claim a future contributor might trust cannot reach the principal.
+ * from `PermissionService`, never a claim; this provider still copies only `role`, `email`, `sub`,
+ * `tokenVersion` and `sid` so a claim a future contributor might trust cannot reach the principal.
+ * `sid` reaches the principal only as `sessionId`, and only to ask the session store whether that
+ * session is still live (auth-sessions US-003): revoking one device must not need a `tokenVersion` bump
+ * that ends every device.
  */
 @Injectable()
 export class JwtAuthProvider implements AuthProvider {
   constructor(
     private readonly authRepo: PrismaAuthRepository,
     private readonly cache: CacheManager,
+    private readonly authSessions: AuthSessionService,
   ) {}
 
   async getPrincipal(jwtPayload: Record<string, unknown>): Promise<UserPrincipal> {
@@ -31,6 +42,11 @@ export class JwtAuthProvider implements AuthProvider {
     const id = (jwtPayload['sub'] as string) ?? '';
     const email = (jwtPayload['email'] as string) ?? id;
     const tokenVersion = (jwtPayload['tokenVersion'] as number | undefined) ?? 0;
+    // A legacy access token (issued before sessions) has no `sid`; it stays valid until it expires and
+    // is checked by `tokenVersion` alone, exactly as before.
+    const sid = typeof jwtPayload['sid'] === 'string' && jwtPayload['sid'].length > 0
+      ? jwtPayload['sid']
+      : undefined;
 
     const state = await this.cache.get<UserAuthState>(
       userAuthStateCacheKey(id),
@@ -43,6 +59,16 @@ export class JwtAuthProvider implements AuthProvider {
       { tags: [userTokenVersionCacheTag(id)] },
     );
 
+    // Cached as an object, not a boolean: a cached `false` would otherwise read as a miss. A revoke
+    // evicts this key directly, so a logout takes effect on the next request.
+    const activity = sid === undefined
+      ? null
+      : await this.cache.get<SessionActivity>(
+        authSessionCacheKey(sid),
+        async () => ({ active: await this.authSessions.isActive(sid, new Date()) }),
+        60_000,
+      );
+
     return {
       actorType: 'user',
       id,
@@ -50,13 +76,14 @@ export class JwtAuthProvider implements AuthProvider {
       email,
       role,
       blacklisted: false,
-      revoked: !state || state.disabled || state.tokenVersion > tokenVersion,
+      revoked: !state || state.disabled || state.tokenVersion > tokenVersion || activity?.active === false,
       authorities: [role],
       extra: {
         sub: id,
         email,
         role,
       },
+      ...(sid === undefined ? {} : { sessionId: sid }),
     };
   }
 

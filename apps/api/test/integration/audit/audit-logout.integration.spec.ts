@@ -43,17 +43,29 @@ describeIntegration('logout audit transaction (PG)', () => {
     });
   });
 
-  it('rolls back tokenVersion when audit recording rejects', async () => {
+  it('rolls back the session revoke when audit recording rejects', async () => {
     const token = (await request(server).post('/api/auth/login').send({
       email, password: TEST_PASSWORD,
     }).expect(200));
     accessToken = data<{ accessToken: string }>(token).accessToken;
-    const before = await db.user.findUniqueOrThrow({ where: { id: userId } });
+    // auth-sessions US-003: a session-carrying token makes the session revoke the transaction's write,
+    // so the rollback assertion is the session's revokedAt rather than the tokenVersion bump.
+    const claims = JSON.parse(Buffer.from(accessToken.split('.')[1] ?? '', 'base64url').toString()) as { sid?: string };
+    const sessionId = claims.sid;
+    expect(typeof sessionId).toBe('string');
     const record = vi.spyOn(recorder, 'record').mockRejectedValueOnce(new Error('audit storage unavailable'));
 
     await request(server).post('/api/auth/logout').set('Authorization', `Bearer ${accessToken}`).expect(500);
-    expect((await db.user.findUniqueOrThrow({ where: { id: userId } })).tokenVersion).toBe(before.tokenVersion);
+
+    const session = await db.authSession.findUniqueOrThrow({ where: { id: sessionId } });
+    expect(session.revokedAt).toBeNull();
+    expect(session.revokedReason).toBeNull();
     expect(record).toHaveBeenCalledOnce();
     record.mockRestore();
+
+    // The same route does revoke the session when its entry records, so the null above is the failed
+    // transaction's rollback — not a logout that never writes the session at all.
+    await request(server).post('/api/auth/logout').set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect((await db.authSession.findUniqueOrThrow({ where: { id: sessionId } })).revokedReason).toBe('logout');
   });
 });

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { JwtAuthProvider } from './jwt-auth.provider';
 import { PrismaAuthRepository } from './prisma-auth.repository';
+import { AuthSessionService } from './sessions/auth-session.service';
 
 describe('JwtAuthProvider', () => {
   let provider: JwtAuthProvider;
@@ -14,16 +15,22 @@ describe('JwtAuthProvider', () => {
     get: vi.fn(),
   };
 
+  const mockAuthSessions = {
+    isActive: vi.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JwtAuthProvider,
         { provide: PrismaAuthRepository, useValue: mockAuthRepository },
         { provide: CacheManager, useValue: mockCacheManager },
+        { provide: AuthSessionService, useValue: mockAuthSessions },
       ],
     }).compile();
 
     provider = module.get<JwtAuthProvider>(JwtAuthProvider);
+    mockAuthSessions.isActive.mockReset().mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -98,6 +105,59 @@ describe('JwtAuthProvider', () => {
       authorities: ['ADMIN'],
       extra: { sub: 'user-1', email: 'a@b.com', role: 'ADMIN' },
       blacklisted: false,
+    });
+  });
+
+  describe('auth-sessions US-003 — session activity on access tokens', () => {
+    /** A cache that really caches: one value per key, a resolver runs once, `false` is retained. */
+    const cachingCacheManager = (): Map<string, unknown> => {
+      const store = new Map<string, unknown>();
+      mockCacheManager.get.mockImplementation(async (keys: unknown, resolver: () => Promise<unknown>) => {
+        const key = Array.isArray(keys) ? keys.join('|') : String(keys);
+        if (!store.has(key)) store.set(key, await resolver());
+        return store.get(key);
+      });
+      return store;
+    };
+
+    it("AC-1: a payload carrying sid 's1' yields a principal carrying sessionId 's1'", async () => {
+      cachingCacheManager();
+      const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, sid: 's1' });
+      expect(principal.sessionId).toBe('s1');
+    });
+
+    it("AC-2: an inactive session revokes the principal, and isActive is asked about 's1' at a Date", async () => {
+      cachingCacheManager();
+      mockAuthSessions.isActive.mockResolvedValue(false);
+
+      const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, sid: 's1' });
+
+      expect(principal.revoked).toBe(true);
+      expect(mockAuthSessions.isActive).toHaveBeenCalledOnce();
+      const [sessionId, now] = mockAuthSessions.isActive.mock.calls[0] as [string, unknown];
+      expect(sessionId).toBe('s1');
+      expect(now).toBeInstanceOf(Date);
+    });
+
+    it('AC-3: a payload with no sid never asks the session store', async () => {
+      cachingCacheManager();
+      await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0 });
+      expect(mockAuthSessions.isActive).not.toHaveBeenCalled();
+    });
+
+    it('AC-4: two calls for one sid inside 60 s ask once and both stay revoked', async () => {
+      const store = cachingCacheManager();
+      mockAuthSessions.isActive.mockResolvedValue(false);
+      const payload = { sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, sid: 's1' };
+
+      const first = await provider.getPrincipal(payload);
+      const second = await provider.getPrincipal(payload);
+
+      expect(mockAuthSessions.isActive).toHaveBeenCalledOnce();
+      expect(first.revoked).toBe(true);
+      expect(second.revoked).toBe(true);
+      // The cached answer is the object, keyed by the session: a cached `false` is never a miss.
+      expect(store.get('auth-session|s1')).toEqual({ active: false });
     });
   });
 });

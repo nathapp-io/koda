@@ -86,6 +86,8 @@ describe('AuthService', () => {
 
   const mockAuthSessions = {
     start: vi.fn(),
+    revoke: vi.fn(),
+    isActive: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -98,6 +100,8 @@ describe('AuthService', () => {
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
     mockAuthSessions.start.mockReset();
+    mockAuthSessions.revoke.mockReset();
+    mockAuthSessions.isActive.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = moduleRef = await Test.createTestingModule({
@@ -576,6 +580,42 @@ describe('AuthService', () => {
       expect(out.accessToken).toBeDefined();
       expect(out.refreshToken).toBeDefined();
     });
+
+    // auth-sessions US-003: a per-device logout must not leave the device able to mint a fresh pair.
+    it('refuses to mint a pair from a token whose session is no longer live', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.isActive.mockResolvedValue(false);
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: { sessionId: 's1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).rejects.toThrow(AuthException);
+      expect(mockAuthSessions.isActive).toHaveBeenCalledWith('s1', expect.any(Date));
+    });
+
+    it('refreshes a token whose session is still live', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.isActive.mockResolvedValue(true);
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: { sessionId: 's1' },
+      } as unknown as IPrincipal;
+
+      const out = await service.refresh(principal);
+
+      expect(out.accessToken).toBeDefined();
+      expect(mockAuthSessions.isActive).toHaveBeenCalledWith('s1', expect.any(Date));
+    });
+
+    it('asks no session store for a token that names no session', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: {},
+      } as unknown as IPrincipal;
+
+      await service.refresh(principal);
+
+      expect(mockAuthSessions.isActive).not.toHaveBeenCalled();
+    });
   });
 
   describe('disabled users', () => {
@@ -694,6 +734,53 @@ describe('AuthService', () => {
 
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
+    });
+
+    // auth-sessions US-003 — a logout that names a session ends that session only.
+    it('AC-12: without a sessionId it bumps tokenVersion and calls no session method', async () => {
+      mockAuthRepository.bumpTokenVersion.mockResolvedValue(1);
+
+      await service.logout(mockUser.id);
+
+      expect(authRepo.bumpTokenVersion).toHaveBeenCalledWith(mockUser.id);
+      expect(mockAuthSessions.revoke).not.toHaveBeenCalled();
+      expect(mockAuthSessions.isActive).not.toHaveBeenCalled();
+      expect(mockAuthSessions.start).not.toHaveBeenCalled();
+    });
+
+    it('AC-13: a refused revoke (already ended, or another owner) still records the logout entry', async () => {
+      mockAuthSessions.revoke.mockResolvedValue(false);
+
+      await service.logout(mockUser.id, 's1');
+
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(1);
+      const [work, entriesOf] = mockAuditRecorder.audited.mock.calls[0] as unknown as [
+        () => Promise<boolean>,
+        (result: boolean) => unknown,
+      ];
+      await expect(work()).resolves.toBe(false);
+      expect(entriesOf(false)).toEqual({
+        key: 'session.logout', resourceType: 'user', resourceId: mockUser.id,
+        projectId: null, summary: 'logged out',
+      });
+      expect(mockAuthRepository.bumpTokenVersion).not.toHaveBeenCalled();
+    });
+
+    it('revokes the named session for its owner inside the audited transaction and evicts its cache key', async () => {
+      mockAuthSessions.revoke.mockResolvedValue(true);
+
+      await service.logout(mockUser.id, 's1');
+
+      expect(mockAuthSessions.revoke).toHaveBeenCalledWith('s1', mockUser.id, 'logout', expect.any(Date));
+      // The revoke is the audited work, so both commit or roll back together.
+      const [work] = mockAuditRecorder.audited.mock.calls[0] as unknown as [() => Promise<boolean>];
+      await work();
+      expect(mockAuthSessions.revoke).toHaveBeenCalledTimes(2);
+      // One device ending must not end the others: no tokenVersion bump, no user cache eviction.
+      expect(mockAuthRepository.bumpTokenVersion).not.toHaveBeenCalled();
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
     });
   });
 });

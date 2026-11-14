@@ -173,7 +173,7 @@
             "bearer": []
           }
         ],
-        "summary": "Revoke all outstanding access and refresh tokens for the current user",
+        "summary": "Revoke the current session (all sessions for a token issued before sessions)",
         "tags": [
           "auth"
         ]

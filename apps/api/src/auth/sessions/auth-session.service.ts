@@ -9,8 +9,10 @@ import type { SessionRevokeReason } from './auth-session.domain';
  *
  * Both operations write rows no audit entry covers (`AuthSession`, `RefreshToken`), so each runs inside
  * `bookkeeping(...)`: the audit-coverage rule ("wrote nothing it counts, or recorded at least one entry")
- * then accepts login and refresh. `revoke` and `isActive` belong to US-003 and are not implemented here.
- * This module serves no user-facing string, so it adds no i18n file.
+ * then accepts login and refresh. `revoke` and `isActive` (US-003) are the other two operations: the
+ * revoke is deliberately wrapper-free, because its caller records `session.logout` in the same
+ * transaction, and the activity check is a plain read. This module serves no user-facing string, so it
+ * adds no i18n file.
  */
 
 /**
@@ -106,5 +108,22 @@ export class AuthSessionService {
         return userId === null ? { kind: 'invalid' } : { kind: 'reused', userId };
       }),
     );
+  }
+
+  /**
+   * Ends one session, if it belongs to `userId` and has not already ended.
+   *
+   * No transaction of its own and no audit entry: the caller (logout) runs this inside the
+   * `audited(...)` transaction that records `session.logout`, so the revoke and the entry commit or roll
+   * back together. Answering false is not a failure — logging out an already-ended session, or a
+   * session another user owns, writes nothing and still records the logout.
+   */
+  async revoke(sessionId: string, userId: string, reason: SessionRevokeReason, now: Date): Promise<boolean> {
+    return await this.sessions.revokeOwnedSession(sessionId, userId, reason, now);
+  }
+
+  /** Whether a session is still live at `now` — the check `JwtAuthProvider` makes on every access token. */
+  async isActive(sessionId: string, now: Date): Promise<boolean> {
+    return await this.sessions.isSessionActive(sessionId, now);
   }
 }

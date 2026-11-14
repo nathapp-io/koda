@@ -315,38 +315,61 @@ const mockUser = {
   });
 
   describe('POST /auth/logout', () => {
-    it('should revoke tokens for the current user', async () => {
-      const user = {
-        id: mockUser.id,
-        name: mockUser.email,
-        blacklisted: false,
-        revoked: false,
-        authorities: ['MEMBER'],
-      };
+    /** A user principal carrying the session the access token names (auth-sessions US-003). */
+    const userPrincipal = (sessionId?: string) => ({
+      actorType: 'user' as const,
+      id: mockUser.id,
+      name: mockUser.email,
+      email: mockUser.email,
+      role: 'MEMBER' as const,
+      blacklisted: false,
+      revoked: false,
+      authorities: ['MEMBER'],
+      sessionId,
+    });
 
+    it('AC: forwards the principal id and its session so only this device is logged out', async () => {
       mockAuthService.logout.mockResolvedValue(undefined);
 
-      const result = await controller.logout(user);
+      const result = await controller.logout(userPrincipal('s1'));
 
       expect(result).toBeInstanceOf(JsonResponse);
-      expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.id, 's1');
     });
 
     it('should use principal.id when sub is absent (BUG-1)', async () => {
-      const user = {
-        id: mockUser.id,
-        name: mockUser.email,
-        blacklisted: false,
-        revoked: false,
-        authorities: ['MEMBER'],
-      };
-
       mockAuthService.logout.mockResolvedValue(undefined);
 
-      await controller.logout(user);
+      await controller.logout(userPrincipal('s1'));
 
-      expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
-      expect(authService.logout).not.toHaveBeenCalledWith(undefined);
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.id, 's1');
+      expect(authService.logout).not.toHaveBeenCalledWith(undefined, expect.anything());
+    });
+
+    it('passes no session for a legacy token, so the service keeps the tokenVersion bump', async () => {
+      mockAuthService.logout.mockResolvedValue(undefined);
+
+      await controller.logout(userPrincipal());
+
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.id, undefined);
+    });
+
+    it('passes no session for an agent principal', async () => {
+      mockAuthService.logout.mockResolvedValue(undefined);
+
+      await controller.logout({
+        actorType: 'agent',
+        id: 'agent-1',
+        name: 'bot',
+        slug: 'bot',
+        status: 'ACTIVE',
+        capabilities: [],
+        blacklisted: false,
+        revoked: false,
+        authorities: [],
+      });
+
+      expect(authService.logout).toHaveBeenCalledWith('agent-1', undefined);
     });
   });
 

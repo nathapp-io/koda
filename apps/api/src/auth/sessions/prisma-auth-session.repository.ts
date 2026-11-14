@@ -138,4 +138,31 @@ export class PrismaAuthSessionRepository extends AbstractPrismaRepository<AuthSe
     const existing = await this.db.authSession.findUnique({ where: { id: sessionId }, select: { userId: true } });
     return existing?.userId ?? null;
   }
+
+  /**
+   * Revokes one session only when it belongs to `userId` and is not yet revoked. The affected count is
+   * the answer: a session another user owns, or one already ended, is left untouched — so a logout
+   * naming someone else's session writes nothing and answers false.
+   */
+  async revokeOwnedSession(
+    sessionId: string,
+    userId: string,
+    reason: SessionRevokeReason,
+    now: Date,
+  ): Promise<boolean> {
+    const { count } = await this.db.authSession.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: now, revokedReason: reason },
+    });
+    return count > 0;
+  }
+
+  /** Whether the session exists, has not been revoked and expires after `now`. A read; nothing written. */
+  async isSessionActive(sessionId: string, now: Date): Promise<boolean> {
+    const live = await this.db.authSession.findFirst({
+      where: { id: sessionId, revokedAt: null, expiresAt: { gt: now } },
+      select: { id: true },
+    });
+    return live !== null;
+  }
 }

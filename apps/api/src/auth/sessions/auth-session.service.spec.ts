@@ -23,6 +23,8 @@ interface RepositoryStub {
   deleteUsedTokensBefore: ReturnType<typeof vi.fn>;
   findToken: ReturnType<typeof vi.fn>;
   revokeSession: ReturnType<typeof vi.fn>;
+  revokeOwnedSession: ReturnType<typeof vi.fn>;
+  isSessionActive: ReturnType<typeof vi.fn>;
 }
 
 function build() {
@@ -34,6 +36,8 @@ function build() {
     deleteUsedTokensBefore: vi.fn(async () => 0),
     findToken: vi.fn(async () => null),
     revokeSession: vi.fn(async () => 'owner-id'),
+    revokeOwnedSession: vi.fn(async () => true),
+    isSessionActive: vi.fn(async () => true),
   };
   const txManager = {
     run: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -194,5 +198,46 @@ describe('AuthSessionService', () => {
       'auth.session-rotate',
       'auth.session-rotate',
     ]);
+  });
+
+  // auth-sessions US-003: `revoke` opens no transaction and records nothing — its caller (logout)
+  // owns both — so it forwards straight to the repository's owner-checked conditional update.
+  describe('revoke', () => {
+    it('revokes the owner-changed, not-yet-revoked session and answers the repository result', async () => {
+      const { service, repository, txManager } = build();
+
+      await expect(service.revoke('s1', 'u1', 'logout', at(1_000))).resolves.toBe(true);
+
+      expect(repository.revokeOwnedSession).toHaveBeenCalledWith('s1', 'u1', 'logout', at(1_000));
+      // No bookkeeping wrapper and no transaction: the caller's `audited` transaction is the unit.
+      expect(txManager.run).not.toHaveBeenCalled();
+      expect(currentBookkeepingReason()).toBeUndefined();
+    });
+
+    it('answers false when the conditional update matched nothing', async () => {
+      const { service, repository } = build();
+      repository.revokeOwnedSession.mockResolvedValue(false);
+
+      await expect(service.revoke('s1', 'u2', 'logout', at(1_000))).resolves.toBe(false);
+    });
+  });
+
+  // auth-sessions US-003: the access-token activity check is a plain read; no write, no transaction.
+  describe('isActive', () => {
+    it('asks the repository whether the session is live at now', async () => {
+      const { service, repository, txManager } = build();
+
+      await expect(service.isActive('s1', at(1_000))).resolves.toBe(true);
+
+      expect(repository.isSessionActive).toHaveBeenCalledWith('s1', at(1_000));
+      expect(txManager.run).not.toHaveBeenCalled();
+    });
+
+    it('answers false for a session the repository does not consider live', async () => {
+      const { service, repository } = build();
+      repository.isSessionActive.mockResolvedValue(false);
+
+      await expect(service.isActive('s1', at(1_000))).resolves.toBe(false);
+    });
   });
 });

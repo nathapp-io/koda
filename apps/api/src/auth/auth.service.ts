@@ -13,7 +13,7 @@ import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import type { KodaUserRole } from './principal/koda-principal.types';
 import { UserDomain } from './domain/auth.domain';
-import { userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
+import { authSessionCacheKey, userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
@@ -152,6 +152,14 @@ export class AuthService {
     if (principal.revoked) {
       throw new AuthException({}, 'auth');
     }
+    // auth-sessions US-003: a session-scoped refresh token is only good while its session is live, so a
+    // per-device logout cannot be side-stepped by refreshing — the device would otherwise mint a new
+    // session and stay signed in. A token that names no session keeps the pre-sessions behaviour.
+    // US-004 replaces this with `AuthSessionService.rotate`'s own verdict.
+    const sessionId = principal.extra?.['sessionId'];
+    if (typeof sessionId === 'string' && !(await this.authSessions.isActive(sessionId, new Date()))) {
+      throw new AuthException({}, 'auth');
+    }
     // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
     const user = await this.authRepo.findUserById(principal.id);
 
@@ -199,7 +207,35 @@ export class AuthService {
     return user || null;
   }
 
-  async logout(userId: string): Promise<void> {
+  /**
+   * Ends the caller's session, or — for a token issued before sessions — every session of the user.
+   *
+   * With a `sessionId` (auth-sessions US-003) the revoke is the audited work, so the session row and the
+   * `session.logout` entry commit or roll back together, and `tokenVersion` is untouched: logging out one
+   * device must leave the others signed in. A revoke that matches nothing (already ended, or a session
+   * another user owns) is not an error — the request still answers 200 and still records the entry.
+   *
+   * Without one (a legacy access token, or an agent principal) the `tokenVersion` bump stays as before,
+   * together with the user-cache evictions the bump needs.
+   */
+  async logout(userId: string, sessionId?: string): Promise<void> {
+    if (sessionId !== undefined) {
+      await this.audit.audited(
+        () => this.authSessions.revoke(sessionId, userId, 'logout', new Date()),
+        () => ({
+          key: 'session.logout',
+          resourceType: 'user',
+          resourceId: userId,
+          projectId: null,
+          summary: 'logged out',
+        }),
+      );
+      // The activity answer is cached for 60 s as an object; evict it by its direct key, because the
+      // MEMORY strategy has no tag registry (see the note below) and would never match a tag.
+      await this.cache.invalidate(authSessionCacheKey(sessionId));
+      return;
+    }
+
     await this.audit.audited(
       () => this.authRepo.bumpTokenVersion(userId),
       () => ({
