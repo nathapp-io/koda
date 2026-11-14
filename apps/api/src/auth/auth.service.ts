@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -17,12 +18,14 @@ import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
+import { AuthSessionService } from './sessions/auth-session.service';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
   tokenVersion: number;
+  sid: string;
 }
 
 // BUG-12: same-cost bcrypt hash compared against when the email is unknown,
@@ -41,6 +44,7 @@ export class AuthService {
     private readonly membership: MembershipService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
+    private readonly authSessions: AuthSessionService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -172,11 +176,21 @@ export class AuthService {
     // Derive once so the JWT and response describe the same binding snapshot.
     const role = await this.roleClaim(user.id);
     const response = UserResponseDto.from(user, role);
-    return {
-      accessToken: this.generateAccessToken(user.id, user.email, role, user.tokenVersion),
-      refreshToken: this.generateRefreshToken(user.id, user.tokenVersion),
-      user: response,
-    };
+    const sessionId = randomUUID();
+    const tokenId = randomUUID();
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, tokenId);
+    const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
+    const refreshClaims = JSON.parse(Buffer.from(refreshToken.split('.')[1] ?? '', 'base64url').toString()) as { exp?: number };
+    if (typeof refreshClaims.exp !== 'number' || !Number.isFinite(refreshClaims.exp)) {
+      throw new Error('Signed refresh token did not contain a valid exp claim');
+    }
+    await this.authSessions.start({
+      userId: user.id,
+      sessionId,
+      tokenId,
+      expiresAt: new Date(refreshClaims.exp * 1000),
+    });
+    return { accessToken, refreshToken, user: response };
   }
 
   async validateUser(principal: IPrincipal) {
@@ -203,12 +217,12 @@ export class AuthService {
     await this.cache.invalidate(userAuthStateCacheKey(userId));
   }
 
-  generateAccessToken(userId: string, email: string, role: string, tokenVersion: number): string {
-    const payload: JwtPayload = { sub: userId, email, role, tokenVersion };
+  generateAccessToken(userId: string, email: string, role: string, tokenVersion: number, sessionId: string): string {
+    const payload: JwtPayload = { sub: userId, email, role, tokenVersion, sid: sessionId };
     return this.jwtStrategyProvider.sign(payload);
   }
 
-  generateRefreshToken(userId: string, tokenVersion: number): string {
-    return this.jwtRefreshStrategyProvider.sign({ sub: userId, tokenVersion });
+  generateRefreshToken(userId: string, tokenVersion: number, sessionId: string, tokenId: string): string {
+    return this.jwtRefreshStrategyProvider.sign({ sub: userId, tokenVersion, sid: sessionId, jti: tokenId });
   }
 }

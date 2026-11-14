@@ -85,6 +85,9 @@ describeIntegration('registration open (REGISTRATION_ENABLED=true)', () => {
 
     expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
     expect(await prisma.user.count()).toBe(5);
+    const sessions = await prisma.authSession.findMany({ select: { userId: true } });
+    expect(sessions).toHaveLength(5);
+    expect(new Set(sessions.map((session) => session.userId)).size).toBe(5);
     const adminBindings = await prisma.roleBinding.findMany({
       where: { principalType: 'USER', projectId: null, role: { key: { in: ['owner', 'admin'] } } },
       select: { principalId: true },

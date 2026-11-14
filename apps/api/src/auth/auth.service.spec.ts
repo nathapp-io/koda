@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
+import { AuthSessionService } from './sessions/auth-session.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException, AuthException, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -83,6 +84,10 @@ describe('AuthService', () => {
     invalidate: vi.fn(),
   };
 
+  const mockAuthSessions = {
+    start: vi.fn(),
+  };
+
   beforeEach(async () => {
     mockAuditRecorder.record.mockReset();
     mockAuditRecorder.audited.mockReset().mockImplementation(async <T>(fn: () => Promise<T>) => fn());
@@ -92,6 +97,7 @@ describe('AuthService', () => {
     mockJwtStrategyProvider.sign.mockReset();
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
+    mockAuthSessions.start.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = moduleRef = await Test.createTestingModule({
@@ -106,6 +112,7 @@ describe('AuthService', () => {
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
+        { provide: AuthSessionService, useValue: mockAuthSessions },
       ],
     }).compile();
 
@@ -114,7 +121,9 @@ describe('AuthService', () => {
 
     // Default mock values
     mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
-    mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
+    mockJwtRefreshStrategyProvider.sign.mockReturnValue(
+      `e30.${Buffer.from(JSON.stringify({ exp: 2_000_000_000 })).toString('base64url')}.signature`,
+    );
     mockMembership.isGlobalAdmin.mockResolvedValue(false);
     mockAuthRepository.findUserById.mockResolvedValue(mockUser);
     mockAuthRepository.findAnyUser.mockResolvedValue(null);
@@ -144,6 +153,24 @@ describe('AuthService', () => {
       await expect(service.login({ email: mockUser.email, password: 'Password123!' })).rejects.toBe(error);
       expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
       expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: issues one session and preserves exactly the response keys', async () => {
+      const response = await service.issueSession(mockUser);
+
+      expect(Object.keys(response).sort()).toEqual(['accessToken', 'refreshToken', 'user']);
+      expect(mockAuthSessions.start).toHaveBeenCalledWith(expect.objectContaining({
+        userId: mockUser.id,
+        expiresAt: expect.any(Date),
+      }));
+      const refreshClaims = (mockJwtRefreshStrategyProvider.sign as Mock).mock.calls[0][0];
+      const accessClaims = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
+      expect(refreshClaims).toEqual(expect.objectContaining({ sid: expect.any(String), jti: expect.any(String) }));
+      expect(accessClaims).toEqual(expect.objectContaining({ sid: refreshClaims.sid }));
+      expect(mockAuthSessions.start).toHaveBeenCalledWith({
+        userId: mockUser.id, sessionId: refreshClaims.sid, tokenId: refreshClaims.jti,
+        expiresAt: expect.any(Date),
+      });
     });
 
     it.each([true, false])('uses one role lookup for the response and claim (admin=%s)', async (admin) => {
@@ -245,7 +272,7 @@ describe('AuthService', () => {
       expect(result.user.email).toBe(mockUser.email);
       expect(result.user.name).toBe(mockUser.name);
       expect(result.accessToken).toBe('mock-token');
-      expect(result.refreshToken).toBe('mock-token');
+      expect(result.refreshToken).toMatch(/^e30\..+\.signature$/);
     });
 
     it('trusts the repository to handle the existence-check + create atomically', async () => {
@@ -599,7 +626,7 @@ describe('AuthService', () => {
 
   describe('JWT token generation', () => {
     it('should generate access token with correct payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'MEMBER', mockUser.tokenVersion);
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'MEMBER', mockUser.tokenVersion, 's1');
 
       expect(token).toBe('mock-token');
       expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith({
@@ -607,21 +634,24 @@ describe('AuthService', () => {
         email: mockUser.email,
         role: 'MEMBER',
         tokenVersion: mockUser.tokenVersion,
+        sid: 's1',
       });
     });
 
     it('should generate refresh token', () => {
-      const token = service.generateRefreshToken(mockUser.id, mockUser.tokenVersion);
+      const token = service.generateRefreshToken(mockUser.id, mockUser.tokenVersion, 's1', 't1');
 
-      expect(token).toBe('mock-token');
+      expect(token).toMatch(/^e30\..+\.signature$/);
       expect(mockJwtRefreshStrategyProvider.sign).toHaveBeenCalledWith({
         sub: mockUser.id,
         tokenVersion: mockUser.tokenVersion,
+        sid: 's1',
+        jti: 't1',
       });
     });
 
     it('should include sub, email, role, and tokenVersion in JWT payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN', 2);
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN', 2, 's1');
 
       expect(token).toBe('mock-token');
       const callArgs = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
@@ -629,6 +659,7 @@ describe('AuthService', () => {
       expect(callArgs.email).toBe(mockUser.email);
       expect(callArgs.role).toBe('ADMIN');
       expect(callArgs.tokenVersion).toBe(2);
+      expect(callArgs.sid).toBe('s1');
     });
   });
 
