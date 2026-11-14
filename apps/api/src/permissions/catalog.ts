@@ -446,10 +446,20 @@ function deriveScope(key: string, access: PermissionAccess, ownable: boolean): K
 /** Keys that grant project membership or invite roles; all require a human approval floor. */
 export const ROLE_GRANT_KEYS: ReadonlySet<string> = new Set(['member.add', 'invite.create', 'invite.resend']);
 
+/** Keys whose spend or account-write risk requires agent approval by default. */
+export const SPEND_AND_ACCOUNT_WRITE_KEYS: ReadonlySet<string> = new Set([
+  'fleet.job.dispatch',
+  'fleet.job.config.edit',
+  'fleet.schedule.create',
+  'user.update',
+]);
+
 /** Risk, first match wins: role and policy keys, then reads, then deletes/removes and high-risk writes. */
 function classifyRisk(key: string): PermissionRisk {
+  if (key === 'fleet.thread.preapprove') return 'critical';
   if (key === 'fleet.flow.start') return 'critical';
   if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
+  if (SPEND_AND_ACCOUNT_WRITE_KEYS.has(key)) return 'high';
   if (isReadKey(key)) return 'low';
   if (CREDENTIAL_KEYS.has(key)) return 'high';
   const last = key.slice(key.lastIndexOf('.') + 1);

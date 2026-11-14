@@ -10,6 +10,7 @@ import {
   PUBLIC_KEYS,
   READ_ACTION_KEYS,
   ROLE_GRANT_KEYS,
+  SPEND_AND_ACCOUNT_WRITE_KEYS,
   TEST_HOOK_KEYS,
   type PermissionCatalogEntry,
 } from './catalog';
@@ -193,6 +194,10 @@ function expectedScope(key: string, access: CatalogAccess, ownable: boolean): Ca
 }
 
 function expectedRisk(key: string): CatalogRisk {
+  if (key === 'fleet.thread.preapprove') return 'critical';
+  if (
+    ['fleet.job.dispatch', 'fleet.job.config.edit', 'fleet.schedule.create', 'user.update'].includes(key)
+  ) return 'high';
   if (key === 'fleet.flow.start') return 'critical';
   if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   const last = key.slice(key.lastIndexOf('.') + 1);
@@ -204,6 +209,31 @@ function expectedRisk(key: string): CatalogRisk {
 }
 
 describe('PERMISSION_CATALOG', () => {
+  it('US-001: applies spend/account-write and thread-preapproval risk tiers', () => {
+    expect([...SPEND_AND_ACCOUNT_WRITE_KEYS].sort()).toEqual([
+      'fleet.job.config.edit',
+      'fleet.job.dispatch',
+      'fleet.schedule.create',
+      'user.update',
+    ]);
+
+    for (const key of SPEND_AND_ACCOUNT_WRITE_KEYS) {
+      expect(findCatalogEntry(key)).toMatchObject({
+        risk: 'high',
+        approval: { default: 'agent' },
+      });
+    }
+
+    expect(findCatalogEntry('fleet.thread.preapprove')).toMatchObject({
+      risk: 'critical',
+      principals: ['user', 'agent'],
+      approval: { floor: 'human' },
+    });
+    expect(findCatalogEntry('fleet.schedule.update')?.risk).toBe('medium');
+    expect(findCatalogEntry('fleet.job.requeue')?.risk).toBe('medium');
+    expect(findCatalogEntry('fleet.job.not-a-permission')).toBeUndefined();
+  });
+
   it('US-002 AC-1/2/3: role-grant keys are critical and require human approval', () => {
     expect(ROLE_GRANT_KEYS).toEqual(new Set(['member.add', 'invite.create', 'invite.resend']));
     for (const key of ROLE_GRANT_KEYS) {
@@ -627,7 +657,7 @@ describe('catalog approval metadata', () => {
     expect(drift).toEqual([]);
   });
 
-  it('AC-9: only role and policy keys are floored at human', () => {
+  it('AC-9: only designated critical keys are floored at human', () => {
     const floored = PERMISSION_CATALOG.filter((entry) => entry.approval.floor === 'human');
     expect(floored.map((entry) => entry.key)).toEqual(
       expect.arrayContaining(['role.manage', 'role.binding.global', 'approval.policy.manage']),
@@ -637,7 +667,9 @@ describe('catalog approval metadata', () => {
       .filter((entry) => !entry.key.startsWith('role.') && !entry.key.startsWith('approval.policy.'))
       .map((entry) => entry.key);
 
-    expect(new Set(elsewhere)).toEqual(new Set([...ROLE_GRANT_KEYS, 'fleet.flow.start']));
+    expect(new Set(elsewhere)).toEqual(
+      new Set([...ROLE_GRANT_KEYS, 'fleet.flow.start', 'fleet.thread.preapprove']),
+    );
   });
 
   it('AC-10: approval.decide is scoped any, so a global role can hold it', () => {
