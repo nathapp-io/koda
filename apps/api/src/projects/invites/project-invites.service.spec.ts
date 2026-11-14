@@ -3,6 +3,7 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { legacyRoleForRoleKey } from '../../permissions/legacy-project-roles';
 import { hashInviteToken } from './invite-token';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ProjectInvitesService } from './project-invites.service';
 import type { ProjectInviteRecord } from './domain/project-invite.domain';
 
@@ -141,6 +142,7 @@ function setup(opts: SetupOptions = {}) {
       return result;
     }),
   };
+  const afterCommit = new AfterCommitService();
   const service = new ProjectInvitesService(
     invites as never,
     members as never,
@@ -152,6 +154,7 @@ function setup(opts: SetupOptions = {}) {
     membership as never,
     roles as never,
     mockAuditRecorder as never,
+    afterCommit,
   );
 
   const seed = (over: Partial<ProjectInviteRecord> = {}) => {
@@ -175,7 +178,7 @@ function setup(opts: SetupOptions = {}) {
     return record;
   };
 
-  return { service, audit: mockAuditRecorder, entriesOfCalled, invites, membership, members, access, roles, mailer, schedule, email, store, seed };
+  return { service, afterCommit, audit: mockAuditRecorder, entriesOfCalled, invites, membership, members, access, roles, mailer, schedule, email, store, seed };
 }
 
 describe('ProjectInvitesService.create (S4b US-004)', () => {
@@ -356,6 +359,46 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     expect(call.rawToken).toBe(rawOf(result.invitePath));
     expect(call.role).toBe('Name of developer');
     expect(call.toEmail).toBe('new@x.io');
+  });
+
+  it('US-005 AC-1/2/4: defers new-address mail until scope resolves and reports emailed false', async () => {
+    const { service, afterCommit, mailer } = setup({ existingUser: null });
+    let callbackResolved = false;
+
+    await afterCommit.scope(async () => {
+      const result = await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
+      expect(result.emailed).toBe(false);
+      expect(mailer.sendInvite).not.toHaveBeenCalled();
+      callbackResolved = true;
+    });
+
+    expect(callbackResolved).toBe(true);
+    expect(mailer.sendInvite).toHaveBeenCalledTimes(1);
+  });
+
+  it('US-005 AC-3: drops deferred invite mail when the owning scope rolls back', async () => {
+    const { service, afterCommit, mailer } = setup({ existingUser: null });
+
+    await expect(afterCommit.scope(async () => {
+      await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
+      throw new Error('rollback');
+    })).rejects.toThrow('rollback');
+
+    expect(mailer.sendInvite).not.toHaveBeenCalled();
+  });
+
+  it('US-005 AC-6: resend waits to mail until its owning scope resolves', async () => {
+    const { service, afterCommit, invites, mailer, seed } = setup({ existingUser: null });
+    const invite = seed();
+    invites.findByIdForProject.mockResolvedValue(invite);
+    invites.rotate.mockResolvedValue(invite);
+
+    await afterCommit.scope(async () => {
+      await service.resend('p', invite.id, admin, 'en');
+      expect(mailer.sendInvite).not.toHaveBeenCalled();
+    });
+
+    expect(mailer.sendInvite).toHaveBeenCalledTimes(1);
   });
 
   it('AC-11: a delivery that throws is reported as emailed false, never an error', async () => {

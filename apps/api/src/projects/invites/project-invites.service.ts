@@ -6,6 +6,7 @@ import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { MembershipService } from '../../permissions/membership.service';
 import { RoleDomain } from '../../permissions/permissions.types';
 import { RoleAdminService } from '../../permissions/role-admin.service';
@@ -49,6 +50,7 @@ export class ProjectInvitesService {
     private readonly membership: MembershipService,
     private readonly roles: RoleAdminService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   async create(
@@ -119,7 +121,12 @@ export class ProjectInvitesService {
       return written;
     }, () => ({ key: 'invite.resend', resourceType: 'project-invite', resourceId: id, projectId, summary: 'resent' }));
 
-    const emailed = this.email.configured ? await this.sendInvite(rotated, raw, rotated.email, locale) : false;
+    let emailed = false;
+    if (this.email.configured) {
+      const send = (): Promise<boolean> => this.sendInvite(rotated, raw, rotated.email, locale);
+      const task = async (): Promise<void> => { await send(); };
+      if (!this.afterCommit.defer(task)) emailed = await send();
+    }
     return { invite: this.toDto(rotated, now), invitePath: `/invite/${raw}`, emailed };
   }
 
@@ -210,7 +217,12 @@ export class ProjectInvitesService {
       return created;
     });
 
-    const emailed = this.email.configured ? await this.sendInvite(invite, raw, email, locale) : false;
+    let emailed = false;
+    if (this.email.configured) {
+      const send = (): Promise<boolean> => this.sendInvite(invite, raw, email, locale);
+      const task = async (): Promise<void> => { await send(); };
+      if (!this.afterCommit.defer(task)) emailed = await send();
+    }
     return { outcome: 'INVITED', invite: this.toDto(invite, now), invitePath: `/invite/${raw}`, emailed };
   }
 
