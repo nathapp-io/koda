@@ -49,6 +49,7 @@ integration('two-feature fleet flows through tick against PG with a stubbed forg
     // Only explicit ticks may progress the fixtures in this suite.
     vi.stubEnv('FLEET_SWEEP_ENABLED', 'false');
     vi.stubEnv('OUTBOX_RELAY_ENABLED', 'false');
+    vi.stubEnv('FLEET_FLOW_MERGE_POLL_MS', '1000');
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     db = fixtureDb(app);
@@ -261,6 +262,16 @@ integration('two-feature fleet flows through tick against PG with a stubbed forg
     expect(await featureRow(b.id)).toMatchObject({ state: 'RUNNING', branch: 'feat/b' });
     // AC-7
     expectForgeOutsideTransaction();
+  });
+
+  it('AC-8: five throwing merge-watch ticks stop the flow as an internal error', async () => {
+    const { flowId } = await reachWaitingMerge();
+    vi.mocked(github.getPullRequest).mockRejectedValue(new Error('unexpected forge failure'));
+
+    for (let attempt = 0; attempt < 5; attempt += 1) await tick();
+
+    expect(await flowRow(flowId)).toMatchObject({ state: 'STOPPED', stopReason: 'internal_error' });
+    expect(github.getPullRequest).toHaveBeenCalledTimes(5);
   });
 
   it('AC-6/AC-7: a PR closed without a merge stops the waiting flow pr_closed, persisted on the row', async () => {

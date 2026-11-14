@@ -11,6 +11,17 @@ describe('fleet config', () => {
     process.env = { ...saved };
   });
 
+  it('AC-1: defaults merge polling to two minutes', () => {
+    delete process.env.FLEET_FLOW_MERGE_POLL_MS;
+    expect(fleetConfig().flowMergePollMs).toBe(120_000);
+  });
+
+  it('AC-2: reads the merge poll override', () => {
+    process.env.FLEET_FLOW_MERGE_POLL_MS = '60000';
+    expect(fleetConfig().flowMergePollMs).toBe(60_000);
+    delete process.env.FLEET_FLOW_MERGE_POLL_MS;
+  });
+
   it('flow AC-1: defaults the flow ticker, PR wait and review agent', () => {
     delete process.env.FLEET_FLOW_TICK_MS;
     delete process.env.FLEET_FLOW_PR_WAIT_MS;
@@ -46,6 +57,8 @@ describe('fleet config', () => {
     ['FLEET_FLOW_REVIEW_AGENT', 'x'.repeat(129)],
     ['FLEET_FLOW_TICK_MS', '0'],
     ['FLEET_FLOW_TICK_MS', '3600001'],
+    ['FLEET_FLOW_MERGE_POLL_MS', '999'],
+    ['FLEET_FLOW_MERGE_POLL_MS', '3600001'],
     ['FLEET_FLOW_TICK_MS', '1.5'],
     ['FLEET_FLOW_PR_WAIT_MS', '59999'],
     ['FLEET_FLOW_PR_WAIT_MS', '86400001'],

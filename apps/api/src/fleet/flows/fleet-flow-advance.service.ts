@@ -61,6 +61,7 @@ interface DispatchPass<A extends FlowPassAction = FlowPassAction> {
 @Injectable()
 export class FleetFlowAdvanceService {
   private readonly logger = new Logger(FleetFlowAdvanceService.name);
+  private readonly mergeWatchAt = new Map<string, number>();
 
   constructor(
     @Inject(FLEET_FLOW_REPOSITORY) private readonly flows: IFleetFlowRepository,
@@ -75,7 +76,7 @@ export class FleetFlowAdvanceService {
     private readonly flowService: FleetFlowsService,
     private readonly github: GitHubAppClient,
     private readonly reviews: FleetReviewClaimService,
-    @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent'>,
+    @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent' | 'flowMergePollMs'>,
     private readonly calls: FleetFlowCallsService,
     private readonly outbox: OutboxService,
     private readonly rulings: FleetPrRulingsService,
@@ -105,7 +106,10 @@ export class FleetFlowAdvanceService {
     // US-012: a flow that waits for a merge is watched, not decided: the pass polls the awaited
     // PRs and resumes the flow when the next feature can start.
     if (live.state === 'WAITING_MERGE') {
-      await runMergeWatch(this.featurePassDeps(), { flow: live, now });
+      const lastWatchedAt = this.mergeWatchAt.get(flowId);
+      if (lastWatchedAt !== undefined && now.getTime() - lastWatchedAt < this.config.flowMergePollMs) return;
+      const outcome = await runMergeWatch(this.featurePassDeps(), { flow: live, now });
+      if (outcome.kind === 'watched') this.recordMergeWatch(flowId, now.getTime());
       return;
     }
     const pass = await this.decide(live, now);
@@ -157,6 +161,14 @@ export class FleetFlowAdvanceService {
     });
     if (outcome.kind === 'stop') {
       await this.writeStop(pass.flow, pass.feature, outcome.reason, outcome.detail, now);
+    }
+  }
+
+  private recordMergeWatch(flowId: string, timestamp: number): void {
+    this.mergeWatchAt.set(flowId, timestamp);
+    const expiredBefore = timestamp - this.config.flowMergePollMs;
+    for (const [id, watchedAt] of this.mergeWatchAt) {
+      if (watchedAt < expiredBefore) this.mergeWatchAt.delete(id);
     }
   }
 
