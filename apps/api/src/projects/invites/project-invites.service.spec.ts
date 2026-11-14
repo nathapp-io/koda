@@ -348,7 +348,8 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     expect(store[1].status).toBe('PENDING');
   });
 
-  it('AC-10: a configured invite mails the raw link once and reports emailed true', async () => {
+  // US-005 AC-5: outside an approval scope, the send is awaited inline and the result reports emailed true.
+  it('US-005 AC-5 / AC-10: a configured invite mails the raw link once and reports emailed true', async () => {
     const { service, mailer } = setup({ existingUser: null });
 
     const result = await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');

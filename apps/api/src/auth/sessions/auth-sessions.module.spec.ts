@@ -46,10 +46,12 @@ describe('AuthSessionsModule', () => {
     await moduleRef?.close();
   });
 
-  it('compiles without a database', async () => {
+  // auth-sessions US-002 AC-10: the module compiles from a mocked Prisma/transaction layer and resolves
+  // `AuthSessionService` — the wiring `AuthModule` depends on, proven without a database.
+  it('US-002 AC-10: compiles without a database and resolves AuthSessionService', async () => {
     moduleRef = await build();
 
-    expect(moduleRef).toBeDefined();
+    expect(moduleRef.get(AuthSessionService)).toBeInstanceOf(AuthSessionService);
   });
 
   it('registers the repository behind its private token and resolves the service', async () => {

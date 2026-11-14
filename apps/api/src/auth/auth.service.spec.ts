@@ -162,7 +162,7 @@ describe('AuthService', () => {
       expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
     });
 
-    it('AC-12: issues one session and preserves exactly the response keys', async () => {
+    it('US-002 AC-12: issues one session and preserves exactly the response keys', async () => {
       const response = await service.issueSession(mockUser);
 
       expect(Object.keys(response).sort()).toEqual(['accessToken', 'refreshToken', 'user']);
@@ -656,9 +656,9 @@ describe('AuthService', () => {
       });
     });
 
-    // AC-13: the revocation is already committed when the entry is written, so a failed record must not
-    // turn a 401 into a 500 — and must not go unreported.
-    it('AC-13: a rejecting reuse audit still answers 401 and logs the failure', async () => {
+    // auth-sessions US-004 AC-13: the revocation is already committed when the entry is written, so a
+    // failed record must not turn a 401 into a 500 — and must not go unreported.
+    it('US-004 AC-13: a rejecting reuse audit still answers 401 and logs the failure', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
       mockAuthSessions.rotate.mockResolvedValue({ kind: 'reused', userId: 'user-1' });
@@ -837,7 +837,7 @@ describe('AuthService', () => {
     });
 
     // auth-sessions US-003 — a logout that names a session ends that session only.
-    it('AC-12: without a sessionId it bumps tokenVersion and calls no session method', async () => {
+    it('US-003 AC-12: without a sessionId it bumps tokenVersion and calls no session method', async () => {
       mockAuthRepository.bumpTokenVersion.mockResolvedValue(1);
 
       await service.logout(mockUser.id);
@@ -848,7 +848,7 @@ describe('AuthService', () => {
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
     });
 
-    it('AC-13: a refused revoke (already ended, or another owner) still records the logout entry', async () => {
+    it('US-003 AC-13: a refused revoke (already ended, or another owner) still records the logout entry', async () => {
       mockAuthSessions.revoke.mockResolvedValue(false);
 
       await service.logout(mockUser.id, 's1');

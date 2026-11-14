@@ -43,7 +43,9 @@ describeIntegration('logout audit transaction (PG)', () => {
     });
   });
 
-  it('rolls back the session revoke when audit recording rejects', async () => {
+  // auth-sessions US-003 AC-11: a rejecting `session.logout` entry rolls the session revoke back and the
+  // route answers 500.
+  it('US-003 AC-11: rolls back the session revoke when audit recording rejects', async () => {
     const token = (await request(server).post('/api/auth/login').send({
       email, password: TEST_PASSWORD,
     }).expect(200));

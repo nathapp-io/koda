@@ -9,6 +9,7 @@ import {
   authSessionCacheKey,
   userAuthStateCacheKey,
   userTokenVersionCacheTag,
+  withAuthSessionCacheLock,
 } from './token-version.cache';
 import { AuthSessionService } from './sessions/auth-session.service';
 
@@ -59,15 +60,17 @@ export class JwtAuthProvider implements AuthProvider {
       { tags: [userTokenVersionCacheTag(id)] },
     );
 
-    // Cached as an object, not a boolean: a cached `false` would otherwise read as a miss. A revoke
-    // evicts this key directly, so a logout takes effect on the next request.
+    // Cached as an object, not a boolean: a cached `false` would otherwise read as a miss. Every revoke
+    // evicts this key directly, and the fill runs under the same per-session lock the evictions take, so
+    // a lookup that read the store before a revoke cannot write its stale answer after the eviction
+    // (see `withAuthSessionCacheLock`). A logout therefore takes effect on the next request.
     const activity = sid === undefined
       ? null
-      : await this.cache.get<SessionActivity>(
+      : await withAuthSessionCacheLock(sid, () => this.cache.get<SessionActivity>(
         authSessionCacheKey(sid),
         async () => ({ active: await this.authSessions.isActive(sid, new Date()) }),
         60_000,
-      );
+      ));
 
     return {
       actorType: 'user',

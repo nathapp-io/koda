@@ -13,7 +13,7 @@ import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import type { KodaUserRole } from './principal/koda-principal.types';
 import { UserDomain } from './domain/auth.domain';
-import { authSessionCacheKey, userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
+import { authSessionCacheKey, userAuthStateCacheKey, userTokenVersionCacheTag, withAuthSessionCacheLock } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
@@ -198,7 +198,9 @@ export class AuthService {
     if (outcome.kind === 'reused') {
       // The presented token was already spent: the session is revoked by now, so the cached activity
       // answer must not outlive it, and the theft goes on the record after that revocation has committed.
-      await this.cache.invalidate(authSessionCacheKey(sessionId));
+      // The eviction takes the session's cache lock, so a lookup that read the store before this revoke
+      // cannot repopulate the key after it (see `withAuthSessionCacheLock`).
+      await withAuthSessionCacheLock(sessionId, () => this.cache.invalidate(authSessionCacheKey(sessionId)));
       await this.recordRefreshReuse(outcome.userId);
       throw new AuthException({}, 'auth');
     }
@@ -293,8 +295,10 @@ export class AuthService {
         }),
       );
       // The activity answer is cached for 60 s as an object; evict it by its direct key, because the
-      // MEMORY strategy has no tag registry (see the note below) and would never match a tag.
-      await this.cache.invalidate(authSessionCacheKey(sessionId));
+      // MEMORY strategy has no tag registry (see the note below) and would never match a tag. The
+      // eviction takes the session's cache lock, so a lookup that read the store before this revoke
+      // cannot repopulate the key after it (see `withAuthSessionCacheLock`).
+      await withAuthSessionCacheLock(sessionId, () => this.cache.invalidate(authSessionCacheKey(sessionId)));
       return;
     }
 

@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
+import { vi } from 'vitest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -38,6 +39,23 @@ const sessionIdOf = (pair: TokenPair): string => {
   const sid = claims(pair.accessToken)['sid'];
   if (typeof sid !== 'string') throw new Error('access token carries no sid');
   return sid;
+};
+
+/** A promise that stays pending until `resolve` is called — how the paused-lookup cases hold a fill open. */
+const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((res) => { resolve = res; });
+  return { promise, resolve };
+};
+
+/** Polls until `condition` holds, so a case never has to sleep for an unknown duration. */
+const waitFor = async (condition: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('condition did not hold before the deadline');
 };
 
 describeIntegration('per-session logout (PG)', () => {
@@ -124,6 +142,44 @@ describeIntegration('per-session logout (PG)', () => {
 
     await request(server).post('/api/auth/logout').set('Authorization', `Bearer ${pair.accessToken}`).expect(200);
 
+    expect(await me(pair.accessToken)).toBe(401);
+  }, TIMEOUT);
+
+  // Branch fix B1: the 60 s activity fill and every revocation share one per-session lock, so a lookup that
+  // read the session while it was still live cannot write that answer into the cache after the logout
+  // evicted it — which would keep a revoked access token working for the rest of the TTL.
+  it('AC-8 (paused lookup): a fill paused across the logout cannot re-cache the live answer', async () => {
+    const pair = await login();
+    const sessionId = sessionIdOf(pair);
+    const entered = deferred();
+    const gate = deferred();
+    const realIsActive = sessions.isActive.bind(sessions);
+    const pause = vi.spyOn(sessions, 'isActive').mockImplementation(async (id, now) => {
+      // The store read completes while the session is still live, then the fill is held open.
+      const active = await realIsActive(id, now);
+      entered.resolve();
+      await gate.promise;
+      return active;
+    });
+
+    const inFlight = (async () => (await request(server).get('/api/auth/me')
+      .set('Authorization', `Bearer ${pair.accessToken}`)).status)();
+    await entered.promise;
+
+    // The route itself authenticates through the paused lookup, so the revoke is driven through the same
+    // service the controller calls; its cache eviction waits for the paused fill (the fence).
+    try {
+      const logout = withTestActor(actor(), () => authService.logout(userId, sessionId));
+      await waitFor(async () => (await sessionRow(sessionId)).revokedAt !== null);
+
+      gate.resolve();
+      await Promise.all([inFlight, logout]);
+    } finally {
+      gate.resolve();
+      pause.mockRestore();
+    }
+
+    expect((await sessionRow(sessionId)).revokedReason).toBe('logout');
     expect(await me(pair.accessToken)).toBe(401);
   }, TIMEOUT);
 

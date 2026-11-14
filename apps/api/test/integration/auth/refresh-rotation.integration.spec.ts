@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
+import { vi } from 'vitest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -23,6 +24,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { fixtureDb } from '../../helpers/action-context';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { AuthSessionService } from '../../../src/auth/sessions/auth-session.service';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
@@ -47,6 +49,7 @@ describeIntegration('refresh rotation (PG)', () => {
   let db: PrismaClient;
   let server: ReturnType<NathApplication['getHttpServer']>;
   let refreshSigner: JwtRefreshStrategyProvider;
+  let sessions: AuthSessionService;
 
   /** A fresh user per case, with the baseline binding every user gets, and its login pair. */
   const newUserWithSession = async (): Promise<{ userId: string; pair: TokenPair }> => {
@@ -79,12 +82,30 @@ describeIntegration('refresh rotation (PG)', () => {
 
   const userRow = (id: string) => db.user.findUniqueOrThrow({ where: { id } });
 
+  /** A promise that stays pending until `resolve` is called — how the paused-lookup case holds a fill open. */
+  const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((res) => { resolve = res; });
+    return { promise, resolve };
+  };
+
+  /** Polls until `condition` holds, so a case never has to sleep for an unknown duration. */
+  const waitFor = async (condition: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await condition()) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('condition did not hold before the deadline');
+  };
+
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
     db = fixtureDb(app);
     refreshSigner = app.get(JwtRefreshStrategyProvider);
+    sessions = app.get(AuthSessionService);
   }, TIMEOUT);
 
   afterAll(async () => {
@@ -163,6 +184,48 @@ describeIntegration('refresh rotation (PG)', () => {
     await refresh(rotated.refreshToken).expect(401);
 
     // AC-7: so did the access token that was still accepted before the reuse.
+    expect(await me(rotated.accessToken)).toBe(401);
+  }, TIMEOUT);
+
+  // Branch fix B1: the 60 s activity fill and the reuse eviction share one per-session lock, so a lookup
+  // that read the session while it was still live cannot write that answer into the cache after the reuse
+  // revocation evicted it — which would keep the revoked access token working for the rest of the TTL.
+  it('AC-7 (paused lookup): a fill paused across the reuse revocation cannot re-cache the live answer', async () => {
+    const { pair } = await newUserWithSession();
+    const rotated = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const sessionId = sessionIdOf(pair);
+    await db.refreshToken.update({ where: { id: tokenIdOf(pair) }, data: { usedAt: new Date(Date.now() - 31_000) } });
+
+    const entered = deferred();
+    const gate = deferred();
+    const realIsActive = sessions.isActive.bind(sessions);
+    const pause = vi.spyOn(sessions, 'isActive').mockImplementation(async (id, now) => {
+      // The store read completes while the session is still live, then the fill is held open.
+      const active = await realIsActive(id, now);
+      entered.resolve();
+      await gate.promise;
+      return active;
+    });
+
+    try {
+      const inFlight = (async () => (await request(server).get('/api/auth/me')
+        .set('Authorization', `Bearer ${rotated.accessToken}`)).status)();
+      await entered.promise;
+
+      // The refresh route does not read session activity, so it revokes and then waits on the paused fill
+      // for the cache eviction (the fence). Supertest starts a request when it is awaited, hence the IIFE.
+      const replay = (async () => await refresh(pair.refreshToken))();
+      await waitFor(async () => (await db.authSession.findUniqueOrThrow({ where: { id: sessionId } })).revokedReason === 'reuse');
+
+      gate.resolve();
+      const [replayResult] = await Promise.all([replay, inFlight]);
+
+      expect(replayResult.status).toBe(401);
+    } finally {
+      gate.resolve();
+      pause.mockRestore();
+    }
+
     expect(await me(rotated.accessToken)).toBe(401);
   }, TIMEOUT);
 
