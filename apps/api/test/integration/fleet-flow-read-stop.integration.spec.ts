@@ -6,6 +6,7 @@ import type { PrismaClient } from '../../src/generated/prisma/client';
 import { grantKeys, seedWaitPolicy } from '../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../src/permissions/permission-cache';
 import { FleetFlowsService } from '../../src/fleet/flows/fleet-flows.service';
+import { ProjectsService } from '../../src/projects/projects.service';
 import type { FleetFlowDto } from '../../src/fleet/flows/dto/fleet-flow.dto';
 import { fixtureDb, withTestActor } from '../helpers/action-context';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../helpers/fleet-fixtures';
@@ -43,7 +44,12 @@ describeDb('fleet flow read and stop endpoints', () => {
     await app.get(PermissionCache).invalidate();
   }, 60_000);
   afterAll(async () => { await app?.close(); });
+  afterEach(async () => {
+    await db.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: world.ids.outsider, projectId: world.projectId } });
+    await app.get(PermissionCache).invalidate();
+  });
   beforeEach(async () => {
+    await db.project.updateMany({ where: { deletedAt: { not: null } }, data: { deletedAt: null } });
     resetThrottle(app);
     await db.approvalDecision.deleteMany();
     await db.approvalRequest.deleteMany();
@@ -85,6 +91,40 @@ describeDb('fleet flow read and stop endpoints', () => {
     const foreign = await create(world.opsProjectId, world.foreignRepoId);
     refusal(await get(projectUrl(foreign.id)).expect(404), 'fleet.flows.notFound.404');
   });
+  it('AC-1: project member with fleet.flow.read can read a global flow URL with its project slug', async () => {
+    const flow = await create();
+    const response = data<FleetFlowDto>(await get(`/api/fleet/flows/${flow.id}`).expect(200));
+    expect(response).toMatchObject({ id: flow.id, url: `/web/flows/${flow.id}` });
+  });
+  it('AC-2: user with no project binding gets fleet.flows.notFound from the global flow URL', async () => {
+    const flow = await create();
+    refusal(await get(`/api/fleet/flows/${flow.id}`, world.tokens.outsider).expect(404), 'fleet.flows.notFound.404');
+  });
+  it('AC-3: soft-deleted project is unreachable through the global flow URL', async () => {
+    const flow = await create();
+    await db.project.update({ where: { id: world.projectId }, data: { deletedAt: new Date() } });
+    refusal(await get(`/api/fleet/flows/${flow.id}`).expect(404), 'fleet.flows.notFound.404');
+  });
+  it('AC-4: project.read without fleet.flow.read is forbidden on the global flow URL', async () => {
+    const flow = await create();
+    await grantKeys(db, { type: 'USER', id: world.ids.outsider }, ['project.read'], world.projectId);
+    await app.get(PermissionCache).invalidate();
+    const response = await get(`/api/fleet/flows/${flow.id}`, world.tokens.outsider).expect(403);
+    expect(response.body.message).toBe('You do not have permissions to perform this action');
+  });
+  it('AC-6: project-scoped agent binding reaches only its bound project', async () => {
+    await expect(app.get(ProjectsService).findReachableById({ actorType: 'agent', id: agent.id } as never, world.projectId))
+      .resolves.toMatchObject({ id: world.projectId, slug: 'web' });
+    await expect(app.get(ProjectsService).findReachableById({ actorType: 'agent', id: agent.id } as never, world.opsProjectId)).resolves.toBeNull();
+  });
+  it('AC-7: global Admin reaches live projects but not soft-deleted projects', async () => {
+    const projects = app.get(ProjectsService);
+    await expect(projects.findReachableById({ actorType: 'user', id: world.ids.root } as never, world.projectId))
+      .resolves.toMatchObject({ id: world.projectId, slug: 'web' });
+    await db.project.update({ where: { id: world.projectId }, data: { deletedAt: new Date() } });
+    await expect(projects.findReachableById({ actorType: 'user', id: world.ids.root } as never, world.projectId)).resolves.toBeNull();
+  });
+
   it('AC-4: rostered agent sees the identical DTO at both URLs', async () => {
     const flow = await create();
     const project = await get(projectUrl(flow.id), agent.apiKey).expect(200);
