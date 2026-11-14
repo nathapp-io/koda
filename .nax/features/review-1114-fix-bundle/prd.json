@@ -3,7 +3,7 @@
   "feature": "review-1114-fix-bundle",
   "branchName": "feat/review-1114-fix-bundle",
   "createdAt": "2026-11-14T05:35:31.930Z",
-  "updatedAt": "2026-11-14T06:37:04.334Z",
+  "updatedAt": "2026-11-14T06:47:27.743Z",
   "userStories": [
     {
       "id": "US-001",
@@ -261,14 +261,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The implementation mirrors the existing interval config and adds a local timestamp check around the existing watched/retry/idle union; existing merge-watch and ticker fixtures support direct TDD despite several mechanical config/test updates."
+        "reasoning": "The implementation mirrors the existing interval config and adds a local timestamp check around the existing watched/retry/idle union; existing merge-watch and ticker fixtures support direct TDD despite several mechanical config/test updates.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -298,7 +301,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d8e0985fb17b257536814112e0518b63228126f9"
     },
     {
       "id": "US-006",
