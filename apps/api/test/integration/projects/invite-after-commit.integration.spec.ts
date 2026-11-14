@@ -4,6 +4,7 @@ import type { NathApplication } from '@nathapp/nestjs-app';
 import { NOTIFY_SERVICE } from '@nathapp/nestjs-notify';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { EmailDispatcher } from '../../../src/email/email-dispatcher';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
@@ -38,6 +39,7 @@ describeIntegration('invite email after approval commit (US-005)', () => {
     db = fixtureDb(app);
     world = await seedFleetHttpWorld(server(), db);
     agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantRole(db, { type: 'AGENT', id: agent.id }, 'viewer', world.projectId);
     await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'invite.create'], world.projectId);
     await app.get(PermissionCache).invalidate();
     vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
@@ -71,8 +73,13 @@ describeIntegration('invite email after approval commit (US-005)', () => {
     const decision = await request(server()).post(`/api/approvals/${pending.id}/decisions`)
       .auth(world.tokens.root, { type: 'bearer' }).send({ decision: 'approve' }).expect(200);
     const settled = data<Settled>(decision);
-    // Decision route returns the approval record; read the persisted execution result after the
-    // decision has synchronously executed its approved command.
+    // Invite creation is a secret redemption: approval releases it, then the requester redeems
+    // the approved request with its original input. This is the execution transaction that owns
+    // the deferred InviteMailer task.
+    await request(server()).post('/api/projects/web/invites')
+      .auth(agent.apiKey, { type: 'bearer' })
+      .set('X-Koda-Approval-Request', pending.id)
+      .send({ email: inviteEmail, roleKey: 'viewer' }).expect(201);
     const persisted = await db.approvalRequest.findUniqueOrThrow({ where: { id: pending.id } });
     expect(settled.id).toBe(pending.id);
     expect(persisted).toMatchObject({ status: 'executed', result: { outcome: 'INVITED', emailed: false } });
