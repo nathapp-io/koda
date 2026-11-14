@@ -24,7 +24,7 @@
 - Checked by hand during consolidation:
   - **A/SEC-12 held.** `permissions/catalog.ts:170-183`: `HIGH_RISK_PREFIXES` does not cover `fleet.job.dispatch`, `fleet.job.config.edit` or `fleet.schedule.create`, so they classify `medium`.
   - **B/BUG-4 held.** `fleet/flows/fleet-flow.ticker.ts:58-60`: the per-flow catch only logs. Nothing counts failures or writes a stop.
-  - **D/SEC-14 held.** `runner/src/executor/host-executor.ts:294-307` writes `forge-token` into the job dir for every GitHub RUN. `dispatch-input.ts:76` defaults `bashMode` to `raw`. `git-token.broker.ts:110-116` runs the protection gate only for `purpose === 'fix'`.
+  - **D/SEC-14 downgraded to LOW.** Although the runner writes `forge-token` into the job dir for GitHub RUN, nax reads and deletes the token file at startup, before the raw RUN agent can read it. The separate fresh-wait/expiry defects remain under D/BUG-9.
   - **D gap "TLS and Secure cookies" held, with a nuance.** `apps/web/server/utils/api.ts:47,56` hard-codes `secure: true`. Browsers accept Secure cookies on `localhost`, which is why koda-wk works. A LAN or prod host reached over plain HTTP cannot keep a session.
   - **Two reviewer-B gap rows were wrong and are corrected in section B.4:**
     - #374 is built: a per-repo FIX check-commands override in `fleet/repos/*fix-checks*` plus the runner's `nax/trust.ts`, closed by PR #383.
@@ -65,7 +65,7 @@ The new code is solid:
 - **Memory notes, search and export** showed no cross-project or cross-user leak and no FTS injection.
 
 What remains falls into three groups:
-1. **Trust-posture decisions that are drifting rather than being made.** The new RUN forge-token file (D/SEC-14), the FIX push scope beyond the default branch (B/SEC-1 partial, D/SEC-3), sandboxing for raw kinds (D/SEC-2) and agent-held spend keys at tier `none` (A/SEC-12). Each needs a ruling, not a patch.
+1. **Trust-posture decisions that are drifting rather than being made.** The FIX push scope beyond the default branch (B/SEC-1 partial, D/SEC-3), sandboxing for raw kinds (D/SEC-2) and agent-held spend keys at tier `none` (A/SEC-12). Each needs a ruling, not a patch. D/SEC-14 is LOW: nax reads and deletes the RUN token file at startup.
 2. **Production readiness.** koda-wk is a localhost deployment. The 11-14 prod plan (k3s api+web+Postgres, runner on the Mac) has no manifests, no TLS path (and Secure cookies need one), no off-host backups or restore drill, and `/api/health` has no DB readiness check.
 3. **Table-stakes product gaps.** There is no self-service password change or reset, refresh tokens are not one-time, and there are no ticket due dates, bulk operations, attachments or full-text ticket search.
 
@@ -77,13 +77,13 @@ What remains falls into three groups:
 
 None.
 
-### MEDIUM (3 new)
+### MEDIUM (2 new)
 
 | ID | Title | Location |
 |:--|:--|:--|
 | A/SEC-12 | Spend and repo-write keys that agents hold (`fleet.job.dispatch`, `fleet.job.config.edit`, `fleet.schedule.create`) classify `medium`, so a Developer agent runs them at approval mode `none`. Budgets are the only cap. Needs consolidated ruling 6. | `permissions/catalog.ts:170-183,234,247,264`; `permissions/system-roles.ts:75,84` |
 | B/BUG-4 | A flow that hits an undeclared error is retried on every tick. There is no failure budget, no stop and no user-visible reason, only one error log per tick. | `fleet/flows/fleet-flow.ticker.ts:58-60`; `fleet-flow-advance.service.ts:168,305,400,417-421,658` |
-| D/SEC-14 | Since #395, every GitHub RUN writes a repo-wide `contents: write` token to `.jobs/<id>/forge-token`. RUN defaults to raw bash, and the default-branch protection gate is FIX-only. A prompt-injected RUN agent can `cat` the token. | `runner/src/executor/host-executor.ts:294-307`; `api/src/fleet/jobs/dispatch-input.ts:76`; `fleet/git-broker/git-token.broker.ts:110-116` |
+
 
 ### Prior MEDIUMs still open or partial (carried, see the area tables)
 
@@ -94,14 +94,14 @@ None.
 | C | SEC-2 partial (approver verified, but the PR author can approve their own "not a defect"); carried BUG-1 partial (budgets still count soft-deleted projects) |
 | D | SEC-2 partial (runner git hardening, sandbox for raw kinds); SEC-3 partial (FIX push to non-default branches); BUG-4/5/6 partial (BUG-6: a 5xx from `/api/auth/me` on page load still logs the user out) |
 
-### LOW (14 new)
+### LOW (15 new)
 
 | Area | IDs |
 |:--|:--|
 | A (4) | SEC-13 (`fleet.thread.preapprove` granted to agents at `none`; inert only because the controller refuses agents), BUG-5 (a PR created after commit can lose its TicketLink, and a later verify opens a second PR), BUG-6 (status PATCH picks its approval key from an unlocked read), STYLE-3 (`ticket-transitions.service.ts` 856 lines) |
 | B (3) | BUG-5 (ticker restarts from the lowest id each tick and starves flows beyond 500; merge watch polls GitHub every tick with no backoff), PERF-2 (`GET /fleet/flows/:id` loads all the caller's projects), ENH-1 (`fleet-flow-advance.service.ts` 1008 lines) |
 | C (3) | BUG-6 (a concurrent write of the same note slug becomes an unhandled P2002 or serialization error), SEC-4 (outbound webhook signature has no timestamp), PERF-2 (ranked search runs `count(*)` over every match on each page) |
-| D (4) | BUG-9 (the RUN identity waits for 50 minutes of token life but the API ignores `fresh` for RUN), SEC-15 (release passes `TURBO_TOKEN` as an undeclared build-arg), BUG-10 (DATABASE_URL built by raw password interpolation), SEC-16 (tracked `apps/api/.env.test` with secret-named keys) |
+| D (5) | SEC-14 (LOW; nax reads and deletes the RUN token file at startup), BUG-9 (the RUN identity waits for 50 minutes of token life but the API ignores `fresh` for RUN), SEC-15 (release passes `TURBO_TOKEN` as an undeclared build-arg), BUG-10 (DATABASE_URL built by raw password interpolation), SEC-16 (tracked `apps/api/.env.test` with secret-named keys) |
 
 ---
 
@@ -156,10 +156,7 @@ The full per-area tables are in sections A.4 to D.4 below.
 Numbers in this list are the consolidated numbering used by the index, the gap table and the Priority Fix Order. The area sections keep their own numbering. For example, area A's "ruling 18" is item 6 here.
 
 **Trust and token posture:**
-1. **RUN forge token (D/SEC-14).** Options:
-   - (a) Give RUN a login-only nax identity with no token file.
-   - (b) Default GitHub RUN to `gated` bash.
-   - (c) Accept the file exposure for RUN, as already accepted for REVIEW and FIX.
+1. **RUN forge token (D/SEC-14, downgraded to LOW).** nax reads and deletes the token file at startup, before a raw RUN agent can access it. The login-only identity is implemented. The separate fresh-wait and token-expiry defects remain D/BUG-9.
 2. **FIX push scope (B/SEC-1, D/SEC-3).** Options:
    - Accept "default branch must be protected" as a deployment prerequisite.
    - Or add a runner refspec allowlist (PR head branch only).
@@ -211,7 +208,7 @@ Numbers in this list are the consolidated numbering used by the index, the gap t
 
 | Priority | ID | Effort | Description |
 |:--|:--|:--|:--|
-| P0 | D/SEC-14 | S | After ruling 1: no token file for RUN (login-only identity), or `gated` default for GitHub RUN. |
+| LOW | D/SEC-14 | Done | Downgraded: nax reads and deletes the RUN token file at startup; the login-only identity removes the file and fresh-wait defects remain tracked as D/BUG-9. |
 | P0 | B/BUG-4 | S | Per-flow consecutive-failure counter. After N failures, `writeStop('internal_error')` with an activity row; reset on success. |
 | P0 | A/SEC-12 | S | After ruling 6: add the spend and repo-write keys to `HIGH_RISK_PREFIXES` or a named set, and pin each spend key's tier in a catalog test. |
 | P1 | Prod bundle | M | TLS terminator, Secure-cookie-compatible config, off-host backup plus restore drill, migrate Job, DB-ping readiness, `NODE_ENV=production`. Blocked on the k3s decision. |
@@ -658,7 +655,7 @@ Prior at 61052931: D1 13/14/16/15/15, D2 13/12/15/16/12.
 - Still open: the sandbox for raw job kinds (SEC-2 ruling 4), the FIX push-scope residual (SEC-3), the cancel-path pgid signal without an identity check (BUG-4), the bidi/control-character render (SEC-12), FIX diagnostics not sanitized (SEC-13), no CSP or security headers (E SEC-11), `ci.yml` with no `permissions:` and tag-pinned actions (E SEC-13), and the CLI secrets on argv (prior SEC-8).
 - Prod gaps are the largest block: no Kubernetes manifests, no off-host backup, a backup script that is local-only, no TLS, `secure: true` cookies hard-coded, no readiness that checks the DB, no metrics.
 
-**New findings (this review):** HIGH 0, MEDIUM 1, LOW 4. Details in section 3.
+**New findings (this review):** HIGH 0, MEDIUM 1, LOW 5 (including D/SEC-14 downgraded to LOW because nax reads and deletes the token file at startup). Details in section 3.
 
 **Prior-status counts (24 Area D IDs from 11-01):** Fixed 12, Partial 5, Open 6, Closed by ruling 1.
 
@@ -703,7 +700,7 @@ Status key: Fixed, Partial, Open, or Closed by ruling. IDs are as used in the 11
 |:--|:--|:--|:--|
 | E BUG-6 | `deploy.sh` health race | Fixed | `deployments/example/deploy.sh:76-77` `up -d --wait api web`. |
 | E SEC-9 | `${{ }}` inside `run:` | Fixed | `release.yml:35` routes inputs through env; `ci.yml:251,255` interpolate matrix integers only. |
-| E OPS-1 | Release gaps (TURBO cache not wired) | Partial | `release.yml:192-193` passes `TURBO_TOKEN` as a build-arg, with no `secrets:` input; the Dockerfiles read `/run/secrets/TURBO_TOKEN` (`apps/api/Dockerfile:62-63`), so the cache is never used. See SEC-14. |
+| E OPS-1 | Release gaps (TURBO cache not wired) | Partial | `release.yml:192-193` passes `TURBO_TOKEN` as a build-arg, with no `secrets:` input; the Dockerfiles read `/run/secrets/TURBO_TOKEN` (`apps/api/Dockerfile:62-63`), so the cache is never used. See SEC-15. |
 | E SEC-10 | Refresh cookie path `/` | Open | `apps/web/server/utils/api.ts:48,57` `path: '/'`. |
 | E SEC-11 | No CSP or security headers | Open | No `routeRules` headers in `apps/web/nuxt.config.ts`; no header middleware under `apps/web/server/middleware/` (only `client-ip.ts` and `session-refresh.ts`). |
 | E SEC-12 | `.dockerignore` only root `.env` | Open | `.dockerignore` lists `.env` and `.env.*` at root only; `apps/api/.env.test` is tracked (see SEC-16). |
@@ -728,20 +725,10 @@ Status key: Fixed, Partial, Open, or Closed by ruling. IDs are as used in the 11
 
 Numbering continues after the 11-01 Area D IDs (SEC-13, BUG-8, STYLE-1, ENH-1, OPS-1).
 
-##### SEC-14 [MEDIUM] RUN jobs now get a repo-wide write token as a same-user file, and RUN defaults to raw bash
-- **Location:**
-  - `apps/runner/src/executor/host-executor.ts:296-307` (`runIdentityEnv`, #395, commit 7093ced1): writes `forge-token` into `.jobs/<id>/`.
-  - `apps/api/src/fleet/jobs/dispatch-input.ts:76` (`const bashMode: BashMode = dto.bashMode ?? 'raw';`), so RUN is raw unless dispatched otherwise.
-  - `apps/api/src/fleet/git-broker/git-token.broker.ts:110-120`: the default-branch gate runs only for `purpose === 'fix'`; a RUN mint uses the default (write) path.
-- **Code:**
-  ```ts
-  // host-executor.ts:296-307
-  if (job.command !== 'RUN' || job.assign.repo.provider !== 'github') return {};
-  ...
-  return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, result.token), NAX_FORGE_LOGIN: job.assign.gitIdentity.name };
-  ```
-- **Scenario:** a raw RUN agent reads untrusted issue or repo text and is prompt-injected. It runs `cat .jobs/<id>/forge-token`, without any Bash approval, and gets a `contents: write` installation token for the repo. The token skips the default-branch protection gate. Pushes to an unprotected default branch are then possible, and so is any other branch write. The socket already gave a same-user process the same token (accepted posture), so the marginal change is that a raw agent can take it directly from a file. Ruling 5 and the forge-token acceptance covered REVIEW and FIX only.
-- **Fix:** either (a) give RUN a login-only nax identity (no token file), which the code comment at `host-executor.ts:291-293` already names as the goal; or (b) default GitHub RUN to `gated` bash; or (c) record a ruling that RUN joins the accepted file exposure. Decide before the prod runner runs RUN at scale.
+##### SEC-14 [LOW, downgraded] RUN token file is read and deleted by nax at startup
+- **Location:** `apps/runner/src/executor/host-executor.ts:296-307` writes the token file for GitHub RUN; `apps/api/src/fleet/jobs/dispatch-input.ts:76` defaults RUN to raw bash.
+- **Assessment:** nax reads and deletes the token file at startup (`captureForgeIdentity`, nax >= 0.91.7), before the raw RUN agent can access it. The original same-user-file exposure scenario therefore does not hold. The login-only identity is implemented by the follow-up change; it removes the file and avoids waiting for token life.
+- **Residual:** the separate fresh-wait and token-expiry defects remain D/BUG-9; this downgrade does not close those reliability issues.
 
 ##### BUG-9 [LOW] RUN forge identity waits 50 minutes of token life that the API will not mint for RUN
 - **Location:** `apps/api/src/fleet/sync/sync.service.ts:179` passes `fresh` only for FIX and REVIEW. `apps/runner/src/executor/host-executor.ts:44` requires 3,000,000 ms of remaining life for RUN too (`:296-298`). The broker waits `tokenWaitMs` (`apps/runner/src/daemon/tuning.ts:89`, 120 s) in `broker.ts:166-186`.
@@ -826,7 +813,7 @@ Summary by module: the largest unconsumed area is project-scoped ticket workflow
 
 ### 5. Rulings needed
 
-1. **RUN forge token and raw default (SEC-14).** Choose: login-only nax identity for RUN; default GitHub RUN to `gated` bash; or accept file exposure for RUN as well. This is a decision, not a defect fix.
+1. **RUN forge token (SEC-14, downgraded to LOW).** nax reads and deletes the token file at startup, so the raw RUN agent cannot read it. The login-only identity is implemented; separate fresh-wait/expiry defects remain D/BUG-9.
 2. **ACP `read` mode is unsandboxed with `inheritEnv: true` (`apps/runner/src/thread/session-factory.ts:107-113`, `:145`).** The design accepts unsandboxed ACP in every mode. Confirm that the `read` guarantee relies on nax-agent-acp's profile mapping (design §3), and that koda should add a test that asserts it.
 3. **FIX push scope beyond the default branch (SEC-3 residual).** Accept the non-default-branch write, or add a runner refspec allowlist (PR head branch only).
 4. **Sandbox for raw kinds (SEC-2 ruling 4).** Force `sandbox` on for REVIEW, FIX, THREAD and RUN in `job-profile.ts`, or accept the global nax config.

@@ -190,6 +190,7 @@ jobs:
             BUILD_APP=api
             BUILD_APP_PACKAGE=@nathapp/koda-api
             TURBO_TEAM=${{ secrets.TURBO_TEAM }}
+          secrets: |
             TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -231,6 +232,7 @@ jobs:
             BUILD_APP=web
             BUILD_APP_PACKAGE=@nathapp/koda-web
             TURBO_TEAM=${{ secrets.TURBO_TEAM }}
+          secrets: |
             TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

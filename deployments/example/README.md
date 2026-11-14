@@ -24,7 +24,7 @@ Benefits:
 
 ```bash
 KODA_VERSION=v0.4.0
-POSTGRES_PASSWORD=replace-this   # required: compose fails closed without it
+POSTGRES_PASSWORD=replace-this   # required: only A-Z, a-z, 0-9, ., _, ~, -; deploy.sh refuses other characters
 JWT_SECRET=replace-this          # required: openssl rand -hex 32
 JWT_REFRESH_SECRET=replace-this  # required, must differ from JWT_SECRET
 API_KEY_SECRET=replace-this      # required
