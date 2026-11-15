@@ -16,6 +16,12 @@ const E2E_DATABASE_URL =
 process.env['E2E_API_URL'] = API_URL;
 process.env['E2E_WEB_URL'] = WEB_URL;
 
+// koda #466: the e2e API's seed writes the auth fixtures the password journeys need (a reset token,
+// an expired reset token and a refresh token that was already used) to this file, and the browser
+// journeys read it back. Under the OS temp directory, like the fleet artifacts.
+const AUTH_FIXTURE_FILE = path.join(os.tmpdir(), `koda-e2e-auth-fixture-${API_PORT}.json`);
+process.env['E2E_AUTH_FIXTURE_FILE'] = AUTH_FIXTURE_FILE;
+
 // E2E_WEB_MODE=build (CI): serve the production build instead of `nuxt dev`.
 // Build first: `bunx turbo run build --filter=@nathapp/koda-web`.
 const WEB_BUILD_MODE = process.env['E2E_WEB_MODE'] === 'build';
@@ -60,6 +66,8 @@ export default defineConfig({
       env: {
         DATABASE_URL: E2E_DATABASE_URL,
         API_PORT: String(API_PORT),
+        // The seed writes the auth fixtures the password journeys read (koda #466).
+        E2E_AUTH_FIXTURE_FILE: AUTH_FIXTURE_FILE,
         VCS_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         // Deterministic offline embeddings so the KB specs run without Ollama.
         EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'] ?? 'fake',

@@ -10,11 +10,66 @@
  * mirrors into `User.role`, and the `project-admin` binding in the fleet project.
  */
 import * as bcrypt from 'bcrypt';
+import { JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '../src/generated/prisma/client';
 import { grantBaseline, grantRole } from '../src/permissions/test-helpers/permission-fixtures';
+import { PASSWORD_RESET_TTL_MS } from '../src/auth/password-reset/password-reset.constants';
+import { generatePasswordResetToken } from '../src/auth/password-reset/password-reset-token';
+import { refreshClientOf } from '../src/auth/sessions/refresh-client';
 
 const ADMIN_EMAIL = 'admin@koda-e2e.test';
 const ADMIN_PASSWORD = 'E2ePassword1!';
+
+/**
+ * The accounts the password journeys use (koda #466).
+ *
+ * Never the admin: every e2e spec logs in as `E2E_ADMIN`, and the e2e database is reset only at the
+ * start of a run, so a journey that changed the admin's password would break every spec that runs
+ * after it.
+ *
+ * One account per journey, because a confirmation spends its token and discards the account's other
+ * outstanding links — with one shared account the journeys would spoil each other, and a spec that
+ * runs alone (a CI retry, a `--grep`) would see a different answer than the suite does.
+ */
+const JOURNEY_PASSWORD = 'E2ePassword1!';
+const JOURNEY_ACCOUNTS = {
+  valid: 'password-valid@koda-e2e.test',
+  replayable: 'password-replay@koda-e2e.test',
+  expired: 'password-expired@koda-e2e.test',
+  weak: 'password-weak@koda-e2e.test',
+  session: 'password-session@koda-e2e.test',
+} as const;
+
+/** The User-Agent the seeded refresh token is bound to; the browser journey presents the same one. */
+const JOURNEY_USER_AGENT = 'KodaE2E-UA/1.0';
+
+/**
+ * What the web e2e needs from the seed. The runner writes it to `$E2E_AUTH_FIXTURE_FILE`.
+ *
+ * The things a browser journey cannot build for itself:
+ *
+ * - a reset token: `POST /auth/password-reset` writes none while email is unconfigured (the e2e API
+ *   has no SMTP), and only the sha256 of a token is stored, so the raw value exists only in a link;
+ * - an expired reset token, for the dead-link path;
+ * - a refresh token that was already used, bound to a known User-Agent: presenting it again is the
+ *   lost-response recovery — the only path on which the API compares the User-Agent.
+ */
+export interface E2eAuthFixture {
+  /** One account per reset token, so a journey that spends a token cannot spoil another's. */
+  accounts: Record<'valid' | 'replayable' | 'expired' | 'weak', E2eJourneyAccount>;
+  /** The User-Agent the seeded refresh token is bound to. */
+  userAgent: string;
+  /** A refresh token that was already used once. */
+  refreshToken: string;
+}
+
+/** One journey account: the credentials it signs in with and the reset token it presents. */
+export interface E2eJourneyAccount {
+  email: string;
+  password: string;
+  resetToken: string;
+}
 
 /**
  * Wipes every test table so hardcoded keys/slugs do not conflict across runs.
@@ -43,11 +98,12 @@ async function wipe(db: PrismaClient): Promise<void> {
 }
 
 /**
- * Seeds the e2e database: an admin user, the fleet project and its repo.
+ * Seeds the e2e database: an admin user, the fleet project and its repo, and the auth fixtures the
+ * password journeys need.
  *
  * Idempotent: the wipe runs first, so calling it twice leaves the same rows as calling it once.
  */
-export async function seedE2e(db: PrismaClient): Promise<void> {
+export async function seedE2e(db: PrismaClient): Promise<E2eAuthFixture> {
   await wipe(db);
 
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
@@ -78,4 +134,84 @@ export async function seedE2e(db: PrismaClient): Promise<void> {
       githubInstallationId: BigInt(1), createdById: admin.id,
     },
   });
+
+  return await seedAuthJourney(db);
+}
+
+/**
+ * The auth fixtures the password journeys need (koda #466).
+ *
+ * The accounts carry no role binding: the journeys are about the account itself, and every route
+ * they touch is either public or `own`.
+ */
+async function seedAuthJourney(db: PrismaClient): Promise<E2eAuthFixture> {
+  const now = new Date();
+  // One hash for every journey account: they share the password, and bcrypt at cost 12 is the
+  // seed's slowest step.
+  const passwordHash = await bcrypt.hash(JOURNEY_PASSWORD, 12);
+
+  const accounts = {} as Record<'valid' | 'replayable' | 'expired' | 'weak', E2eJourneyAccount>;
+  for (const key of ['valid', 'replayable', 'expired', 'weak'] as const) {
+    const user = await db.user.create({
+      data: { email: JOURNEY_ACCOUNTS[key], name: 'Password Journey', passwordHash },
+    });
+    // Only the sha256 of a token is stored, so the raw values reach the browser journey through the
+    // fixture file.
+    const token = generatePasswordResetToken();
+    await db.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: token.hash,
+        expiresAt: key === 'expired'
+          ? new Date(now.getTime() - 60_000)
+          : new Date(now.getTime() + PASSWORD_RESET_TTL_MS),
+      },
+    });
+    accounts[key] = { email: JOURNEY_ACCOUNTS[key], password: JOURNEY_PASSWORD, resetToken: token.raw };
+  }
+
+  // A refresh token that was already used, bound to a known User-Agent. Presenting it again is the
+  // lost-response recovery — the only path on which the API compares the User-Agent, because the
+  // reuse grace short-circuits every presentation inside its window. Its `usedAt` is backdated past
+  // that grace, so the recovery fires at once instead of after a wait.
+  const sessionUser = await db.user.create({
+    data: { email: JOURNEY_ACCOUNTS.session, name: 'Password Journey Session', passwordHash },
+  });
+  const sessionId = randomUUID();
+  const tokenId = randomUUID();
+  await db.authSession.create({
+    data: { id: sessionId, userId: sessionUser.id, expiresAt: new Date(now.getTime() + 60 * 60_000) },
+  });
+  await db.refreshToken.create({
+    data: {
+      id: tokenId,
+      sessionId,
+      usedAt: new Date(now.getTime() - 2 * 60_000),
+      usedUaHash: refreshClientOf(JOURNEY_USER_AGENT, undefined).uaHash,
+    },
+  });
+
+  return {
+    accounts,
+    userAgent: JOURNEY_USER_AGENT,
+    refreshToken: signRefreshToken(sessionUser.id, sessionId, tokenId),
+  };
+}
+
+/**
+ * A refresh JWT for the seeded session, signed the way `AuthService.generateRefreshToken` signs one.
+ *
+ * The library's own provider does the signing, so the `typ: "refresh"` claim and the expiry come
+ * from the same place the API's tokens come from — nothing about the claim shape is restated here.
+ */
+function signRefreshToken(userId: string, sessionId: string, tokenId: string): string {
+  const secret = process.env['JWT_REFRESH_SECRET'];
+  if (!secret) {
+    throw new Error('JWT_REFRESH_SECRET is required to seed the e2e refresh token');
+  }
+  const provider = new JwtRefreshStrategyProvider({
+    secret,
+    signOption: { expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d' },
+  });
+  return provider.sign({ sub: userId, tokenVersion: 0, sid: sessionId, jti: tokenId });
 }
