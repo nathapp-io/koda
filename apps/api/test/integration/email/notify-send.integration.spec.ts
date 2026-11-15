@@ -42,8 +42,17 @@ describeIntegration('nestjs-notify send on PG (S4b A5)', () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
-  it('seeded 6 templates for tenant default', async () => {
-    expect(await prisma.notificationTemplate.count({ where: { tenantId: 'default', channel: 'email' } })).toBe(6);
+  it('seeds every email template in both locales for tenant default', async () => {
+    const templates = await prisma.notificationTemplate.findMany({
+      where: { tenantId: 'default', channel: 'email' },
+      select: { code: true, locale: true },
+    });
+    expect(templates).toHaveLength(8);
+    expect(templates).toEqual(expect.arrayContaining(
+      ['NOTIFICATION', 'INVITE', 'MEMBER_ADDED', 'PASSWORD_RESET'].flatMap((code) =>
+        ['en', 'zh'].map((locale) => ({ code, locale })),
+      ),
+    ));
   });
 
   it('renders from the DB template and logs SENT', async () => {
