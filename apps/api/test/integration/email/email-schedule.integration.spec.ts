@@ -25,7 +25,7 @@ const T0 = new Date('2026-10-10T10:00:00Z');
 const min = (n: number): Date => new Date(T0.getTime() + n * 60_000);
 
 interface SeedRow {
-  kind: 'NOTIFICATION' | 'INVITE' | 'MEMBER_ADDED';
+  kind: 'NOTIFICATION' | 'INVITE' | 'MEMBER_ADDED' | 'PASSWORD_RESET';
   status: 'PENDING' | 'SENDING' | 'SENT' | 'SKIPPED' | 'FAILED';
   notificationId: string | null;
   inviteId: string | null;
@@ -177,6 +177,20 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
     await schedule();
     await schedule();
     expect(await scheduledCount(notification.id)).toBe(1);
+  });
+
+  it('password reset AC-7: starts a sending row with the user and lock', async () => {
+    const userId = randomUUID();
+    const row = await service.startPasswordResetSend({ userId, toEmail: 'reset@x.io', locale: 'en', now: T0 });
+    expect(await prisma.emailSchedule.findUnique({ where: { id: row.id } })).toEqual(expect.objectContaining({
+      kind: 'PASSWORD_RESET', status: 'SENDING', userId, inviteId: null, lockedUntil: min(2),
+    }));
+  });
+
+  it('password reset AC-9: never claims a due pending reset', async () => {
+    const id = await seed({ kind: 'PASSWORD_RESET', status: 'PENDING', dueAt: min(-1) });
+    expect((await service.claimDue(T0, 20)).map(row => row.id)).not.toContain(id);
+    expect(await statusOf(id)).toBe('PENDING');
   });
 
   it('US-001 AC7: retryAt stores a lastError of exactly 500 characters and returns the row to PENDING', async () => {

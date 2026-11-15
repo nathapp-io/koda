@@ -14,6 +14,10 @@ export const EN_TEMPLATES: Record<EmailTemplateCode, EmailTemplateText> = {
     html: '<p>{{inviterName}} invited you to join <strong>{{projectName}}</strong> on koda as {{role}}.</p>'
       + '<p><a href="{{url}}">Accept the invite</a></p><p>This link works once and expires on {{expiresAt}}.</p>',
   },
+  PASSWORD_RESET: {
+    subject: '[koda] Reset your password',
+    html: '<p>Someone asked to reset the password of your koda account.</p><p><a href="{{url}}">Choose a new password</a></p><p>This link works once and expires on {{expiresAt}}. If you did not ask for it, ignore this email.</p>',
+  },
   MEMBER_ADDED: {
     subject: '[koda] You were added to {{projectName}}',
     html: '<p>You were added to <strong>{{projectName}}</strong> on koda as {{role}}.</p>'

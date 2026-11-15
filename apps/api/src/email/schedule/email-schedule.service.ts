@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EmailScheduleRepository } from './email-schedule.repository';
 import {
-  EmailScheduleRow, InviteSend, MemberAddedEmail, NewNotificationEmail, SkipReason,
+  EmailScheduleRow, InviteSend, MemberAddedEmail, NewNotificationEmail, PasswordResetSend, SkipReason,
 } from './email-schedule.types';
 
 /**
@@ -23,6 +23,10 @@ export class EmailScheduleService {
 
   async startInviteSend(input: InviteSend): Promise<EmailScheduleRow> {
     return this.repo.startInviteSend(input);
+  }
+
+  async startPasswordResetSend(input: PasswordResetSend): Promise<EmailScheduleRow> {
+    return this.repo.startPasswordResetSend(input);
   }
 
   /** Exclusive claim of due NOTIFICATION/MEMBER_ADDED rows (AC1-AC4). */

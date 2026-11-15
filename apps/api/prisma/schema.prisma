@@ -40,6 +40,19 @@ model User {
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
   authSessions                    AuthSession[]
+  passwordResetTokens             PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model Agent {
@@ -376,7 +389,7 @@ model Notification {
 /// A missing email master preference means on; a delivered notification has exactly one row here.
 model EmailSchedule {
   id             String    @id @default(cuid())
-  kind           String // NOTIFICATION | INVITE | MEMBER_ADDED
+  kind           String // NOTIFICATION | INVITE | MEMBER_ADDED | PASSWORD_RESET
   notificationId String?   @unique
   inviteId       String?
   userId         String?

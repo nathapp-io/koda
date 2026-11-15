@@ -47,13 +47,31 @@ describe('EmailScheduleRepository (S4b US-001 invite recovery)', () => {
     expect(row).toEqual(expect.objectContaining({ id: 'row-1', kind: 'INVITE', attempts: 1 }));
   });
 
-  it('US-001: closeAbandonedInvites fails an invite whose lock expired and records why', async () => {
+  it('AC-7: starts reset send with the user and two-minute lock', async () => {
+    const { repo, emailSchedule } = setup();
+    await repo.startPasswordResetSend({ userId: 'user-1', toEmail: 'a@x.io', locale: 'en', now });
+    expect(emailSchedule.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      kind: 'PASSWORD_RESET', userId: 'user-1', status: 'SENDING', attempts: 1,
+      dueAt: now, lockedUntil: new Date(now.getTime() + 120_000),
+    }) });
+  });
+
+  it('AC-8: closes reset rows only after their lock expires', async () => {
+    const { repo, emailSchedule } = setup();
+    await repo.closeAbandonedInvites(now);
+    expect(emailSchedule.updateMany).toHaveBeenCalledWith({
+      where: { kind: { in: ['INVITE', 'PASSWORD_RESET'] }, status: 'SENDING', lockedUntil: { lt: now } },
+      data: { status: 'FAILED', lastError: 'abandoned', lockedUntil: null },
+    });
+  });
+
+  it('AC-13: closeAbandonedInvites fails an invite whose lock expired and records why', async () => {
     const { repo, emailSchedule } = setup();
     const count = await repo.closeAbandonedInvites(now);
 
     expect(count).toBe(1);
     expect(emailSchedule.updateMany).toHaveBeenCalledWith({
-      where: { kind: 'INVITE', status: 'SENDING', lockedUntil: { lt: now } },
+      where: { kind: { in: ['INVITE', 'PASSWORD_RESET'] }, status: 'SENDING', lockedUntil: { lt: now } },
       data: { status: 'FAILED', lastError: 'abandoned', lockedUntil: null },
     });
   });
