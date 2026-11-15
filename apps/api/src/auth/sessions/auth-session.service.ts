@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { bookkeeping } from '../../action-context/audit-coverage';
+import type { RefreshClient } from './refresh-client';
 import { PrismaAuthSessionRepository } from './prisma-auth-session.repository';
 import type { SessionRevokeReason } from './auth-session.domain';
 
@@ -38,8 +39,11 @@ export type { SessionRevokeReason };
 
 export type RotateOutcome =
   | { kind: 'rotated' }
-  /** Rotation step 5: a lost response was recovered. The caller answers the pair and audits the recovery. */
-  | { kind: 'recovered' }
+  /**
+   * Rotation step 5: a lost response was recovered. The caller answers the pair and audits the recovery,
+   * naming the IP the client presented (`null` when Fastify resolved none).
+   */
+  | { kind: 'recovered'; ip: string | null }
   | { kind: 'reused'; userId: string }
   | { kind: 'invalid' };
 
@@ -73,13 +77,14 @@ export class AuthSessionService {
    * 3. first use: insert the next token and drop the tokens used before the grace window;
    * 4. second use inside the grace window (a parallel refresh of the same browser): insert the next
    *    token and keep the session — both responses then hold a refresh token that works;
-   * 5. used before the grace window but within LOST_RESPONSE_WINDOW_MS of its first use, and no token of
-   *    the session was used after it: the response that carried its successor never reached the client (a
-   *    navigation or a closed tab aborted the refresh after the API committed it), so the client presents
-   *    the newest token it holds again. Drop the undelivered successors (unused tokens older than the grace
-   *    window; a sibling a parallel retry just issued stays) and insert the next. `usedAt` is not moved, so
-   *    replays cannot slide the window. A thief replaying it instead is caught one step later (the real
-   *    holder's successor is gone, so presenting it hits step 6) or once the window has passed;
+   * 5. used before the grace window but within LOST_RESPONSE_WINDOW_MS of its first use, no token of the
+   *    session was used after it, and the presented client's User-Agent hash is the one recorded by that
+   *    first use: the response that carried its successor never reached the client (a navigation or a
+   *    closed tab aborted the refresh after the API committed it), so the client presents the newest token
+   *    it holds again. Drop the undelivered successors (unused tokens older than the grace window; a
+   *    sibling a parallel retry just issued stays) and insert the next. `usedAt` is not moved, so replays
+   *    cannot slide the window. A different User-Agent — a thief replaying the stolen token, or a row
+   *    written before the binding existed (`usedUaHash` null) — falls through to step 6;
    * 6. otherwise (a later token was used, or no row at all): revoke the session as `reuse`.
    */
   async rotate(input: {
@@ -88,13 +93,17 @@ export class AuthSessionService {
     nextTokenId: string;
     nextExpiresAt: Date;
     now: Date;
+    /** The presenting client (auth-passwords US-005): bound at first use, matched on a recovery. */
+    client: RefreshClient;
   }): Promise<RotateOutcome> {
     return await bookkeeping('auth.session-rotate', () =>
       this.txManager.run(async (): Promise<RotateOutcome> => {
         const live = await this.sessions.slideExpiry(input.sessionId, input.nextExpiresAt, input.now);
         if (!live) return { kind: 'invalid' };
 
-        const marked = await this.sessions.markUsed(input.sessionId, input.presentedTokenId, input.now);
+        const marked = await this.sessions.markUsed(
+          input.sessionId, input.presentedTokenId, input.now, input.client,
+        );
         if (marked === 1) {
           await this.sessions.createToken({
             id: input.nextTokenId,
@@ -123,9 +132,11 @@ export class AuthSessionService {
           return { kind: 'rotated' };
         }
 
-        // A lost response: nothing after this token was ever used (step 5).
+        // A lost response: nothing after this token was ever used, and the same client presents it again
+        // (step 5). A null `usedUaHash` is a row written before the binding existed, and never matches.
         if (presented !== null && presented.usedAt !== null
           && presented.usedAt.getTime() >= input.now.getTime() - LOST_RESPONSE_WINDOW_MS
+          && presented.usedUaHash !== null && presented.usedUaHash === input.client.uaHash
           && !(await this.sessions.hasTokenUsedAfter(input.sessionId, presented.usedAt, input.presentedTokenId))) {
           await this.sessions.deleteUnusedTokens(
             input.sessionId,
@@ -139,7 +150,7 @@ export class AuthSessionService {
           // Observable on purpose: a thief replaying a stolen newest token takes this path too. The caller
           // also records a `session.refresh` audit entry for it.
           this.logger.warn(`refresh session ${input.sessionId}: lost-response recovery re-rotated a used token`);
-          return { kind: 'recovered' };
+          return { kind: 'recovered', ip: input.client.ip };
         }
 
         // The revocation returns normally, so it commits; the caller records `session.refresh` itself.

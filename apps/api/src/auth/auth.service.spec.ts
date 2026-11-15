@@ -107,6 +107,9 @@ describe('AuthService', () => {
     discardUnusedFor: vi.fn(),
   };
 
+  /** auth-passwords US-005: the client facts every refresh presents. */
+  const REFRESH_CLIENT = { uaHash: 'ua-hash-1', ip: '198.51.100.9' };
+
   beforeEach(async () => {
     mockAuditRecorder.record.mockReset();
     mockAuditRecorder.audited.mockReset().mockImplementation(async <T>(fn: () => Promise<T>) => fn());
@@ -577,7 +580,7 @@ describe('AuthService', () => {
         revoked: false,
         authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
-      });
+      }, REFRESH_CLIENT);
 
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
@@ -590,7 +593,7 @@ describe('AuthService', () => {
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: true, authorities: [],
       } as unknown as IPrincipal;
-      await expect(service.refresh(principal)).rejects.toThrow(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toThrow(AuthException);
     });
 
     it('still refreshes for a non-revoked principal', async () => {
@@ -600,7 +603,7 @@ describe('AuthService', () => {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
-      const out = await service.refresh(principal);
+      const out = await service.refresh(principal, REFRESH_CLIENT);
       expect(out.accessToken).toBeDefined();
       expect(out.refreshToken).toBeDefined();
     });
@@ -621,14 +624,18 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      const out = await service.refresh(principal);
+      const out = await service.refresh(principal, REFRESH_CLIENT);
 
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
       expect(mockAuthSessions.rotate).toHaveBeenCalledOnce();
       const input = mockAuthSessions.rotate.mock.calls[0][0] as {
         sessionId: string; presentedTokenId: string; nextTokenId: string; nextExpiresAt: Date; now: Date;
+        client: { uaHash: string; ip: string | null };
       };
       expect(input).toMatchObject({ sessionId: 's1', presentedTokenId: 't1' });
+      // auth-passwords US-005: the client the request presented reaches the rotation, which binds the
+      // first use to it.
+      expect(input.client).toEqual(REFRESH_CLIENT);
       expect(typeof input.nextTokenId).toBe('string');
       expect(input.nextExpiresAt).toEqual(new Date(2_000_000_000 * 1000));
       expect(input.now).toBeInstanceOf(Date);
@@ -647,7 +654,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       // An invalid session is not evidence of theft: nothing is recorded.
       expect(mockAuditRecorder.record).not.toHaveBeenCalled();
       expect(mockAuditRecorder.audited).not.toHaveBeenCalled();
@@ -661,7 +668,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       // The reuse revoked the session; the cached `{ active: true }` must not outlive it.
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
       // The revocation committed inside `rotate`, so the entry is recorded after it, in its own transaction.
@@ -676,13 +683,13 @@ describe('AuthService', () => {
 
     it('answers the new pair and records a session.refresh entry when the rotation recovered a lost response', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
-      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: '198.51.100.9' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      const result = await service.refresh(principal);
+      const result = await service.refresh(principal, REFRESH_CLIENT);
 
       expect(result.accessToken).toEqual(expect.any(String));
       expect(result.refreshToken).toEqual(expect.any(String));
@@ -692,22 +699,41 @@ describe('AuthService', () => {
         resourceType: 'user',
         resourceId: 'user-1',
         projectId: null,
-        summary: 'refresh token lost-response recovery; session kept',
+        summary: 'refresh token lost-response recovery; session kept; ip 198.51.100.9',
       });
       expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: a recovery with no presenting IP records the summary ending in `; ip unknown`', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: null });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await service.refresh(principal, { uaHash: 'ua-hash-1', ip: null });
+
+      expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: 'user-1',
+        projectId: null,
+        summary: 'refresh token lost-response recovery; session kept; ip unknown',
+      });
     });
 
     it('a rejecting recovery audit still answers the new pair and logs the failure', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
-      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: '198.51.100.9' });
       mockAuditRecorder.record.mockRejectedValue(new Error('audit storage unavailable'));
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).resolves.toMatchObject({ accessToken: expect.any(String) });
+      await expect(service.refresh(principal, REFRESH_CLIENT)).resolves.toMatchObject({ accessToken: expect.any(String) });
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
       warn.mockRestore();
     });
@@ -725,7 +751,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuditRecorder.record).toHaveBeenCalledOnce();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
       warn.mockRestore();
@@ -738,7 +764,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
     });
@@ -751,7 +777,7 @@ describe('AuthService', () => {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: {},
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
 
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
@@ -775,7 +801,7 @@ describe('AuthService', () => {
       // missing claim.
       await expect(service.refresh({
         id: mockUser.id, revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
-      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      } as unknown as IPrincipal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
     });
 
@@ -784,7 +810,7 @@ describe('AuthService', () => {
 
       await expect(service.refresh({
         id: 'deleted-user', revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
-      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      } as unknown as IPrincipal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
     });
   });

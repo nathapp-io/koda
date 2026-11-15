@@ -180,7 +180,7 @@ describe('session activity cache fence', () => {
       id: 'user-1',
       revoked: false,
       extra: { sessionId: 's-reuse', tokenId: 't-presented' },
-    } as never).catch((error: unknown) => error);
+    } as never, { uaHash: 'ua-hash-1', ip: '198.51.100.9' }).catch((error: unknown) => error);
     await revoked.promise;
     gate.resolve();
     await Promise.all([fill, refresh]);
@@ -197,7 +197,7 @@ describe('session activity cache fence', () => {
         id: 'user-1',
         revoked: false,
         extra: { sessionId: 's-reuse', tokenId: 't-presented' },
-      } as never),
+      } as never, { uaHash: 'ua-hash-1', ip: '198.51.100.9' }),
     ).rejects.toBeInstanceOf(AuthException);
   });
 });

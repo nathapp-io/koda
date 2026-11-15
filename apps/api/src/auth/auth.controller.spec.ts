@@ -5,6 +5,7 @@ import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA } from '../permissions/requires.decorator';
+import { refreshClientOf, type RefreshRequestLike } from './sessions/refresh-client';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -194,6 +195,10 @@ const mockUser = {
   });
 
   describe('POST /auth/refresh', () => {
+    /** The way Fastify hands the raw request to a handler (auth-passwords US-005). */
+    const request = (headers: Record<string, string | string[] | undefined>, ip?: string): RefreshRequestLike =>
+      ({ headers, ip });
+
     it('should return new tokens with valid refresh token', async () => {
       // refresh endpoint receives IPrincipal (id field), not JwtPayload (sub field)
       const user = {
@@ -207,11 +212,30 @@ const mockUser = {
 
       mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
 
-      const result = await controller.refresh(user);
+      const result = await controller.refresh(user, request({ 'user-agent': 'UA-1' }, '198.51.100.9'));
 
       expect(result).toBeInstanceOf(JsonResponse);
       expect(result.data).toEqual(mockTokenResponse);
-      expect(authService.refresh).toHaveBeenCalledWith(user);
+      // AC-12: the handler derives the client from the request and hands it to the service.
+      expect(authService.refresh).toHaveBeenCalledWith(user, refreshClientOf('UA-1', '198.51.100.9'));
+    });
+
+    it('AC-12: uses the first value of an array user-agent header', async () => {
+      const user = { id: mockUser.id, revoked: false, authorities: [], extra: {} } as never;
+      mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
+
+      await controller.refresh(user, request({ 'user-agent': ['UA-1', 'UA-2'] }, '203.0.113.7'));
+
+      expect(authService.refresh).toHaveBeenCalledWith(user, refreshClientOf('UA-1', '203.0.113.7'));
+    });
+
+    it('hashes the empty string when the request carries no user-agent header', async () => {
+      const user = { id: mockUser.id, revoked: false, authorities: [], extra: {} } as never;
+      mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
+
+      await controller.refresh(user, request({}));
+
+      expect(authService.refresh).toHaveBeenCalledWith(user, refreshClientOf(undefined, undefined));
     });
 
     it('should return 401 when token is missing', async () => {
@@ -226,7 +250,7 @@ const mockUser = {
 
       mockAuthService.refresh.mockRejectedValue(new AuthException());
 
-      await expect(controller.refresh(user)).rejects.toThrow(
+      await expect(controller.refresh(user, request({ 'user-agent': 'UA-1' }))).rejects.toThrow(
         AuthException,
       );
     });

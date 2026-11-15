@@ -58,8 +58,11 @@ function build() {
 }
 
 function token(overrides: Partial<RefreshTokenDomain> = {}): RefreshTokenDomain {
-  return { id: 't1', sessionId: 's1', createdAt: at(0), usedAt: null, ...overrides };
+  return { id: 't1', sessionId: 's1', createdAt: at(0), usedAt: null, usedUaHash: null, ...overrides };
 }
+
+/** The client every case presents unless it overrides one; `uaHash` is what a recovery must match. */
+const CLIENT = { uaHash: 'ua-hash-1', ip: '198.51.100.9' };
 
 const rotateInput = (overrides: Partial<Parameters<AuthSessionService['rotate']>[0]> = {}) => ({
   sessionId: 's1',
@@ -67,6 +70,7 @@ const rotateInput = (overrides: Partial<Parameters<AuthSessionService['rotate']>
   nextTokenId: 't2',
   nextExpiresAt: at(7 * 24 * 60 * 60 * 1000),
   now: at(1_000),
+  client: CLIENT,
   ...overrides,
 });
 
@@ -97,7 +101,8 @@ describe('AuthSessionService', () => {
 
     expect(txManager.run).toHaveBeenCalledTimes(1);
     expect(repository.slideExpiry).toHaveBeenCalledWith('s1', input.nextExpiresAt, input.now);
-    expect(repository.markUsed).toHaveBeenCalledWith('s1', 't1', input.now);
+    // auth-passwords US-005: the first use records the client that presented the token.
+    expect(repository.markUsed).toHaveBeenCalledWith('s1', 't1', input.now, input.client);
     expect(repository.createToken).toHaveBeenCalledWith({ id: 't2', sessionId: 's1', createdAt: input.now });
     expect(repository.deleteUsedTokensBefore).toHaveBeenCalledWith(
       's1',
@@ -138,7 +143,8 @@ describe('AuthSessionService', () => {
     const input = rotateInput();
     const usedAt = new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS - 1_000);
     repository.markUsed.mockResolvedValue(0);
-    repository.findToken.mockResolvedValue(token({ usedAt }));
+    // The same client presents it again, so the decision is the later use, not the binding (US-005).
+    repository.findToken.mockResolvedValue(token({ usedAt, usedUaHash: CLIENT.uaHash }));
     repository.hasTokenUsedAfter.mockResolvedValue(true);
 
     await expect(service.rotate(input)).resolves.toEqual({ kind: 'reused', userId: 'owner-id' });
@@ -157,11 +163,14 @@ describe('AuthSessionService', () => {
     const input = rotateInput();
     repository.markUsed.mockResolvedValue(0);
     repository.findToken.mockResolvedValue(
-      token({ usedAt: new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS - 1_000) }),
+      token({
+        usedAt: new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS - 1_000),
+        usedUaHash: input.client.uaHash,
+      }),
     );
     repository.hasTokenUsedAfter.mockResolvedValue(false);
 
-    await expect(service.rotate(input)).resolves.toEqual({ kind: 'recovered' });
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'recovered', ip: input.client.ip });
 
     // Only successors older than the grace window go: a sibling a parallel retry just issued stays valid.
     expect(repository.deleteUnusedTokens).toHaveBeenCalledWith(
@@ -176,7 +185,7 @@ describe('AuthSessionService', () => {
     expect(deleted).toBeLessThan(created);
   });
 
-  it('recovers a matching User-Agent with the presenting IP, even after an IP change', async () => {
+  it('AC-7: recovers a matching User-Agent with the presenting IP, even after an IP change', async () => {
     const { service, repository } = build();
     const client = { uaHash: 'matching-hash', ip: '198.51.100.9' };
     const input = { ...rotateInput(), client };
@@ -192,7 +201,7 @@ describe('AuthSessionService', () => {
     expect(repository.revokeSession).not.toHaveBeenCalled();
   });
 
-  it('revokes a lost-response retry with a different User-Agent hash', async () => {
+  it('AC-11: revokes a lost-response retry with a different User-Agent hash', async () => {
     const { service, repository } = build();
     const input = { ...rotateInput(), client: { uaHash: 'different-hash', ip: null } };
     repository.markUsed.mockResolvedValue(0);
@@ -205,6 +214,37 @@ describe('AuthSessionService', () => {
     await expect(service.rotate(input)).resolves.toEqual({ kind: 'reused', userId: 'owner-id' });
     expect(repository.revokeSession).toHaveBeenCalledWith('s1', 'reuse', input.now);
     expect(repository.createToken).not.toHaveBeenCalled();
+  });
+
+  it('AC-11 (cont.): a token first used before the migration carries no binding, so it is never recovered', async () => {
+    const { service, repository } = build();
+    const input = rotateInput();
+    repository.markUsed.mockResolvedValue(0);
+    repository.findToken.mockResolvedValue({
+      ...token({ usedAt: new Date(input.now.getTime() - 31_000) }),
+      usedUaHash: null,
+    });
+    repository.hasTokenUsedAfter.mockResolvedValue(false);
+
+    // A null hash never matches: the token can be rotated on first use or refused, never recovered.
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'reused', userId: 'owner-id' });
+    expect(repository.revokeSession).toHaveBeenCalledWith('s1', 'reuse', input.now);
+    expect(repository.deleteUnusedTokens).not.toHaveBeenCalled();
+    expect(repository.createToken).not.toHaveBeenCalled();
+  });
+
+  it('AC-13 (unit): the grace window is not bound — a different User-Agent inside it still rotates', async () => {
+    const { service, repository } = build();
+    const input = rotateInput({ client: { uaHash: 'another-browser', ip: null } });
+    repository.markUsed.mockResolvedValue(0);
+    repository.findToken.mockResolvedValue(
+      token({ usedAt: new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS), usedUaHash: CLIENT.uaHash }),
+    );
+
+    // Step 4 answers a parallel refresh of the same browser: only the recovery (step 5) is bound.
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'rotated' });
+    expect(repository.revokeSession).not.toHaveBeenCalled();
+    expect(repository.createToken).toHaveBeenCalledWith({ id: 't2', sessionId: 's1', createdAt: input.now });
   });
 
   it('revokes, without re-rotating, a stale token used longer than the lost-response window ago', async () => {

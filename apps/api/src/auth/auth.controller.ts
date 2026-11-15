@@ -5,6 +5,7 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -22,6 +23,7 @@ import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { AUTH_LOGIN_LIMIT, AUTH_LOGIN_TTL_MS } from './auth-throttle';
 import { KodaPrincipal, isUserPrincipal } from './principal/koda-principal.types';
+import { refreshClientOf, type RefreshRequestLike } from './sessions/refresh-client';
 
 /**
  * Permissions P1 (US-010): every auth route states its catalog key. The four session-starting routes
@@ -78,7 +80,14 @@ export class AuthController {
     return JsonResponse.Ok(data);
   }
 
-  /** @design @Public() opts out of the global CombinedAuthGuard (access-token path); JwtRefreshGuard validates the refresh token independently. */
+  /**
+   * @design @Public() opts out of the global CombinedAuthGuard (access-token path); JwtRefreshGuard
+   * validates the refresh token independently.
+   *
+   * auth-passwords US-005: the handler is the one auth route that reads the raw request, because the
+   * client's User-Agent and IP are what a lost-response recovery is matched against. The User-Agent is a
+   * header, so an array value uses its first entry.
+   */
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
@@ -88,8 +97,10 @@ export class AuthController {
   @Public()
   @UseGuards(JwtRefreshGuard, RequiresGuard)
   @Requires('session.refresh')
-  async refresh(@Principal() user: IPrincipal) {
-    const data = await this.authService.refresh(user);
+  async refresh(@Principal() user: IPrincipal, @Req() req: RefreshRequestLike) {
+    const userAgent = req.headers['user-agent'];
+    const client = refreshClientOf(Array.isArray(userAgent) ? userAgent[0] : userAgent, req.ip);
+    const data = await this.authService.refresh(user, client);
     return JsonResponse.Ok(data);
   }
 

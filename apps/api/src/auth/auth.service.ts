@@ -21,6 +21,7 @@ import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { AuthSessionService } from './sessions/auth-session.service';
+import type { RefreshClient } from './sessions/refresh-client';
 import { PasswordResetTokenStore } from './password-reset/password-reset-token.store';
 
 export interface JwtPayload {
@@ -152,7 +153,7 @@ export class AuthService {
     return this.issueSession(user);
   }
 
-  async refresh(principal: IPrincipal) {
+  async refresh(principal: IPrincipal, client: RefreshClient) {
     // H1: the refresh strategy flags tokens issued before a logout
     // (tokenVersion < current). Never mint a new pair from those.
     if (principal.revoked) {
@@ -191,6 +192,8 @@ export class AuthService {
       nextTokenId,
       nextExpiresAt: this.refreshExpiryOf(refreshToken),
       now: new Date(),
+      // auth-passwords US-005: the first use binds the token to this client, and a recovery must match it.
+      client,
     });
 
     // The session ended (a logout, an expiry): mint nothing and record nothing — a dead session is not
@@ -211,8 +214,12 @@ export class AuthService {
 
     if (outcome.kind === 'recovered') {
       // A lost response was recovered (rotation step 5). A thief replaying a stolen newest token inside
-      // the window takes the same path, so the recovery goes on the record next to the reuse revocations.
-      await this.recordRefreshEvent(user.id, 'refresh token lost-response recovery; session kept');
+      // the window takes the same path, so the recovery goes on the record next to the reuse revocations,
+      // naming the IP it came from (US-005: the recovery is the one refresh outcome worth chasing).
+      await this.recordRefreshEvent(
+        user.id,
+        `refresh token lost-response recovery; session kept; ip ${outcome.ip ?? 'unknown'}`,
+      );
     }
 
     return { accessToken, refreshToken, user: UserResponseDto.from(user, role) };
