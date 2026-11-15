@@ -3,7 +3,7 @@
   "feature": "auth-passwords",
   "branchName": "feat/auth-passwords",
   "createdAt": "2026-11-15T05:04:44.168Z",
-  "updatedAt": "2026-11-15T05:37:00.960Z",
+  "updatedAt": "2026-11-15T05:44:04.240Z",
   "userStories": [
     {
       "id": "US-001",
@@ -301,14 +301,17 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One-time credential reset must be race-safe and atomic with tokenVersion, all-session revocation and audit, followed by immediate cache invalidation; strict security override applies."
+        "reasoning": "One-time credential reset must be race-safe and atomic with tokenVersion, all-session revocation and audit, followed by immediate cache invalidation; strict security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/auth/password-reset/password-reset.service.ts",
@@ -348,7 +351,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3a4888b60d1d63fc8b32baf66573d111125ca412"
     },
     {
       "id": "US-005",
