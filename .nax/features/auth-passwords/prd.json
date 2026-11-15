@@ -3,7 +3,7 @@
   "feature": "auth-passwords",
   "branchName": "feat/auth-passwords",
   "createdAt": "2026-11-15T05:04:44.168Z",
-  "updatedAt": "2026-11-15T11:59:31.849Z",
+  "updatedAt": "2026-11-15T12:13:06.352Z",
   "userStories": [
     {
       "id": "US-001",
@@ -384,8 +384,8 @@
         "audit"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -446,7 +446,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "91418234b359262b7981fc28ae766205f339d793"
     },
     {
       "id": "US-006",
