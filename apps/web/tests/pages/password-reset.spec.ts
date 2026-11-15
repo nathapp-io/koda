@@ -21,7 +21,9 @@ async function submit(m: ReturnType<typeof page>, fields: Record<string, string>
     ;(input.props.onInput as (e: unknown) => void)({ target: { value } })
   }
   await nextTick()
-  ;(m.one('form')!.props.onSubmit as (e: unknown) => void)({ preventDefault() {}, stopPropagation() {} })
+  const form = m.one('form')
+  if (!form) throw new Error('Missing form')
+  ;(form.props.onSubmit as (e: unknown) => void)({ preventDefault() {}, stopPropagation() {} })
   for (let i = 0; i < 10; i++) { await new Promise(resolve => setTimeout(resolve, 0)); await nextTick() }
 }
 beforeEach(() => { requestReset.mockReset().mockResolvedValue(); confirmReset.mockReset().mockResolvedValue(); navigateTo.mockReset(); error.mockReset() })
