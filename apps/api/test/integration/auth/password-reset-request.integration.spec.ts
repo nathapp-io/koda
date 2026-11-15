@@ -46,6 +46,24 @@ async function waitFor<T>(probe: () => Promise<T | null | undefined | false>, wh
   }
 }
 
+/**
+ * The negative twin of `waitFor`: watches for a forbidden write across the whole `WAIT_MS` bound and
+ * answers how many times it looked. It throws the moment `probe` reports one, so a write that landed
+ * late cannot hide behind a short sleep — the address is observed for the same window the positive
+ * cases allow the detached task to take.
+ */
+async function observeAbsence(probe: () => Promise<string | null>, what: string): Promise<number> {
+  const deadline = Date.now() + WAIT_MS;
+  let polls = 0;
+  for (;;) {
+    const violation = await probe();
+    polls += 1;
+    if (violation !== null) throw new Error(`${what}: ${violation}`);
+    if (Date.now() >= deadline) return polls;
+    await sleep(POLL_MS);
+  }
+}
+
 const resetPath = '/reset-password/';
 const rawTokenOf = (url: string): string => url.slice(url.lastIndexOf(resetPath) + resetPath.length);
 
@@ -206,19 +224,36 @@ describeDb('password reset request (PG)', () => {
     expect(warn.mock.calls.some(([message]) => String(message).includes(userId))).toBe(true);
   });
 
-  it('AC-6: an unknown address answers 200 {} and writes nothing, with the same wait', async () => {
+  it('AC-6: an unknown address answers 200 {} and writes nothing across the full observation window', async () => {
     const unknown = `nobody-${randomUUID()}@example.test`;
     const response = await requestReset(unknown).expect(200);
     expect(response.body).toEqual({ ret: 0, data: {} });
 
-    // The control request proves the detached machinery ran to completion inside the same wait.
-    await requestReset(userEmail).expect(200);
-    await waitFor(async () => (await scheduleRows(userEmail)).length > 0, 'the control schedule row');
-    await sleep(250);
+    // The specified wait, spent on the unknown address itself: it is watched for the whole bound the
+    // positive cases allow the detached task, so a token or schedule row that landed late — a task that
+    // should never have started — cannot slip past a short sleep.
+    const startedAt = Date.now();
+    const polls = await observeAbsence(async () => {
+      const [users, tokens, schedules] = await Promise.all([
+        db.user.count({ where: { email: unknown } }),
+        db.passwordResetToken.count({ where: { user: { email: unknown } } }),
+        db.emailSchedule.count({ where: { toEmail: unknown, kind: 'PASSWORD_RESET' } }),
+      ]);
+      const mailed = (send.mock.calls as unknown as [{ recipient?: string }][])
+        .filter(([payload]) => payload.recipient === unknown).length;
 
+      if (users > 0) return `${users} user row(s) for the address`;
+      if (tokens > 0) return `${tokens} reset token row(s)`;
+      if (schedules > 0) return `${schedules} schedule row(s)`;
+      if (mailed > 0) return `${mailed} email(s)`;
+      return null;
+    }, 'the unknown address stayed untouched');
+
+    // The window is the spec's bound, not a short sleep: prove it was actually observed for that long.
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(WAIT_MS - 250);
+    expect(polls).toBeGreaterThan(10);
     expect(await scheduleRows(unknown)).toEqual([]);
     expect(await db.user.count({ where: { email: unknown } })).toBe(0);
-    expect(send).toHaveBeenCalledTimes(1);
     expect((sendOne.mock.calls as unknown as [{ toEmail: string }][]).filter(([row]) => row.toEmail === unknown))
       .toEqual([]);
   });
