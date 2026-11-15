@@ -151,11 +151,13 @@ describeIntegration('auth sessions store (PG)', () => {
     expect(await db.refreshToken.findUnique({ where: { id: 't3' } })).toMatchObject({ usedAt: null });
   }, TIMEOUT);
 
-  it('AC-7 and AC-8: a token used 31 seconds ago is reuse, and it revokes the session', async () => {
+  it('AC-7 and AC-8: a token used 31 seconds ago, with a later token used, is reuse and revokes the session', async () => {
     await startSession();
     const now = at(100_000);
     const presentedUsedAt = new Date(now.getTime() - (GRACE + 1_000));
     await rotate({ presentedTokenId: 't1', nextTokenId: 't2', now: presentedUsedAt });
+    // The client moved on (it used t2), so the replay is not a lost response.
+    await rotate({ presentedTokenId: 't2', nextTokenId: 't2b', now: new Date(presentedUsedAt.getTime() + 1_000) });
 
     await expect(rotate({ presentedTokenId: 't1', nextTokenId: 't3', now })).resolves.toEqual({
       kind: 'reused',

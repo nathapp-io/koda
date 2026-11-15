@@ -8,7 +8,7 @@
  */
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { currentBookkeepingReason, openAuditScope } from '../../action-context/audit-coverage';
-import { AuthSessionService, REFRESH_REUSE_GRACE_MS } from './auth-session.service';
+import { AuthSessionService, LOST_RESPONSE_WINDOW_MS, REFRESH_REUSE_GRACE_MS } from './auth-session.service';
 import type { RefreshTokenDomain } from './auth-session.domain';
 import type { PrismaAuthSessionRepository } from './prisma-auth-session.repository';
 
@@ -22,6 +22,8 @@ interface RepositoryStub {
   markUsed: ReturnType<typeof vi.fn>;
   deleteUsedTokensBefore: ReturnType<typeof vi.fn>;
   findToken: ReturnType<typeof vi.fn>;
+  hasTokenUsedAfter: ReturnType<typeof vi.fn>;
+  deleteUnusedTokens: ReturnType<typeof vi.fn>;
   revokeSession: ReturnType<typeof vi.fn>;
   revokeOwnedSession: ReturnType<typeof vi.fn>;
   isSessionActive: ReturnType<typeof vi.fn>;
@@ -35,6 +37,8 @@ function build() {
     markUsed: vi.fn(async () => 1),
     deleteUsedTokensBefore: vi.fn(async () => 0),
     findToken: vi.fn(async () => null),
+    hasTokenUsedAfter: vi.fn(async () => true),
+    deleteUnusedTokens: vi.fn(async () => 0),
     revokeSession: vi.fn(async () => 'owner-id'),
     revokeOwnedSession: vi.fn(async () => true),
     isSessionActive: vi.fn(async () => true),
@@ -120,17 +124,64 @@ describe('AuthSessionService', () => {
     expect(repository.revokeSession).not.toHaveBeenCalled();
   });
 
-  it('revokes and answers reused when the token was used before the grace window', async () => {
+  it('revokes and answers reused when the token was used before the grace window and a later token was used', async () => {
+    const { service, repository } = build();
+    const input = rotateInput();
+    const usedAt = new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS - 1_000);
+    repository.markUsed.mockResolvedValue(0);
+    repository.findToken.mockResolvedValue(token({ usedAt }));
+    repository.hasTokenUsedAfter.mockResolvedValue(true);
+
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'reused', userId: 'owner-id' });
+
+    expect(repository.hasTokenUsedAfter).toHaveBeenCalledWith('s1', usedAt, 't1');
+    expect(repository.revokeSession).toHaveBeenCalledWith('s1', 'reuse', input.now);
+    expect(repository.createToken).not.toHaveBeenCalled();
+    expect(repository.deleteUnusedTokens).not.toHaveBeenCalled();
+  });
+
+  it('re-rotates, without revoking, when the token was used before the grace window but no later token was used', async () => {
+    // A lost response: the client never received the token this one was exchanged for, so it presents the
+    // newest token it holds again. Its unreceived successors are dropped, so if the client did hold one,
+    // presenting it later finds no row and revokes the session.
     const { service, repository } = build();
     const input = rotateInput();
     repository.markUsed.mockResolvedValue(0);
     repository.findToken.mockResolvedValue(
       token({ usedAt: new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS - 1_000) }),
     );
+    repository.hasTokenUsedAfter.mockResolvedValue(false);
+
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'rotated' });
+
+    // Only successors older than the grace window go: a sibling a parallel retry just issued stays valid.
+    expect(repository.deleteUnusedTokens).toHaveBeenCalledWith(
+      's1',
+      new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS),
+    );
+    expect(repository.createToken).toHaveBeenCalledWith({ id: 't2', sessionId: 's1', createdAt: input.now });
+    expect(repository.revokeSession).not.toHaveBeenCalled();
+    // The successors go before the next token is written, or the cleanup would drop it too.
+    const deleted = repository.deleteUnusedTokens.mock.invocationCallOrder[0] ?? 0;
+    const created = repository.createToken.mock.invocationCallOrder[0] ?? 0;
+    expect(deleted).toBeLessThan(created);
+  });
+
+  it('revokes, without re-rotating, a stale token used longer than the lost-response window ago', async () => {
+    // The recovery is bounded: a browser that lost a response refreshes again within one access-token
+    // lifetime, so a token idle past the window is treated as a replay even when nothing later was used.
+    const { service, repository } = build();
+    const input = rotateInput();
+    repository.markUsed.mockResolvedValue(0);
+    repository.findToken.mockResolvedValue(
+      token({ usedAt: new Date(input.now.getTime() - LOST_RESPONSE_WINDOW_MS - 1_000) }),
+    );
+    repository.hasTokenUsedAfter.mockResolvedValue(false);
 
     await expect(service.rotate(input)).resolves.toEqual({ kind: 'reused', userId: 'owner-id' });
 
     expect(repository.revokeSession).toHaveBeenCalledWith('s1', 'reuse', input.now);
+    expect(repository.deleteUnusedTokens).not.toHaveBeenCalled();
     expect(repository.createToken).not.toHaveBeenCalled();
   });
 

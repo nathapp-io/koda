@@ -7,6 +7,11 @@
  *   AC-9:  'ok' outcomes stop at the sixth error without a sixth refresh
  *   AC-10: an onopen resets the delay, so the next recovery waits 1 s again
  *   AC-11: a legacy boolean `true` (not a RefreshOutcome) fails closed, like 'unauthorized'
+ *
+ * Lost refresh responses: a terminal error refreshes only when its backoff timer fires, never at once. A
+ * navigation closes the page's streams; refreshing right then sends a request the navigation aborts after
+ * the API already rotated the token, so the browser keeps a spent refresh cookie. Waiting first lets the
+ * unloading page take the timer with it.
  */
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 import {
@@ -89,13 +94,19 @@ function setup(outcomes: readonly RefreshOutcome[] = ['ok']) {
     due.forEach(t => t.fn())
     return due.map(t => t.ms)
   }
+  /** Fires the due timers and lets the refresh and the reopen they start settle. */
+  const runTimersSettled = async (): Promise<number[]> => {
+    const delays = runTimers()
+    await flush()
+    return delays
+  }
   /** One terminal failure followed by the recovery attempt settling. */
   const fail = async (): Promise<void> => {
     sources[sources.length - 1].terminalError()
     await flush()
   }
   const refreshCalls = (): number => (deps.refreshAuth as jest.Mock).mock.calls.length
-  return { sources, deps, stream, runTimers, fail, refreshCalls, latest: () => sources[sources.length - 1] }
+  return { sources, deps, stream, runTimers, runTimersSettled, fail, refreshCalls, latest: () => sources[sources.length - 1] }
 }
 
 describe('US-007 AC-7: an unauthorized recovery stops the stream', () => {
@@ -109,6 +120,7 @@ describe('US-007 AC-7: an unauthorized recovery stops the stream', () => {
     s.latest().open()
     await s.fail()
 
+    expect(await s.runTimersSettled()).toEqual([1000])
     expect(s.refreshCalls()).toBe(1)
     expect(s.runTimers()).toEqual([])
     expect(s.sources).toHaveLength(1)
@@ -124,7 +136,7 @@ describe('US-007 AC-8: an outage never stops the stream', () => {
     const delays: number[] = []
     for (let i = 0; i < 8; i += 1) {
       await s.fail()
-      delays.push(...s.runTimers())
+      delays.push(...(await s.runTimersSettled()))
     }
 
     expect(delays).toEqual([1000, 2000, 4000, 8000, 16000, 30_000, 30_000, 30_000])
@@ -141,7 +153,7 @@ describe(`US-007 AC-9: authorized recoveries stop after ${MAX_TERMINAL_FAILURES}
     const delays: number[] = []
     for (let i = 0; i < MAX_TERMINAL_FAILURES; i += 1) {
       await s.fail()
-      delays.push(...s.runTimers())
+      delays.push(...(await s.runTimersSettled()))
     }
     expect(delays).toEqual([1000, 2000, 4000, 8000, 16000])
     expect(s.refreshCalls()).toBe(MAX_TERMINAL_FAILURES)
@@ -161,13 +173,13 @@ describe('US-007 AC-10: a reopen resets the delay', () => {
     s.latest().open()
 
     await s.fail()
-    expect(s.runTimers()).toEqual([1000])
+    expect(await s.runTimersSettled()).toEqual([1000])
     await s.fail()
-    expect(s.runTimers()).toEqual([2000])
+    expect(await s.runTimersSettled()).toEqual([2000])
 
     s.latest().open()
     await s.fail()
-    expect(s.runTimers()).toEqual([1000])
+    expect(await s.runTimersSettled()).toEqual([1000])
   })
 })
 
@@ -180,8 +192,37 @@ describe('US-007 AC-11: an unknown outcome fails closed', () => {
 
     await s.fail()
 
+    expect(await s.runTimersSettled()).toEqual([1000])
     expect(booleanRefresh).toHaveBeenCalledTimes(1)
     expect(s.runTimers()).toEqual([])
     expect(s.sources).toHaveLength(1)
+  })
+})
+
+describe('lost refresh responses: no refresh before the backoff fires', () => {
+  test('a terminal error schedules the backoff and refreshes only when it fires', async () => {
+    const s = setup(['ok'])
+    s.latest().open()
+
+    await s.fail()
+
+    // The page may be navigating away: nothing is sent yet.
+    expect(s.refreshCalls()).toBe(0)
+    expect(s.sources).toHaveLength(1)
+
+    expect(await s.runTimersSettled()).toEqual([1000])
+    expect(s.refreshCalls()).toBe(1)
+    expect(s.sources).toHaveLength(2)
+  })
+
+  test('closing the stream during the backoff sends no refresh at all', async () => {
+    const s = setup(['ok'])
+    s.latest().open()
+
+    await s.fail()
+    s.stream.close()
+
+    expect(await s.runTimersSettled()).toEqual([])
+    expect(s.refreshCalls()).toBe(0)
   })
 })

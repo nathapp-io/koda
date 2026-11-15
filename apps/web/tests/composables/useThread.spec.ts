@@ -102,7 +102,16 @@ describe('useThread (US-003)', () => {
 
     const source = StubEventSource.instances[0]
     source.readyState = 2 // EVENT_SOURCE_CLOSED: a terminal failure, not a transient drop
-    source.onerror?.({})
+    jest.useFakeTimers()
+    try {
+      source.onerror?.({})
+      // The refresh waits for the 1 s backoff, so a navigating page never sends it.
+      expect(refreshSession).not.toHaveBeenCalled()
+      jest.advanceTimersByTime(1000)
+    }
+    finally {
+      jest.useRealTimers()
+    }
     await settle()
 
     expect(refreshSession).toHaveBeenCalledTimes(1)

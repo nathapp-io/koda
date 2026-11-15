@@ -105,7 +105,11 @@ describe('US-007 AC-12: an unauthorized thread recovery stops the stream', () =>
   test('AC-12: refreshAuth unauthorized after an error schedules no reopen', async () => {
     s.latest().open()
     await s.fail()
+    // The refresh waits for the backoff (a navigating page must not send it).
+    expect(s.refreshCalls()).toBe(0)
 
+    expect(s.runTimers()).toEqual([1000])
+    await flush()
     expect(s.refreshCalls()).toBe(1)
     expect(s.runTimers()).toEqual([])
     expect(s.sources).toHaveLength(1)
@@ -123,6 +127,7 @@ describe('US-007 AC-13: a thread stream survives an outage', () => {
     for (let i = 0; i < 7; i += 1) {
       await s.fail()
       delays.push(...s.runTimers())
+      await flush()
     }
 
     expect(delays).toEqual([1000, 2000, 4000, 8000, 16000, 30_000, 30_000])
@@ -137,6 +142,7 @@ describe('US-007 AC-13: a thread stream survives an outage', () => {
     for (let i = 0; i < MAX_TERMINAL_FAILURES; i += 1) {
       await s.fail()
       s.runTimers()
+      await flush()
     }
     const opened = s.sources.length
     await s.fail()

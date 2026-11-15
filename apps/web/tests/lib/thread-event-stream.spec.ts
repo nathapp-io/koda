@@ -130,6 +130,7 @@ describe('US-002 thread-event-stream', () => {
     expect(s.sources[0].closed).toBe(true)
 
     expect(s.runTimers()).toEqual([1000])
+    await flush()
     expect(s.sources).toHaveLength(2)
     s.latest().open()
 

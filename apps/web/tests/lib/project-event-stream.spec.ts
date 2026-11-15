@@ -144,14 +144,16 @@ describe('createProjectEventStream', () => {
     expect(s.sources).toHaveLength(1)
   })
 
-  test('after a terminal failure it refreshes auth, waits the backoff, reopens and resyncs', async () => {
+  test('after a terminal failure it waits the backoff, then refreshes auth, reopens and resyncs', async () => {
     s.latest().open()
     s.latest().terminalError()
     await flush()
-    expect(s.deps.refreshAuth).toHaveBeenCalledTimes(1)
+    expect(s.deps.refreshAuth).not.toHaveBeenCalled()
     expect(s.sources[0].closed).toBe(true)
 
     expect(s.runTimers()).toEqual([1000])
+    await flush()
+    expect(s.deps.refreshAuth).toHaveBeenCalledTimes(1)
     expect(s.sources).toHaveLength(2)
     s.latest().open()
     expect(s.onResync).toHaveBeenCalledTimes(1)
@@ -163,6 +165,7 @@ describe('createProjectEventStream', () => {
       s.latest().terminalError()
       await flush()
       delays.push(...s.runTimers())
+      await flush()
     }
     expect(delays).toEqual([1000, 2000, 4000])
   })
@@ -172,6 +175,7 @@ describe('createProjectEventStream', () => {
       s.latest().terminalError()
       await flush()
       s.runTimers()
+      await flush()
     }
     const opened = s.sources.length
     s.latest().terminalError()
@@ -185,6 +189,7 @@ describe('createProjectEventStream', () => {
       s.latest().terminalError()
       await flush()
       s.runTimers()
+      await flush()
     }
     s.latest().open()
     s.latest().terminalError()
@@ -195,6 +200,8 @@ describe('createProjectEventStream', () => {
   test('stops at once when the auth refresh is refused', async () => {
     const failing = setup(['unauthorized'])
     failing.latest().terminalError()
+    await flush()
+    expect(failing.runTimers()).toEqual([1000])
     await flush()
     expect(failing.runTimers()).toEqual([])
     expect(failing.sources).toHaveLength(1)
@@ -212,6 +219,8 @@ describe('createProjectEventStream', () => {
     let resolveRefresh: (outcome: RefreshOutcome) => void = () => undefined
     ;(s.deps.refreshAuth as jest.Mock).mockImplementationOnce(() => new Promise<RefreshOutcome>((resolve) => { resolveRefresh = resolve }))
     s.latest().terminalError()
+    await flush()
+    s.runTimers()
     s.stream.close()
     resolveRefresh('ok')
     await flush()
