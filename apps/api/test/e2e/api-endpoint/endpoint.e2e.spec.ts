@@ -319,6 +319,46 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  describe('Password change endpoint', () => {
+    const oldPassword = 'Original123!Aa';
+    const newPassword = 'Replacement123!Aa';
+
+    beforeEach(() => resetThrottle(app));
+
+    it('POST /api/auth/password — changes the password and preserves the caller session', async () => {
+      const email = 'password-change-lifecycle@koda.test';
+      const registered = body<{ accessToken: string; refreshToken: string }>(
+        await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Password Change', password: oldPassword }).expect(201),
+      );
+      const changed = await request(httpServer).post('/api/auth/password')
+        .set('Authorization', `Bearer ${registered.accessToken}`)
+        .send({ currentPassword: oldPassword, newPassword }).expect(200);
+      expect(body(changed)).toEqual({});
+      await request(httpServer).get('/api/auth/me')
+        .set('Authorization', `Bearer ${registered.accessToken}`).expect(200);
+      await request(httpServer).post('/api/auth/refresh')
+        .set('Authorization', `Bearer ${registered.refreshToken}`).expect(200);
+      await request(httpServer).post('/api/auth/login').send({ email, password: oldPassword }).expect(401);
+      const login = await request(httpServer).post('/api/auth/login').send({ email, password: newPassword }).expect(200);
+      expect(body<{ accessToken: string }>(login).accessToken).toBeTruthy();
+    });
+
+    it('POST /api/auth/password — rejects a wrong current password without changing credentials', async () => {
+      const email = 'password-change-wrong-lifecycle@koda.test';
+      const registered = body<{ accessToken: string }>(
+        await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Password Refusal', password: oldPassword }).expect(201),
+      );
+      const response = await request(httpServer).post('/api/auth/password')
+        .set('Authorization', `Bearer ${registered.accessToken}`)
+        .send({ currentPassword: 'incorrect', newPassword }).expect(403);
+      refusal(response, 'auth.currentPasswordWrong.40003');
+      await request(httpServer).post('/api/auth/login').send({ email, password: newPassword }).expect(401);
+      await request(httpServer).post('/api/auth/login').send({ email, password: oldPassword }).expect(200);
+    });
+  });
+
   // ─────────────────────────────────────────────────────────────────
   // 1b. H1 — Refresh token replay after logout must be rejected
   // ─────────────────────────────────────────────────────────────────
