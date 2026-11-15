@@ -3,7 +3,7 @@
   "feature": "auth-passwords",
   "branchName": "feat/auth-passwords",
   "createdAt": "2026-11-15T05:04:44.168Z",
-  "updatedAt": "2026-11-15T08:57:22.307Z",
+  "updatedAt": "2026-11-15T09:03:02.065Z",
   "userStories": [
     {
       "id": "US-001",
@@ -384,8 +384,8 @@
         "audit"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
