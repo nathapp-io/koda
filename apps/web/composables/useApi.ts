@@ -118,6 +118,30 @@ export function extractErrorStatus(err: unknown): number | undefined {
   return undefined
 }
 
+/** The first non-empty message a field-keyed error map carries for `field`. */
+function fieldMessage(errors: unknown, field: string): string | undefined {
+  if (errors === null || typeof errors !== 'object') return undefined
+  const messages = (errors as Record<string, unknown>)[field]
+  if (!Array.isArray(messages)) return undefined
+  return messages.find((message): message is string => typeof message === 'string' && message.trim().length > 0)
+}
+
+/**
+ * The validation message the API attached to one field, or undefined when the failure is not about it.
+ *
+ * A DTO that fails the global validation pipe answers `{ ret: -2, message, errors: { <field>: [message] } }`
+ * (the `@nathapp/nestjs-common` default formatter), which `request()` turns into an `ApiError` carrying
+ * `errors`; an error that never reached the envelope keeps the same body under `data`. A failure that is
+ * not about a field at all — a refused reset token, for example — carries no `errors`, which is how a
+ * caller tells "your input is wrong, try again" from "the thing you were given is dead".
+ * Pure and exported for unit testing.
+ */
+export function extractFieldError(err: unknown, field: string): string | undefined {
+  if (err === null || typeof err !== 'object') return undefined
+  return fieldMessage((err as { errors?: unknown }).errors, field)
+    ?? fieldMessage((err as { data?: { errors?: unknown } }).data?.errors, field)
+}
+
 /**
  * Decide whether a failed request should be silently refreshed and retried
  * (M22): only on 401, only on the client (SSR must surface errors directly),

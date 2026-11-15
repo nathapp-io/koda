@@ -217,7 +217,7 @@ describe('PasswordResetService.confirm', () => {
     discardUnusedFor: ReturnType<typeof vi.fn>;
   };
   let authSessions: { revokeAllForUser: ReturnType<typeof vi.fn> };
-  let authRepoWrites: { updatePasswordHash: ReturnType<typeof vi.fn>; bumpTokenVersion: ReturnType<typeof vi.fn> };
+  let authRepoWrites: { lockUser: ReturnType<typeof vi.fn>; updatePasswordHash: ReturnType<typeof vi.fn>; bumpTokenVersion: ReturnType<typeof vi.fn> };
   let audit: { audited: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn> };
   let cache: { invalidate: ReturnType<typeof vi.fn> };
   let schedule: { startPasswordResetSend: ReturnType<typeof vi.fn> };
@@ -244,7 +244,11 @@ describe('PasswordResetService.confirm', () => {
       markUsed: vi.fn(async () => 1),
       discardUnusedFor: vi.fn(async () => 0),
     };
-    authRepoWrites = { updatePasswordHash: vi.fn(async () => undefined), bumpTokenVersion: vi.fn(async () => 1) };
+    authRepoWrites = {
+      lockUser: vi.fn(async () => ({ passwordHash: 'stored-hash' })),
+      updatePasswordHash: vi.fn(async () => undefined),
+      bumpTokenVersion: vi.fn(async () => 1),
+    };
     authSessions = { revokeAllForUser: vi.fn(async () => ['s1', 's2']) };
     audit = { audited: vi.fn(<T>(fn: () => Promise<T>) => fn()), record: vi.fn(async () => undefined) };
     cache = { invalidate: vi.fn(async () => undefined) };
@@ -275,6 +279,18 @@ describe('PasswordResetService.confirm', () => {
     expect(authRepoWrites.bumpTokenVersion).toHaveBeenCalledWith(user.id);
     expect(authSessions.revokeAllForUser).toHaveBeenCalledWith(user.id, 'password-reset', NOW);
     expect(tokens.discardUnusedFor).toHaveBeenCalledWith(user.id);
+  });
+
+  it('B2: locks the user row before touching any reset-token row', async () => {
+    await service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW);
+
+    // One lock order for every password write: user row first, reset-token rows after. Locking the token
+    // first deadlocked against a concurrent reset request that held the user row while deleting tokens.
+    expect(authRepoWrites.lockUser).toHaveBeenCalledWith(user.id);
+    const order = (mock: { mock: { invocationCallOrder: number[] } }): number => mock.mock.invocationCallOrder[0];
+    expect(order(authRepoWrites.lockUser)).toBeLessThan(order(tokens.markUsed));
+    expect(order(authRepoWrites.lockUser)).toBeLessThan(order(tokens.discardUnusedFor));
+    expect(order(authRepoWrites.lockUser)).toBeLessThan(order(authRepoWrites.updatePasswordHash));
   });
 
   it('AC-1: hashes the new password before opening the transaction', async () => {

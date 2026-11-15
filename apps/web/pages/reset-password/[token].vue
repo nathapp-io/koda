@@ -2,7 +2,7 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { extractApiError, extractErrorStatus } from '~/composables/useApi'
+import { extractApiError, extractErrorStatus, extractFieldError } from '~/composables/useApi'
 import { usePasswordActions } from '~/composables/usePasswordActions'
 
 definePageMeta({ layout: 'auth' })
@@ -18,7 +18,7 @@ const schema = toTypedSchema(z.object({
 }).refine(values => values.newPassword === values.confirmNewPassword, {
   path: ['confirmNewPassword'], message: t('auth.account.mismatch'),
 }))
-const { defineField, errors, handleSubmit, isSubmitting } = useForm({
+const { defineField, errors, handleSubmit, isSubmitting, setFieldError } = useForm({
   validationSchema: schema, initialValues: { newPassword: '', confirmNewPassword: '' },
 })
 const [newPassword] = defineField('newPassword')
@@ -28,6 +28,14 @@ const onSubmit = handleSubmit(async values => {
     await confirmReset(String(route.params.token), values.newPassword)
     await navigateTo('/login?reset=1')
   } catch (err: unknown) {
+    // A newPassword the API's complexity rule refuses is a field error, not a dead link (branch fix B3):
+    // the token is still valid, so the form stays and the message lands on the field.
+    const newPasswordError = extractFieldError(err, 'newPassword')
+    if (newPasswordError) {
+      setFieldError('newPassword', newPasswordError)
+      return
+    }
+    // No field errors: the API refused the token itself, which is the one state that hides the form.
     if (extractErrorStatus(err) === 400 || (err !== null && typeof err === 'object' && 'code' in err && (err.code === -2 || err.code === 400))) {
       invalid.value = true
     } else {

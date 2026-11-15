@@ -127,6 +127,12 @@ export class PasswordResetService {
     const passwordHash = await bcrypt.hash(dto.newPassword, PASSWORD_HASH_ROUNDS);
 
     const revoked = await this.audit.audited(async () => {
+      // Lock order (branch fix B2): the user row before its reset-token rows — the same order
+      // `PasswordResetTokenStore.replaceUnused` and `AuthService.changePassword` use. Marking the token
+      // first inverted it, so a confirmation could hold a token row while waiting for the user row a
+      // concurrent request held, which waited for the token row: Postgres aborted one of the two, and the
+      // request's reset email was lost silently.
+      await this.authRepo.lockUser(row.userId);
       const marked = await this.tokens.markUsed(row.id, now);
       if (marked === 0) throw invalidToken();
       await this.authRepo.updatePasswordHash(row.userId, passwordHash);

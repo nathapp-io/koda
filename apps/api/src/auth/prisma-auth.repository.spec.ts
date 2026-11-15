@@ -59,6 +59,30 @@ describe('PrismaAuthRepository agent methods', () => {
   });
 });
 
+describe('PrismaAuthRepository user row lock (branch fix B1/B2)', () => {
+  const txManager = createMock<ITransactionManager>({ run: <T>(fn: () => Promise<T>) => fn() });
+
+  it('lockUser locks the user row and answers the hash stored under the lock', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ passwordHash: 'stored-hash' }]);
+    const db = createMock<PrismaService>({ client: { $queryRaw: queryRaw } as any });
+    const repository = new PrismaAuthRepository(db as any, txManager);
+
+    await expect(repository.lockUser('u1')).resolves.toEqual({ passwordHash: 'stored-hash' });
+
+    // A tagged template: [strings, ...values] — the id is bound, and the statement takes the row lock.
+    const [strings, userId] = queryRaw.mock.calls[0] as unknown as [TemplateStringsArray, string];
+    expect(userId).toBe('u1');
+    expect(String(strings)).toContain('FOR UPDATE');
+  });
+
+  it('lockUser answers null when no row matches', async () => {
+    const db = createMock<PrismaService>({ client: { $queryRaw: vi.fn().mockResolvedValue([]) } as any });
+    const repository = new PrismaAuthRepository(db as any, txManager);
+
+    await expect(repository.lockUser('missing')).resolves.toBeNull();
+  });
+});
+
 describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
   const txManager = createMock<ITransactionManager>({ run: <T>(fn: () => Promise<T>) => fn() });
 

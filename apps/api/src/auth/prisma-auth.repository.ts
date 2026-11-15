@@ -82,6 +82,25 @@ export class PrismaAuthRepository {
     await this.db.user.update({ where: { id: userId }, data: { passwordHash } });
   }
 
+  /**
+   * Locks the user row and answers the password hash stored under the lock (null when no row matches).
+   *
+   * One lock order for every password write (branch fix B1/B2): the user row first, then the rows that
+   * hang off it — the reset tokens. `PasswordResetTokenStore.replaceUnused`,
+   * `PasswordResetService.confirm` and `AuthService.changePassword` all take it in that order, so a
+   * confirmation holding a reset-token row can never wait for a user row a concurrent transaction holds
+   * while that transaction waits for the reset-token row (Postgres would abort one of the two).
+   *
+   * Inside a transaction the lock is also the re-check: a concurrent password write that committed first
+   * is visible in the answer here, and one that has not committed yet waits behind this lock. That is
+   * what makes the hash a caller verified before the transaction authoritative for its write.
+   */
+  async lockUser(userId: string): Promise<{ passwordHash: string } | null> {
+    const rows = await this.db.$queryRaw<{ passwordHash: string }[]>`
+      SELECT "passwordHash" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+    return rows[0] ?? null;
+  }
+
   async bumpTokenVersion(userId: string): Promise<number> {
     const m = await this.db.user.update({
       where: { id: userId },

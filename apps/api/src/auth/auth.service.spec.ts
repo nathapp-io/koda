@@ -56,6 +56,7 @@ describe('AuthService', () => {
     findUserById: vi.fn(),
     bumpTokenVersion: vi.fn(),
     updatePasswordHash: vi.fn(),
+    lockUser: vi.fn(),
   };
 
   const mockConfigService = {
@@ -975,9 +976,12 @@ describe('AuthService', () => {
     };
 
     beforeEach(async () => {
-      mockAuthRepository.findUserById.mockResolvedValue({
-        ...mockUser, passwordHash: await bcrypt.hash(currentPassword, 4),
-      });
+      const passwordHash = await bcrypt.hash(currentPassword, 4);
+      mockAuthRepository.findUserById.mockResolvedValue({ ...mockUser, passwordHash });
+      // The row lock re-reads the hash the compare verified: no concurrent change happened.
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash });
+      // The caller's session is still live when the transaction revalidates it.
+      mockAuthSessions.isActive.mockResolvedValue(true);
       mockAuthSessions.revokeAllForUser.mockResolvedValue([]);
       mockPasswordResetTokens.discardUnusedFor.mockResolvedValue(1);
     });
@@ -1015,6 +1019,50 @@ describe('AuthService', () => {
       ).rejects.toBeInstanceOf(ForbiddenAppException);
 
       expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+    });
+
+    it('B1: re-reads the verified hash under the user row lock and refuses a stale change without writes', async () => {
+      // A concurrent change committed first: the account password is no longer the one proved above.
+      mockAuthRepository.lockUser.mockResolvedValueOnce({ passwordHash: 'hash-of-the-winning-change' });
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+
+      expect(mockAuthRepository.lockUser).toHaveBeenCalledWith(mockUser.id);
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('B1: treats a user row that vanished under the lock as a stale change too', async () => {
+      mockAuthRepository.lockUser.mockResolvedValueOnce(null);
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+    });
+
+    it('B1: refuses with 401 when the caller session is no longer live under the lock', async () => {
+      // The change that won revoked every other session of the user, this caller's included.
+      mockAuthSessions.isActive.mockResolvedValueOnce(false);
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(AuthException);
+
+      expect(mockAuthSessions.isActive).toHaveBeenCalledWith('s-caller', expect.any(Date));
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+    });
+
+    it('B1/B2: locks the user row before the hash re-check, the session revalidation and the writes', async () => {
+      await service.changePassword(principal, { currentPassword, newPassword });
+
+      const order = (mock: { mock: { invocationCallOrder: number[] } }): number => mock.mock.invocationCallOrder[0];
+      expect(order(mockAuthRepository.lockUser)).toBeLessThan(order(mockAuthSessions.isActive));
+      expect(order(mockAuthSessions.isActive)).toBeLessThan(order(mockAuthRepository.updatePasswordHash));
+      expect(order(mockAuthRepository.updatePasswordHash)).toBeLessThan(order(mockAuthSessions.revokeAllForUser));
+      expect(order(mockAuthSessions.revokeAllForUser)).toBeLessThan(order(mockPasswordResetTokens.discardUnusedFor));
     });
   });
 });

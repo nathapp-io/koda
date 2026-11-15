@@ -446,6 +446,41 @@ describe('M22: extractErrorStatus helper', () => {
   })
 })
 
+// ──────────────────────────────────────────────────────────────────────────────
+// B3 — field-validation errors are not "the link is dead"
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('B3: extractFieldError helper', () => {
+  test('reads the field message off an unwrapped ApiError envelope', async () => {
+    const mod = await import(`${composablePath}`)
+    const error = new mod.ApiError(-2, 'Validation failed', { newPassword: ['Password must contain an uppercase letter'] })
+    expect(mod.extractFieldError(error, 'newPassword')).toBe('Password must contain an uppercase letter')
+  })
+
+  test('reads the same envelope off a raw $fetch error body', async () => {
+    const mod = await import(`${composablePath}`)
+    const error = { status: 400, data: { ret: -2, errors: { newPassword: ['too short'] } } }
+    expect(mod.extractFieldError(error, 'newPassword')).toBe('too short')
+  })
+
+  test('skips blank messages', async () => {
+    const mod = await import(`${composablePath}`)
+    const error = new mod.ApiError(-2, 'Validation failed', { newPassword: ['  ', 'real message'] })
+    expect(mod.extractFieldError(error, 'newPassword')).toBe('real message')
+  })
+
+  test('answers undefined for another field and for a failure with no field errors', async () => {
+    const mod = await import(`${composablePath}`)
+    // A refused reset token is a ValidationAppException with no field key at all.
+    expect(mod.extractFieldError(new mod.ApiError(-2, 'This reset link is invalid or has expired'), 'newPassword'))
+      .toBeUndefined()
+    expect(mod.extractFieldError(new mod.ApiError(-2, 'Validation failed', { token: ['required'] }), 'newPassword'))
+      .toBeUndefined()
+    expect(mod.extractFieldError('boom', 'newPassword')).toBeUndefined()
+    expect(mod.extractFieldError(null, 'newPassword')).toBeUndefined()
+  })
+})
+
 describe('M22: useApi client wrapper retries once through /api/auth/refresh on 401', () => {
   const g = globalThis as Record<string, unknown>
 

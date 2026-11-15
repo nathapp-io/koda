@@ -40,6 +40,24 @@ test.each([{ status: 400 }, new ApiError(-2, 'invalid'), new ApiError(400, 'inva
   confirmReset.mockRejectedValue(failure); const m = page('reset-password/[token]'); await submit(m, { newPassword: 'NewPass1!', confirmNewPassword: 'NewPass1!' })
   expect(m.text()).toContain('auth.reset.invalid'); expect(m.find('a').some(n => n.props.href === '/forgot-password')).toBe(true); m.unmount()
 })
+/**
+ * B3: the API's field-validation envelope (`{ ret: -2, errors: { newPassword: [...] } }`, the
+ * `@nathapp/nestjs-common` default formatter) is not a dead link — the token is still usable, so the form
+ * stays and the message shows on the field. The token-refusal envelope carries no `errors` at all.
+ */
+test.each([
+  ['ApiError', new ApiError(-2, 'Validation failed', { newPassword: ['Password must contain an uppercase letter'] })],
+  ['raw fetch error', { status: 400, data: { ret: -2, message: 'Validation failed', errors: { newPassword: ['Password must contain an uppercase letter'] } } }],
+])('B3: a %s field validation failure keeps the form and shows the newPassword message', async (_shape, failure) => {
+  confirmReset.mockRejectedValue(failure)
+  const m = page('reset-password/[token]'); await submit(m, { newPassword: 'lowercase1!', confirmNewPassword: 'lowercase1!' })
+  expect(confirmReset).toHaveBeenCalledWith('tok', 'lowercase1!')
+  expect(m.text()).toContain('Password must contain an uppercase letter')
+  expect(m.text()).not.toContain('auth.reset.invalid')
+  expect(m.one('form')).toBeTruthy()
+  expect(navigateTo).not.toHaveBeenCalled()
+  m.unmount()
+})
 test('AC-7 mismatch blocks submission', async () => {
   const m = page('reset-password/[token]'); await submit(m, { newPassword: 'NewPass1!', confirmNewPassword: 'different' })
   expect(confirmReset).not.toHaveBeenCalled(); expect(m.text()).toContain('auth.account.mismatch'); m.unmount()

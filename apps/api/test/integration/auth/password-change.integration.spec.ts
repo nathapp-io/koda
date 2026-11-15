@@ -4,6 +4,8 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { AUTH_CFG, IAuthConfig } from '../../../src/config/auth.config';
 import { AUTH_LOGIN_LIMIT } from '../../../src/auth/auth-throttle';
+import { PrismaAuthRepository } from '../../../src/auth/prisma-auth.repository';
+import { hashPasswordResetToken } from '../../../src/auth/password-reset/password-reset-token';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -15,6 +17,30 @@ const describeDb = canRunDbTests() ? describe : describe.skip;
 const NEW_PASSWORD = 'Different123!';
 type Pair = { accessToken: string; refreshToken: string };
 const sid = (pair: Pair): string => (JSON.parse(Buffer.from(pair.accessToken.split('.')[1], 'base64url').toString()) as { sid: string }).sid;
+
+/**
+ * A two-way barrier for the user row lock.
+ *
+ * Both requests must reach `PrismaAuthRepository.lockUser` before either continues, so the interleaving
+ * is the one that matters — both have verified the old password before either opens its transaction —
+ * instead of whichever request happened to be scheduled first. The timeout releases a lone arrival, so a
+ * missing request fails the assertions rather than hanging the suite.
+ */
+const LOCK_BARRIER_TIMEOUT_MS = 5_000;
+function lockBarrier(expected = 2): () => Promise<void> {
+  let arrived = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const timer = setTimeout(release, LOCK_BARRIER_TIMEOUT_MS);
+  return async () => {
+    arrived += 1;
+    if (arrived >= expected) {
+      clearTimeout(timer);
+      release();
+    }
+    await gate;
+  };
+}
 
 describeDb('password change (PG)', () => {
   let app: NathApplication;
@@ -30,6 +56,21 @@ describeDb('password change (PG)', () => {
   const me = (token: string) => request(server).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
   const hash = async () => (await db.user.findUniqueOrThrow({ where: { id: userId } })).passwordHash;
   const entries = () => db.auditEntry.findMany({ where: { key: 'session.password.change', resourceId: userId } });
+  /** Installs the lock barrier on the live repository instance for the duration of `run`. */
+  const withLockBarrier = async <T>(run: () => Promise<T>): Promise<T> => {
+    const repo = app.get(PrismaAuthRepository);
+    const original = repo.lockUser;
+    const barrier = lockBarrier();
+    repo.lockUser = async (id: string) => {
+      await barrier();
+      return original.call(repo, id);
+    };
+    try {
+      return await run();
+    } finally {
+      repo.lockUser = original;
+    }
+  };
 
   beforeAll(async () => { await resetDb(); app = await bootHttpApp({ registrationEnabled: false }); server = app.getHttpServer(); db = fixtureDb(app); }, 30_000);
   afterAll(async () => { await app?.close(); });
@@ -110,5 +151,55 @@ describeDb('password change (PG)', () => {
   it('AC-15: password change uses the login throttle', async () => {
     for (let i = 0; i < AUTH_LOGIN_LIMIT; i++) await change(pair.accessToken, 'wrong').expect(403);
     await change(pair.accessToken, 'wrong').expect(429);
+  });
+
+  it('B1: two concurrent changes both verifying the old password write one password, and the loser answers 403', async () => {
+    // Two sessions of the same account: each request proves the same current password.
+    const second = await login();
+    const firstPassword = 'Racing123!Aa';
+    const secondPassword = 'Stale123!Aa';
+
+    const [first, other] = await withLockBarrier(() => Promise.all([
+      change(pair.accessToken, TEST_PASSWORD, firstPassword),
+      change(second.accessToken, TEST_PASSWORD, secondPassword),
+    ]));
+
+    // Exactly one commits; the stale request is refused instead of overwriting the change that won.
+    expect([first.status, other.status].sort()).toEqual([200, 403]);
+    const refused = first.status === 403 ? first : other;
+    expect(JSON.stringify(refused.body)).toContain('The current password is incorrect');
+
+    // Whichever request won owns the account password; the other one never became a password.
+    const winnerPassword = first.status === 200 ? firstPassword : secondPassword;
+    const loserPassword = first.status === 200 ? secondPassword : firstPassword;
+    await login(email, winnerPassword);
+    await request(server).post('/api/auth/login').send({ email, password: loserPassword }).expect(401);
+    // One committed change, so one entry — the refused request wrote nothing at all.
+    expect(await entries()).toHaveLength(1);
+  });
+
+  it('B2: a change racing a reset confirmation deadlocks neither and leaves exactly one password', async () => {
+    const raw = `racing-${randomUUID()}`;
+    await db.passwordResetToken.create({
+      data: { userId, tokenHash: hashPasswordResetToken(raw), expiresAt: new Date(Date.now() + 60_000) },
+    });
+
+    const [changed, confirmed] = await withLockBarrier(() => Promise.all([
+      change(pair.accessToken, TEST_PASSWORD, 'Change123!Aa'),
+      request(server).post('/api/auth/password-reset/confirm').send({ token: raw, newPassword: 'Reset123!Aa' }),
+    ]));
+
+    // One lock order means neither transaction is a deadlock victim: no 5xx, and exactly one 200.
+    expect(changed.status).toBeLessThan(500);
+    expect(confirmed.status).toBeLessThan(500);
+    expect([changed.status, confirmed.status].filter((status) => status === 200)).toHaveLength(1);
+    const refusal = changed.status === 200 ? confirmed : changed;
+    // The change that lost is refused as stale (403) or as a spent token (400); nothing else.
+    expect([400, 403]).toContain(refusal.status);
+
+    const winner = changed.status === 200 ? 'Change123!Aa' : 'Reset123!Aa';
+    const other = changed.status === 200 ? 'Reset123!Aa' : 'Change123!Aa';
+    await login(email, winner);
+    await request(server).post('/api/auth/login').send({ email, password: other }).expect(401);
   });
 });

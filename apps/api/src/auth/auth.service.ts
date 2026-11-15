@@ -286,15 +286,35 @@ export class AuthService {
 
   async changePassword(principal: KodaPrincipal, dto: ChangePasswordDto): Promise<void> {
     if (!isUserPrincipal(principal) || !principal.sessionId) throw new AuthException({}, 'auth');
+    const sessionId = principal.sessionId;
     const user = await this.authRepo.findUserById(principal.id);
     if (!user || user.disabled) throw new AuthException({}, 'auth');
     if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
       throw new ForbiddenAppException({}, 'auth.currentPasswordWrong');
     }
+    // The hash the compare above proved. The transaction only writes while it is still the stored one,
+    // so two changes racing the same correct `currentPassword` cannot both win (branch fix B1).
+    const verifiedHash = user.passwordHash;
     const hash = await bcrypt.hash(dto.newPassword, 12);
+    const now = new Date();
     const revoked = await this.audit.audited(async () => {
+      // User row first, then the rows that hang off it — the lock order `PasswordResetService.confirm`
+      // and the reset request use too (branch fix B2), so a concurrent confirmation cannot deadlock
+      // against this transaction. Under READ COMMITTED the lock also re-reads the row: another change
+      // that committed while this request was hashing is visible in `locked`, and one still in flight
+      // waits behind it.
+      const locked = await this.authRepo.lockUser(user.id);
+      // A concurrent change of the same user committed first, so the `currentPassword` this request
+      // verified is no longer the account's password: answer the same 403 a wrong current password gets
+      // and write nothing, instead of overwriting the change that won.
+      if (locked?.passwordHash !== verifiedHash) {
+        throw new ForbiddenAppException({}, 'auth.currentPasswordWrong');
+      }
+      // Revalidated under the lock as well: a change that won revokes every other session of the user, so
+      // this caller's session may already be gone. A stale request ends here with nothing written.
+      if (!(await this.authSessions.isActive(sessionId, now))) throw new AuthException({}, 'auth');
       await this.authRepo.updatePasswordHash(user.id, hash);
-      const revokedIds = await this.authSessions.revokeAllForUser(user.id, 'password-change', new Date(), principal.sessionId);
+      const revokedIds = await this.authSessions.revokeAllForUser(user.id, 'password-change', now, sessionId);
       // auth-passwords US-003: a reset link emailed before this change stops working, in the same
       // transaction, so the password write and the link invalidation commit or roll back together.
       await this.passwordResetTokens.discardUnusedFor(user.id);
