@@ -21,6 +21,7 @@ import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { AuthSessionService } from './sessions/auth-session.service';
+import { PasswordResetTokenStore } from './password-reset/password-reset-token.store';
 
 export interface JwtPayload {
   sub: string;
@@ -49,6 +50,7 @@ export class AuthService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly authSessions: AuthSessionService,
+    private readonly passwordResetTokens: PasswordResetTokenStore,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -285,7 +287,11 @@ export class AuthService {
     const hash = await bcrypt.hash(dto.newPassword, 12);
     const revoked = await this.audit.audited(async () => {
       await this.authRepo.updatePasswordHash(user.id, hash);
-      return this.authSessions.revokeAllForUser(user.id, 'password-change', new Date(), principal.sessionId);
+      const revokedIds = await this.authSessions.revokeAllForUser(user.id, 'password-change', new Date(), principal.sessionId);
+      // auth-passwords US-003: a reset link emailed before this change stops working, in the same
+      // transaction, so the password write and the link invalidation commit or roll back together.
+      await this.passwordResetTokens.discardUnusedFor(user.id);
+      return revokedIds;
     }, () => ({ key: 'session.password.change', resourceType: 'user', resourceId: user.id, projectId: null, summary: 'password changed' }));
     for (const id of revoked) {
       await withAuthSessionCacheLock(id, () => this.cache.invalidate(authSessionCacheKey(id)));

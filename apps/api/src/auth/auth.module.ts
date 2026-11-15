@@ -9,6 +9,7 @@ import { CombinedAuthGuard } from './guards/combined-auth.guard';
 import { AgentAuthProvider } from './agent-auth.provider';
 import { AuthRepositoryModule } from './auth-repository.module';
 import { AuthSessionsModule } from './sessions/auth-sessions.module';
+import { PasswordResetStoreModule } from './password-reset/password-reset-store.module';
 
 type JwtFromRequestFunction = (req: unknown) => string | null;
 
@@ -103,6 +104,10 @@ export { KODA_TOKEN_COOKIE, KODA_REFRESH_COOKIE };
   imports: [
     AuthRepositoryModule,
     AuthSessionsModule,
+    // auth-passwords US-003: `changePassword` invalidates outstanding reset links. The leaf store
+    // module only — never `PasswordResetModule`, which imports `NotificationsModule` and would close
+    // the auth → notifications → live → auth cycle.
+    PasswordResetStoreModule,
     NathappAuthModule.forRootAsync({
       imports: [ConfigModule, AuthRepositoryModule, AuthSessionsModule],
       inject: [ConfigService],

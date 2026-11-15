@@ -41,6 +41,7 @@ export interface PermissionCatalogEntry {
 export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
   'session.login',
   'session.refresh',
+  'session.password.reset.request',
   'auth.register',
   'auth.registration.read',
   'health.read',
@@ -204,6 +205,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'auth.registration.read': ['public'],
   'session.login': ['public'],
   'session.refresh': ['public'],
+  'session.password.reset.request': ['public'],
   'auth.me.read': ['own'],
   'session.logout': ['own'],
   'session.password.change': ['own'],

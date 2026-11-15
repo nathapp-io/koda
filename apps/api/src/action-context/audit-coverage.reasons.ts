@@ -37,6 +37,7 @@ export const BOOKKEEPING_REASONS = {
   'approval.request-settle': "An approval request's terminal status and result; the command records its own key and the expiry records `system.approval.expire`.",
   'auth.session-start': 'The session and first refresh token rows that a login, registration or invite acceptance writes; registration and invite acceptance record their own entries.',
   'auth.session-rotate': 'A refresh token rotation: the used mark, the next token, the sliding expiry and the cleanup of old used tokens; a reuse revocation records `session.refresh` itself.',
+  'auth.password-reset-request': 'A password reset token and its email schedule row, written for a public request that records no audit entry so it cannot reveal whether the address has an account.',
 } as const;
 
 export type BookkeepingReason = keyof typeof BOOKKEEPING_REASONS;

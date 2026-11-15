@@ -6,6 +6,7 @@ import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { AuthSessionService } from './sessions/auth-session.service';
+import { PasswordResetTokenStore } from './password-reset/password-reset-token.store';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException, AuthException, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -101,6 +102,11 @@ describe('AuthService', () => {
     revokeAllForUser: vi.fn(),
   };
 
+  /** auth-passwords US-003: `changePassword` invalidates outstanding reset links in its audited work. */
+  const mockPasswordResetTokens = {
+    discardUnusedFor: vi.fn(),
+  };
+
   beforeEach(async () => {
     mockAuditRecorder.record.mockReset();
     mockAuditRecorder.audited.mockReset().mockImplementation(async <T>(fn: () => Promise<T>) => fn());
@@ -115,6 +121,7 @@ describe('AuthService', () => {
     mockAuthSessions.revoke.mockReset();
     mockAuthSessions.isActive.mockReset();
     mockAuthSessions.revokeAllForUser.mockReset();
+    mockPasswordResetTokens.discardUnusedFor.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = moduleRef = await Test.createTestingModule({
@@ -130,6 +137,7 @@ describe('AuthService', () => {
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
         { provide: AuthSessionService, useValue: mockAuthSessions },
+        { provide: PasswordResetTokenStore, useValue: mockPasswordResetTokens },
       ],
     }).compile();
 
@@ -929,6 +937,58 @@ describe('AuthService', () => {
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
       expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
       expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
+    });
+  });
+
+  describe('changePassword (auth-passwords US-003)', () => {
+    const currentPassword = 'Current123!Aa';
+    const newPassword = 'Replacement123!Aa';
+    const principal = {
+      actorType: 'user' as const, id: mockUser.id, role: 'MEMBER' as const, email: mockUser.email,
+      name: 'U', blacklisted: false, revoked: false, authorities: [], sessionId: 's-caller',
+    };
+
+    beforeEach(async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({
+        ...mockUser, passwordHash: await bcrypt.hash(currentPassword, 4),
+      });
+      mockAuthSessions.revokeAllForUser.mockResolvedValue([]);
+      mockPasswordResetTokens.discardUnusedFor.mockResolvedValue(1);
+    });
+
+    it('AC-14: deletes the user outstanding reset tokens inside the audited work', async () => {
+      const order: string[] = [];
+      mockAuditRecorder.audited.mockImplementationOnce(async <T>(fn: () => Promise<T>) => {
+        order.push('audited');
+        return fn();
+      });
+      mockPasswordResetTokens.discardUnusedFor.mockImplementationOnce(async () => {
+        order.push('discard');
+        return 1;
+      });
+
+      await service.changePassword(principal, { currentPassword, newPassword });
+
+      expect(mockPasswordResetTokens.discardUnusedFor).toHaveBeenCalledWith(mockUser.id);
+      // Inside the transaction the audit entry covers, so a rollback leaves the links in place too.
+      expect(order).toEqual(['audited', 'discard']);
+    });
+
+    it('AC-14: a refused audited work never discards the reset tokens', async () => {
+      const error = new Error('audit storage unavailable');
+      mockAuditRecorder.audited.mockRejectedValueOnce(error);
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword })).rejects.toBe(error);
+
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+    });
+
+    it('AC-14: a wrong current password never discards the reset tokens', async () => {
+      await expect(
+        service.changePassword(principal, { currentPassword: 'wrong', newPassword }),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
     });
   });
 });
