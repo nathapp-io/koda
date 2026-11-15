@@ -34,9 +34,15 @@ const INVENTORY_PATH = join(
 );
 const OWN_ROW = 'own (see design §1)';
 
+it('AC-14: password change is implicit', () => {
+  expect(findCatalogEntry('session.password.change')?.access).toBe('implicit');
+});
+
 const PUBLIC_KEY_LIST = [
   'session.login',
   'session.refresh',
+  'session.password.reset.request',
+  'session.password.reset.confirm',
   'auth.register',
   'auth.registration.read',
   'health.read',
@@ -49,6 +55,7 @@ const PUBLIC_KEY_LIST = [
 const IMPLICIT_KEY_LIST = [
   'auth.me.read',
   'session.logout',
+  'session.password.change',
   'approval.request.cancel',
   'home.read',
   'notification.read',
@@ -335,6 +342,28 @@ describe('PERMISSION_CATALOG', () => {
 
   it('AC-8: session.login is public access', () => {
     expect(findCatalogEntry('session.login')?.access).toBe('public');
+  });
+
+  it('AC-13 (auth-passwords US-003): the password reset request key is public', () => {
+    expect(findCatalogEntry('session.password.reset.request')).toMatchObject({
+      key: 'session.password.reset.request',
+      access: 'public',
+      scope: 'any',
+      risk: 'medium',
+      approval: { approvable: false, floor: 'none', default: 'none' },
+    });
+    expect(PUBLIC_KEYS.has('session.password.reset.request')).toBe(true);
+  });
+
+  it('AC-13 (auth-passwords US-004): the password reset confirm key is public', () => {
+    expect(findCatalogEntry('session.password.reset.confirm')).toMatchObject({
+      key: 'session.password.reset.confirm',
+      access: 'public',
+      scope: 'any',
+      risk: 'medium',
+      approval: { approvable: false, floor: 'none', default: 'none' },
+    });
+    expect(PUBLIC_KEYS.has('session.password.reset.confirm')).toBe(true);
   });
 
   it('AC-9: ticket.delete is a role key scoped to a project', () => {

@@ -60,6 +60,7 @@ Principles:
 | 12 | Focused unslop polish | **Implemented locally** — `style/koda-unslop-polish`: sentence-case navigation, quieter shared headings and dark surfaces, neutral type chips and plain board counts; 5,587 Jest tests, lint/typecheck, accessibility/filter checks and desktop/mobile inspection pass |
 
 | 13 | Unslop audit follow-ups U01–U09 | **Verified** — `style/koda-unslop-page-audit`; accessible Dispatch, responsive Labels, guarded invitations, quieter interior/auth/status treatments and localized knowledge results; [resolution record](./UNSLOP-FIXES-2026-11-13.md) |
+| 14 | Account password navigation | **Implemented** — header and command palette expose account password settings (auth-passwords US-006) |
 
 ## 4b. Effort estimate (2026-10-05, a guess from file sizes, not measured)
 
@@ -155,6 +156,7 @@ Update these in Slice 3 (or sooner if you touch the area):
 
 | Date | Decision | Why |
 |:-----|:---------|:----|
+| 2026-11-14 | Add Account beside logout and to the command palette | Make personal password settings discoverable without changing the sidebar order. |
 | 2026-10-05 | Linear-style dense dev-tool look, indigo accent, system fonts | Fits a ticket + agent-fleet tool; no new font dependency or network load |
 | 2026-10-05 | Project nav first via CSS `order-first`, DOM order unchanged | Layout tests pin source order; UX wants project links on top |
 | 2026-10-05 | Client-side board filter for now | Simplest for a UI-only slice. Correction: the API does support `priority`/`status`/`type`/`assignedTo` filters (not text search); server-side priority filtering is a cheap follow-up |

@@ -6,6 +6,7 @@ import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { AuthSessionService } from './sessions/auth-session.service';
+import { PasswordResetTokenStore } from './password-reset/password-reset-token.store';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException, AuthException, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -23,6 +24,13 @@ describe('AuthService', () => {
   let service: AuthService;
   let authRepo: PrismaAuthRepository;
   let moduleRef: TestingModule;
+
+  it('AC-9: refuses a legacy user without a session before writes', async () => {
+    const principal = { actorType: 'user' as const, id: 'u1', role: 'MEMBER' as const, email: 'u@example.test', name: 'U', blacklisted: false, revoked: false, authorities: [] };
+    await expect(service.changePassword(principal, { currentPassword: 'old', newPassword: 'Newpass1!' })).rejects.toBeInstanceOf(AuthException);
+    expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+    expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
 
   const mockAuditRecorder = {
     record: vi.fn(),
@@ -47,6 +55,8 @@ describe('AuthService', () => {
     findUserByEmail: vi.fn(),
     findUserById: vi.fn(),
     bumpTokenVersion: vi.fn(),
+    updatePasswordHash: vi.fn(),
+    lockUser: vi.fn(),
   };
 
   const mockConfigService = {
@@ -90,7 +100,16 @@ describe('AuthService', () => {
     rotate: vi.fn(),
     revoke: vi.fn(),
     isActive: vi.fn(),
+    revokeAllForUser: vi.fn(),
   };
+
+  /** auth-passwords US-003: `changePassword` invalidates outstanding reset links in its audited work. */
+  const mockPasswordResetTokens = {
+    discardUnusedFor: vi.fn(),
+  };
+
+  /** auth-passwords US-005: the client facts every refresh presents. */
+  const REFRESH_CLIENT = { uaHash: 'ua-hash-1', ip: '198.51.100.9' };
 
   beforeEach(async () => {
     mockAuditRecorder.record.mockReset();
@@ -101,10 +120,12 @@ describe('AuthService', () => {
     mockJwtStrategyProvider.sign.mockReset();
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
-    mockAuthSessions.start.mockReset();
+    mockAuthSessions.start.mockReset().mockResolvedValue(true);
     mockAuthSessions.rotate.mockReset();
     mockAuthSessions.revoke.mockReset();
     mockAuthSessions.isActive.mockReset();
+    mockAuthSessions.revokeAllForUser.mockReset();
+    mockPasswordResetTokens.discardUnusedFor.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = moduleRef = await Test.createTestingModule({
@@ -120,6 +141,7 @@ describe('AuthService', () => {
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
         { provide: AuthSessionService, useValue: mockAuthSessions },
+        { provide: PasswordResetTokenStore, useValue: mockPasswordResetTokens },
       ],
     }).compile();
 
@@ -169,7 +191,7 @@ describe('AuthService', () => {
       expect(mockAuthSessions.start).toHaveBeenCalledWith(expect.objectContaining({
         userId: mockUser.id,
         expiresAt: expect.any(Date),
-      }));
+      }), undefined);
       const refreshClaims = (mockJwtRefreshStrategyProvider.sign as Mock).mock.calls[0][0];
       const accessClaims = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
       expect(refreshClaims).toEqual(expect.objectContaining({ sid: expect.any(String), jti: expect.any(String) }));
@@ -177,7 +199,7 @@ describe('AuthService', () => {
       expect(mockAuthSessions.start).toHaveBeenCalledWith({
         userId: mockUser.id, sessionId: refreshClaims.sid, tokenId: refreshClaims.jti,
         expiresAt: expect.any(Date),
-      });
+      }, undefined);
     });
 
     it.each([true, false])('uses one role lookup for the response and claim (admin=%s)', async (admin) => {
@@ -512,6 +534,8 @@ describe('AuthService', () => {
       const userWithHash = { ...mockUser, passwordHash: hashedPassword };
 
       mockAuthRepository.findUserByEmail.mockResolvedValue(userWithHash);
+      // The lock still sees the password this sign-in verified.
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash: hashedPassword, disabled: false });
 
       const result = await service.login({
         email: mockUser.email,
@@ -522,6 +546,48 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('refreshToken');
       expect(result).toHaveProperty('user');
       expect(result.user.email).toBe(mockUser.email);
+    });
+
+    // Branch fix B1: the session is created behind the user row lock every password write takes, so the
+    // hash this sign-in verified is read again inside the transaction that writes the session.
+    it('B1: hands the session-start fence that re-reads the proved hash under the user row lock', async () => {
+      const password = 'Password123!';
+      const hashedPassword = await bcrypt.hash(password, 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: hashedPassword });
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash: hashedPassword, disabled: false });
+
+      await service.login({ email: mockUser.email, password });
+
+      const fence = mockAuthSessions.start.mock.calls[0][1] as () => Promise<boolean>;
+      expect(fence).toBeInstanceOf(Function);
+      await expect(fence()).resolves.toBe(true);
+      expect(mockAuthRepository.lockUser).toHaveBeenCalledWith(mockUser.id);
+    });
+
+    it.each([
+      ['a concurrent change committed', { passwordHash: 'hash-of-the-winning-change', disabled: false }],
+      ['the account was disabled concurrently', { passwordHash: 'hashed-password', disabled: true }],
+      ['the user row is gone', null],
+    ])('B1: the fence refuses when %s', async (_label, locked) => {
+      const password = 'Password123!';
+      const hashedPassword = await bcrypt.hash(password, 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: hashedPassword });
+      mockAuthRepository.lockUser.mockResolvedValue(locked);
+
+      await service.login({ email: mockUser.email, password });
+
+      const fence = mockAuthSessions.start.mock.calls[0][1] as () => Promise<boolean>;
+      await expect(fence()).resolves.toBe(false);
+    });
+
+    it('B1: a refused fence answers 401 like a wrong password, so no session is handed out', async () => {
+      const password = 'Password123!';
+      const hashedPassword = await bcrypt.hash(password, 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: hashedPassword });
+      // The change committed while the request was hashing: `start` wrote no session.
+      mockAuthSessions.start.mockResolvedValueOnce(false);
+
+      await expect(service.login({ email: mockUser.email, password })).rejects.toBeInstanceOf(AuthException);
     });
 
     it('should throw 401 error for invalid password', async () => {
@@ -559,7 +625,7 @@ describe('AuthService', () => {
         revoked: false,
         authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
-      });
+      }, REFRESH_CLIENT);
 
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
@@ -572,7 +638,7 @@ describe('AuthService', () => {
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: true, authorities: [],
       } as unknown as IPrincipal;
-      await expect(service.refresh(principal)).rejects.toThrow(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toThrow(AuthException);
     });
 
     it('still refreshes for a non-revoked principal', async () => {
@@ -582,7 +648,7 @@ describe('AuthService', () => {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
-      const out = await service.refresh(principal);
+      const out = await service.refresh(principal, REFRESH_CLIENT);
       expect(out.accessToken).toBeDefined();
       expect(out.refreshToken).toBeDefined();
     });
@@ -603,14 +669,18 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      const out = await service.refresh(principal);
+      const out = await service.refresh(principal, REFRESH_CLIENT);
 
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
       expect(mockAuthSessions.rotate).toHaveBeenCalledOnce();
       const input = mockAuthSessions.rotate.mock.calls[0][0] as {
         sessionId: string; presentedTokenId: string; nextTokenId: string; nextExpiresAt: Date; now: Date;
+        client: { uaHash: string; ip: string | null };
       };
       expect(input).toMatchObject({ sessionId: 's1', presentedTokenId: 't1' });
+      // auth-passwords US-005: the client the request presented reaches the rotation, which binds the
+      // first use to it.
+      expect(input.client).toEqual(REFRESH_CLIENT);
       expect(typeof input.nextTokenId).toBe('string');
       expect(input.nextExpiresAt).toEqual(new Date(2_000_000_000 * 1000));
       expect(input.now).toBeInstanceOf(Date);
@@ -629,7 +699,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       // An invalid session is not evidence of theft: nothing is recorded.
       expect(mockAuditRecorder.record).not.toHaveBeenCalled();
       expect(mockAuditRecorder.audited).not.toHaveBeenCalled();
@@ -643,7 +713,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       // The reuse revoked the session; the cached `{ active: true }` must not outlive it.
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
       // The revocation committed inside `rotate`, so the entry is recorded after it, in its own transaction.
@@ -656,15 +726,15 @@ describe('AuthService', () => {
       });
     });
 
-    it('answers the new pair and records a session.refresh entry when the rotation recovered a lost response', async () => {
+    it('AC-9: answers the new pair and records the recovery with the presenting IP', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
-      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: '198.51.100.9' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      const result = await service.refresh(principal);
+      const result = await service.refresh(principal, REFRESH_CLIENT);
 
       expect(result.accessToken).toEqual(expect.any(String));
       expect(result.refreshToken).toEqual(expect.any(String));
@@ -674,22 +744,41 @@ describe('AuthService', () => {
         resourceType: 'user',
         resourceId: 'user-1',
         projectId: null,
-        summary: 'refresh token lost-response recovery; session kept',
+        summary: 'refresh token lost-response recovery; session kept; ip 198.51.100.9',
       });
       expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: a recovery with no presenting IP records the summary ending in `; ip unknown`', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: null });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await service.refresh(principal, { uaHash: 'ua-hash-1', ip: null });
+
+      expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: 'user-1',
+        projectId: null,
+        summary: 'refresh token lost-response recovery; session kept; ip unknown',
+      });
     });
 
     it('a rejecting recovery audit still answers the new pair and logs the failure', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
-      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: '198.51.100.9' });
       mockAuditRecorder.record.mockRejectedValue(new Error('audit storage unavailable'));
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).resolves.toMatchObject({ accessToken: expect.any(String) });
+      await expect(service.refresh(principal, REFRESH_CLIENT)).resolves.toMatchObject({ accessToken: expect.any(String) });
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
       warn.mockRestore();
     });
@@ -707,7 +796,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1', tokenId: 't1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuditRecorder.record).toHaveBeenCalledOnce();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
       warn.mockRestore();
@@ -720,7 +809,7 @@ describe('AuthService', () => {
         extra: { sessionId: 's1' },
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
     });
@@ -733,7 +822,7 @@ describe('AuthService', () => {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [], extra: {},
       } as unknown as IPrincipal;
 
-      await expect(service.refresh(principal)).rejects.toBeInstanceOf(AuthException);
+      await expect(service.refresh(principal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
 
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
       expect(mockAuthSessions.start).not.toHaveBeenCalled();
@@ -757,7 +846,7 @@ describe('AuthService', () => {
       // missing claim.
       await expect(service.refresh({
         id: mockUser.id, revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
-      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      } as unknown as IPrincipal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
     });
 
@@ -766,7 +855,7 @@ describe('AuthService', () => {
 
       await expect(service.refresh({
         id: 'deleted-user', revoked: false, extra: { sessionId: 's1', tokenId: 't1' },
-      } as unknown as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+      } as unknown as IPrincipal, REFRESH_CLIENT)).rejects.toBeInstanceOf(AuthException);
       expect(mockAuthSessions.rotate).not.toHaveBeenCalled();
     });
   });
@@ -919,6 +1008,118 @@ describe('AuthService', () => {
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['auth-session', 's1']);
       expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
       expect(mockCacheManager.invalidate).not.toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
+    });
+  });
+
+  describe('changePassword (auth-passwords US-003)', () => {
+    const currentPassword = 'Current123!Aa';
+    const newPassword = 'Replacement123!Aa';
+    const principal = {
+      actorType: 'user' as const, id: mockUser.id, role: 'MEMBER' as const, email: mockUser.email,
+      name: 'U', blacklisted: false, revoked: false, authorities: [], sessionId: 's-caller',
+    };
+
+    beforeEach(async () => {
+      const passwordHash = await bcrypt.hash(currentPassword, 4);
+      mockAuthRepository.findUserById.mockResolvedValue({ ...mockUser, passwordHash });
+      // The row lock re-reads the row the checks above read: no concurrent change, no disable.
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash, disabled: false });
+      // The caller's session is still live when the transaction revalidates it.
+      mockAuthSessions.isActive.mockResolvedValue(true);
+      mockAuthSessions.revokeAllForUser.mockResolvedValue([]);
+      mockPasswordResetTokens.discardUnusedFor.mockResolvedValue(1);
+    });
+
+    it('AC-14: deletes the user outstanding reset tokens inside the audited work', async () => {
+      const order: string[] = [];
+      mockAuditRecorder.audited.mockImplementationOnce(async <T>(fn: () => Promise<T>) => {
+        order.push('audited');
+        return fn();
+      });
+      mockPasswordResetTokens.discardUnusedFor.mockImplementationOnce(async () => {
+        order.push('discard');
+        return 1;
+      });
+
+      await service.changePassword(principal, { currentPassword, newPassword });
+
+      expect(mockPasswordResetTokens.discardUnusedFor).toHaveBeenCalledWith(mockUser.id);
+      // Inside the transaction the audit entry covers, so a rollback leaves the links in place too.
+      expect(order).toEqual(['audited', 'discard']);
+    });
+
+    it('AC-14: a refused audited work never discards the reset tokens', async () => {
+      const error = new Error('audit storage unavailable');
+      mockAuditRecorder.audited.mockRejectedValueOnce(error);
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword })).rejects.toBe(error);
+
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+    });
+
+    it('AC-14: a wrong current password never discards the reset tokens', async () => {
+      await expect(
+        service.changePassword(principal, { currentPassword: 'wrong', newPassword }),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+    });
+
+    it('B1: re-reads the verified hash under the user row lock and refuses a stale change without writes', async () => {
+      // A concurrent change committed first: the account password is no longer the one proved above.
+      mockAuthRepository.lockUser.mockResolvedValueOnce({ passwordHash: 'hash-of-the-winning-change', disabled: false });
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+
+      expect(mockAuthRepository.lockUser).toHaveBeenCalledWith(mockUser.id);
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    // Branch fix B2: an administrative disable that commits while this request verifies or hashes is only
+    // visible under the lock, and it must beat the write the way the refusal above the transaction does.
+    it('B2: refuses with 401 when the account was disabled under the lock, writing nothing', async () => {
+      mockAuthRepository.lockUser.mockResolvedValueOnce({ passwordHash: 'hashed-password', disabled: true });
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(AuthException);
+
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+    });
+
+    it('B1/B2: treats a user row that vanished under the lock as a signed-out account', async () => {
+      mockAuthRepository.lockUser.mockResolvedValueOnce(null);
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(AuthException);
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+    });
+
+    it('B1: refuses with 401 when the caller session is no longer live under the lock', async () => {
+      // The change that won revoked every other session of the user, this caller's included.
+      mockAuthSessions.isActive.mockResolvedValueOnce(false);
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(AuthException);
+
+      expect(mockAuthSessions.isActive).toHaveBeenCalledWith('s-caller', expect.any(Date));
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+    });
+
+    it('B1/B2: locks the user row before the hash re-check, the session revalidation and the writes', async () => {
+      await service.changePassword(principal, { currentPassword, newPassword });
+
+      const order = (mock: { mock: { invocationCallOrder: number[] } }): number => mock.mock.invocationCallOrder[0];
+      expect(order(mockAuthRepository.lockUser)).toBeLessThan(order(mockAuthSessions.isActive));
+      expect(order(mockAuthSessions.isActive)).toBeLessThan(order(mockAuthRepository.updatePasswordHash));
+      expect(order(mockAuthRepository.updatePasswordHash)).toBeLessThan(order(mockAuthSessions.revokeAllForUser));
+      expect(order(mockAuthSessions.revokeAllForUser)).toBeLessThan(order(mockPasswordResetTokens.discardUnusedFor));
     });
   });
 });

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { bookkeeping } from '../../action-context/audit-coverage';
+import type { RefreshClient } from './refresh-client';
 import { PrismaAuthSessionRepository } from './prisma-auth-session.repository';
 import type { SessionRevokeReason } from './auth-session.domain';
 
@@ -35,11 +36,16 @@ export const REFRESH_REUSE_GRACE_MS = 30_000;
 export const LOST_RESPONSE_WINDOW_MS = 20 * 60_000;
 
 export type { SessionRevokeReason };
+/** Re-exported like the revoke reason: `rotate` takes it, so callers may name it from here. */
+export type { RefreshClient };
 
 export type RotateOutcome =
   | { kind: 'rotated' }
-  /** Rotation step 5: a lost response was recovered. The caller answers the pair and audits the recovery. */
-  | { kind: 'recovered' }
+  /**
+   * Rotation step 5: a lost response was recovered. The caller answers the pair and audits the recovery,
+   * naming the IP the client presented (`null` when Fastify resolved none).
+   */
+  | { kind: 'recovered'; ip: string | null }
   | { kind: 'reused'; userId: string }
   | { kind: 'invalid' };
 
@@ -52,12 +58,28 @@ export class AuthSessionService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  /** Writes the session of a sign-in and its first refresh token, together. */
-  async start(input: { userId: string; sessionId: string; tokenId: string; expiresAt: Date }): Promise<void> {
-    await bookkeeping('auth.session-start', () =>
+  /**
+   * Writes the session of a sign-in and its first refresh token, together. Answers whether the session
+   * exists.
+   *
+   * The optional `fence` runs inside the same transaction and before either row is written, and it is the
+   * caller's answer to "may this sign-in still have a session?" (branch fix B1). Login passes the
+   * credentials it proved there, and that check takes the user row lock every password write takes: so a
+   * password change either commits before this transaction — the fence then sees the new hash and refuses,
+   * and no session is written — or it waits for this transaction and revokes the session it wrote. Without
+   * the fence a session created just after a change's bulk revocation would outlive that change for good,
+   * because a change leaves `tokenVersion` (the only thing a refresh checks) alone.
+   */
+  async start(
+    input: { userId: string; sessionId: string; tokenId: string; expiresAt: Date },
+    fence?: () => Promise<boolean>,
+  ): Promise<boolean> {
+    return await bookkeeping('auth.session-start', () =>
       this.txManager.run(async () => {
+        if (fence !== undefined && !(await fence())) return false;
         await this.sessions.createSession({ id: input.sessionId, userId: input.userId, expiresAt: input.expiresAt });
         await this.sessions.createToken({ id: input.tokenId, sessionId: input.sessionId });
+        return true;
       }),
     );
   }
@@ -73,13 +95,14 @@ export class AuthSessionService {
    * 3. first use: insert the next token and drop the tokens used before the grace window;
    * 4. second use inside the grace window (a parallel refresh of the same browser): insert the next
    *    token and keep the session — both responses then hold a refresh token that works;
-   * 5. used before the grace window but within LOST_RESPONSE_WINDOW_MS of its first use, and no token of
-   *    the session was used after it: the response that carried its successor never reached the client (a
-   *    navigation or a closed tab aborted the refresh after the API committed it), so the client presents
-   *    the newest token it holds again. Drop the undelivered successors (unused tokens older than the grace
-   *    window; a sibling a parallel retry just issued stays) and insert the next. `usedAt` is not moved, so
-   *    replays cannot slide the window. A thief replaying it instead is caught one step later (the real
-   *    holder's successor is gone, so presenting it hits step 6) or once the window has passed;
+   * 5. used before the grace window but within LOST_RESPONSE_WINDOW_MS of its first use, no token of the
+   *    session was used after it, and the presented client's User-Agent hash is the one recorded by that
+   *    first use: the response that carried its successor never reached the client (a navigation or a
+   *    closed tab aborted the refresh after the API committed it), so the client presents the newest token
+   *    it holds again. Drop the undelivered successors (unused tokens older than the grace window; a
+   *    sibling a parallel retry just issued stays) and insert the next. `usedAt` is not moved, so replays
+   *    cannot slide the window. A different User-Agent — a thief replaying the stolen token, or a row
+   *    written before the binding existed (`usedUaHash` null) — falls through to step 6;
    * 6. otherwise (a later token was used, or no row at all): revoke the session as `reuse`.
    */
   async rotate(input: {
@@ -88,13 +111,17 @@ export class AuthSessionService {
     nextTokenId: string;
     nextExpiresAt: Date;
     now: Date;
+    /** The presenting client (auth-passwords US-005): bound at first use, matched on a recovery. */
+    client: RefreshClient;
   }): Promise<RotateOutcome> {
     return await bookkeeping('auth.session-rotate', () =>
       this.txManager.run(async (): Promise<RotateOutcome> => {
         const live = await this.sessions.slideExpiry(input.sessionId, input.nextExpiresAt, input.now);
         if (!live) return { kind: 'invalid' };
 
-        const marked = await this.sessions.markUsed(input.sessionId, input.presentedTokenId, input.now);
+        const marked = await this.sessions.markUsed(
+          input.sessionId, input.presentedTokenId, input.now, input.client,
+        );
         if (marked === 1) {
           await this.sessions.createToken({
             id: input.nextTokenId,
@@ -123,9 +150,11 @@ export class AuthSessionService {
           return { kind: 'rotated' };
         }
 
-        // A lost response: nothing after this token was ever used (step 5).
+        // A lost response: nothing after this token was ever used, and the same client presents it again
+        // (step 5). A null `usedUaHash` is a row written before the binding existed, and never matches.
         if (presented !== null && presented.usedAt !== null
           && presented.usedAt.getTime() >= input.now.getTime() - LOST_RESPONSE_WINDOW_MS
+          && presented.usedUaHash !== null && presented.usedUaHash === input.client.uaHash
           && !(await this.sessions.hasTokenUsedAfter(input.sessionId, presented.usedAt, input.presentedTokenId))) {
           await this.sessions.deleteUnusedTokens(
             input.sessionId,
@@ -139,7 +168,7 @@ export class AuthSessionService {
           // Observable on purpose: a thief replaying a stolen newest token takes this path too. The caller
           // also records a `session.refresh` audit entry for it.
           this.logger.warn(`refresh session ${input.sessionId}: lost-response recovery re-rotated a used token`);
-          return { kind: 'recovered' };
+          return { kind: 'recovered', ip: input.client.ip };
         }
 
         // The revocation returns normally, so it commits; the caller records `session.refresh` itself.
@@ -159,6 +188,11 @@ export class AuthSessionService {
    */
   async revoke(sessionId: string, userId: string, reason: SessionRevokeReason, now: Date): Promise<boolean> {
     return await this.sessions.revokeOwnedSession(sessionId, userId, reason, now);
+  }
+
+  /** The caller owns the transaction and audit record for this bulk revocation. */
+  async revokeAllForUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]> {
+    return this.sessions.revokeActiveSessionsOfUser(userId, reason, now, exceptSessionId);
   }
 
   /** Whether a session is still live at `now` — the check `JwtAuthProvider` makes on every access token. */

@@ -23,6 +23,32 @@
     "delete": "Delete"
   },
   "auth": {
+    "forgot": {
+      "title": "Forgot password?",
+      "email": "Email",
+      "submit": "Send reset link",
+      "checkEmail": "If an account exists for this email, check your inbox for a reset link.",
+      "link": "Forgot password?"
+    },
+    "reset": {
+      "title": "Reset password",
+      "submit": "Reset password",
+      "invalid": "This link is invalid or has expired.",
+      "tryAgain": "Request a new link",
+      "loginNotice": "Your password has been changed. Please sign in."
+    },
+    "account": {
+      "title": "Change password",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmNewPassword": "Confirm new password",
+      "currentRequired": "Enter your current password",
+      "minimum": "Password must be at least 8 characters",
+      "mismatch": "Passwords must match",
+      "currentPasswordWrong": "Current password is incorrect",
+      "success": "Password changed",
+      "submit": "Change password"
+    },
     "login": {
       "title": "Koda",
       "subtitle": "Dev Ticket Tracker",
@@ -58,6 +84,7 @@
     }
   },
   "nav": {
+    "account": "Account",
     "dashboard": "Dashboard",
     "projects": "Projects",
     "board": "Board",

@@ -40,6 +40,19 @@ model User {
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
   authSessions                    AuthSession[]
+  passwordResetTokens             PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model Agent {
@@ -376,7 +389,7 @@ model Notification {
 /// A missing email master preference means on; a delivered notification has exactly one row here.
 model EmailSchedule {
   id             String    @id @default(cuid())
-  kind           String // NOTIFICATION | INVITE | MEMBER_ADDED
+  kind           String // NOTIFICATION | INVITE | MEMBER_ADDED | PASSWORD_RESET
   notificationId String?   @unique
   inviteId       String?
   userId         String?
@@ -446,13 +459,17 @@ model AuthSession {
 }
 
 /// One refresh token of a session; `id` is the refresh JWT's `jti`. `usedAt` is set by the rotation that
-/// presents it, so a second use — or one inside the grace window — is detectable.
+/// presents it, so a second use — or one inside the grace window — is detectable. `usedUaHash` is the
+/// sha256 hex of the User-Agent that first used it and `usedIp` the IP it presented, both written by that
+/// first use only: a lost-response recovery must present the same User-Agent (auth-passwords US-005).
 model RefreshToken {
-  id        String      @id
-  sessionId String
-  session   AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  createdAt DateTime    @default(now())
-  usedAt    DateTime?
+  id         String      @id
+  sessionId  String
+  session    AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt  DateTime    @default(now())
+  usedAt     DateTime?
+  usedUaHash String?
+  usedIp     String?
 
   @@index([sessionId])
 }

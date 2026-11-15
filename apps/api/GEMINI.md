@@ -25,7 +25,7 @@ This is the app-specific source-of-truth context for `apps/api`.
 ## Read First
 
 Before writing NestJS code in this app:
-- read and follow the `nathapp-nestjs-patterns` skill
+- check the capability catalog in `.nax/rules/nathapp-packages.md` and look up the package with the `nathapp-nestjs-docs` MCP tools (`find_package` -> `get_usage` -> `get_example` -> `get_api`)
 - prefer Nathapp platform patterns over generic NestJS alternatives
 
 ## Role In The Monorepo
@@ -197,9 +197,11 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 - DB-backed specs use `canRunDbTests()` from `test/helpers/test-environment.ts` (shared implementation at repo-root `test/helpers/test-environment.ts`): they run only with `KODA_DB_TESTS=1` outside `NAX_SANDBOXED=1`. Inside a nax sandbox they report skipped; pure tests still execute and globalSetup does not provision Postgres
 - nax's scoped test command (`bun run test:scoped <files>`) sets `KODA_DB_TESTS=1` whenever a targeted path matches `integration` or `e2e`, and the acceptance command always sets it
 - the Vitest globalSetup (`test/vitest-global-setup.ts`) picks the database in this order (`test/helpers/test-database.ts`): `KODA_TEST_DATABASE_URL` when set (CI); else the compose test database named in `.env.test` (localhost:5433) when it answers; else a throwaway Postgres 16 started with Testcontainers (needs Docker) and stopped after the run. An inherited `DATABASE_URL` is never used
-- nax's agent shell may withhold host Postgres/Docker. Do not weaken assertions to make it pass: keep the shared DB gate and verify DB behavior in host quality/acceptance runs. Without the sandbox marker, unavailable Postgres still fails loudly
-- a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped` outside the sandbox, not just compile or skip
+- nax's agent shell (`Bash`, and `RunCommand` `argv` calls) runs inside the sandbox and may withhold host Postgres/Docker. Declared commands called through `RunCommand` (`testScoped`, `test`, `typecheck`, `lint`) run on the host and reach the test Postgres: `RunCommand` `testScoped` with integration/e2e paths is the DB-mode run. Do not weaken assertions to make it pass: keep the shared DB gate and verify DB behavior in host quality/acceptance runs. Without the sandbox marker, unavailable Postgres still fails loudly
+- a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped` outside the sandbox (`RunCommand` `testScoped`), not just compile or skip
 - every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode test runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
+- DB-mode Vitest runs stay serial and reuse the app module graph in batches of at most 25 files (`db-shared-*` projects), with a fresh worker between batches to bound heap growth. Specs that mock modules stay in `db-isolated`. The root project's global setup provisions/locks the database once and returns the cleanup for the whole command
+- `bootHttpApp` owns one listener on port 0 at `127.0.0.1` until `app.close()`. Use its existing server/address for Supertest and streaming clients; do not call `listen()` again. Keeping the listener open avoids per-request port churn and intercepted HTTP responses. Fastify injection-only suites can pass `listen: false` to retain their socket-free contract
 
 ### nax acceptance tests
 

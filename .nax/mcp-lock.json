@@ -19,6 +19,71 @@
       "search_code": "cc83201b0c64547e",
       "search_graph": "65e5048e145a8077",
       "trace_path": "730682166f723d94"
+    },
+    "codebase-memory-mcp": {
+      "check_index_coverage": "b8b00f9b87cb57ed",
+      "compare_graphs": "87ec262d89f36b82",
+      "delete_project": "45dbba3dc46a8289",
+      "detect_changes": "346fbeaa837d5c1f",
+      "get_architecture": "8789f11d147ef052",
+      "get_code_snippet": "1c6007751d6f46ce",
+      "get_file_outline": "0f77ac2e7768c23a",
+      "get_graph_schema": "d86e64c6c3904c45",
+      "index_repository": "0fa32989ec66c700",
+      "index_status": "04b893d10a363a0b",
+      "ingest_traces": "6ef32f649c3c80a8",
+      "list_projects": "a71b4d8af74907af",
+      "manage_adr": "54d93874455b6c3f",
+      "query_graph": "645289466a3a14d0",
+      "search_code": "cc83201b0c64547e",
+      "search_graph": "65e5048e145a8077",
+      "trace_path": "730682166f723d94"
+    },
+    "context7": {},
+    "context7-context7": {},
+    "nathapp-nestjs-docs": {
+      "find_package": "59d15a5b7304373f",
+      "get_api": "11996d931b27ddaf",
+      "get_example": "9d35e12d26d8b515",
+      "get_usage": "9d35e12d26d8b515"
+    },
+    "nathapp-nestjs-plugin-nathapp-nestjs-docs": {
+      "find_package": "59d15a5b7304373f",
+      "get_api": "11996d931b27ddaf",
+      "get_example": "9d35e12d26d8b515",
+      "get_usage": "9d35e12d26d8b515"
     }
+  },
+  "readOnly": {
+    "codebase-memory": [
+      "check_index_coverage",
+      "compare_graphs",
+      "detect_changes",
+      "get_architecture",
+      "get_code_snippet",
+      "get_file_outline",
+      "get_graph_schema",
+      "index_status",
+      "list_projects",
+      "query_graph",
+      "search_code",
+      "search_graph",
+      "trace_path"
+    ],
+    "codebase-memory-mcp": [
+      "check_index_coverage",
+      "compare_graphs",
+      "detect_changes",
+      "get_architecture",
+      "get_code_snippet",
+      "get_file_outline",
+      "get_graph_schema",
+      "index_status",
+      "list_projects",
+      "query_graph",
+      "search_code",
+      "search_graph",
+      "trace_path"
+    ]
   }
 }

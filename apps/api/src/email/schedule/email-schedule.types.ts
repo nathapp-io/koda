@@ -3,7 +3,14 @@
  *
  * US-001: type/constant declarations only — the implementer owns persistence and claiming.
  */
-export type EmailKind = 'NOTIFICATION' | 'INVITE' | 'MEMBER_ADDED';
+export type EmailKind = 'NOTIFICATION' | 'INVITE' | 'MEMBER_ADDED' | 'PASSWORD_RESET';
+
+export interface PasswordResetSend {
+  userId: string;
+  toEmail: string;
+  locale: string;
+  now: Date;
+}
 export type EmailStatus = 'PENDING' | 'SENDING' | 'SENT' | 'SKIPPED' | 'FAILED';
 export type SkipReason = 'READ' | 'EMAIL_OFF' | 'CATEGORY_OFF' | 'USER_DISABLED' | 'SOURCE_GONE';
 

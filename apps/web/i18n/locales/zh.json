@@ -23,6 +23,32 @@
     "delete": "删除"
   },
   "auth": {
+    "forgot": {
+      "title": "忘记密码？",
+      "email": "电子邮箱",
+      "submit": "发送重置链接",
+      "checkEmail": "如果此邮箱对应的账户存在，请查看收件箱中的重置链接。",
+      "link": "忘记密码？"
+    },
+    "reset": {
+      "title": "重置密码",
+      "submit": "重置密码",
+      "invalid": "此链接无效或已过期。",
+      "tryAgain": "申请新链接",
+      "loginNotice": "密码已更改，请登录。"
+    },
+    "account": {
+      "title": "修改密码",
+      "currentPassword": "当前密码",
+      "newPassword": "新密码",
+      "confirmNewPassword": "确认新密码",
+      "currentRequired": "请输入当前密码",
+      "minimum": "密码至少需要 8 个字符",
+      "mismatch": "两次输入的密码必须一致",
+      "currentPasswordWrong": "当前密码不正确",
+      "success": "密码已修改",
+      "submit": "修改密码"
+    },
     "login": {
       "title": "Koda",
       "subtitle": "开发工单追踪器",
@@ -58,6 +84,7 @@
     }
   },
   "nav": {
+    "account": "账户",
     "dashboard": "仪表盘",
     "projects": "项目",
     "board": "看板",

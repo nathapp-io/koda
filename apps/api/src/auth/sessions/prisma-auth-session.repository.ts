@@ -9,6 +9,7 @@ import {
   RefreshTokenDomain,
   SessionRevokeReason,
 } from './auth-session.domain';
+import type { RefreshClient } from './refresh-client';
 
 /**
  * auth-sessions US-001 — the only place that touches the session tables.
@@ -95,11 +96,15 @@ export class PrismaAuthSessionRepository extends AbstractPrismaRepository<AuthSe
   /**
    * Marks the presented token used, if it is unused and belongs to the session. The affected count is the
    * answer: 1 means this rotation is the first to present it.
+   *
+   * auth-passwords US-005: the first use also records the client that presented the token — the sha256 of
+   * its User-Agent and the IP it came from. A later recovery must present the same hash; the IP is audit
+   * context only.
    */
-  async markUsed(sessionId: string, tokenId: string, now: Date): Promise<number> {
+  async markUsed(sessionId: string, tokenId: string, now: Date, client: RefreshClient): Promise<number> {
     const { count } = await this.db.refreshToken.updateMany({
       where: { id: tokenId, sessionId, usedAt: null },
-      data: { usedAt: now },
+      data: { usedAt: now, usedUaHash: client.uaHash, usedIp: client.ip },
     });
     return count;
   }
@@ -108,7 +113,13 @@ export class PrismaAuthSessionRepository extends AbstractPrismaRepository<AuthSe
   async findToken(tokenId: string, sessionId: string): Promise<RefreshTokenDomain | null> {
     const model: RefreshTokenModel | null = await this.db.refreshToken.findUnique({ where: { id: tokenId, sessionId } });
     if (model === null) return null;
-    return { id: model.id, sessionId: model.sessionId, createdAt: model.createdAt, usedAt: model.usedAt };
+    return {
+      id: model.id,
+      sessionId: model.sessionId,
+      createdAt: model.createdAt,
+      usedAt: model.usedAt,
+      usedUaHash: model.usedUaHash,
+    };
   }
 
   /**
@@ -179,6 +190,16 @@ export class PrismaAuthSessionRepository extends AbstractPrismaRepository<AuthSe
       data: { revokedAt: now, revokedReason: reason },
     });
     return count > 0;
+  }
+
+  /** Revoke only live sessions owned by the user, leaving the optional caller session intact. */
+  async revokeActiveSessionsOfUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]> {
+    const rows = await this.db.authSession.updateManyAndReturn({
+      where: { userId, revokedAt: null, expiresAt: { gt: now }, ...(exceptSessionId === undefined ? {} : { id: { not: exceptSessionId } }) },
+      data: { revokedAt: now, revokedReason: reason },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
   }
 
   /** Whether the session exists, has not been revoked and expires after `now`. A read; nothing written. */

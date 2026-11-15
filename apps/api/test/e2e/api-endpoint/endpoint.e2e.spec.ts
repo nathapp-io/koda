@@ -27,10 +27,11 @@ import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/a
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resetDb } from '../../helpers/reset-db';
+import { hashPasswordResetToken } from '../../../src/auth/password-reset/password-reset-token';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
@@ -316,6 +317,102 @@ describeIntegration('API Integration Tests', () => {
       expect(data.refreshToken).toBeTruthy();
       userAccessToken = data.accessToken;
       userRefreshToken = data.refreshToken;
+    });
+  });
+
+  describe('Password change endpoint', () => {
+    const oldPassword = 'Original123!Aa';
+    const newPassword = 'Replacement123!Aa';
+
+    beforeEach(() => resetThrottle(app));
+
+    it('POST /api/auth/password — changes the password and preserves the caller session', async () => {
+      const email = 'password-change-lifecycle@koda.test';
+      const registered = body<{ accessToken: string; refreshToken: string }>(
+        await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Password Change', password: oldPassword }).expect(201),
+      );
+      const changed = await request(httpServer).post('/api/auth/password')
+        .set('Authorization', `Bearer ${registered.accessToken}`)
+        .send({ currentPassword: oldPassword, newPassword }).expect(200);
+      expect(body(changed)).toEqual({});
+      await request(httpServer).get('/api/auth/me')
+        .set('Authorization', `Bearer ${registered.accessToken}`).expect(200);
+      await request(httpServer).post('/api/auth/refresh')
+        .set('Authorization', `Bearer ${registered.refreshToken}`).expect(200);
+      await request(httpServer).post('/api/auth/login').send({ email, password: oldPassword }).expect(401);
+      const login = await request(httpServer).post('/api/auth/login').send({ email, password: newPassword }).expect(200);
+      expect(body<{ accessToken: string }>(login).accessToken).toBeTruthy();
+    });
+
+    it('POST /api/auth/password — rejects a wrong current password without changing credentials', async () => {
+      const email = 'password-change-wrong-lifecycle@koda.test';
+      const registered = body<{ accessToken: string }>(
+        await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Password Refusal', password: oldPassword }).expect(201),
+      );
+      const response = await request(httpServer).post('/api/auth/password')
+        .set('Authorization', `Bearer ${registered.accessToken}`)
+        .send({ currentPassword: 'incorrect', newPassword }).expect(403);
+      refusal(response, 'auth.currentPasswordWrong.40003');
+      await request(httpServer).post('/api/auth/login').send({ email, password: newPassword }).expect(401);
+      await request(httpServer).post('/api/auth/login').send({ email, password: oldPassword }).expect(200);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // auth-passwords US-004 — the public reset confirmation route
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Password reset confirmation endpoint', () => {
+    const oldPassword = 'Original123!Aa';
+    const newPassword = 'Reset123!Aa';
+
+    beforeEach(() => resetThrottle(app));
+
+    /**
+     * The row the request route leaves after emailing a link: the sha256 of the raw token, expiring in
+     * 30 minutes. The token row is seeded directly so this lifecycle case needs no SMTP seam; the
+     * request-to-email path itself is covered by the reset-request and reset-confirm integration suites.
+     */
+    const seedResetToken = async (email: string): Promise<string> => {
+      const registered = body<{ user: { id: string } }>(
+        await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Reset Lifecycle', password: oldPassword }).expect(201),
+      );
+      const raw = randomUUID();
+      await prismaClient().passwordResetToken.create({
+        data: {
+          userId: registered.user.id,
+          tokenHash: hashPasswordResetToken(raw),
+          expiresAt: new Date(Date.now() + 30 * 60_000),
+        },
+      });
+      return raw;
+    };
+
+    it('POST /api/auth/password-reset/confirm — sets the password and issues no session', async () => {
+      const email = 'password-reset-confirm-lifecycle@koda.test';
+      const raw = await seedResetToken(email);
+
+      const confirmed = await request(httpServer).post('/api/auth/password-reset/confirm')
+        .send({ token: raw, newPassword }).expect(200);
+      expect(body(confirmed)).toEqual({});
+
+      await request(httpServer).post('/api/auth/login').send({ email, password: oldPassword }).expect(401);
+      const login = await request(httpServer).post('/api/auth/login')
+        .send({ email, password: newPassword }).expect(200);
+      expect(body<{ accessToken: string }>(login).accessToken).toBeTruthy();
+      // The same link never works twice.
+      const replayed = await request(httpServer).post('/api/auth/password-reset/confirm')
+        .send({ token: raw, newPassword }).expect(400);
+      refusal(replayed, 'auth.resetTokenInvalid.-2');
+    });
+
+    it('POST /api/auth/password-reset/confirm — rejects an unknown token', async () => {
+      const response = await request(httpServer).post('/api/auth/password-reset/confirm')
+        .send({ token: randomUUID(), newPassword }).expect(400);
+      refusal(response, 'auth.resetTokenInvalid.-2');
     });
   });
 

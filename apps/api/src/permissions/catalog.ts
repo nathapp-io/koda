@@ -41,6 +41,8 @@ export interface PermissionCatalogEntry {
 export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
   'session.login',
   'session.refresh',
+  'session.password.reset.request',
+  'session.password.reset.confirm',
   'auth.register',
   'auth.registration.read',
   'health.read',
@@ -75,6 +77,7 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
 export const IMPLICIT_KEYS: ReadonlySet<string> = new Set([
   'auth.me.read',
   'session.logout',
+  'session.password.change',
   'approval.request.cancel',
   'home.read',
   'notification.read',
@@ -203,8 +206,11 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'auth.registration.read': ['public'],
   'session.login': ['public'],
   'session.refresh': ['public'],
+  'session.password.reset.request': ['public'],
+  'session.password.reset.confirm': ['public'],
   'auth.me.read': ['own'],
   'session.logout': ['own'],
+  'session.password.change': ['own'],
   'ci.webhook.ingest': ['public'],
   'codeintel.index.write': ['project'],
   'codeintel.read': ['project'],

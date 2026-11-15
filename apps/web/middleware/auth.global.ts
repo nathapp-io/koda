@@ -4,7 +4,7 @@ export default defineNuxtRouteMiddleware(async (to, _from) => {
   const auth = useAuth()
 
   // Guest-only routes where authenticated users should be redirected
-  const guestOnlyRoutes = ['/login', '/register']
+  const guestOnly = ['/login', '/register', '/forgot-password'].includes(to.path) || to.path.startsWith('/reset-password/')
 
   // US-007: the public invite accept screen is visible signed in or out, so it
   // never bounces an anonymous visitor to /login (the API authorizes by token).
@@ -19,14 +19,14 @@ export default defineNuxtRouteMiddleware(async (to, _from) => {
   }
 
   // If unauthenticated and trying to access a protected route (not /login or /register)
-  if (!auth.isAuthenticated.value && !guestOnlyRoutes.includes(to.path)) {
+  if (!auth.isAuthenticated.value && !guestOnly) {
     return navigateTo(to.fullPath === '/'
       ? { path: '/login' }
       : { path: '/login', query: { redirect: to.fullPath } })
   }
 
   // If authenticated and trying to access a guest-only route
-  if (auth.isAuthenticated.value && guestOnlyRoutes.includes(to.path)) {
+  if (auth.isAuthenticated.value && guestOnly) {
     return navigateTo(safeRedirectPath(to.query.redirect))
   }
 })

@@ -46,6 +46,7 @@ const EXPECTED_REASON_IDS = [
   'approval.request-settle',
   'auth.session-start',
   'auth.session-rotate',
+  'auth.password-reset-request',
 ] as const;
 
 const EXPECTED_UNAUDITED_SURFACES = [

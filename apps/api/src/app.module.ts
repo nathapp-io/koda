@@ -12,6 +12,7 @@ import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttle
 import { KodaPrismaClient } from './prisma/koda-prisma-client';
 import { createPgAdapter } from './prisma/pg-adapter';
 import { AuthModule } from './auth/auth.module';
+import { PasswordResetModule } from './auth/password-reset/password-reset.module';
 import { UsersModule } from './users/users.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -112,6 +113,9 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
       }),
     }),
     AuthModule,
+    // auth-passwords US-003: the public reset-request route. `AuthModule` imports only the leaf
+    // `PasswordResetStoreModule`, so this import does not close the auth → notifications cycle.
+    PasswordResetModule,
     UsersModule,
     AgentsModule,
     ProjectsModule,

@@ -9,6 +9,7 @@ import { MembershipService } from '../permissions/membership.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { AuthService } from './auth.service';
 import { AuthSessionService } from './sessions/auth-session.service';
+import { PasswordResetTokenStore } from './password-reset/password-reset-token.store';
 import { JwtAuthProvider } from './jwt-auth.provider';
 
 /**
@@ -90,6 +91,8 @@ describe('session activity cache fence', () => {
         { provide: PrismaAuthRepository, useValue: mockAuthRepository },
         { provide: CacheManager, useValue: cache },
         { provide: AuthSessionService, useValue: mockAuthSessions },
+        // auth-passwords US-003: `changePassword` takes the reset-token store; this suite never uses it.
+        { provide: PasswordResetTokenStore, useValue: { discardUnusedFor: vi.fn(async () => 0) } },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: MembershipService, useValue: mockMembership },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
@@ -177,7 +180,7 @@ describe('session activity cache fence', () => {
       id: 'user-1',
       revoked: false,
       extra: { sessionId: 's-reuse', tokenId: 't-presented' },
-    } as never).catch((error: unknown) => error);
+    } as never, { uaHash: 'ua-hash-1', ip: '198.51.100.9' }).catch((error: unknown) => error);
     await revoked.promise;
     gate.resolve();
     await Promise.all([fill, refresh]);
@@ -194,7 +197,7 @@ describe('session activity cache fence', () => {
         id: 'user-1',
         revoked: false,
         extra: { sessionId: 's-reuse', tokenId: 't-presented' },
-      } as never),
+      } as never, { uaHash: 'ua-hash-1', ip: '198.51.100.9' }),
     ).rejects.toBeInstanceOf(AuthException);
   });
 });

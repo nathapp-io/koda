@@ -438,6 +438,7 @@ const backTo = computed(() => {
           <span class="hidden max-w-[16rem] truncate text-sm text-muted-foreground md:inline">
             {{ auth.user.value?.email }}
           </span>
+          <NuxtLink to="/settings/account" data-testid="header-account-link" class="text-sm text-muted-foreground hover:text-foreground">{{ t('nav.account') }}</NuxtLink>
           <Button
             variant="ghost"
             size="sm"

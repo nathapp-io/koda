@@ -297,3 +297,25 @@ describe('US-007 AC15: unauthenticated visit to /invite/abc is not redirected to
     expect(result === undefined || result === true).toBe(true)
   })
 })
+
+
+test.each(['/forgot-password', '/reset-password/abc', '/login', '/register'])('AC-10/11/14 anonymous guest route %s', async path => {
+  const { userRef, isAuthenticated } = makeAuthEnv(null)
+  const navigate = jest.fn()
+  ;(globalThis as Record<string, unknown>).useAuth = () => ({ user: userRef, isAuthenticated, fetchUser: async () => false })
+  ;(globalThis as Record<string, unknown>).navigateTo = navigate
+  ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: unknown) => fn
+  const mod = await import(`${middlewarePath}`)
+  await mod.default(makeRoute(path), makeRoute('/'))
+  expect(navigate).not.toHaveBeenCalled()
+})
+test.each(['/forgot-password', '/reset-password/abc', '/login', '/register'])('AC-12/15 authenticated guest route %s sanitizes redirect', async path => {
+  const { userRef, isAuthenticated } = makeAuthEnv('token', { id: '1' })
+  const navigate = jest.fn()
+  ;(globalThis as Record<string, unknown>).useAuth = () => ({ user: userRef, isAuthenticated, fetchUser: async () => true })
+  ;(globalThis as Record<string, unknown>).navigateTo = navigate
+  ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: unknown) => fn
+  const mod = await import(`${middlewarePath}`)
+  await mod.default(makeRoute(path, { redirect: '//evil.example' }), makeRoute('/'))
+  expect(navigate).toHaveBeenCalledWith('/')
+})

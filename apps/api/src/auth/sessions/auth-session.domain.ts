@@ -31,6 +31,11 @@ export interface RefreshTokenDomain {
   sessionId: string;
   createdAt: Date;
   usedAt: Date | null;
+  /**
+   * auth-passwords US-005: the sha256 hex of the User-Agent that first used this token, or null for a row
+   * written before the binding existed. Only a recovery presenting the same hash may re-rotate it.
+   */
+  usedUaHash: string | null;
 }
 
 /** The session `start` writes; `createdAt` stays the column default, which is the login's own time. */

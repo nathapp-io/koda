@@ -7,6 +7,8 @@
       </p>
     </div>
 
+    <p v-if="route.query.reset === '1'" role="status" class="text-sm text-muted-foreground">{{ t('auth.reset.loginNotice') }}</p>
+
     <form class="space-y-4" @submit.prevent="onSubmit">
       <FormField name="email" v-slot="{ componentField }">
         <FormItem>
@@ -40,6 +42,8 @@
         {{ t('auth.login.signIn') }}
       </Button>
     </form>
+
+    <p class="text-center text-sm"><NuxtLink to="/forgot-password" class="text-link hover:underline">{{ t('auth.forgot.link') }}</NuxtLink></p>
 
     <p v-if="registrationOpen" class="text-center text-sm text-muted-foreground">
       {{ t('auth.login.noAccount') }}

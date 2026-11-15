@@ -10,7 +10,7 @@
  *
  * Run: cd apps/api && bun run test:db:up && KODA_DB_TESTS=1 npx vitest run test/integration/auth/refresh-rotation.integration.spec.ts
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as bcrypt from 'bcrypt';
@@ -40,6 +40,12 @@ interface TokenPair {
   refreshToken: string;
 }
 
+/** The sha256 hex the first use must store for a User-Agent, computed without the production helper. */
+const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+/** The summary every lost-response recovery records: the presenting IP is part of the entry. */
+const RECOVERY_SUMMARY = /^refresh token lost-response recovery; session kept; ip \S+$/;
+
 /** A signed JWT's claims, without verifying it: these cases only need the ids it names. */
 const claims = (token: string): Record<string, unknown> =>
   JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as Record<string, unknown>;
@@ -62,8 +68,11 @@ describeIntegration('refresh rotation (PG)', () => {
     return { userId: user.id, pair: data<TokenPair>(res) };
   };
 
-  const refresh = (refreshToken: string) =>
-    request(server).post('/api/auth/refresh').set('Authorization', `Bearer ${refreshToken}`);
+  /** Presents a refresh token; `userAgent` is the header the client sends (auth-passwords US-005). */
+  const refresh = (refreshToken: string, userAgent?: string) => {
+    const call = request(server).post('/api/auth/refresh').set('Authorization', `Bearer ${refreshToken}`);
+    return userAgent === undefined ? call : call.set('User-Agent', userAgent);
+  };
 
   const me = async (accessToken: string): Promise<number> =>
     (await request(server).get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`)).status;
@@ -199,10 +208,10 @@ describeIntegration('refresh rotation (PG)', () => {
   it('lost response: a replay after the grace window whose successor was never used re-rotates instead of revoking', async () => {
     const { userId, pair } = await newUserWithSession();
     // The successor never reaches the client (a navigation aborted the refresh after the API committed it).
-    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
     await ageExchange(pair, lost);
 
-    const resent = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const resent = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
 
     expect(sessionIdOf(resent)).toBe(sessionIdOf(pair));
     expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
@@ -211,11 +220,8 @@ describeIntegration('refresh rotation (PG)', () => {
     // The recovery is on the record: a thief replaying a stolen newest token would take this path too.
     const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      resourceType: 'user',
-      projectId: null,
-      summary: 'refresh token lost-response recovery; session kept',
-    });
+    expect(entries[0]).toMatchObject({ resourceType: 'user', projectId: null });
+    expect(entries[0]?.summary).toMatch(RECOVERY_SUMMARY);
     // The undelivered successor is gone; the new chain keeps rotating.
     expect(await db.refreshToken.findUnique({ where: { id: tokenIdOf(lost) } })).toBeNull();
     await refresh(resent.refreshToken).expect(200);
@@ -223,10 +229,12 @@ describeIntegration('refresh rotation (PG)', () => {
 
   it('lost response: parallel retries of the same stale token all answer 200 and keep the session', async () => {
     const { pair } = await newUserWithSession();
-    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
     await ageExchange(pair, lost);
 
-    const responses = await Promise.all([refresh(pair.refreshToken), refresh(pair.refreshToken), refresh(pair.refreshToken)]);
+    const responses = await Promise.all([
+      refresh(pair.refreshToken, 'UA-1'), refresh(pair.refreshToken, 'UA-1'), refresh(pair.refreshToken, 'UA-1'),
+    ]);
 
     expect(responses.map((res) => res.status)).toEqual([200, 200, 200]);
     expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
@@ -236,10 +244,10 @@ describeIntegration('refresh rotation (PG)', () => {
 
   it('lost response: a thief replaying the newest used token is caught when the real holder presents its successor', async () => {
     const { userId, pair } = await newUserWithSession();
-    const holder = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const holder = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
     await ageExchange(pair, holder);
 
-    const thief = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const thief = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
     await refresh(holder.refreshToken).expect(401);
 
     expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
@@ -249,20 +257,128 @@ describeIntegration('refresh rotation (PG)', () => {
       where: { key: 'session.refresh', resourceId: userId },
       orderBy: { createdAt: 'asc' },
     })).map((entry) => entry.summary);
-    expect(summaries).toEqual([
-      'refresh token lost-response recovery; session kept',
-      'refresh token reuse; session revoked',
-    ]);
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toMatch(RECOVERY_SUMMARY);
+    expect(summaries[1]).toBe('refresh token reuse; session revoked');
     await refresh(thief.refreshToken).expect(401);
     expect(await me(thief.accessToken)).toBe(401);
   }, TIMEOUT);
 
+  // ── auth-passwords US-005: the recovery is bound to the token's first-use User-Agent ──────────────
+  it('AC-4: a first-use refresh stores the presenting User-Agent hash and a non-null IP', async () => {
+    const { pair } = await newUserWithSession();
+
+    await refresh(pair.refreshToken, 'UA-1').expect(200);
+
+    const presented = await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } });
+    expect(presented.usedAt).toBeInstanceOf(Date);
+    expect(presented.usedUaHash).toBe(sha256('UA-1'));
+    expect(presented.usedIp).toEqual(expect.any(String));
+    expect(presented.usedIp).not.toBe('');
+  }, TIMEOUT);
+
+  it('AC-5: a lost-response retry with the same User-Agent answers 200 and keeps the session', async () => {
+    const { userId, pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
+    await ageExchange(pair, lost);
+
+    const resent = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
+
+    expect(sessionIdOf(resent)).toBe(sessionIdOf(pair));
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedAt: null, revokedReason: null });
+    // The binding is what let it through: the first use is still the one on record.
+    expect((await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedUaHash)
+      .toBe(sha256('UA-1'));
+    const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.summary).toMatch(RECOVERY_SUMMARY);
+    expect(await me(resent.accessToken)).toBe(200);
+  }, TIMEOUT);
+
+  it('AC-6: a lost-response retry from a different User-Agent answers 401 and revokes as reuse', async () => {
+    const { userId, pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
+    await ageExchange(pair, lost);
+
+    const retry = await refresh(pair.refreshToken, 'UA-2');
+
+    expect(retry.status).toBe(401);
+    expect(retry.body.ret).toBe(40000);
+    expect(retry.body.message).toBe(AUTH_REFUSED);
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedReason: 'reuse' });
+    // The mismatch is a reuse, so the entry is the unchanged reuse summary — one entry, not two.
+    const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ summary: 'refresh token reuse; session revoked' });
+  }, TIMEOUT);
+
+  it('AC-15 (US-005): the User-Agent mismatch is the one reuse entry, with the unchanged summary', async () => {
+    const { userId, pair } = await newUserWithSession();
+    // A first use that bound the token to UA-1, whose successor the client never received.
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
+    await ageExchange(pair, lost);
+
+    await refresh(pair.refreshToken, 'UA-2').expect(401);
+
+    // Exactly one entry: a mismatch falls through to step 6, so no recovery entry is written beside it.
+    const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      key: 'session.refresh',
+      resourceType: 'user',
+      resourceId: userId,
+      projectId: null,
+      summary: 'refresh token reuse; session revoked',
+    });
+  }, TIMEOUT);
+
+  it('AC-8: a token whose first use stored no User-Agent (a legacy row) is never recovered', async () => {
+    const { userId, pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
+    await ageExchange(pair, lost);
+    // What a row written before the migration looks like.
+    await db.refreshToken.update({ where: { id: tokenIdOf(pair) }, data: { usedUaHash: null } });
+
+    await refresh(pair.refreshToken, 'UA-1').expect(401);
+
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedReason: 'reuse' });
+    expect(await db.auditEntry.count({ where: { key: 'session.refresh', resourceId: userId } })).toBe(1);
+  }, TIMEOUT);
+
+  it('AC-13: a refresh inside the grace window is not bound to the User-Agent', async () => {
+    const { pair } = await newUserWithSession();
+    // The first use records UA-1; a parallel retry from another client inside 30 s still rotates.
+    await refresh(pair.refreshToken, 'UA-1').expect(200);
+
+    const graceRetry = await refresh(pair.refreshToken, 'UA-2');
+
+    expect(graceRetry.status).toBe(200);
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedAt: null });
+    // Step 4 does not rewrite the binding: it belongs to the first use.
+    expect((await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedUaHash)
+      .toBe(sha256('UA-1'));
+  }, TIMEOUT);
+
+  it('AC-14: the first use is not bound to the User-Agent the login presented', async () => {
+    // `newUserWithSession` logs in with superagent's own User-Agent; the refresh below presents another.
+    const { pair } = await newUserWithSession();
+
+    expect((await refresh(pair.refreshToken, 'UA-1')).status).toBe(200);
+
+    expect((await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedUaHash)
+      .toBe(sha256('UA-1'));
+  }, TIMEOUT);
+
   it('lost response: a token used longer than the recovery window ago is reuse, even with nothing used after it', async () => {
     const { userId, pair } = await newUserWithSession();
-    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
     await ageExchange(pair, lost, LOST_RESPONSE_WINDOW_MS + 1_000);
 
-    await refresh(pair.refreshToken).expect(401);
+    await refresh(pair.refreshToken, 'UA-1').expect(401);
 
     expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
       .toMatchObject({ revokedReason: 'reuse' });
@@ -271,11 +387,11 @@ describeIntegration('refresh rotation (PG)', () => {
 
   it('lost response: repeated replays do not slide the window (usedAt keeps the first use)', async () => {
     const { pair } = await newUserWithSession();
-    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
     await ageExchange(pair, lost);
     const firstUse = (await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedAt;
 
-    await refresh(pair.refreshToken).expect(200);
+    await refresh(pair.refreshToken, 'UA-1').expect(200);
 
     expect((await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedAt).toEqual(firstUse);
   }, TIMEOUT);

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { EmailSchedule as EmailScheduleModel, Prisma, PrismaClient } from '../../generated/prisma/client';
 import {
-  EmailKind, EmailScheduleRow, InviteSend, LAST_ERROR_MAX, LOCK_MS, MemberAddedEmail, NewNotificationEmail, SkipReason,
+  EmailKind, EmailScheduleRow, InviteSend, LAST_ERROR_MAX, LOCK_MS, MemberAddedEmail, NewNotificationEmail, PasswordResetSend, SkipReason,
 } from './email-schedule.types';
 
 /**
@@ -69,6 +69,23 @@ export class EmailScheduleRepository {
     return this.toRow(model);
   }
 
+  async startPasswordResetSend(input: PasswordResetSend): Promise<EmailScheduleRow> {
+    const model = await this.prisma.client.emailSchedule.create({
+      data: {
+        kind: 'PASSWORD_RESET' satisfies EmailKind,
+        userId: input.userId,
+        inviteId: null,
+        toEmail: input.toEmail,
+        locale: input.locale,
+        status: 'SENDING',
+        attempts: 1,
+        dueAt: input.now,
+        lockedUntil: new Date(input.now.getTime() + LOCK_MS),
+      },
+    });
+    return this.toRow(model);
+  }
+
   async claimDue(now: Date, limit: number): Promise<EmailScheduleRow[]> {
     const lockedUntil = new Date(now.getTime() + LOCK_MS);
     const rows = await this.prisma.client.$queryRaw<EmailScheduleModel[]>(Prisma.sql`
@@ -93,7 +110,7 @@ export class EmailScheduleRepository {
   /** An INVITE row that stayed SENDING past its lock is terminal: only the token hash exists, so it cannot retry. */
   async closeAbandonedInvites(now: Date): Promise<number> {
     const result = await this.prisma.client.emailSchedule.updateMany({
-      where: { kind: 'INVITE', status: 'SENDING', lockedUntil: { lt: now } },
+      where: { kind: { in: ['INVITE', 'PASSWORD_RESET'] }, status: 'SENDING', lockedUntil: { lt: now } },
       data: { status: 'FAILED', lastError: 'abandoned', lockedUntil: null },
     });
     return result.count;

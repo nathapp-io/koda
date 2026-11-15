@@ -8,6 +8,8 @@ import * as bcrypt from 'bcrypt';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { isUserPrincipal, type KodaPrincipal } from './principal/koda-principal.types';
 import type { IPrincipal } from './types';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
@@ -19,6 +21,8 @@ import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { AuthSessionService } from './sessions/auth-session.service';
+import type { RefreshClient } from './sessions/refresh-client';
+import { PasswordResetTokenStore } from './password-reset/password-reset-token.store';
 
 export interface JwtPayload {
   sub: string;
@@ -47,6 +51,7 @@ export class AuthService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly authSessions: AuthSessionService,
+    private readonly passwordResetTokens: PasswordResetTokenStore,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -145,10 +150,20 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    return this.issueSession(user);
+    // Branch fix B1: the hash proved above must still be the account's password at the moment the session
+    // is written, read under the user row lock every password write takes. A change that commits while
+    // this request is hashing therefore refuses this sign-in — 401, like a wrong password — instead of
+    // handing out a session its bulk revocation has already run past; and a change that arrives later
+    // waits for the session, then revokes it. Without the fence the new session would refresh for good,
+    // because a password change leaves `tokenVersion` alone.
+    const verifiedHash = user.passwordHash;
+    return this.issueSession(user, async () => {
+      const locked = await this.authRepo.lockUser(user.id);
+      return locked !== null && !locked.disabled && locked.passwordHash === verifiedHash;
+    });
   }
 
-  async refresh(principal: IPrincipal) {
+  async refresh(principal: IPrincipal, client: RefreshClient) {
     // H1: the refresh strategy flags tokens issued before a logout
     // (tokenVersion < current). Never mint a new pair from those.
     if (principal.revoked) {
@@ -187,6 +202,8 @@ export class AuthService {
       nextTokenId,
       nextExpiresAt: this.refreshExpiryOf(refreshToken),
       now: new Date(),
+      // auth-passwords US-005: the first use binds the token to this client, and a recovery must match it.
+      client,
     });
 
     // The session ended (a logout, an expiry): mint nothing and record nothing — a dead session is not
@@ -207,8 +224,12 @@ export class AuthService {
 
     if (outcome.kind === 'recovered') {
       // A lost response was recovered (rotation step 5). A thief replaying a stolen newest token inside
-      // the window takes the same path, so the recovery goes on the record next to the reuse revocations.
-      await this.recordRefreshEvent(user.id, 'refresh token lost-response recovery; session kept');
+      // the window takes the same path, so the recovery goes on the record next to the reuse revocations,
+      // naming the IP it came from (US-005: the recovery is the one refresh outcome worth chasing).
+      await this.recordRefreshEvent(
+        user.id,
+        `refresh token lost-response recovery; session kept; ip ${outcome.ip ?? 'unknown'}`,
+      );
     }
 
     return { accessToken, refreshToken, user: UserResponseDto.from(user, role) };
@@ -246,8 +267,14 @@ export class AuthService {
     return UserResponseDto.from(user, await this.roleClaim(user.id));
   }
 
-  /** The session shape shared by register, login, refresh and invite acceptance. */
-  async issueSession(user: UserDomain): Promise<AuthResponseDto> {
+  /**
+   * The session shape shared by register, login, refresh and invite acceptance.
+   *
+   * `fence` (branch fix B1) is a credential re-check that `AuthSessionService.start` runs inside the
+   * session's own transaction, before the rows are written: a sign-in it refuses writes no session and
+   * answers like a wrong password.
+   */
+  async issueSession(user: UserDomain, fence?: () => Promise<boolean>): Promise<AuthResponseDto> {
     // Derive once so the JWT and response describe the same binding snapshot.
     const role = await this.roleClaim(user.id);
     const response = UserResponseDto.from(user, role);
@@ -255,12 +282,13 @@ export class AuthService {
     const tokenId = randomUUID();
     const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, tokenId);
     const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
-    await this.authSessions.start({
+    const started = await this.authSessions.start({
       userId: user.id,
       sessionId,
       tokenId,
       expiresAt: this.refreshExpiryOf(refreshToken),
-    });
+    }, fence);
+    if (!started) throw new AuthException({}, 'auth');
     return { accessToken, refreshToken, user: response };
   }
 
@@ -271,6 +299,53 @@ export class AuthService {
       throw new Error('Signed refresh token did not contain a valid exp claim');
     }
     return new Date(claims.exp * 1000);
+  }
+
+  async changePassword(principal: KodaPrincipal, dto: ChangePasswordDto): Promise<void> {
+    if (!isUserPrincipal(principal) || !principal.sessionId) throw new AuthException({}, 'auth');
+    const sessionId = principal.sessionId;
+    const user = await this.authRepo.findUserById(principal.id);
+    if (!user || user.disabled) throw new AuthException({}, 'auth');
+    if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+      throw new ForbiddenAppException({}, 'auth.currentPasswordWrong');
+    }
+    // The hash the compare above proved. The transaction only writes while it is still the stored one,
+    // so two changes racing the same correct `currentPassword` cannot both win (branch fix B1).
+    const verifiedHash = user.passwordHash;
+    const hash = await bcrypt.hash(dto.newPassword, 12);
+    const now = new Date();
+    const revoked = await this.audit.audited(async () => {
+      // User row first, then the rows that hang off it — the lock order `PasswordResetService.confirm`
+      // and the reset request use too (branch fix B2), so a concurrent confirmation cannot deadlock
+      // against this transaction. Under READ COMMITTED the lock also re-reads the row: another change
+      // that committed while this request was hashing is visible in `locked`, and one still in flight
+      // waits behind it.
+      const locked = await this.authRepo.lockUser(user.id);
+      // The account as the lock sees it, not as the checks above saw it (branch fix B2): an administrative
+      // disable commits its own update on this row, so one that finished while this request was verifying
+      // or hashing is visible here and only here. It answers like the refusal above the transaction — 401,
+      // nothing written — instead of letting a disabled account change its own password.
+      if (!locked || locked.disabled) throw new AuthException({}, 'auth');
+      // A concurrent change of the same user committed first, so the `currentPassword` this request
+      // verified is no longer the account's password: answer the same 403 a wrong current password gets
+      // and write nothing, instead of overwriting the change that won.
+      if (locked.passwordHash !== verifiedHash) {
+        throw new ForbiddenAppException({}, 'auth.currentPasswordWrong');
+      }
+      // Revalidated under the lock as well: a change that won revokes every other session of the user, so
+      // this caller's session may already be gone. A stale request ends here with nothing written.
+      if (!(await this.authSessions.isActive(sessionId, now))) throw new AuthException({}, 'auth');
+      await this.authRepo.updatePasswordHash(user.id, hash);
+      const revokedIds = await this.authSessions.revokeAllForUser(user.id, 'password-change', now, sessionId);
+      // auth-passwords US-003: a reset link emailed before this change stops working, in the same
+      // transaction, so the password write and the link invalidation commit or roll back together.
+      await this.passwordResetTokens.discardUnusedFor(user.id);
+      return revokedIds;
+    }, () => ({ key: 'session.password.change', resourceType: 'user', resourceId: user.id, projectId: null, summary: 'password changed' }));
+    for (const id of revoked) {
+      await withAuthSessionCacheLock(id, () => this.cache.invalidate(authSessionCacheKey(id)));
+    }
+    await this.cache.invalidate(userAuthStateCacheKey(user.id));
   }
 
   async validateUser(principal: IPrincipal) {

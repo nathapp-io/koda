@@ -17,6 +17,7 @@ import {
   AuthSessionService,
   REFRESH_REUSE_GRACE_MS,
 } from '../../../src/auth/sessions/auth-session.service';
+import { refreshClientOf } from '../../../src/auth/sessions/refresh-client';
 import { PrismaAuthSessionRepository } from '../../../src/auth/sessions/prisma-auth-session.repository';
 import { AUTH_SESSION_REPOSITORY } from '../../../src/auth/sessions/auth-session.domain';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -87,8 +88,17 @@ describeIntegration('auth sessions store (PG)', () => {
     await asUser(() => sessions.start({ userId, sessionId, tokenId, expiresAt }));
   };
 
+  /**
+   * auth-passwords US-005: every rotation presents a client. These cases keep one client, so a
+   * recovery matches; the binding itself is covered in `refresh-rotation.integration.spec.ts`.
+   */
+  const CLIENT = { uaHash: refreshClientOf('UA-1', undefined).uaHash, ip: '203.0.113.7' };
+
   const rotate = (
-    input: { sessionId?: string; presentedTokenId: string; nextTokenId: string; now: Date; nextExpiresAt?: Date },
+    input: {
+      sessionId?: string; presentedTokenId: string; nextTokenId: string; now: Date; nextExpiresAt?: Date;
+      client?: { uaHash: string; ip: string | null };
+    },
   ) =>
     asUser(() =>
       sessions.rotate({
@@ -97,12 +107,25 @@ describeIntegration('auth sessions store (PG)', () => {
         nextTokenId: input.nextTokenId,
         nextExpiresAt: input.nextExpiresAt ?? at(WEEK + input.now.getTime() - t0.getTime()),
         now: input.now,
+        client: input.client ?? CLIENT,
       }),
     );
 
   const sessionRow = (sessionId = 's1') => db.authSession.findUnique({ where: { id: sessionId } });
   const tokenRows = (sessionId = 's1') =>
     db.refreshToken.findMany({ where: { sessionId }, orderBy: { id: 'asc' } });
+
+  it('bulk revocation preserves an already revoked session and excludes its id', async () => {
+    await startSession('old', 'old-token');
+    await startSession('live', 'live-token');
+    await db.authSession.update({ where: { id: 'old' }, data: { revokedAt: at(100), revokedReason: 'logout' } });
+
+    const repository = module.get(PrismaAuthSessionRepository);
+    const ids = await asUser(() => repository.revokeActiveSessionsOfUser(userId, 'password-change', at(200)));
+    expect(ids).toEqual(['live']);
+    expect(await sessionRow('old')).toMatchObject({ revokedAt: at(100), revokedReason: 'logout' });
+    expect(await sessionRow('live')).toMatchObject({ revokedAt: at(200), revokedReason: 'password-change' });
+  }, TIMEOUT);
 
   it('AC-1: start inserts the session with its user and expiry, holding exactly one unused token', async () => {
     await startSession('s1', 't1', at(WEEK));
@@ -210,8 +233,8 @@ describeIntegration('auth sessions store (PG)', () => {
     await expect(
       asUser(() =>
         Promise.all([
-          sessions.rotate({ sessionId: 's1', presentedTokenId: 't1', nextTokenId: 't2', nextExpiresAt: at(WEEK), now }),
-          sessions.rotate({ sessionId: 's1', presentedTokenId: 't1', nextTokenId: 't3', nextExpiresAt: at(WEEK), now }),
+          sessions.rotate({ sessionId: 's1', presentedTokenId: 't1', nextTokenId: 't2', nextExpiresAt: at(WEEK), now, client: CLIENT }),
+          sessions.rotate({ sessionId: 's1', presentedTokenId: 't1', nextTokenId: 't3', nextExpiresAt: at(WEEK), now, client: CLIENT }),
         ]),
       ),
     ).resolves.toEqual([{ kind: 'rotated' }, { kind: 'rotated' }]);
