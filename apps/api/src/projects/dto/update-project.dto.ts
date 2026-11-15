@@ -9,7 +9,7 @@ export class UpdateProjectDto {
   })
   @IsOptional()
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(2, { message: 'common.validation.minLength' })
+  @MinLength(2, { message: 'common.validation.minLength|{"min":2}' })
   name?: string;
 
   @ApiProperty({
@@ -55,7 +55,7 @@ export class UpdateProjectDto {
   })
   @IsOptional()
   @IsString({ message: 'common.validation.isString' })
-  @MaxLength(3000, { message: 'common.validation.maxLength' })
+  @MaxLength(3000, { message: 'common.validation.maxLength|{"max":3000}' })
   brief?: string | null;
 
   @ApiProperty({

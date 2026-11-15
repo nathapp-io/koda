@@ -8,7 +8,7 @@ export class CreateProjectDto {
     minLength: 2,
   })
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(2, { message: 'common.validation.minLength' })
+  @MinLength(2, { message: 'common.validation.minLength|{"min":2}' })
   name!: string;
 
   @ApiProperty({

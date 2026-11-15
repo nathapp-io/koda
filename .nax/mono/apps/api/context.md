@@ -74,6 +74,9 @@ Cross-cutting modules:
 - a DTO validation message is the i18n key itself (`message: 'common.validation.isEmail'`), not a
   `$t(...)` wrapper: the validation filter translates the key with the request's language, and a
   `$t(...)` string is not a key, so the client would receive the placeholder verbatim (koda #466)
+- a message with placeholders carries its arguments after a `|`
+  (`message: 'common.validation.minLength|{"min":8}'`): the filter splits the key from the
+  arguments and interpolates them, so a length rule answers with the number it asks for
 - API responses should use the Nathapp JSON envelope pattern
 - Prisma 7: import `PrismaClient`, `Prisma` and model types from the generated client
   (`src/generated/prisma/client`; gitignored, rebuilt by `bun install` or `bun run db:generate`), never from

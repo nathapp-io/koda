@@ -9,18 +9,18 @@ import { PASSWORD_COMPLEXITY } from '../../auth/dto/register.dto';
 export class CreateUserDto {
   @ApiProperty({ example: 'dev@example.com' })
   @IsEmail({}, { message: 'common.validation.isEmail' })
-  @MaxLength(254, { message: 'common.validation.maxLength' })
+  @MaxLength(254, { message: 'common.validation.maxLength|{"max":254}' })
   declare email: string;
 
   @ApiProperty({ example: 'Dev User' })
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(1, { message: 'common.validation.minLength' })
-  @MaxLength(100, { message: 'common.validation.maxLength' })
+  @MinLength(1, { message: 'common.validation.minLength|{"min":1}' })
+  @MaxLength(100, { message: 'common.validation.maxLength|{"max":100}' })
   declare name: string;
 
   @ApiProperty({ description: 'Temporary password, handed over out of band', example: 'StrongPass123!' })
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(8, { message: 'common.validation.minLength' })
+  @MinLength(8, { message: 'common.validation.minLength|{"min":8}' })
   @Matches(PASSWORD_COMPLEXITY, { message: 'common.validation.passwordComplexity' })
   declare password: string;
 }

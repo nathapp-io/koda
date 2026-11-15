@@ -10,13 +10,13 @@ import { PASSWORD_COMPLEXITY } from './register.dto';
 export class PasswordResetConfirmDto {
   @ApiProperty({ description: 'The raw token from the reset link' })
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(1, { message: 'common.validation.minLength' })
-  @MaxLength(128, { message: 'common.validation.maxLength' })
+  @MinLength(1, { message: 'common.validation.minLength|{"min":1}' })
+  @MaxLength(128, { message: 'common.validation.maxLength|{"max":128}' })
   declare token: string;
 
   @ApiProperty({ example: 'StrongPass123!' })
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(8, { message: 'common.validation.minLength' })
+  @MinLength(8, { message: 'common.validation.minLength|{"min":8}' })
   @Matches(PASSWORD_COMPLEXITY, { message: 'common.validation.passwordComplexity' })
   declare newPassword: string;
 }

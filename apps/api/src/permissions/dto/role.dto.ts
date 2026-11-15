@@ -68,14 +68,14 @@ export class CreateRoleDto {
 
   @ApiProperty({ example: 'QA' })
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(1, { message: 'common.validation.minLength' })
-  @MaxLength(100, { message: 'common.validation.maxLength' })
+  @MinLength(1, { message: 'common.validation.minLength|{"min":1}' })
+  @MaxLength(100, { message: 'common.validation.maxLength|{"max":100}' })
   declare name: string;
 
   @ApiPropertyOptional({ example: 'Runs the QA pass' })
   @IsOptional()
   @IsString({ message: 'common.validation.isString' })
-  @MaxLength(500, { message: 'common.validation.maxLength' })
+  @MaxLength(500, { message: 'common.validation.maxLength|{"max":500}' })
   description?: string;
 
   @ApiProperty({ enum: ROLE_SCOPES, description: 'Cannot change after creation' })
@@ -93,14 +93,14 @@ export class UpdateRoleDto {
   @ApiPropertyOptional({ description: 'Rejected for a system role' })
   @ValidateIf((_object, value) => value !== undefined)
   @IsString({ message: 'common.validation.isString' })
-  @MinLength(1, { message: 'common.validation.minLength' })
-  @MaxLength(100, { message: 'common.validation.maxLength' })
+  @MinLength(1, { message: 'common.validation.minLength|{"min":1}' })
+  @MaxLength(100, { message: 'common.validation.maxLength|{"max":100}' })
   name?: string;
 
   @ApiPropertyOptional()
   @ValidateIf((_object, value) => value !== undefined)
   @IsString({ message: 'common.validation.isString' })
-  @MaxLength(500, { message: 'common.validation.maxLength' })
+  @MaxLength(500, { message: 'common.validation.maxLength|{"max":500}' })
   description?: string;
 
   @ApiPropertyOptional({ type: [String], description: 'Replaces the stored entry list' })
