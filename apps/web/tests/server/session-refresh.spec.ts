@@ -1,7 +1,7 @@
 import { describe, test, expect, jest, beforeEach } from '@jest/globals'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { clearAuthCookies as clearRealAuthCookies, setAuthCookies as setRealAuthCookies } from '~/server/utils/api'
+import { clearAuthCookies as clearRealAuthCookies, setAuthCookies as setRealAuthCookies, forwardToApi as realForwardToApi } from '~/server/utils/api'
 
 const middlewarePath = join(__dirname, '..', '..', 'server', 'middleware', 'session-refresh.ts')
 const g = globalThis as Record<string, unknown>
@@ -102,6 +102,20 @@ describe('SSR session refresh middleware', () => {
     await (await loadHandler())(req)
     expect(g.forwardToApi).toHaveBeenCalledTimes(1)
     expect((g.forwardToApi as jest.Mock).mock.calls[0]).toEqual([req, '/auth/refresh', { method: 'POST', cookieName: 'refresh' }])
+  })
+
+  test('AC-2 browser UA reaches upstream refresh', async () => {
+    const req = event()
+    Object.assign(req.node.req.headers, { 'user-agent': 'UA-1' })
+    const raw = jest.fn(async () => ({ status: 503, _data: {} }))
+    g.forwardToApi = realForwardToApi
+    g.useRuntimeConfig = () => ({ apiInternalUrl: 'http://localhost:3100' })
+    g.getCookie = () => 'r1'
+    g.getRequestHeader = (e: TestEvent, name: string) => (e.node.req.headers as Record<string, string>)[name]
+    g.$fetch = { raw }
+    await (await loadHandler())(req)
+    expect(raw).toHaveBeenCalledTimes(1)
+    expect((raw.mock.calls[0] as unknown as [string, { headers: Record<string, string> }])[1].headers['User-Agent']).toBe('UA-1')
   })
 
   test('AC-3/4 writes response cookies and the same-render cookie header', async () => {

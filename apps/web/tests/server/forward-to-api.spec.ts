@@ -124,6 +124,31 @@ describe('forwardToApi client IP (see server/utils/client-ip.ts)', () => {
   })
 })
 
+describe('browser User-Agent forwarding', () => {
+  test('AC-1 forwards the browser User-Agent', async () => {
+    g.getCookie = () => undefined
+    g.getRequestHeader = (_event: unknown, name: string) => name === 'user-agent' ? 'Mozilla/5.0 Test' : undefined
+    await forwardToApi(makeEvent(), '/auth/refresh')
+    expect((rawMock.mock.calls[0] as [string, { headers: Record<string, string> }])[1].headers['User-Agent']).toBe('Mozilla/5.0 Test')
+  })
+  test('AC-3 omits User-Agent when absent', async () => {
+    g.getCookie = () => undefined
+    g.getRequestHeader = () => undefined
+    await forwardToApi(makeEvent(), '/auth/logout')
+    expect((rawMock.mock.calls[0] as [string, { headers: Record<string, string> }])[1].headers).not.toHaveProperty('User-Agent')
+  })
+  test('AC-12 preserves other headers', async () => {
+    g.getCookie = () => 'token'
+    g.getRequestHeader = (_event: unknown, name: string) => name === 'content-type' ? 'application/json' : undefined
+    await forwardToApi(makeEvent('198.51.100.9'), '/auth/logout', { body: {} })
+    g.getRequestHeader = (_event: unknown, name: string) => name === 'content-type' ? 'application/json' : name === 'user-agent' ? 'UA' : undefined
+    await forwardToApi(makeEvent('198.51.100.9'), '/auth/logout', { body: {} })
+    const headers = rawMock.mock.calls.map((call) => (call as [string, { headers: Record<string, string> }])[1].headers)
+    expect(headers[1]['User-Agent']).toBe('UA')
+    for (const name of ['Accept', 'Authorization', 'Content-Type', 'x-client-ip']) expect(headers[1][name]).toBe(headers[0][name])
+  })
+})
+
 describe('M22: refresh route wiring', () => {
   const routePath = path.join(__dirname, '..', '..', 'server', 'api', 'auth', 'refresh.post.ts')
 

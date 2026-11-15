@@ -93,6 +93,8 @@ export function forwardToApi<T = unknown>(
     ...clientIpHeaders(event.context.clientIp),
   }
   if (bearer) headers['Authorization'] = `Bearer ${bearer}`
+  const userAgent = getRequestHeader(event, 'user-agent')
+  if (userAgent) headers['User-Agent'] = userAgent
 
   const contentType = getRequestHeader(event, 'content-type')
   if (contentType && typeof init.body !== 'undefined') {

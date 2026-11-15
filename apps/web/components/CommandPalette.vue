@@ -34,6 +34,7 @@ const go = (to: string) => () => { close(); void navigateTo(to) }
 const commands = computed<Command[]>(() => {
   const list: Command[] = [
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, run: go('/') },
+    { id: 'account', label: t('nav.account'), icon: Settings, run: go('/settings/account') },
     { id: 'agents', label: t('nav.agents'), icon: Bot, run: go('/agents') },
     // A personal thread list is a top-level destination, so it is offered with or without a project.
     { id: 'my-threads', label: t('nav.myThreads'), icon: MessagesSquare, run: go('/threads') },

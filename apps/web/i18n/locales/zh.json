@@ -23,6 +23,18 @@
     "delete": "删除"
   },
   "auth": {
+    "account": {
+      "title": "修改密码",
+      "currentPassword": "当前密码",
+      "newPassword": "新密码",
+      "confirmNewPassword": "确认新密码",
+      "currentRequired": "请输入当前密码",
+      "minimum": "密码至少需要 8 个字符",
+      "mismatch": "两次输入的密码必须一致",
+      "currentPasswordWrong": "当前密码不正确",
+      "success": "密码已修改",
+      "submit": "修改密码"
+    },
     "login": {
       "title": "Koda",
       "subtitle": "开发工单追踪器",
@@ -58,6 +70,7 @@
     }
   },
   "nav": {
+    "account": "账户",
     "dashboard": "仪表盘",
     "projects": "项目",
     "board": "看板",
