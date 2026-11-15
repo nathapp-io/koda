@@ -656,6 +656,44 @@ describe('AuthService', () => {
       });
     });
 
+    it('answers the new pair and records a session.refresh entry when the rotation recovered a lost response', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      const result = await service.refresh(principal);
+
+      expect(result.accessToken).toEqual(expect.any(String));
+      expect(result.refreshToken).toEqual(expect.any(String));
+      // A thief replaying a stolen newest token takes this path too, so it goes on the record.
+      expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+        key: 'session.refresh',
+        resourceType: 'user',
+        resourceId: 'user-1',
+        projectId: null,
+        summary: 'refresh token lost-response recovery; session kept',
+      });
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('a rejecting recovery audit still answers the new pair and logs the failure', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
+      mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered' });
+      mockAuditRecorder.record.mockRejectedValue(new Error('audit storage unavailable'));
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+        extra: { sessionId: 's1', tokenId: 't1' },
+      } as unknown as IPrincipal;
+
+      await expect(service.refresh(principal)).resolves.toMatchObject({ accessToken: expect.any(String) });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('audit storage unavailable'));
+      warn.mockRestore();
+    });
+
     // auth-sessions US-004 AC-13: the revocation is already committed when the entry is written, so a
     // failed record must not turn a 401 into a 500 — and must not go unreported.
     it('US-004 AC-13: a rejecting reuse audit still answers 401 and logs the failure', async () => {

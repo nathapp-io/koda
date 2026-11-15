@@ -152,7 +152,7 @@ describe('AuthSessionService', () => {
     );
     repository.hasTokenUsedAfter.mockResolvedValue(false);
 
-    await expect(service.rotate(input)).resolves.toEqual({ kind: 'rotated' });
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'recovered' });
 
     // Only successors older than the grace window go: a sibling a parallel retry just issued stays valid.
     expect(repository.deleteUnusedTokens).toHaveBeenCalledWith(
