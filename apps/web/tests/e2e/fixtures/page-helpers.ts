@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { E2E_ADMIN } from './api-client';
-import { getSession } from './session';
+import { newBrowserSession } from './session';
 
 export function generateUniqueProjectKey(prefix = 'EE'): string {
   const normalizedPrefix = prefix.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) || 'EE';
@@ -34,12 +34,12 @@ export async function webLogin(
   page: Page,
   email = E2E_ADMIN.email,
   password = E2E_ADMIN.password,
-  opts: { fresh?: boolean } = {},
 ) {
   const webUrl = process.env['E2E_WEB_URL'] ?? 'http://localhost:3103';
 
-  // 1. One cached API login per user per worker (see fixtures/session.ts)
-  const { accessToken, refreshToken } = await getSession(email, password, opts);
+  // 1. A session of this browser context's own: its refresh cookie rotates
+  // independently of every other context (see fixtures/session.ts)
+  const { accessToken, refreshToken } = await newBrowserSession(email, password);
 
   // 2. Inject auth cookies so the browser session is authenticated
   await page.context().addCookies([
