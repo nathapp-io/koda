@@ -34,8 +34,8 @@
         "sessions"
       ],
       "dependencies": [],
-      "status": "passed",
-      "passes": true,
+      "status": "pending",
+      "passes": false,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -85,7 +85,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
-      "storyGitRef": "9aa75c05d99edce6ed46dd3006441f46feee6d56"
+      "storyGitRef": "48ac9dde6a1c5cd1b3c1a3d77143faa31498314e"
     },
     {
       "id": "US-002",
@@ -198,8 +198,8 @@
         "US-001",
         "US-002"
       ],
-      "status": "passed",
-      "passes": true,
+      "status": "pending",
+      "passes": false,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -267,7 +267,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
-      "storyGitRef": "dbb94ebdadc30dfe86061d14f5cceda6acd84590"
+      "storyGitRef": "48ac9dde6a1c5cd1b3c1a3d77143faa31498314e"
     },
     {
       "id": "US-004",
@@ -301,8 +301,8 @@
         "US-001",
         "US-003"
       ],
-      "status": "passed",
-      "passes": true,
+      "status": "pending",
+      "passes": false,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -352,7 +352,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
-      "storyGitRef": "3a4888b60d1d63fc8b32baf66573d111125ca412"
+      "storyGitRef": "48ac9dde6a1c5cd1b3c1a3d77143faa31498314e"
     },
     {
       "id": "US-005",
@@ -384,8 +384,8 @@
         "audit"
       ],
       "dependencies": [],
-      "status": "passed",
-      "passes": true,
+      "status": "pending",
+      "passes": false,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -447,7 +447,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
-      "storyGitRef": "14c34aaa7c56521153704383590cc7ce940f51ed"
+      "storyGitRef": "48ac9dde6a1c5cd1b3c1a3d77143faa31498314e"
     },
     {
       "id": "US-006",
@@ -479,8 +479,8 @@
         "US-001",
         "US-005"
       ],
-      "status": "passed",
-      "passes": true,
+      "status": "pending",
+      "passes": false,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -514,7 +514,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
-      "storyGitRef": "f03d0dc45355afa56bc029acba5a1bd694ec1d0c"
+      "storyGitRef": "48ac9dde6a1c5cd1b3c1a3d77143faa31498314e"
     },
     {
       "id": "US-007",
