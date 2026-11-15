@@ -208,7 +208,14 @@ describeIntegration('refresh rotation (PG)', () => {
     expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
       .toMatchObject({ revokedAt: null, revokedReason: null });
     expect(await me(resent.accessToken)).toBe(200);
-    expect(await db.auditEntry.count({ where: { key: 'session.refresh', resourceId: userId } })).toBe(0);
+    // The recovery is on the record: a thief replaying a stolen newest token would take this path too.
+    const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      resourceType: 'user',
+      projectId: null,
+      summary: 'refresh token lost-response recovery; session kept',
+    });
     // The undelivered successor is gone; the new chain keeps rotating.
     expect(await db.refreshToken.findUnique({ where: { id: tokenIdOf(lost) } })).toBeNull();
     await refresh(resent.refreshToken).expect(200);
@@ -237,7 +244,15 @@ describeIntegration('refresh rotation (PG)', () => {
 
     expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
       .toMatchObject({ revokedReason: 'reuse' });
-    expect(await db.auditEntry.count({ where: { key: 'session.refresh', resourceId: userId } })).toBe(1);
+    // The thief's recovery and the holder's reuse revocation are both on the record.
+    const summaries = (await db.auditEntry.findMany({
+      where: { key: 'session.refresh', resourceId: userId },
+      orderBy: { createdAt: 'asc' },
+    })).map((entry) => entry.summary);
+    expect(summaries).toEqual([
+      'refresh token lost-response recovery; session kept',
+      'refresh token reuse; session revoked',
+    ]);
     await refresh(thief.refreshToken).expect(401);
     expect(await me(thief.accessToken)).toBe(401);
   }, TIMEOUT);

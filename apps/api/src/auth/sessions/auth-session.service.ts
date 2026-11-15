@@ -38,6 +38,8 @@ export type { SessionRevokeReason };
 
 export type RotateOutcome =
   | { kind: 'rotated' }
+  /** Rotation step 5: a lost response was recovered. The caller answers the pair and audits the recovery. */
+  | { kind: 'recovered' }
   | { kind: 'reused'; userId: string }
   | { kind: 'invalid' };
 
@@ -134,9 +136,10 @@ export class AuthSessionService {
             sessionId: input.sessionId,
             createdAt: input.now,
           });
-          // Observable on purpose: a thief replaying a stolen newest token takes this path too.
+          // Observable on purpose: a thief replaying a stolen newest token takes this path too. The caller
+          // also records a `session.refresh` audit entry for it.
           this.logger.warn(`refresh session ${input.sessionId}: lost-response recovery re-rotated a used token`);
-          return { kind: 'rotated' };
+          return { kind: 'recovered' };
         }
 
         // The revocation returns normally, so it commits; the caller records `session.refresh` itself.

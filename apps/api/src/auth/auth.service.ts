@@ -201,31 +201,39 @@ export class AuthService {
       // The eviction takes the session's cache lock, so a lookup that read the store before this revoke
       // cannot repopulate the key after it (see `withAuthSessionCacheLock`).
       await withAuthSessionCacheLock(sessionId, () => this.cache.invalidate(authSessionCacheKey(sessionId)));
-      await this.recordRefreshReuse(outcome.userId);
+      await this.recordRefreshEvent(outcome.userId, 'refresh token reuse; session revoked');
       throw new AuthException({}, 'auth');
+    }
+
+    if (outcome.kind === 'recovered') {
+      // A lost response was recovered (rotation step 5). A thief replaying a stolen newest token inside
+      // the window takes the same path, so the recovery goes on the record next to the reuse revocations.
+      await this.recordRefreshEvent(user.id, 'refresh token lost-response recovery; session kept');
     }
 
     return { accessToken, refreshToken, user: UserResponseDto.from(user, role) };
   }
 
   /**
-   * Records the reuse revocation `AuthSessionService.rotate` has already committed.
+   * Records a `session.refresh` entry for what `AuthSessionService.rotate` has already committed: a reuse
+   * revocation, or a lost-response recovery.
    *
    * `AuditRecorder.record` must run inside a transaction and the rotation's own is closed, so this opens
-   * one of its own. A failed write is logged and swallowed: the session is revoked either way, and the
-   * caller's answer must stay the 401 that revocation earned, not a 500 about its bookkeeping.
+   * one of its own. A failed write is logged and swallowed: the rotation's outcome stands either way, and
+   * the caller's answer (401 for a reuse, the new pair for a recovery) must not become a 500 about its
+   * bookkeeping.
    */
-  private async recordRefreshReuse(userId: string): Promise<void> {
+  private async recordRefreshEvent(userId: string, summary: string): Promise<void> {
     try {
       await this.txManager.run(() => this.audit.record({
         key: 'session.refresh',
         resourceType: 'user',
         resourceId: userId,
         projectId: null,
-        summary: 'refresh token reuse; session revoked',
+        summary,
       }));
     } catch (error) {
-      this.logger.warn(`failed to record session.refresh for reused token of user ${userId}: ${String(error)}`);
+      this.logger.warn(`failed to record session.refresh (${summary}) for user ${userId}: ${String(error)}`);
     }
   }
 
