@@ -62,29 +62,29 @@ function expandedKeysOf(role: RoleDomain): string[] {
 
 export class CreateRoleDto {
   @ApiProperty({ example: 'qa', description: 'kebab-case; cannot change after creation' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @Matches(ROLE_KEY_PATTERN, { message: '$t(common.validation.keyFormat)' })
+  @IsString({ message: 'common.validation.isString' })
+  @Matches(ROLE_KEY_PATTERN, { message: 'common.validation.keyFormat' })
   declare key: string;
 
   @ApiProperty({ example: 'QA' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.minLength)' })
-  @MaxLength(100, { message: '$t(common.validation.maxLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.minLength' })
+  @MaxLength(100, { message: 'common.validation.maxLength' })
   declare name: string;
 
   @ApiPropertyOptional({ example: 'Runs the QA pass' })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MaxLength(500, { message: '$t(common.validation.maxLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MaxLength(500, { message: 'common.validation.maxLength' })
   description?: string;
 
   @ApiProperty({ enum: ROLE_SCOPES, description: 'Cannot change after creation' })
-  @IsIn(ROLE_SCOPES, { message: '$t(common.validation.isEnum)' })
+  @IsIn(ROLE_SCOPES, { message: 'common.validation.isEnum' })
   declare scope: RoleScope;
 
   @ApiProperty({ type: [String], example: ['ticket.read', 'comment.create'] })
-  @IsArray({ message: '$t(common.validation.isArray)' })
-  @IsString({ each: true, message: '$t(common.validation.isString)' })
+  @IsArray({ message: 'common.validation.isArray' })
+  @IsString({ each: true, message: 'common.validation.isString' })
   declare permissions: string[];
 }
 
@@ -92,20 +92,20 @@ export class CreateRoleDto {
 export class UpdateRoleDto {
   @ApiPropertyOptional({ description: 'Rejected for a system role' })
   @ValidateIf((_object, value) => value !== undefined)
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.minLength)' })
-  @MaxLength(100, { message: '$t(common.validation.maxLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.minLength' })
+  @MaxLength(100, { message: 'common.validation.maxLength' })
   name?: string;
 
   @ApiPropertyOptional()
   @ValidateIf((_object, value) => value !== undefined)
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MaxLength(500, { message: '$t(common.validation.maxLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MaxLength(500, { message: 'common.validation.maxLength' })
   description?: string;
 
   @ApiPropertyOptional({ type: [String], description: 'Replaces the stored entry list' })
   @ValidateIf((_object, value) => value !== undefined)
-  @IsArray({ message: '$t(common.validation.isArray)' })
-  @IsString({ each: true, message: '$t(common.validation.isString)' })
+  @IsArray({ message: 'common.validation.isArray' })
+  @IsString({ each: true, message: 'common.validation.isString' })
   permissions?: string[];
 }

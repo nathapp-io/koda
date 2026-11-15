@@ -8,6 +8,6 @@ import { IsBoolean, IsOptional } from 'class-validator';
 export class UpdateUserDto {
   @ApiPropertyOptional({ description: 'Disabling revokes every session of the user' })
   @IsOptional()
-  @IsBoolean({ message: '$t(common.validation.isBoolean)' })
+  @IsBoolean({ message: 'common.validation.isBoolean' })
   disabled?: boolean;
 }

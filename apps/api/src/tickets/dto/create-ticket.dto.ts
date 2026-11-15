@@ -8,7 +8,7 @@ export class CreateTicketDto {
     enum: TicketType,
     example: 'BUG',
   })
-  @IsEnum(TicketType, { message: '$t(common.validation.isEnum)' })
+  @IsEnum(TicketType, { message: 'common.validation.isEnum' })
   type!: TicketType;
 
   @ApiProperty({
@@ -16,8 +16,8 @@ export class CreateTicketDto {
     example: 'Fix login bug',
     minLength: 1,
   })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.required)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.required' })
   title!: string;
 
   @ApiProperty({
@@ -26,7 +26,7 @@ export class CreateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   description?: string;
 
   @ApiProperty({
@@ -37,6 +37,6 @@ export class CreateTicketDto {
     default: 'MEDIUM',
   })
   @IsOptional()
-  @IsEnum(Priority, { message: '$t(common.validation.isEnum)' })
+  @IsEnum(Priority, { message: 'common.validation.isEnum' })
   priority?: Priority;
 }

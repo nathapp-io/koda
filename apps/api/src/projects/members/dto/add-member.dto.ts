@@ -13,12 +13,12 @@ import { ROLE_KEY_PATTERN } from '../../../permissions/dto/role.dto';
  */
 export class AddMemberDto {
   @ApiProperty({ description: 'Email of an existing user', example: 'dev@example.com' })
-  @IsEmail({}, { message: '$t(common.validation.isEmail)' })
+  @IsEmail({}, { message: 'common.validation.isEmail' })
   declare email: string;
 
   /** US-004: the role key to grant; omitted means the least-privileged `viewer`. */
   @ApiPropertyOptional({ example: 'triager', description: 'kebab-case role key; omitted grants viewer' })
   @ValidateIf((dto: AddMemberDto) => dto.roleKey !== undefined)
-  @Matches(ROLE_KEY_PATTERN, { message: '$t(common.validation.keyFormat)' })
+  @Matches(ROLE_KEY_PATTERN, { message: 'common.validation.keyFormat' })
   declare roleKey?: string;
 }

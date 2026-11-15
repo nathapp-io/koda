@@ -8,8 +8,8 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(2, { message: '$t(common.validation.minLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(2, { message: 'common.validation.minLength' })
   name?: string;
 
   @ApiProperty({
@@ -19,9 +19,9 @@ export class UpdateProjectDto {
     pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
-    message: '$t(projects.slugInvalid)',
+    message: 'projects.slugInvalid',
   })
   slug?: string;
 
@@ -32,9 +32,9 @@ export class UpdateProjectDto {
     pattern: '^[A-Z]{2,6}$',
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   @Matches(/^[A-Z]{2,6}$/, {
-    message: '$t(projects.keyInvalid)',
+    message: 'projects.keyInvalid',
   })
   key?: string;
 
@@ -44,7 +44,7 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   description?: string;
 
   @ApiPropertyOptional({
@@ -54,8 +54,8 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MaxLength(3000, { message: '$t(common.validation.maxLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MaxLength(3000, { message: 'common.validation.maxLength' })
   brief?: string | null;
 
   @ApiProperty({
@@ -64,7 +64,7 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsUrl({}, { message: '$t(common.validation.isUrl)' })
+  @IsUrl({}, { message: 'common.validation.isUrl' })
   gitRemoteUrl?: string;
 
   @ApiProperty({
@@ -73,7 +73,7 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsBoolean({ message: '$t(common.validation.isBoolean)' })
+  @IsBoolean({ message: 'common.validation.isBoolean' })
   autoIndexOnClose?: boolean;
 
   @ApiProperty({
@@ -83,8 +83,8 @@ export class UpdateProjectDto {
     enum: ['OFF', 'SUGGEST', 'AUTO'],
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @IsIn(['OFF', 'SUGGEST', 'AUTO'], { message: '$t(common.validation.isIn)' })
+  @IsString({ message: 'common.validation.isString' })
+  @IsIn(['OFF', 'SUGGEST', 'AUTO'], { message: 'common.validation.isIn' })
   autoAssign?: string;
 
   @ApiPropertyOptional({
@@ -93,8 +93,8 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(32, { message: 'common.validation.webhookSecretMinLength' })
   ciWebhookToken?: string;
 
   @ApiPropertyOptional({
@@ -103,6 +103,6 @@ export class UpdateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsBoolean({ message: '$t(common.validation.isBoolean)' })
+  @IsBoolean({ message: 'common.validation.isBoolean' })
   graphifyEnabled?: boolean;
 }

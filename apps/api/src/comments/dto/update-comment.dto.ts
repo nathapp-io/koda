@@ -8,7 +8,7 @@ export class UpdateCommentDto {
     minLength: 1,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.required)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.required' })
   body?: string;
 }

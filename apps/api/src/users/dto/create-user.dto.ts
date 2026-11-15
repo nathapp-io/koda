@@ -8,19 +8,19 @@ import { PASSWORD_COMPLEXITY } from '../../auth/dto/register.dto';
  */
 export class CreateUserDto {
   @ApiProperty({ example: 'dev@example.com' })
-  @IsEmail({}, { message: '$t(common.validation.isEmail)' })
-  @MaxLength(254, { message: '$t(common.validation.maxLength)' })
+  @IsEmail({}, { message: 'common.validation.isEmail' })
+  @MaxLength(254, { message: 'common.validation.maxLength' })
   declare email: string;
 
   @ApiProperty({ example: 'Dev User' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.minLength)' })
-  @MaxLength(100, { message: '$t(common.validation.maxLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.minLength' })
+  @MaxLength(100, { message: 'common.validation.maxLength' })
   declare name: string;
 
   @ApiProperty({ description: 'Temporary password, handed over out of band', example: 'StrongPass123!' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(8, { message: '$t(common.validation.minLength)' })
-  @Matches(PASSWORD_COMPLEXITY, { message: '$t(common.validation.passwordComplexity)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(8, { message: 'common.validation.minLength' })
+  @Matches(PASSWORD_COMPLEXITY, { message: 'common.validation.passwordComplexity' })
   declare password: string;
 }

@@ -9,15 +9,15 @@ import { PASSWORD_COMPLEXITY } from '../../../auth/dto/register.dto';
 export class AcceptInviteDto {
   @ApiPropertyOptional({ example: 'Jane Doe' })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.minLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.minLength' })
   declare name?: string;
 
   @ApiProperty({ example: 'StrongPass123!' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(8, { message: '$t(common.validation.minLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(8, { message: 'common.validation.minLength' })
   @Matches(PASSWORD_COMPLEXITY, {
-    message: '$t(common.validation.passwordComplexity)',
+    message: 'common.validation.passwordComplexity',
   })
   declare password: string;
 }

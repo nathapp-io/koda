@@ -10,8 +10,8 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.required)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.required' })
   title?: string;
 
   @ApiProperty({
@@ -20,7 +20,7 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   description?: string;
 
   @ApiProperty({
@@ -30,7 +30,7 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(Priority, { message: '$t(common.validation.isEnum)' })
+  @IsEnum(Priority, { message: 'common.validation.isEnum' })
   priority?: Priority;
 
   @ApiProperty({
@@ -40,6 +40,6 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(TicketStatus, { message: '$t(common.validation.isEnum)' })
+  @IsEnum(TicketStatus, { message: 'common.validation.isEnum' })
   status?: TicketStatus;
 }

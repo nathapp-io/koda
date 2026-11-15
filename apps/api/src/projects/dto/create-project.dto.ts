@@ -7,8 +7,8 @@ export class CreateProjectDto {
     example: 'Koda',
     minLength: 2,
   })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(2, { message: '$t(common.validation.minLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(2, { message: 'common.validation.minLength' })
   name!: string;
 
   @ApiProperty({
@@ -16,9 +16,9 @@ export class CreateProjectDto {
     example: 'koda',
     pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
   })
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
-    message: '$t(projects.slugInvalid)',
+    message: 'projects.slugInvalid',
   })
   slug!: string;
 
@@ -27,9 +27,9 @@ export class CreateProjectDto {
     example: 'KODA',
     pattern: '^[A-Z]{2,6}$',
   })
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   @Matches(/^[A-Z]{2,6}$/, {
-    message: '$t(projects.keyInvalid)',
+    message: 'projects.keyInvalid',
   })
   key!: string;
 
@@ -39,7 +39,7 @@ export class CreateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   description?: string;
 
   @ApiProperty({
@@ -48,7 +48,7 @@ export class CreateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsUrl({}, { message: '$t(common.validation.isUrl)' })
+  @IsUrl({}, { message: 'common.validation.isUrl' })
   gitRemoteUrl?: string;
 
   @ApiProperty({
@@ -58,7 +58,7 @@ export class CreateProjectDto {
     default: true,
   })
   @IsOptional()
-  @IsBoolean({ message: '$t(common.validation.isBoolean)' })
+  @IsBoolean({ message: 'common.validation.isBoolean' })
   autoIndexOnClose?: boolean;
 
   @ApiProperty({
@@ -69,7 +69,7 @@ export class CreateProjectDto {
     enum: ['OFF', 'SUGGEST', 'AUTO'],
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @IsIn(['OFF', 'SUGGEST', 'AUTO'], { message: '$t(common.validation.isIn)' })
+  @IsString({ message: 'common.validation.isString' })
+  @IsIn(['OFF', 'SUGGEST', 'AUTO'], { message: 'common.validation.isIn' })
   autoAssign?: string;
 }
