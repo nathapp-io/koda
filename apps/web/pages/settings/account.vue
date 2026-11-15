@@ -2,8 +2,8 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { extractApiError, extractErrorStatus } from '~/composables/useApi'
-import { usePasswordActions } from '~/composables/usePasswordActions'
+import { extractApiError } from '~/composables/useApi'
+import { isCurrentPasswordWrong, usePasswordActions } from '~/composables/usePasswordActions'
 
 const { t } = useI18n()
 const toast = useAppToast()
@@ -29,7 +29,7 @@ const onSubmit = handleSubmit(async values => {
     toast.success(t('auth.account.success'))
     resetForm()
   } catch (err: unknown) {
-    if (extractErrorStatus(err) === 403 || (err !== null && typeof err === 'object' && 'code' in err && err.code === 40003)) {
+    if (isCurrentPasswordWrong(err)) {
       setFieldError('currentPassword', t('auth.account.currentPasswordWrong'))
     } else {
       toast.error(extractApiError(err))

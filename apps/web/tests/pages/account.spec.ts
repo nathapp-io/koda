@@ -2,6 +2,7 @@ import { jest, test, expect, beforeEach } from '@jest/globals'
 import { nextTick } from 'vue'
 import { mountSfc } from '../helpers/mount-sfc'
 import { ApiError } from '~/composables/useApi'
+import { isCurrentPasswordWrong } from '~/composables/usePasswordActions'
 
 const changePassword = jest.fn<() => Promise<void>>()
 const success = jest.fn()
@@ -9,7 +10,9 @@ const error = jest.fn()
 const page = () => mountSfc('pages/settings/account.vue', {
   globals: { useI18n: () => ({ t: (key: string) => key }), useAppToast: () => ({ success, error }), useHead: () => undefined },
   components: { Button: { template: '<button><slot /></button>' } },
-  alias: { '~/composables/usePasswordActions': { usePasswordActions: () => ({ changePassword }) } },
+  // Only the transport is stubbed: the page keeps the real wrong-password predicate,
+  // so AC-8/AC-9 exercise the mapping from ApiError/HTTP status to the field error.
+  alias: { '~/composables/usePasswordActions': { usePasswordActions: () => ({ changePassword }), isCurrentPasswordWrong } },
 })
 async function fill(m: ReturnType<typeof page>, confirm = 'new-password') {
   for (const [id, value] of [['currentPassword', 'old-password'], ['newPassword', 'new-password'], ['confirmNewPassword', confirm]]) {

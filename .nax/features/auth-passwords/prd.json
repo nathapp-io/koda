@@ -3,7 +3,7 @@
   "feature": "auth-passwords",
   "branchName": "feat/auth-passwords",
   "createdAt": "2026-11-15T05:04:44.168Z",
-  "updatedAt": "2026-11-15T12:13:06.352Z",
+  "updatedAt": "2026-11-15T12:13:09.627Z",
   "userStories": [
     {
       "id": "US-001",
@@ -513,7 +513,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f7bbddd590259db9a1812837bdd072a945407e8d"
     },
     {
       "id": "US-007",

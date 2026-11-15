@@ -1,7 +1,5 @@
 {
-  "kind": "captured",
-  "source": "preflight",
-  "capturedAt": "2026-11-15T08:22:17.301Z",
-  "baseRef": "06b4cff12d1640431f8ebc491e0323fca200f9c3",
-  "entries": []
+  "kind": "no-baseline",
+  "reason": "unparseable",
+  "capturedAt": "2026-11-15T10:36:37.575Z"
 }
