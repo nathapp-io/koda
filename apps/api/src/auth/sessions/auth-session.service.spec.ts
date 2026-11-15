@@ -27,6 +27,7 @@ interface RepositoryStub {
   revokeSession: ReturnType<typeof vi.fn>;
   revokeOwnedSession: ReturnType<typeof vi.fn>;
   isSessionActive: ReturnType<typeof vi.fn>;
+  revokeActiveSessionsOfUser: ReturnType<typeof vi.fn>;
 }
 
 function build() {
@@ -42,6 +43,7 @@ function build() {
     revokeSession: vi.fn(async () => 'owner-id'),
     revokeOwnedSession: vi.fn(async () => true),
     isSessionActive: vi.fn(async () => true),
+    revokeActiveSessionsOfUser: vi.fn(async () => ['s2', 's3']),
   };
   const txManager = {
     run: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -69,6 +71,13 @@ const rotateInput = (overrides: Partial<Parameters<AuthSessionService['rotate']>
 });
 
 describe('AuthSessionService', () => {
+  it('returns the ids revoked for a user without opening a transaction', async () => {
+    const { service, repository, txManager } = build();
+    await expect(service.revokeAllForUser('u1', 'password-change', t0, 's1')).resolves.toEqual(['s2', 's3']);
+    expect(repository.revokeActiveSessionsOfUser).toHaveBeenCalledWith('u1', 'password-change', t0, 's1');
+    expect(txManager.run).not.toHaveBeenCalled();
+  });
+
   it('starts a session and its first token in one transaction', async () => {
     const { service, repository, txManager } = build();
     const expiresAt = at(7 * 24 * 60 * 60 * 1000);

@@ -11,6 +11,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { RegistrationStatusDto } from './dto/registration-status.dto';
 import { Public, Principal, JwtRefreshGuard } from '@nathapp/nestjs-auth';
@@ -109,6 +110,20 @@ export class AuthController {
     // passwordHash — map through UserResponseDto (the same DTO login/register
     // use) so the hash is never serialized in the response.
     return JsonResponse.Ok(await this.authService.userResponse(validatedUser));
+  }
+
+  @Post('password')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change the current user password' })
+  @ApiResponse({ status: 200, description: 'Password changed' })
+  @ApiResponse({ status: 403, description: 'Current password is incorrect' })
+  @UseGuards(RequiresGuard)
+  @Requires('session.password.change')
+  @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: AUTH_LOGIN_TTL_MS } })
+  async changePassword(@Principal() user: KodaPrincipal, @Body() dto: ChangePasswordDto) {
+    await this.authService.changePassword(user, dto);
+    return JsonResponse.Ok({});
   }
 
   @Post('logout')

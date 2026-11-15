@@ -161,6 +161,11 @@ export class AuthSessionService {
     return await this.sessions.revokeOwnedSession(sessionId, userId, reason, now);
   }
 
+  /** The caller owns the transaction and audit record for this bulk revocation. */
+  async revokeAllForUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]> {
+    return this.sessions.revokeActiveSessionsOfUser(userId, reason, now, exceptSessionId);
+  }
+
   /** Whether a session is still live at `now` — the check `JwtAuthProvider` makes on every access token. */
   async isActive(sessionId: string, now: Date): Promise<boolean> {
     return await this.sessions.isSessionActive(sessionId, now);

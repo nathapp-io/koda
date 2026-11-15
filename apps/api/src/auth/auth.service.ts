@@ -8,6 +8,8 @@ import * as bcrypt from 'bcrypt';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { isUserPrincipal, type KodaPrincipal } from './principal/koda-principal.types';
 import type { IPrincipal } from './types';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
@@ -271,6 +273,24 @@ export class AuthService {
       throw new Error('Signed refresh token did not contain a valid exp claim');
     }
     return new Date(claims.exp * 1000);
+  }
+
+  async changePassword(principal: KodaPrincipal, dto: ChangePasswordDto): Promise<void> {
+    if (!isUserPrincipal(principal) || !principal.sessionId) throw new AuthException({}, 'auth');
+    const user = await this.authRepo.findUserById(principal.id);
+    if (!user || user.disabled) throw new AuthException({}, 'auth');
+    if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+      throw new ForbiddenAppException({}, 'auth.currentPasswordWrong');
+    }
+    const hash = await bcrypt.hash(dto.newPassword, 12);
+    const revoked = await this.audit.audited(async () => {
+      await this.authRepo.updatePasswordHash(user.id, hash);
+      return this.authSessions.revokeAllForUser(user.id, 'password-change', new Date(), principal.sessionId);
+    }, () => ({ key: 'session.password.change', resourceType: 'user', resourceId: user.id, projectId: null, summary: 'password changed' }));
+    for (const id of revoked) {
+      await withAuthSessionCacheLock(id, () => this.cache.invalidate(authSessionCacheKey(id)));
+    }
+    await this.cache.invalidate(userAuthStateCacheKey(user.id));
   }
 
   async validateUser(principal: IPrincipal) {

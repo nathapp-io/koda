@@ -34,6 +34,10 @@ const INVENTORY_PATH = join(
 );
 const OWN_ROW = 'own (see design §1)';
 
+it('AC-14: password change is implicit', () => {
+  expect(findCatalogEntry('session.password.change')?.access).toBe('implicit');
+});
+
 const PUBLIC_KEY_LIST = [
   'session.login',
   'session.refresh',
@@ -49,6 +53,7 @@ const PUBLIC_KEY_LIST = [
 const IMPLICIT_KEY_LIST = [
   'auth.me.read',
   'session.logout',
+  'session.password.change',
   'approval.request.cancel',
   'home.read',
   'notification.read',

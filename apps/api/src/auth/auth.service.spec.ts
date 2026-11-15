@@ -24,6 +24,13 @@ describe('AuthService', () => {
   let authRepo: PrismaAuthRepository;
   let moduleRef: TestingModule;
 
+  it('AC-9: refuses a legacy user without a session before writes', async () => {
+    const principal = { actorType: 'user' as const, id: 'u1', role: 'MEMBER' as const, email: 'u@example.test', name: 'U', blacklisted: false, revoked: false, authorities: [] };
+    await expect(service.changePassword(principal, { currentPassword: 'old', newPassword: 'Newpass1!' })).rejects.toBeInstanceOf(AuthException);
+    expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+    expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
   const mockAuditRecorder = {
     record: vi.fn(),
     audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()),
@@ -47,6 +54,7 @@ describe('AuthService', () => {
     findUserByEmail: vi.fn(),
     findUserById: vi.fn(),
     bumpTokenVersion: vi.fn(),
+    updatePasswordHash: vi.fn(),
   };
 
   const mockConfigService = {
@@ -90,6 +98,7 @@ describe('AuthService', () => {
     rotate: vi.fn(),
     revoke: vi.fn(),
     isActive: vi.fn(),
+    revokeAllForUser: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -105,6 +114,7 @@ describe('AuthService', () => {
     mockAuthSessions.rotate.mockReset();
     mockAuthSessions.revoke.mockReset();
     mockAuthSessions.isActive.mockReset();
+    mockAuthSessions.revokeAllForUser.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = moduleRef = await Test.createTestingModule({

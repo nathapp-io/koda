@@ -181,6 +181,16 @@ export class PrismaAuthSessionRepository extends AbstractPrismaRepository<AuthSe
     return count > 0;
   }
 
+  /** Revoke only live sessions owned by the user, leaving the optional caller session intact. */
+  async revokeActiveSessionsOfUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]> {
+    const rows = await this.db.authSession.updateManyAndReturn({
+      where: { userId, revokedAt: null, expiresAt: { gt: now }, ...(exceptSessionId === undefined ? {} : { id: { not: exceptSessionId } }) },
+      data: { revokedAt: now, revokedReason: reason },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
   /** Whether the session exists, has not been revoked and expires after `now`. A read; nothing written. */
   async isSessionActive(sessionId: string, now: Date): Promise<boolean> {
     const live = await this.db.authSession.findFirst({

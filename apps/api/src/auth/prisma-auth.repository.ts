@@ -78,6 +78,10 @@ export class PrismaAuthRepository {
     return m ? this.toDomain(m) : null;
   }
 
+  async updatePasswordHash(userId: string, passwordHash: string): Promise<void> {
+    await this.db.user.update({ where: { id: userId }, data: { passwordHash } });
+  }
+
   async bumpTokenVersion(userId: string): Promise<number> {
     const m = await this.db.user.update({
       where: { id: userId },

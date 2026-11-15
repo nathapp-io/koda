@@ -104,6 +104,18 @@ describeIntegration('auth sessions store (PG)', () => {
   const tokenRows = (sessionId = 's1') =>
     db.refreshToken.findMany({ where: { sessionId }, orderBy: { id: 'asc' } });
 
+  it('bulk revocation preserves an already revoked session and excludes its id', async () => {
+    await startSession('old', 'old-token');
+    await startSession('live', 'live-token');
+    await db.authSession.update({ where: { id: 'old' }, data: { revokedAt: at(100), revokedReason: 'logout' } });
+
+    const repository = module.get(PrismaAuthSessionRepository);
+    const ids = await asUser(() => repository.revokeActiveSessionsOfUser(userId, 'password-change', at(200)));
+    expect(ids).toEqual(['live']);
+    expect(await sessionRow('old')).toMatchObject({ revokedAt: at(100), revokedReason: 'logout' });
+    expect(await sessionRow('live')).toMatchObject({ revokedAt: at(200), revokedReason: 'password-change' });
+  }, TIMEOUT);
+
   it('AC-1: start inserts the session with its user and expiry, holding exactly one unused token', async () => {
     await startSession('s1', 't1', at(WEEK));
 
