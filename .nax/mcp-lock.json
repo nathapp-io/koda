@@ -19,6 +19,29 @@
       "search_code": "cc83201b0c64547e",
       "search_graph": "65e5048e145a8077",
       "trace_path": "730682166f723d94"
+    },
+    "nathapp-nestjs-docs": {
+      "find_package": "59d15a5b7304373f",
+      "get_api": "11996d931b27ddaf",
+      "get_example": "9d35e12d26d8b515",
+      "get_usage": "9d35e12d26d8b515"
     }
+  },
+  "readOnly": {
+    "codebase-memory": [
+      "check_index_coverage",
+      "compare_graphs",
+      "detect_changes",
+      "get_architecture",
+      "get_code_snippet",
+      "get_file_outline",
+      "get_graph_schema",
+      "index_status",
+      "list_projects",
+      "query_graph",
+      "search_code",
+      "search_graph",
+      "trace_path"
+    ]
   }
 }

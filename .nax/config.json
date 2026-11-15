@@ -37,6 +37,11 @@
     },
     "mcp": {
         "servers": {
+            "nathapp-nestjs-docs": {
+                "command": "bunx",
+                "args": ["@nathapp/nestjs-docs-mcp@0.7.1"],
+                "stages": ["run", "review"]
+            },
             "codebase-memory": {
                 "command": "codebase-memory-mcp",
                 "stages": ["run", "review"],

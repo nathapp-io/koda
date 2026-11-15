@@ -5,7 +5,7 @@ This is the app-specific source-of-truth context for `apps/api`.
 ## Read First
 
 Before writing NestJS code in this app:
-- read and follow the `nathapp-nestjs-patterns` skill
+- check the capability catalog in `.nax/rules/nathapp-packages.md` and look up the package with the `nathapp-nestjs-docs` MCP tools (`find_package` -> `get_usage` -> `get_example` -> `get_api`)
 - prefer Nathapp platform patterns over generic NestJS alternatives
 
 ## Role In The Monorepo

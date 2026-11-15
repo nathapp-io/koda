@@ -1,5 +1,5 @@
 ---
-description: "Core apps/api rules: nathapp-nestjs-patterns first, nestjs-auth v3 with @Principal and permission keys (@Requires, RequiresGuard), API key and password hashing, quality gates, async patterns, DI and response anti-patterns"
+description: "Core apps/api rules: nathapp package catalog and nathapp-nestjs-docs MCP first, nestjs-auth v3 with @Principal and permission keys (@Requires, RequiresGuard), API key and password hashing, quality gates, async patterns, DI and response anti-patterns"
 paths:
   - "apps/api/*"
 priority: 50
@@ -8,7 +8,7 @@ priority: 50
 # API Core Rules — apps/api
 
 ## Read-First
-- Follow `nathapp-nestjs-patterns` before implementing NestJS changes
+- Before implementing NestJS changes, check the capability catalog in `nathapp-packages.md` and look up the package with the `nathapp-nestjs-docs` MCP tools
 - Prefer Nathapp patterns over generic alternatives when both exist
 
 ## Auth
