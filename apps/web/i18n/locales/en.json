@@ -23,6 +23,20 @@
     "delete": "Delete"
   },
   "auth": {
+    "forgot": {
+      "title": "Forgot password?",
+      "email": "Email",
+      "submit": "Send reset link",
+      "checkEmail": "If an account exists for this email, check your inbox for a reset link.",
+      "link": "Forgot password?"
+    },
+    "reset": {
+      "title": "Reset password",
+      "submit": "Reset password",
+      "invalid": "This link is invalid or has expired.",
+      "tryAgain": "Request a new link",
+      "loginNotice": "Your password has been changed. Please sign in."
+    },
     "account": {
       "title": "Change password",
       "currentPassword": "Current password",

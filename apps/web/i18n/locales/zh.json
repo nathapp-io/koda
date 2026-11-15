@@ -23,6 +23,20 @@
     "delete": "删除"
   },
   "auth": {
+    "forgot": {
+      "title": "忘记密码？",
+      "email": "电子邮箱",
+      "submit": "发送重置链接",
+      "checkEmail": "如果此邮箱对应的账户存在，请查看收件箱中的重置链接。",
+      "link": "忘记密码？"
+    },
+    "reset": {
+      "title": "重置密码",
+      "submit": "重置密码",
+      "invalid": "此链接无效或已过期。",
+      "tryAgain": "申请新链接",
+      "loginNotice": "密码已更改，请登录。"
+    },
     "account": {
       "title": "修改密码",
       "currentPassword": "当前密码",

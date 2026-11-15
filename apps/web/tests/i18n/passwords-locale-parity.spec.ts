@@ -11,3 +11,14 @@ test('AC-11 account and navigation keys exist in both locales', () => {
     expect(locale.nav.account).toBeTruthy()
   }
 })
+
+
+test('AC-13 forgot and reset keys are present in both locales', () => {
+  const locales = [en, zh] as unknown as Array<{ auth: Record<string, Record<string, string>> }>
+  for (const group of ['forgot', 'reset']) {
+    expect(locales[0].auth[group]).toBeDefined()
+    expect(Object.keys(locales[0].auth[group]).length).toBeGreaterThan(0)
+    expect(Object.keys(locales[0].auth[group]).sort()).toEqual(Object.keys(locales[1].auth[group]).sort())
+    for (const locale of locales) for (const value of Object.values(locale.auth[group])) expect(value).toBeTruthy()
+  }
+})
