@@ -3,7 +3,7 @@
   "feature": "auth-passwords",
   "branchName": "feat/auth-passwords",
   "createdAt": "2026-11-15T05:04:44.168Z",
-  "updatedAt": "2026-11-15T05:21:23.856Z",
+  "updatedAt": "2026-11-15T05:30:12.753Z",
   "userStories": [
     {
       "id": "US-001",
@@ -115,14 +115,17 @@
         "tokens"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New transactional token store, migration, module boundary and one-shot email integration are security-critical despite having no route yet."
+        "reasoning": "New transactional token store, migration, module boundary and one-shot email integration are security-critical despite having no route yet.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/projects/invites/invite-token.ts",
@@ -159,7 +162,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3fd973af2fb07a978df1ddaba1dc06622dfa8fdb"
     },
     {
       "id": "US-003",
