@@ -468,7 +468,7 @@ None. `tests/middleware/auth.spec.ts` asserts behaviour for `/login` and `/regis
 - AC-12 [unit] `AuthController.refresh` called with a request whose `user-agent` header is `UA-1` and `ip` is `198.51.100.9` calls `AuthService.refresh` with `refreshClientOf('UA-1', '198.51.100.9')`.
 - AC-13 [integration] A refresh inside the 30 s grace with a different User-Agent still answers 200 (step 4 is not bound).
 - AC-14 [integration] A first-use refresh with a different User-Agent than the login answers 200 (step 3 is not bound).
-- AC-15 [integration] The User-Agent-mismatch revocation of AC-6 records one `session.refresh` audit entry with summary `refresh token reuse; session revoked`.
+- AC-15 [integration] The User-Agent-mismatch revocation (a retry with `User-Agent: UA-2` after a first use with `UA-1`, answering 401) records one `session.refresh` audit entry with summary `refresh token reuse; session revoked`.
 
 ### US-006
 

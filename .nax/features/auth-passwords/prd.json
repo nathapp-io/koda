@@ -1,0 +1,563 @@
+{
+  "project": "koda",
+  "feature": "auth-passwords",
+  "branchName": "feat/auth-passwords",
+  "createdAt": "2026-11-15T05:04:44.168Z",
+  "updatedAt": "2026-11-15T05:04:44.168Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Self-service password change",
+      "description": "**Goal** \u2014 Add authenticated password change that preserves the caller's session and revokes the user's other active sessions.\n\n**Motivation** \u2014 Users are admin-created with a temporary password, and a forgotten password needs an admin.\n\n**Approach** \u2014 Verbatim password-change design:\n\n`POST /api/auth/password`, body `ChangePasswordDto { currentPassword: string; newPassword: string }`. `currentPassword` is `@IsString` + `@MinLength(1)`. `newPassword` uses the same validators as `RegisterDto.password` (`@IsString`, `@MinLength(8)`, `@Matches(PASSWORD_COMPLEXITY)`, same i18n messages). The route is authenticated (no `@Public()`), declares `@UseGuards(RequiresGuard)` + `@Requires('session.password.change')`, and is throttled with `@Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: AUTH_LOGIN_TTL_MS } })`.\n\n`AuthService.changePassword(principal: KodaPrincipal, dto: ChangePasswordDto): Promise<void>`:\n1. A principal that is not a user principal (`isUserPrincipal` false: an agent or runner), or a user principal without `sessionId` (an access token issued before sessions; none can still be valid, since access tokens live 15 minutes and sessions shipped in #460) \u2192 `AuthException({}, 'auth')` (401). Load the user with `authRepo.findUserById(principal.id)`; missing or `disabled` \u2192 `AuthException({}, 'auth')` (401).\n2. `bcrypt.compare(dto.currentPassword, user.passwordHash)` false \u2192 `ForbiddenAppException({}, 'auth.currentPasswordWrong')` (403). A 403, not a 401, so the web's 401 refresh-and-retry does not run.\n3. Hash the new password with `bcrypt.hash(dto.newPassword, 12)` before opening the transaction. Then, in one `audit.audited(...)` call (it opens the transaction): `authRepo.updatePasswordHash(user.id, hash)`, then `authSessions.revokeAllForUser(user.id, 'password-change', now, principal.sessionId)`. From US-003 on, the same transaction also deletes the user's unused `PasswordResetToken` rows (`PasswordResetTokenStore.discardUnusedFor(userId)`), so a reset link emailed before the change stops working. The audit entry is `{ key: 'session.password.change', resourceType: 'user', resourceId: user.id, projectId: null, summary: 'password changed' }`.\n4. After the commit: for each revoked session id, `withAuthSessionCacheLock(id, () => cache.invalidate(authSessionCacheKey(id)))`; then `cache.invalidate(userAuthStateCacheKey(user.id))`.\n5. The controller answers `JsonResponse.Ok({})` (200). The caller's session and cookies stay valid.\n\n`AuthSessionService.revokeAllForUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]>` revokes every active session of the user (`revokedAt: null`, `expiresAt > now`) except `exceptSessionId`, sets `revokedReason`, and answers the revoked ids. It runs no transaction of its own and records no audit entry: its caller runs it inside the audited transaction. It goes through a new repository method `PrismaAuthSessionRepository.revokeActiveSessionsOfUser(userId, reason, now, exceptSessionId?)` built on `updateManyAndReturn` (the same Prisma call `revokeSession` uses).\n\nCatalog design: Three new keys, each added in four places: one REST row in the inventory TSV `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` (next to the `session.*` rows, same columns), `INVENTORY_SCOPE_ROWS` plus the access set in `apps/api/src/permissions/catalog.ts`, the key lists in `catalog.spec.ts`, and one cell per role in `src/permissions/__snapshots__/role-matrix.json`. For this story: `session.password.change`, `POST /auth/password`, TSV `own (see design \u00a71)`, INVENTORY_SCOPE_ROWS `own`, access set `IMPLICIT_KEYS`, every role cell `[\"implicit\",\"implicit\"]`. Keep every other catalog assertion and snapshot cell unchanged. After the API contract changes, `bun run generate` from the repo root keeps `openapi.json` and the CLI client current.\n\nAPI message design: The exception filter translates `<prefix>.<code>`, so both messages are nested under their exception codes in `apps/api/src/i18n/en/auth.json` and `zh/auth.json`, the way `invites.json` nests `roleGone`: `\"currentPasswordWrong\": { \"40003\": \"The current password is incorrect\" }` (`ForbiddenAppException`). Add the Chinese equivalent.\n\n**Scope** \u2014 In: change route/DTO, password-hash repository update, bulk session revoke, atomic audit, cache eviction, permission inventory/catalog/snapshot and API translations/contracts. Out: reset storage/email (US-002), the PasswordResetTokenStore dependency and outstanding-link deletion until US-003, reset routes (US-003/004), recovery binding (US-005) and web forms (US-006/007). No password-history, same-password rejection or session-list UI.\n\n**Interface** \u2014 `ChangePasswordDto { currentPassword: string; newPassword: string }`; `AuthService.changePassword(principal: KodaPrincipal, dto: ChangePasswordDto): Promise<void>`; `PrismaAuthRepository.updatePasswordHash(userId, passwordHash): Promise<void>`; `AuthSessionService.revokeAllForUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]>`; `PrismaAuthSessionRepository.revokeActiveSessionsOfUser(userId, reason, now, exceptSessionId?)`.\n\nVerification: Use existing auth service/controller tests and add real HTTP/persistence cases under test/integration/auth. Prime session activity caches before revocation assertions, use resetThrottle for throttle isolation and keep other users' sessions intact. Test the no-session principal at unit level; an agent HTTP case covers the shared non-user guard without a separate runner case.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] When POST /api/auth/password receives the caller's correct currentPassword and a valid newPassword, it answers 200, and a later POST /api/auth/login succeeds with newPassword and answers 401 with the old password.",
+        "AC-2 [integration] After that change, the caller's own access token still answers 200 on GET /api/auth/me, and its refresh token still rotates on POST /api/auth/refresh.",
+        "AC-3 [integration] After that change, a second session of the same user whose access token answered 200 on GET /api/auth/me before the change (so its activity is cached) is revoked with revokedReason password-change, and that access token answers 401 on GET /api/auth/me right after the change.",
+        "AC-4 [integration] After that change, a session of a different user stays active.",
+        "AC-5 [integration] When POST /api/auth/password receives a wrong currentPassword, it answers 403 with the auth.currentPasswordWrong message, the stored hash is unchanged, and no session is revoked.",
+        "AC-6 [integration] When currentPassword is wrong, no session.password.change audit entry is recorded.",
+        "AC-7 [integration] A successful change records exactly one audit entry { key: 'session.password.change', resourceType: 'user', resourceId: <userId>, projectId: null, summary: 'password changed' }.",
+        "AC-8 [integration] When POST /api/auth/password receives an agent API key, it answers 401 and writes nothing.",
+        "AC-9 [unit] AuthService.changePassword with a user principal that has no sessionId throws AuthException and calls neither updatePasswordHash nor revokeAllForUser.",
+        "AC-10 [integration] When newPassword is short1! (fewer than 8 characters), POST /api/auth/password answers 400 and the stored hash is unchanged.",
+        "AC-11 [integration] When newPassword lacks an uppercase letter (lowercase1!), POST /api/auth/password answers 400 and the stored hash is unchanged.",
+        "AC-12 [unit] AuthSessionService.revokeAllForUser('u1', 'password-change', now, 's1') answers the ids the repository's revokeActiveSessionsOfUser('u1', 'password-change', now, 's1') returned.",
+        "AC-13 [integration] PrismaAuthSessionRepository.revokeActiveSessionsOfUser leaves an already-revoked session's revokedReason and revokedAt unchanged and does not return its id.",
+        "AC-14 [unit] The catalog entry for session.password.change has access implicit.",
+        "AC-15 [integration] POST /api/auth/password is throttled like POST /api/auth/login: after AUTH_LOGIN_LIMIT requests from one client inside AUTH_LOGIN_TTL_MS, the next answers 429."
+      ],
+      "tags": [
+        "auth-passwords",
+        "api",
+        "security",
+        "passwords",
+        "sessions"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Password hashing, principal restrictions, audited multi-write transactions and immediate session-cache revocation cross multiple modules; security override requires strict test/implementation isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/auth/auth.controller.ts",
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/auth/sessions/prisma-auth-session.repository.ts",
+        "apps/api/src/auth/dto/register.dto.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/auth/dto/change-password.dto.ts",
+        "apps/api/test/integration/auth/password-change.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "AuthService.changePassword throws AuthException without password or session writes when findUserById returns null or a disabled user.",
+        "revokeActiveSessionsOfUser does not change or return a session whose expiresAt equals now.",
+        "When the password-change audit write fails, the password hash and all session revocation fields retain their pre-change values."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the closed key lists gain `session.password.change` next to `session.logout`; every other assertion stays."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role block gains the cell `\"session.password.change\": [\"implicit\",\"implicit\"]` in catalog order; no other cell changes."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "one REST row for route POST /auth/password (`session`, `own-resource`, `session.password.change`, `own (see design \u00a71)` like the `session.logout` row)."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Password reset store and email plumbing",
+      "description": "**Goal** \u2014 Add durable one-time reset-token storage and non-retryable localized reset-email scheduling without exposing a route.\n\n**Motivation** \u2014 Users are admin-created with a temporary password, and a forgotten password needs an admin.\n\n**Approach** \u2014 Verbatim reset-storage design:\n\nNew model, migration `20261210100000_password_reset_tokens`:\n\n```prisma\nmodel PasswordResetToken {\n  id        String    @id @default(cuid())\n  userId    String\n  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)\n  tokenHash String    @unique // lowercase sha256 hex of the raw token\n  expiresAt DateTime\n  usedAt    DateTime?\n  createdAt DateTime  @default(now())\n\n  @@index([userId])\n}\n```\n\n`User` gains the back-relation `passwordResetTokens PasswordResetToken[]`. The raw token is `randomBytes(32).toString('base64url')`, hashed with sha256 the way `generateInviteToken` / `hashInviteToken` (`apps/api/src/projects/invites/invite-token.ts`) do; only the hash is stored. `PASSWORD_RESET_TTL_MS = 30 * 60_000`. A new module-private `PrismaPasswordResetRepository` (`apps/api/src/auth/password-reset/prisma-password-reset.repository.ts`) owns the table with four methods: `replaceUnused(userId, tokenHash, expiresAt): Promise<void>` (deletes the user's unused rows and inserts the new one in one `txManager.run`), `findByHash(tokenHash): Promise<{ id; userId; expiresAt; usedAt; userDisabled } | null>`, `markUsed(id, now): Promise<number>` (`updateMany where { id, usedAt: null }`, the affected count) and `deleteUnusedOf(userId): Promise<number>`. `PasswordResetTokenStore` (below) is its only consumer and the public face of the table.\n\nNo `@nathapp/nestjs-*` package covers password reset (plugin catalog checked 2026-11-15: the closest match, `nestjs-iam`, is roles and policies), so the flow is built here on the existing email schedule.\n\n`PasswordResetStoreModule` (`apps/api/src/auth/password-reset/password-reset-store.module.ts`, US-002) is a leaf: it imports only `PrismaModule`, provides `PrismaPasswordResetRepository` and `PasswordResetTokenStore`, and exports `PasswordResetTokenStore`. `PasswordResetTokenStore` (`password-reset-token.store.ts`) is the public face of the table: `replaceUnused`, `findByHash`, `markUsed` and `discardUnusedFor(userId): Promise<number>`, each delegating to the repository.\n\n`PasswordResetTokenStore.discardUnusedFor(userId)` deletes the user's unused reset tokens and runs inside its caller's transaction; `AuthService.changePassword` calls it from US-003 on.\n\nVerbatim email plumbing:\n- `EmailKind` (`email-schedule.types.ts`) and `EMAIL_TEMPLATE_CODES` (`templates/template-codes.ts`) gain `PASSWORD_RESET`.\n- `EN_TEMPLATES` gains `PASSWORD_RESET`: subject `[koda] Reset your password`, html `<p>Someone asked to reset the password of your koda account.</p><p><a href=\"{{url}}\">Choose a new password</a></p><p>This link works once and expires on {{expiresAt}}. If you did not ask for it, ignore this email.</p>`. `ZH_TEMPLATES` gains the Chinese equivalent.\n- `EmailScheduleService.startPasswordResetSend(input: PasswordResetSend)` and `EmailScheduleRepository.startPasswordResetSend`, mirroring `startInviteSend` with `kind: 'PASSWORD_RESET'`, `userId` set and `inviteId` null. `PasswordResetSend = { userId: string; toEmail: string; locale: string; now: Date }`.\n- `EmailScheduleRepository.closeAbandonedInvites(now)` closes abandoned `PASSWORD_RESET` rows too: its `where.kind` becomes `{ in: ['INVITE', 'PASSWORD_RESET'] }`. `claimDue` already claims only `NOTIFICATION` and `MEMBER_ADDED`, so reset rows are never re-sent.\n- The `EmailSchedule.kind` schema comment lists `PASSWORD_RESET`.\n\n**Scope** \u2014 In: exact model/migration, leaf module/repository/store/constants, reset email kind/code/templates, schedule service/repository start operation and abandoned closing. Out: request/confirm controller/service and module wiring (US-003/004), change-password integration with the store (US-003), refresh-client columns (US-005), web pages (US-006/007), expired/used-row purge and email retries.\n\n**Interface** \u2014 `replaceUnused(userId, tokenHash, expiresAt): Promise<void>`; `findByHash(tokenHash): Promise<{ id; userId; expiresAt; usedAt; userDisabled } | null>`; `markUsed(id, now): Promise<number>`; repository `deleteUnusedOf(userId): Promise<number>`; store `discardUnusedFor(userId): Promise<number>`; `EmailScheduleService.startPasswordResetSend(input: PasswordResetSend)`; `PasswordResetSend = { userId: string; toEmail: string; locale: string; now: Date }`; `PASSWORD_RESET_TTL_MS = 30 * 60_000`.\n\nImplementation note: The later request design requires two concurrent requests not to leave two unused rows. PostgreSQL transaction atomicity alone does not serialize delete/insert with an initially empty token set; use per-user serialization inside replaceUnused without changing its interface or specified schema. markUsed and discardUnusedFor must use the current transaction client rather than opening independent transactions.\n\nVerification: Add real Postgres store/schedule tests and a no-DB leaf-module compilation test. Extend existing email-schedule repository and template/seeder tests. The closeAbandonedInvites where-clause assertion becomes kind: { in: ['INVITE', 'PASSWORD_RESET'] }; the status and lock conditions stay. The seeder already loops codes and locales; new reset templates must be seeded for both en and zh without making reset rows eligible for dispatcher claiming.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] PasswordResetTokenStore.replaceUnused(userId, tokenHash, expiresAt) deletes the user's unused token rows and inserts the new one, so afterwards exactly one unused row exists for the user, carrying the given tokenHash and expiresAt.",
+        "AC-2 [integration] replaceUnused leaves a used row (usedAt set) of the same user in place.",
+        "AC-3 [integration] replaceUnused leaves another user's unused row in place.",
+        "AC-4 [integration] PasswordResetTokenStore.findByHash(tokenHash) answers { id, userId, expiresAt, usedAt, userDisabled } for a stored hash, or null for an unknown hash.",
+        "AC-5 [integration] PasswordResetTokenStore.markUsed(id, now) answers 1 for an unused row and 0 when the row already has usedAt.",
+        "AC-6 [unit] PASSWORD_RESET_TTL_MS equals 1,800,000 (30 minutes).",
+        "AC-7 [integration] EmailScheduleService.startPasswordResetSend({ userId, toEmail, locale: 'en', now }) writes one EmailSchedule row with kind PASSWORD_RESET, status SENDING, the userId, inviteId null and lockedUntil two minutes after now.",
+        "AC-8 [unit] EmailScheduleRepository.closeAbandonedInvites marks a PASSWORD_RESET row in status SENDING with lockedUntil in the past as FAILED with lastError abandoned.",
+        "AC-9 [integration] EmailScheduleService.claimDue never returns a PASSWORD_RESET row, even one in status PENDING with dueAt in the past.",
+        "AC-10 [unit] EN_TEMPLATES.PASSWORD_RESET has the subject [koda] Reset your password and an html body containing the {{url}} and {{expiresAt}} placeholders.",
+        "AC-11 [unit] ZH_TEMPLATES.PASSWORD_RESET has a non-empty subject and an html body containing the {{url}} and {{expiresAt}} placeholders.",
+        "AC-12 [unit] The email template seeder seeds a PASSWORD_RESET template for both en and zh.",
+        "AC-13 [unit] Regression: Given an INVITE EmailSchedule row in SENDING with lockedUntil before now, EmailScheduleRepository.closeAbandonedInvites(now) still marks it FAILED with lastError abandoned."
+      ],
+      "tags": [
+        "auth-passwords",
+        "api",
+        "security",
+        "prisma",
+        "email",
+        "tokens"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New transactional token store, migration, module boundary and one-shot email integration are security-critical despite having no route yet."
+      },
+      "contextFiles": [
+        "apps/api/src/projects/invites/invite-token.ts",
+        "apps/api/src/email/schedule/email-schedule.repository.ts",
+        "apps/api/src/email/schedule/email-schedule.types.ts",
+        "apps/api/src/email/templates/en.ts",
+        "apps/api/src/email/templates/template-codes.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261210100000_password_reset_tokens/migration.sql",
+        "apps/api/src/auth/password-reset/prisma-password-reset.repository.ts",
+        "apps/api/src/auth/password-reset/password-reset-token.store.ts",
+        "apps/api/src/auth/password-reset/password-reset-store.module.ts",
+        "apps/api/src/auth/password-reset/password-reset.constants.ts",
+        "apps/api/src/auth/password-reset/password-reset-store.module.spec.ts",
+        "apps/api/test/integration/auth/password-reset-store.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When two replaceUnused calls for the same user execute concurrently with no initial token rows, exactly one unused token remains after both calls finish.",
+        "PasswordResetTokenStore.discardUnusedFor(userId) deletes only that user's unused rows and returns their affected count, leaving used rows and other users' rows unchanged.",
+        "When an enclosing transaction rolls back after discardUnusedFor, the deleted unused tokens remain available."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/email/schedule/email-schedule.repository.spec.ts",
+          "reason": "the `closeAbandonedInvites` where-clause assertion becomes `kind: { in: ['INVITE', 'PASSWORD_RESET'] }`; the status and lock conditions stay."
+        },
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "the `PasswordResetToken` model, the `User.passwordResetTokens` back-relation and the `EmailSchedule.kind` comment."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Password reset request route",
+      "description": "**Goal** \u2014 Add a non-enumerating public reset-request endpoint with detached email work and invalidate outstanding reset links after password change.\n\n**Motivation** \u2014 Users are admin-created with a temporary password, and a forgotten password needs an admin.\n\n**Approach** \u2014 Verbatim modules design:\n\nTwo modules, so `AuthModule` never imports `NotificationsModule` (that would close the cycle `AuthModule` \u2192 `NotificationsModule` \u2192 `LiveModule` \u2192 `AuthModule`; the repo avoids it the same way with `AuthRepositoryModule` and `AuthSessionsModule`):\n- `PasswordResetStoreModule` (`apps/api/src/auth/password-reset/password-reset-store.module.ts`, US-002) is a leaf: it imports only `PrismaModule`, provides `PrismaPasswordResetRepository` and `PasswordResetTokenStore`, and exports `PasswordResetTokenStore`. `PasswordResetTokenStore` (`password-reset-token.store.ts`) is the public face of the table: `replaceUnused`, `findByHash`, `markUsed` and `discardUnusedFor(userId): Promise<number>`, each delegating to the repository.\n- `PasswordResetModule` (`password-reset.module.ts`, US-003) declares `PasswordResetController`, provides `PasswordResetService`, and imports `PasswordResetStoreModule`, `AuthRepositoryModule` (`PrismaAuthRepository`), `AuthSessionsModule` (`AuthSessionService`) and `NotificationsModule` (`EmailDispatcher`); `EmailAvailability` and `EmailScheduleService` come from the global `EmailCoreModule`. `AppModule` imports `PasswordResetModule`.\n- `AuthModule` imports `PasswordResetStoreModule` only, so `AuthService.changePassword` can call `PasswordResetTokenStore.discardUnusedFor`.\n\nController design: `PasswordResetController` (`apps/api/src/auth/password-reset/password-reset.controller.ts`, `@Controller('auth')`, `@ApiTags('auth')` like `AuthController`) hosts both reset routes: handler `requestReset` on `@Post('password-reset')` and handler `confirmReset` on `@Post('password-reset/confirm')`, each `@HttpCode(200)`. Both routes are public, so the controller carries no `@ApiBearerAuth` (an exception to `.nax/rules/api-controllers.md` for unauthenticated routes, like `register` and `login`). `AuthController` is unchanged by the reset routes. Story boundary: this story creates the controller with requestReset only; confirmReset is added by US-004.\n\nVerbatim request design:\n\n`POST /api/auth/password-reset`, body `PasswordResetRequestDto { email: string }` (`@IsEmail`, `@MaxLength(254)`, same messages as `RegisterDto.email`). The route is public (`@Public()`, `@UseGuards(RequiresGuard)`, `@Requires('session.password.reset.request')`), throttled with `AUTH_LOGIN_LIMIT` / `AUTH_LOGIN_TTL_MS`, and always answers `JsonResponse.Ok({})` (200).\n\n`PasswordResetService.request(email: string, locale: EmailLocale): Promise<void>` returns after the user lookup. When the user exists, is not disabled and `EmailAvailability.configured` is true, it starts a detached task (not awaited; a rejection is caught and logged with `Logger.warn`). The whole task runs inside `bookkeeping('auth.password-reset-request', ...)`, a new reason in `BOOKKEEPING_REASONS` (`apps/api/src/action-context/audit-coverage.reasons.ts`, sentence: \"A password reset token and its email schedule row, written for a public request that records no audit entry so it cannot reveal whether the address has an account.\"), so its writes never count against the request's audit scope, whether they land before or after the handler completes. The task:\n1. calls `PasswordResetTokenStore.replaceUnused(userId, sha256(raw), now + PASSWORD_RESET_TTL_MS)`, which deletes the user's unused reset tokens and inserts the new one in one transaction, so two concurrent requests cannot leave two unused tokens;\n2. calls `EmailScheduleService.startPasswordResetSend({ userId, toEmail, locale, now })`, which inserts a `PASSWORD_RESET` row in status `SENDING`;\n3. sends it with `EmailDispatcher.sendOne(row, 'PASSWORD_RESET', { url: EmailAvailability.webUrl('/reset-password/<raw>'), expiresAt: <ISO> }, userId, now, false)`. Retry is off: only the hash is stored, so a failed send is final.\n\nThe controller resolves the locale from `Accept-Language` with a local helper that copies the rule of the module-private `inviteLocale` in `project-invites.controller.ts` (only a value starting with `zh` gives `zh`; anything else is `en`).\n\nToken material follows the storage design: The raw token is `randomBytes(32).toString('base64url')`, hashed with sha256 the way `generateInviteToken` / `hashInviteToken` (`apps/api/src/projects/invites/invite-token.ts`) do; only the hash is stored. `PASSWORD_RESET_TTL_MS = 30 * 60_000`.\n\nPassword-change seam: `PasswordResetTokenStore.discardUnusedFor(userId)` deletes the user's unused reset tokens and runs inside its caller's transaction; `AuthService.changePassword` calls it from US-003 on. `AuthModule` imports the leaf `PasswordResetStoreModule` (never `PasswordResetModule`) from US-003 on; `AuthService` gains the constructor dependency `PasswordResetTokenStore`. The existing password-change audited work must include discardUnusedFor before commit so old reset links stop working.\n\nCatalog: add `session.password.reset.request` as `POST /auth/password-reset`, scope `public`, access `PUBLIC_KEYS`, every role cell `[\"public\",\"public\"]`, in the inventory TSV, INVENTORY_SCOPE_ROWS/access set, catalog.spec.ts key lists and role-matrix.json. Place it next to session.refresh; keep unrelated assertions/cells unchanged. The TSV row is session/global. Regenerate openapi.json and CLI artifacts with root `bun run generate`. Add `auth.password-reset-request` to EXPECTED_REASON_IDS in audit-coverage.bookkeeping.spec.ts without changing its exact-list assertion or the seven unaudited surfaces. Add a PasswordResetTokenStore double to auth.service.spec.ts and session-activity-fence.spec.ts, preserving fence assertions and asserting discardUnusedFor occurs inside audited work.\n\n**Scope** \u2014 In: request DTO/controller/service/module, detached bookkeeping-scoped token/email task, app wiring, permission contract and password-change token invalidation. Out: persistence/email primitives (US-002), confirm route/DTO/algorithm (US-004), client-bound refresh (US-005), web forms (US-006/007), equal lookup timing and per-email throttling. Log only user id and failure reason, never raw token or URL; no separate log-token-absence test is required.\n\n**Interface** \u2014 `PasswordResetRequestDto { email: string }`; `PasswordResetService.request(email: string, locale: EmailLocale): Promise<void>`; controller `requestReset` on `@Post('password-reset')`; `PasswordResetTokenStore.discardUnusedFor(userId): Promise<number>`; `EmailDispatcher.sendOne(row, templateCode, data, userId, now, retryable = true): Promise<SendOutcome>`.\n\nVerification: Write request HTTP integration cases with audit-coverage checking enabled, injected email collaborators and bounded polling up to 5 seconds for detached work. Unknown-address absence uses the same wait. Assert FAILED final state for channel failure, and both returned FAILED and rejected task failures must be warning-logged appropriately. Add no-DB module compilation coverage to expose circular or missing provider wiring.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/auth/password-reset for an existing, enabled user with email configured answers 200 {}, and (the test polls up to 5 s for the detached task) a PasswordResetToken row appears for that user with expiresAt 30 minutes after the request and usedAt null.",
+        "AC-2 [integration] The stored tokenHash is the lowercase sha256 hex of the raw token in the emailed /reset-password/<raw> URL, and the raw token is stored in no column.",
+        "AC-3 [integration] The email is sent through EmailDispatcher.sendOne with template code PASSWORD_RESET, data.url equal to EmailAvailability.webUrl('/reset-password/<raw>'), and the sixth argument false (no retry).",
+        "AC-4 [integration] One EmailSchedule row of kind PASSWORD_RESET with the user's id is written and ends in status SENT when the send succeeds.",
+        "AC-5 [integration] When the email channel throws on send, the response is still 200 {}, the EmailSchedule row ends in status FAILED, and the failure is logged with Logger.warn.",
+        "AC-6 [integration] A request for an unknown address answers 200 {} and, after the same 5 s wait, no PasswordResetToken row and no EmailSchedule row exist for it, and no email is sent.",
+        "AC-7 [integration] A request for a disabled user answers 200 {}, writes no token row and sends no email.",
+        "AC-8 [integration] A request while email is not configured answers 200 {}, writes no token row and sends no email.",
+        "AC-9 [integration] A known and an unknown address both answer 200 with the same body, and neither raises UnauditedWriteError (the test runs with audit-coverage checking on, as the integration harness does).",
+        "AC-10 [integration] A second request for the same user leaves exactly one unused token row for that user.",
+        "AC-11 [integration] A request with Accept-Language: zh-CN writes the EmailSchedule row with locale zh; one with Accept-Language: fr writes en.",
+        "AC-12 [integration] POST /api/auth/password-reset is throttled like POST /api/auth/login: after AUTH_LOGIN_LIMIT requests from one client inside AUTH_LOGIN_TTL_MS, the next answers 429.",
+        "AC-13 [unit] The catalog entry for session.password.reset.request has access public.",
+        "AC-14 [integration] After a reset request, a successful POST /api/auth/password by that user deletes the outstanding unused reset token, so confirming it later answers 400.",
+        "AC-15 [integration] A body whose email is not an email address answers 400 and writes nothing."
+      ],
+      "tags": [
+        "auth-passwords",
+        "api",
+        "security",
+        "email",
+        "audit",
+        "password-reset"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The new reset module joins existing token-store, bookkeeping, audited-change and one-shot email patterns rather than introducing a new architecture; its public credential-recovery flow still requires the security-mandated strict TDD strategy."
+      },
+      "contextFiles": [
+        "apps/api/src/projects/invites/invite-mailer.ts",
+        "apps/api/src/projects/invites/project-invites.module.ts",
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/projects/invites/project-invites.controller.ts",
+        "apps/api/src/auth/password-reset/password-reset-token.store.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/auth/password-reset/password-reset.module.ts",
+        "apps/api/src/auth/password-reset/password-reset.service.ts",
+        "apps/api/src/auth/password-reset/password-reset.controller.ts",
+        "apps/api/src/auth/dto/password-reset-request.dto.ts",
+        "apps/api/src/auth/password-reset/password-reset.service.spec.ts",
+        "apps/api/src/auth/password-reset/password-reset.controller.spec.ts",
+        "apps/api/src/auth/password-reset/password-reset.module.spec.ts",
+        "apps/api/test/integration/auth/password-reset-request.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the detached token-write task rejects, requestReset still answers 200 with the same envelope and Logger.warn records the failure.",
+        "When email delivery stays pending, PasswordResetService.request resolves without waiting for the send to finish.",
+        "When password-change audited work rolls back after discarding reset tokens, the previously unused reset token remains stored."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts",
+          "reason": "`EXPECTED_REASON_IDS` gains `auth.password-reset-request`; the exact-list assertion stays; the seven unaudited surfaces are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the closed key lists gain `session.password.reset.request` next to `session.refresh`."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role block gains `\"session.password.reset.request\": [\"public\",\"public\"]` in catalog order; no other cell changes."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "one REST row for route POST /auth/password-reset (`session`, `global`, `session.password.reset.request`, `public`)."
+        },
+        {
+          "path": "apps/api/src/auth/auth.service.spec.ts",
+          "reason": "the `AuthService` test module provides a `PasswordResetTokenStore` double; `changePassword` cases assert `discardUnusedFor(userId)` is called inside the audited work."
+        },
+        {
+          "path": "apps/api/src/auth/session-activity-fence.spec.ts",
+          "reason": "its `Test.createTestingModule` provider list gains a `PasswordResetTokenStore` double for the new `AuthService` dependency; the fence assertions stay."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Password reset confirmation",
+      "description": "**Goal** \u2014 Consume an emailed reset token exactly once, change the password and revoke every session without signing the user in.\n\n**Motivation** \u2014 Users are admin-created with a temporary password, and a forgotten password needs an admin.\n\n**Approach** \u2014 Verbatim confirm design:\n\n`POST /api/auth/password-reset/confirm`, body `PasswordResetConfirmDto { token: string; newPassword: string }`, `token` `@IsString` + `@MinLength(1)` + `@MaxLength(128)`, `newPassword` validated like `RegisterDto.password`. Public (`@Requires('session.password.reset.confirm')`), throttled the same way.\n\n`PasswordResetTokenStore.discardUnusedFor(userId)` deletes the user's unused reset tokens and runs inside its caller's transaction; `AuthService.changePassword` calls it from US-003 on.\n\n`PasswordResetService.confirm(dto: PasswordResetConfirmDto, now: Date): Promise<void>`:\n1. Hash the token and find the row with its user.\n2. Missing, `usedAt` set, `expiresAt <= now`, or the user disabled \u2192 `ValidationAppException({}, 'auth.resetTokenInvalid')` (400).\n3. Hash the new password before opening the transaction. In one `audit.audited(...)` call: mark the row used with `updateMany where { id, usedAt: null }` (count 0 \u2192 the same 400, thrown inside so the transaction rolls back), `updatePasswordHash`, `bumpTokenVersion`, `authSessions.revokeAllForUser(userId, 'password-reset', now)`, delete the user's other unused reset tokens. Audit entry `{ key: 'session.password.reset.confirm', resourceType: 'user', resourceId: userId, projectId: null, summary: 'password reset' }`.\n4. After the commit: evict each revoked session's `authSessionCacheKey` under its lock, `cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' })` and `cache.invalidate(userAuthStateCacheKey(userId))`.\n5. Answer `JsonResponse.Ok({})`. No session is issued; the web sends the user to `/login`.\n\nController design: `PasswordResetController` (`apps/api/src/auth/password-reset/password-reset.controller.ts`, `@Controller('auth')`, `@ApiTags('auth')` like `AuthController`) hosts both reset routes: handler `requestReset` on `@Post('password-reset')` and handler `confirmReset` on `@Post('password-reset/confirm')`, each `@HttpCode(200)`. Both routes are public, so the controller carries no `@ApiBearerAuth` (an exception to `.nax/rules/api-controllers.md` for unauthenticated routes, like `register` and `login`). `AuthController` is unchanged by the reset routes. Add confirmReset to the controller created by US-003; preserve its request route and module split. Use @Public(), @UseGuards(RequiresGuard), @Requires('session.password.reset.confirm') and @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: AUTH_LOGIN_TTL_MS } }). RegisterDto.password validators are @IsString, @MinLength(8), @Matches(PASSWORD_COMPLEXITY), with the same i18n messages; bcrypt hash cost is 12.\n\nCatalog design: add `session.password.reset.confirm`, `POST /auth/password-reset/confirm`, TSV/INVENTORY_SCOPE_ROWS `public`, access set `PUBLIC_KEYS`, every role cell `[\"public\",\"public\"]`. Update the inventory TSV session/global row, catalog scope/access, catalog.spec.ts closed lists and every role in role-matrix.json in catalog order, changing no other cell. After the API contract changes, `bun run generate` from the repo root keeps `openapi.json` and the CLI client current.\n\nAPI message design: The exception filter translates `<prefix>.<code>`, so both messages are nested under their exception codes in `apps/api/src/i18n/en/auth.json` and `zh/auth.json`, the way `invites.json` nests `roleGone`: `\"resetTokenInvalid\": { \"-2\": \"This reset link is invalid or has expired\", \"400\": \"This reset link is invalid or has expired\" }` (`ValidationAppException`). Add the Chinese equivalent under both codes too.\n\n**Scope** \u2014 In: confirm DTO/service/controller method, one-winner token consumption, atomic password/tokenVersion/session/audit mutation, post-commit cache eviction, localized exception and public permission/contracts. Out: request/send algorithm and wiring (US-003), storage/schema/email primitives (US-002), self-service change (US-001 except shared calls), refresh recovery binding (US-005) and reset UI (US-007). No automatic login/session creation, reset-email retries or agent/runner reset path.\n\n**Interface** \u2014 `PasswordResetConfirmDto { token: string; newPassword: string }`; `PasswordResetService.confirm(dto: PasswordResetConfirmDto, now: Date): Promise<void>`; controller `confirmReset` on `@Post('password-reset/confirm')`; `PasswordResetTokenStore.markUsed(id, now): Promise<number>`; `PrismaAuthRepository.updatePasswordHash(userId, passwordHash): Promise<void>`; `PrismaAuthRepository.bumpTokenVersion(userId): Promise<number>`; `AuthSessionService.revokeAllForUser(userId: string, reason: SessionRevokeReason, now: Date, exceptSessionId?: string): Promise<string[]>`.\n\nVerification: Extend upstream service/controller unit suites; add Postgres HTTP confirmation tests using a token from a real request-route email seam, not only a hand-inserted row. Race two confirms and assert one commit/audit. Prime access activity cache before confirming and assert immediate 401 afterwards. Invalid password validation must leave the token unused; used/expired/unknown/disabled links must not modify password state. Keep no-DB module wiring tests outside test/integration.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After POST /api/auth/password-reset for a user, POST /api/auth/password-reset/confirm with the emailed raw token and a valid newPassword answers 200 {}, and POST /api/auth/login then succeeds with newPassword.",
+        "AC-2 [integration] After that confirm, the token row has usedAt set, and a second confirm with the same token answers 400 with the auth.resetTokenInvalid message.",
+        "AC-3 [integration] A confirm with a token whose expiresAt is in the past answers 400 auth.resetTokenInvalid and leaves the password unchanged.",
+        "AC-4 [integration] A confirm with an unknown token answers 400 auth.resetTokenInvalid and writes nothing.",
+        "AC-5 [integration] A confirm for a user disabled after the request answers 400 auth.resetTokenInvalid and leaves the password unchanged.",
+        "AC-6 [integration] A session of the user whose access token answered 200 on GET /api/auth/me before the confirm (so its activity is cached) is revoked with revokedReason password-reset, and that access token answers 401 on GET /api/auth/me right after the confirm.",
+        "AC-7 [integration] A successful confirm raises the user's tokenVersion by one.",
+        "AC-8 [integration] A successful confirm deletes the user's other unused reset tokens.",
+        "AC-9 [integration] A successful confirm records exactly one audit entry { key: 'session.password.reset.confirm', resourceType: 'user', resourceId: <userId>, projectId: null, summary: 'password reset' }.",
+        "AC-10 [integration] When two confirms with the same token execute concurrently, exactly one answers 200 and the other answers 400 auth.resetTokenInvalid, and exactly one audit entry is recorded.",
+        "AC-11 [integration] A confirm whose newPassword fails the complexity rule answers 400, and the token stays unused.",
+        "AC-12 [integration] POST /api/auth/password-reset/confirm is throttled like POST /api/auth/login: after AUTH_LOGIN_LIMIT requests from one client inside AUTH_LOGIN_TTL_MS, the next answers 429.",
+        "AC-13 [unit] The catalog entry for session.password.reset.confirm has access public.",
+        "AC-14 [integration] The confirm issues no tokens: its response body carries no accessToken and no refreshToken, and no AuthSession row is created."
+      ],
+      "tags": [
+        "auth-passwords",
+        "api",
+        "security",
+        "password-reset",
+        "sessions",
+        "audit"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One-time credential reset must be race-safe and atomic with tokenVersion, all-session revocation and audit, followed by immediate cache invalidation; strict security override applies."
+      },
+      "contextFiles": [
+        "apps/api/src/auth/password-reset/password-reset.service.ts",
+        "apps/api/src/auth/password-reset/password-reset.controller.ts",
+        "apps/api/src/auth/sessions/auth-session.service.ts",
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/i18n/en/auth.json"
+      ],
+      "expectedFiles": [
+        "apps/api/src/auth/dto/password-reset-confirm.dto.ts",
+        "apps/api/test/integration/auth/password-reset-confirm.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "PasswordResetService.confirm throws ValidationAppException with auth.resetTokenInvalid when expiresAt equals the supplied now and leaves the password unchanged.",
+        "When the reset audit write fails, usedAt, passwordHash, tokenVersion and session revocation fields retain their pre-confirmation values.",
+        "After reset confirmation, every active session of that user is revoked while a different user's session remains active."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the closed key lists gain `session.password.reset.confirm`."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role block gains `\"session.password.reset.confirm\": [\"public\",\"public\"]` in catalog order; no other cell changes."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "one REST row for route POST /auth/password-reset/confirm (`session`, `global`, `session.password.reset.confirm`, `public`)."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Client-bound lost-response recovery",
+      "description": "**Goal** \u2014 Bind only lost-response refresh recovery to the token's first-use User-Agent and audit the presenting IP.\n\n**Motivation** \u2014 Inside the 20-minute recovery window, a thief replaying the stolen newest-used refresh token cannot be told apart from a client whose refresh response was lost.\n\n**Approach** \u2014 Verbatim client-bound lost-response recovery design:\n\nMigration `20261210110000_refresh_token_client` adds two nullable columns to `RefreshToken`: `usedUaHash String?` (lowercase sha256 hex of the User-Agent header, hashing the empty string when the header is absent, (`refreshClientOf(undefined, undefined)` answers the sha256 hex of the empty string)) and `usedIp String?` (the client IP as Fastify resolves it through the trusted proxies configured in `main.ts`).\n\nNew type in `auth-session.service.ts`: `RefreshClient = { uaHash: string; ip: string | null }`. A pure helper `refreshClientOf(userAgent: string | undefined, ip: string | undefined): RefreshClient` in a new file `apps/api/src/auth/sessions/refresh-client.ts` hashes `userAgent ?? ''` with sha256 and maps a missing or empty ip to `null`.\n\nWorked skeleton of the controller change (novel shape: no auth route reads the raw request today):\n\n```ts\n@Post('refresh')\n// ...existing decorators unchanged...\nasync refresh(@Principal() user: IPrincipal, @Req() req: RefreshRequestLike) {\n  const userAgent = req.headers['user-agent'];\n  const client = refreshClientOf(Array.isArray(userAgent) ? userAgent[0] : userAgent, req.ip);\n  return JsonResponse.Ok(await this.authService.refresh(user, client));\n}\n```\n\n`RefreshRequestLike` is a local interface in `refresh-client.ts`, `{ headers: Record<string, string | string[] | undefined>; ip?: string }` (the way `mcp.controller.ts` declares `McpHttpRequest`), because `fastify` is not a direct dependency of `apps/api`. A `user-agent` header given as an array uses its first value.\n\n`AuthService.refresh(principal, client)` passes `client` into `AuthSessionService.rotate({ ..., client })`. In `rotate`:\n- step 3 (first use): `markUsed(sessionId, presentedTokenId, now, client)` also writes `usedUaHash = client.uaHash` and `usedIp = client.ip`;\n- step 4 (grace) is unchanged;\n- step 5 (lost response) additionally requires `presented.usedUaHash === client.uaHash`. A `null` `usedUaHash` (a token first used before this migration) never matches. A mismatch falls through to step 6 (revoke as `reuse`);\n- the `recovered` outcome carries the presenting IP: `{ kind: 'recovered'; ip: string | null }`.\n\n`AuthService.refresh` records the recovery entry with summary `refresh token lost-response recovery; session kept; ip <ip>` (`ip unknown` when null). The reuse entry is unchanged.\n\nAC-authoritative clarifications: Absent UA stores/returns lowercase sha256 hex of the empty string, (`refreshClientOf(undefined, undefined)` answers the sha256 hex of the empty string), never a literal empty hash. The skeleton includes the specified first-value normalization for an array header before passing it to refreshClientOf, whose argument remains string | undefined. usedIp is first-use persistence/audit context only; findToken and RefreshTokenDomain need only the new usedUaHash field. For the different-IP recovery unit case, model a different originally recorded IP in the fixture without requiring production rotate to read or compare it; the recovered outcome's IP must come from the presenting input.client.ip.\n\nTarget interfaces from Integration (implement targets, never baseline signatures):\n- `AuthController.refresh`: `refresh(@Principal() user: IPrincipal, @Req() req: RefreshRequestLike)` calling `authService.refresh(user, client)` after selecting the first array header value, if needed, and deriving client with `refreshClientOf(userAgent, req.ip)`.\n- `AuthService.refresh`: `refresh(principal: IPrincipal, client: RefreshClient)`; passes `client` to `rotate`; on `recovered` records `refresh token lost-response recovery; session kept; ip <ip|unknown>`.\n- `AuthSessionService.rotate`: input adds `client: RefreshClient`; `RotateOutcome` member `{ kind: 'recovered'; ip: string | null }`; step 5 also requires `presented.usedUaHash === client.uaHash`.\n- `PrismaAuthSessionRepository.markUsed`: `markUsed(sessionId, tokenId, now, client: RefreshClient)` also writes `usedUaHash` and `usedIp`.\n- `PrismaAuthSessionRepository.findToken` and `RefreshTokenDomain`: adds `usedUaHash: string | null`.\n\n**Scope** \u2014 In: additive client columns/migration, domain mapping, pure helper/request interface, first-use persistence, recovery match/outcome/audit and controller/service propagation. Out: password flows (US-001\u2013004), Nuxt forwarding (US-006), DPoP, IP enforcement, UA binding on first rotation or grace, multi-replica concurrency and different-IP integration testing. Matching-UA/different-IP recovery is pinned at unit level because the integration harness has no trusted-proxy variation.\n\n**Interface** \u2014 `RefreshClient = { uaHash: string; ip: string | null }`; `refreshClientOf(userAgent: string | undefined, ip: string | undefined): RefreshClient`; `RefreshRequestLike` is `{ headers: Record<string, string | string[] | undefined>; ip?: string }`; `AuthService.refresh(principal: IPrincipal, client: RefreshClient)`; `rotate` input is `{ sessionId, presentedTokenId, nextTokenId, nextExpiresAt, now, client: RefreshClient }`; recovered outcome `{ kind: 'recovered'; ip: string | null }`; `markUsed(sessionId, tokenId, now, client: RefreshClient)`.\n\nVerification/regression anchors: auth-session.service.spec.ts rotateInput gains client; first-use assertion becomes markUsed('s1', 't1', now, client); recovery expects { kind: 'recovered', ip } and a matching usedUaHash. auth.service.spec.ts refresh calls/rotate assertions gain client and the recovery summary IP. auth.controller.spec.ts calls refresh with a request and checks its derived client. session-activity-fence.spec.ts refresh calls gain client without changing fence assertions. test/integration/auth/auth-sessions.integration.spec.ts rotate helper and concurrent rotation pass client and keep every existing outcome assertion. test/integration/auth/refresh-rotation.integration.spec.ts summaries gain the IP and lost-response original/retry requests send the same UA. Add mismatch/null-legacy revocation and grace/normal-rotation regression cases. Backdate token usedAt 31 seconds for recovery cases, retaining the existing 30-second grace and 20-minute recovery window. Apply the nullable-column migration and regenerate Prisma before writing the new fields.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] refreshClientOf('Mozilla/5.0 X', '203.0.113.7') answers { uaHash: <lowercase sha256 hex of 'Mozilla/5.0 X'>, ip: '203.0.113.7' }.",
+        "AC-2 [unit] refreshClientOf(undefined, undefined) answers the sha256 hex of the empty string and ip null.",
+        "AC-3 [unit] refreshClientOf('UA', '') answers ip null.",
+        "AC-4 [integration] A first-use refresh with User-Agent: UA-1 writes usedUaHash = sha256('UA-1') and a non-null usedIp on the presented token row.",
+        "AC-5 [integration] Lost response with a matching User-Agent: after a refresh with User-Agent: UA-1 whose successor is never used, a retry of the same token with User-Agent: UA-1, its usedAt backdated 31 s, answers 200 and the session stays active.",
+        "AC-6 [integration] Lost response with a different User-Agent: the same retry with User-Agent: UA-2 answers 401 and the session is revoked with revokedReason reuse.",
+        "AC-7 [unit] AuthSessionService.rotate on the lost-response path with a matching usedUaHash and a client.ip different from the token's usedIp answers { kind: 'recovered', ip: <client.ip> }.",
+        "AC-8 [integration] After a real first-use refresh, setting the presented token's usedUaHash to null and backdating its usedAt 31 s causes the lost-response retry to answer 401 and revoke the session as reuse.",
+        "AC-9 [unit] AuthService.refresh given a { kind: 'recovered', ip: '198.51.100.9' } rotation records session.refresh with summary refresh token lost-response recovery; session kept; ip 198.51.100.9.",
+        "AC-10 [unit] AuthService.refresh given a { kind: 'recovered', ip: null } rotation records the summary ending in ; ip unknown.",
+        "AC-11 [unit] AuthSessionService.rotate on the lost-response path with a different usedUaHash calls revokeSession(sessionId, 'reuse', now) and answers { kind: 'reused', userId }.",
+        "AC-12 [unit] AuthController.refresh called with a request whose user-agent header is UA-1 and ip is 198.51.100.9 calls AuthService.refresh with refreshClientOf('UA-1', '198.51.100.9').",
+        "AC-13 [integration] A refresh inside the 30 s grace with a different User-Agent still answers 200 (step 4 is not bound).",
+        "AC-14 [integration] A first-use refresh with a different User-Agent than the login answers 200 (step 3 is not bound).",
+        "The User-Agent-mismatch revocation (a retry with `User-Agent: UA-2` after a first use with `UA-1`, answering 401) records one `session.refresh` audit entry with summary `refresh token reuse; session revoked`."
+      ],
+      "tags": [
+        "auth-passwords",
+        "api",
+        "security",
+        "refresh-tokens",
+        "sessions",
+        "audit"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "An additive migration and client parameter extend an existing transactional rotation algorithm with one recovery predicate and audit field; cross-layer signature changes justify complex scope, while authentication security requires strict TDD isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/auth/sessions/auth-session.service.ts",
+        "apps/api/src/auth/sessions/prisma-auth-session.repository.ts",
+        "apps/api/src/auth/auth.controller.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+        "apps/api/src/auth/auth.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261210110000_refresh_token_client/migration.sql",
+        "apps/api/src/auth/sessions/refresh-client.ts",
+        "apps/api/src/auth/sessions/refresh-client.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "AuthController.refresh given user-agent: ['UA-1', 'UA-2'] passes refreshClientOf('UA-1', req.ip) to AuthService.refresh.",
+        "When a token is presented after LOST_RESPONSE_WINDOW_MS, rotate revokes it as reuse even when usedUaHash matches the presenting client."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/sessions/auth-session.service.spec.ts",
+          "reason": "`rotateInput` gains `client`; the first-use assertion becomes `markUsed('s1', 't1', now, client)`; the recovery case expects `{ kind: 'recovered', ip }` and needs a matching `usedUaHash` on the found token."
+        },
+        {
+          "path": "apps/api/src/auth/auth.service.spec.ts",
+          "reason": "`refresh` is called with a client argument and `rotate` is asserted with it; the recovery entry's summary gains `; ip <ip>`."
+        },
+        {
+          "path": "apps/api/src/auth/auth.controller.spec.ts",
+          "reason": "the refresh handler is called with a request object and asserted to pass the client built from its `user-agent` header and `ip`."
+        },
+        {
+          "path": "apps/api/src/auth/session-activity-fence.spec.ts",
+          "reason": "the `service.refresh(...)` calls pass a client argument; the fence assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/auth/auth-sessions.integration.spec.ts",
+          "reason": "the `rotate` helper and the concurrent-rotation case pass a `client`; every outcome assertion stays."
+        },
+        {
+          "path": "apps/api/test/integration/auth/refresh-rotation.integration.spec.ts",
+          "reason": "the recovery summaries gain `; ip <ip>`; the lost-response cases send the same `User-Agent` on the original refresh and the retry."
+        },
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "the two `RefreshToken` columns."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Account password form and User-Agent forwarding",
+      "description": "**Goal** \u2014 Provide the account password-change form and forward the browser's User-Agent through Nuxt auth proxy calls.\n\n**Motivation** \u2014 Users are admin-created with a temporary password, and a forgotten password needs an admin.\n\n**Approach** \u2014 Verbatim web forwarding design:\n\n`forwardToApi` (`apps/web/server/utils/api.ts`) forwards the incoming request's `user-agent` header as `User-Agent` when present, so the SSR refresh middleware, `server/api/auth/refresh.post.ts` and `server/api/auth/logout.post.ts` all present the browser's User-Agent. `clientIpHeaders` and `proxyHeaders` are unchanged.\n\nVerbatim account-page and layout design:\n- **Account page** `apps/web/pages/settings/account.vue`: a vee-validate + zod form with current password, new password and confirm new password (confirm must equal new; new must be at least 8 characters). It submits through `usePasswordActions().changePassword({ currentPassword, newPassword })` (`apps/web/composables/usePasswordActions.ts`), which calls `$api.post('/auth/password', ...)`. Success shows a `useAppToast()` success toast and resets the form. A 403 shows the `auth.account.currentPasswordWrong` message on the current-password field; any other error shows `extractApiError()`.\n- **Layout:** the header in `apps/web/layouts/default.vue` gains an \"Account\" link (`data-testid=\"header-account-link\"`) to `/settings/account`, next to the logout button.\n- **i18n:** every new string is in both `i18n/locales/en.json` and `zh.json`, under `auth.account`, `auth.forgot`, `auth.reset` and `nav.account`.\n- The API calls go through the existing Nuxt catch-all proxy; none sets cookies, so no new Nitro route is needed.\n\nFor this story only auth.account and nav.account are introduced; US-007 adds auth.forgot/auth.reset. The integration bodies are exact: `POST /auth/password` with `{ currentPassword, newPassword }`. Do not submit confirmNewPassword to the API or manipulate auth cookies on success; US-001 preserves the caller's session. The UA forwarded here is the same one US-005 hashes on refresh, including SSR middleware requests, not the Nuxt runtime's own UA. When absent, send no User-Agent header.\n\n**Scope** \u2014 In: account page, thin changePassword composable action, header link, en/zh strings and shared forwardToApi UA forwarding covering SSR/refresh/logout. Out: forgot/reset actions/pages/login and guest-route changes (US-007), API password mutation (US-001), API recovery algorithm (US-005), client-IP/proxy policy changes, session list and logout-all UI. Do not expand password policy beyond the specified frontend minimum/matching checks.\n\n**Interface** \u2014 `usePasswordActions().changePassword({ currentPassword, newPassword })`; `$api.post('/auth/password', { currentPassword, newPassword })`; existing `forwardToApi` signature stays unchanged and adds `User-Agent` when the incoming request has a `user-agent` header.\n\nRepository integration notes: Read docs/ux/redesign/MASTER-PLAN.md before layout changes and update its Status/Decisions in the implementing PR. Keep inline navigation/source order and token-based styling; add the Account destination to CommandPalette per app guidance, without redesigning the shell. useApi converts HTTP FetchError envelopes into ApiError carrying the application ret; account 403 handling must recognize the real auth.currentPasswordWrong envelope code 40003 as well as raw HTTP status errors, rather than passing only mocked-status tests. Keep generic errors using extractApiError.\n\nVerification: Extend forward-to-api.spec.ts and session-refresh.spec.ts to assert browser UA propagation and absence behavior. Existing forwardToApi assertions read individual keys, never the full header object, and layout specs do not pin the header button list. Add composable/form Jest tests for exact request body, mismatch prevention, success/reset, field 403 and generic failure; assert i18n parity. No new Nitro route is needed.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] forwardToApi called for an event whose request has user-agent: Mozilla/5.0 Test sends the header User-Agent: Mozilla/5.0 Test to the API.",
+        "AC-2 [unit] The SSR session-refresh middleware calling /auth/refresh for a request with user-agent: UA-1 forwards User-Agent: UA-1.",
+        "AC-3 [unit] forwardToApi for a request without a user-agent header sends no User-Agent header.",
+        "AC-4 [unit] usePasswordActions().changePassword({ currentPassword: 'a', newPassword: 'B' }) calls $api.post('/auth/password', { currentPassword: 'a', newPassword: 'B' }).",
+        "AC-5 [unit] Submitting the account form with matching new and confirm values calls changePassword once with the current and new password.",
+        "AC-6 [unit] Submitting with a confirm value different from the new password shows a validation message and does not call changePassword.",
+        "AC-7 [unit] A successful change shows a success toast and clears all three fields.",
+        "AC-8 [unit] A 403 from changePassword shows the auth.account.currentPasswordWrong text next to the current-password field.",
+        "AC-9 [unit] A 500 from changePassword shows the extractApiError message.",
+        "AC-10 [unit] The default layout header renders a link with data-testid=\"header-account-link\" pointing to /settings/account.",
+        "AC-11 [unit] Every new key under auth.account and nav.account exists in both en.json and zh.json.",
+        "AC-12 [unit] Regression: When forwardToApi forwards an incoming User-Agent, its outgoing Accept, Authorization, Content-Type and client-IP header values equal those produced for an otherwise identical event without that incoming User-Agent."
+      ],
+      "tags": [
+        "auth-passwords",
+        "web",
+        "security",
+        "nuxt",
+        "passwords",
+        "ssr"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential UI and SSR client-provenance forwarding connect to security-sensitive API contracts and error handling; security override applies across the web boundary."
+      },
+      "contextFiles": [
+        "apps/web/server/utils/api.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/pages/register.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/server/middleware/session-refresh.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/settings/account.vue",
+        "apps/web/composables/usePasswordActions.ts",
+        "apps/web/tests/pages/account.spec.ts",
+        "apps/web/tests/composables/usePasswordActions.spec.ts",
+        "apps/web/tests/i18n/passwords-locale-parity.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Submitting the account form with a new password shorter than eight characters does not call changePassword.",
+        "When changePassword rejects with the actual API envelope converted to ApiError code 40003, the current-password field displays auth.account.currentPasswordWrong."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Forgot-password and reset-password pages",
+      "description": "**Goal** \u2014 Complete the guest-facing email reset journey with non-enumerating request feedback, token confirmation and safe login routing.\n\n**Motivation** \u2014 Users are admin-created with a temporary password, and a forgotten password needs an admin.\n\n**Approach** \u2014 Verbatim web-page design:\n- **Forgot password** `apps/web/pages/forgot-password.vue` (with `definePageMeta({ layout: 'auth' })`, as `login.vue` and `register.vue` do): an email form calling `usePasswordActions().requestReset(email)` (`$api.post('/auth/password-reset', { email })`); after the call settles it always shows the same \"check your email\" state.\n- **Reset password** `apps/web/pages/reset-password/[token].vue` (layout `auth` too): new-password and confirm form calling `usePasswordActions().confirmReset(token, newPassword)` (`$api.post('/auth/password-reset/confirm', { token, newPassword })`). Success navigates to `/login?reset=1`; a 400 shows the \"link invalid or expired\" state with a link to `/forgot-password`.\n- **Login page** `apps/web/pages/login.vue`: a \"Forgot password?\" link to `/forgot-password`, and a notice when the query has `reset=1`.\n- **Routing:** `apps/web/middleware/auth.global.ts` treats `/forgot-password` and every path starting with `/reset-password/` as guest-only: anonymous visitors are not sent to `/login`, and authenticated users are redirected to `safeRedirectPath(to.query.redirect)`.\n- **i18n:** every new string is in both `i18n/locales/en.json` and `zh.json`, under `auth.account`, `auth.forgot`, `auth.reset` and `nav.account`.\n- The API calls go through the existing Nuxt catch-all proxy; none sets cookies, so no new Nitro route is needed.\n\nThe reset form mirrors the upstream account form's vee-validate + zod new-password and confirm validation (new at least 8 characters; confirm equals new). auth.account and nav.account were added by US-006; this story adds auth.forgot and auth.reset, including the login reset notice/link text. Extend rather than replace usePasswordActions. Body contracts remain `{ email }` and `{ token, newPassword }` exactly. Reset success does not establish a session; navigating to login is intentional. Forgot feedback is identical even after rejection, including network or API failure.\n\n**Scope** \u2014 In: forgot/reset auth-layout pages, composable requestReset/confirmReset actions, login link/reset notice, unified guest-only route predicate and en/zh strings. Out: account page/UA forwarding (US-006), request/confirm APIs (US-003/004), storage/email (US-002), reset for agents/runners, and automatic login or new Nitro cookie routes. Preserve existing login/register behavior, invite public-route exception and safeRedirectPath sanitization.\n\n**Interface** \u2014 `usePasswordActions().requestReset(email)` \u2192 `$api.post('/auth/password-reset', { email })`; `usePasswordActions().confirmReset(token, newPassword)` \u2192 `$api.post('/auth/password-reset/confirm', { token, newPassword })`; `definePageMeta({ layout: 'auth' })`; success `navigateTo('/login?reset=1')`; authenticated guest-route redirect `safeRedirectPath(to.query.redirect)`.\n\nError seam: useApi can replace HTTP status errors with ApiError application codes. Ensure a genuine resetTokenInvalid response (-2 or 400 per the API exception contract) still enters the invalid/expired state; do not rely only on mocks carrying raw status=400. All user-facing copy must be localized.\n\nVerification: Extend usePasswordActions and locale-parity tests created by US-006, login page tests and middleware tests. Existing middleware tests assert login/register behavior only and must remain true. Add page tests for resolved and rejected request feedback, route token propagation, confirm mismatch, success navigation and invalid-link recovery. Use the same guest-only predicate in both anonymous and authenticated branches so every /reset-password/ path gets consistent treatment; retain safe redirects for authenticated visitors.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] usePasswordActions().requestReset('a@b.c') calls $api.post('/auth/password-reset', { email: 'a@b.c' }).",
+        "AC-2 [unit] usePasswordActions().confirmReset('tok', 'NewPass1!') calls $api.post('/auth/password-reset/confirm', { token: 'tok', newPassword: 'NewPass1!' }).",
+        "AC-3 [unit] Submitting the forgot-password form shows the check your email state after requestReset resolves.",
+        "AC-4 [unit] Submitting the forgot-password form shows the same check your email state after requestReset rejects.",
+        "AC-5 [unit] Submitting the reset-password form on /reset-password/tok calls confirmReset('tok', <new password>) and, on success, navigates to /login?reset=1.",
+        "AC-6 [unit] A 400 from confirmReset shows the invalid-or-expired state with a link to /forgot-password.",
+        "AC-7 [unit] The reset-password form with a confirm value different from the new password shows a validation message and does not call confirmReset.",
+        "AC-8 [unit] The login page renders a Forgot password? link to /forgot-password.",
+        "AC-9 [unit] The login page shows the password-changed notice when the route query has reset=1, and not otherwise.",
+        "AC-10 [unit] The auth middleware lets an anonymous visitor reach /forgot-password without redirecting to /login.",
+        "AC-11 [unit] The auth middleware lets an anonymous visitor reach /reset-password/abc without redirecting to /login.",
+        "AC-12 [unit] The auth middleware redirects an authenticated user on /forgot-password to safeRedirectPath(to.query.redirect).",
+        "AC-13 [unit] Every new key under auth.forgot and auth.reset exists in both en.json and zh.json.",
+        "AC-14 [unit] Regression: For either existing guest-only route /login or /register, the auth middleware still lets an anonymous visitor proceed without redirecting.",
+        "AC-15 [unit] Regression: For either existing guest-only route /login or /register, the auth middleware still redirects an authenticated visitor to safeRedirectPath(to.query.redirect)."
+      ],
+      "tags": [
+        "auth-passwords",
+        "web",
+        "security",
+        "nuxt",
+        "password-reset",
+        "routing"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Public password recovery spans two credential forms, shared API actions and auth routing/privacy states; security override requires strict TDD isolation."
+      },
+      "contextFiles": [
+        "apps/web/pages/login.vue",
+        "apps/web/middleware/auth.global.ts",
+        "apps/web/composables/usePasswordActions.ts",
+        "apps/web/pages/settings/account.vue",
+        "apps/web/composables/useApi.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/forgot-password.vue",
+        "apps/web/pages/reset-password/[token].vue",
+        "apps/web/tests/pages/forgot-password.spec.ts",
+        "apps/web/tests/pages/reset-password.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The auth middleware redirects an authenticated user on /reset-password/abc to safeRedirectPath(to.query.redirect).",
+        "When confirmReset rejects with ApiError code -2 for auth.resetTokenInvalid, the reset page shows the invalid-or-expired state and its /forgot-password link.",
+        "Submitting the reset-password form with a new password shorter than eight characters does not call confirmReset."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository inspection and architecture: This is an enhancement to existing session authentication, not greenfield. Graph-first tools are unavailable in this session; findings were obtained with direct Read, Glob and Grep. The supplied stack detection calling apps/web Next.js is incorrect: apps/web/package.json:7 runs nuxt dev, :42 declares Nuxt 4.6.4 and :47 declares Vue; .nax/mono/apps/web/context.md:21 identifies Nuxt SSR. The API is NestJS/Fastify with Prisma 7, Vitest and oxlint; web uses Nuxt-native API composables, vee-validate/zod, Jest and Playwright. Read matching .nax/mono/apps/{api,web}/context.md before implementation and the nathapp-nestjs-patterns skill before NestJS changes. No such skill tool is exposed in this planning session; no NestJS source is being written here. Business rules remain API-owned. All seven stories touch authentication/credentials and require three-session-tdd, even the web stories. Dependencies and workdirs are binding; US-001, US-002 and US-005 can start independently, US-003 joins US-001/002, US-004 follows US-001/003, US-006 follows US-001/005, and US-007 joins US-003/004/006. Coordinate edits to shared auth service/controller/tests and schema when parallel branches merge. Done means the stated HTTP, persistence, audit, cache, email and UI behaviors hold, not merely that files compile. One acceptance-order seam needs care: US-003 AC-14 remains assigned to US-003 but asserts a later confirmation returns 400, while the confirm route is only created by downstream US-004. Verify US-003's token deletion in its own implementation tests and rerun that unchanged end-to-end AC once US-004 exists; do not introduce confirm early, move the AC or alter the binding dependency graph.\n\nUS-001 impact: apps/api/src/auth/auth.controller.ts:115-129 supplies the authenticated logout decorator/JsonResponse pattern; refresh currently accepts only a principal at :90. apps/api/src/auth/auth.service.ts:37-49 lists constructor collaborators; :144-160 checks password and disabled state at login; :277-321 implements audited logout and post-commit cache eviction. Add changePassword here rather than a new auth implementation. apps/api/src/auth/prisma-auth.repository.ts:76-89 contains findUserById and bumpTokenVersion but no updatePasswordHash. Existing case-insensitive email lookup is at :69-73. apps/api/src/auth/dto/register.dto.ts:5 and :19-25 define shared lower/upper/digit/special complexity and localized validation messages. apps/api/src/auth/principal/koda-principal.types.ts:8-15 defines optional UserPrincipal.sessionId; :39-42 defines KodaPrincipal and isUserPrincipal. Require a user principal with a session, and reject missing/disabled users with 401 before writes; wrong current password must be 403, not 401, to avoid web refresh/retry. bcrypt cost is 12, before opening the audited transaction. Password change must not bump tokenVersion or replace the caller's cookies/session. Revoke only this user's active unexpired other sessions, return their ids, and evict every returned id under the cache lock after commit. apps/api/src/auth/sessions/prisma-auth-session.repository.ts:149-162 shows updateManyAndReturn for revocation; :171-181 preserves ownership/revoked checks. apps/api/src/auth/sessions/auth-session.domain.ts:17 already permits password-change and password-reset reasons. apps/api/src/audit/audit-recorder.service.ts:34-40 wraps work plus entries in the same transaction and :44-49 refuses unregistered keys/out-of-transaction audit records. Register each new permission key before audited code executes.\n\nCache correctness: apps/api/src/auth/token-version.cache.ts:7-9 and :25-27 return direct key parts for user state and session activity; :42-71 implements the shared fill/eviction lock and :74-77 defines the tokenVersion tag. These locks are process-local by design (single replica, MEMORY cache). Tag invalidation alone cannot evict the user-auth-state key; preserve both required invalidations on reset and the explicit user-state invalidation on change. Cached-active-session integration assertions must prime GET /api/auth/me before mutation. Keep session-activity-fence.spec.ts race assertions intact when adding AuthService constructor doubles and refresh client arguments.\n\nUS-002 storage/email: apps/api/prisma/schema.prisma:25-44 defines User without a reset back-relation, :377-399 defines EmailSchedule with string kind, and :435-458 defines AuthSession/RefreshToken without client-use columns. Add the exact PasswordResetToken model and migration 20261210100000_password_reset_tokens; store only sha256 hex, unique tokenHash, user index, cascade foreign key, usedAt and 30-minute expiry. apps/api/src/projects/invites/invite-token.ts:7-15 provides the 32-byte base64url generation/lowercase sha256 pattern. New repository is module-private; only PasswordResetTokenStore is exported by a leaf module importing PrismaModule. replaceUnused owns its transaction, while markUsed and discardUnusedFor participate in their caller's transaction. Important concurrency risk: at PostgreSQL READ COMMITTED, deleteMany plus insert inside a transaction alone does not serialize two replacements when no unused row exists; ensure per-user serialization inside replaceUnused (for example a user-row lock through the transaction client), retaining the specified schema and public interface. Sequential replacement ACs must not be mistaken for proof of the design's concurrent-request guarantee. The one-winner confirm uses conditional updateMany usedAt:null; count 0 throws inside audited work and rolls everything back.\n\nEmail plumbing exists already. apps/api/src/email/schedule/email-schedule.types.ts:6 defines the three-kind union and :10-11 defines the two-minute lock. apps/api/src/email/schedule/email-schedule.repository.ts:55-69 starts an invite SENDING with attempts=1; :72-99 claims only NOTIFICATION/MEMBER_ADDED; :103-109 closes abandoned INVITE rows. Mirror the start operation for PASSWORD_RESET with userId set and inviteId null; expand abandoned-close kinds but do not expand claimDue. apps/api/src/email/schedule/email-schedule.service.ts:24-26 delegates startInviteSend. EMAIL_TEMPLATE_CODES is a closed array at apps/api/src/email/templates/template-codes.ts:2, and EmailLocale is en|zh at :10-11. Add en/zh template data and the new code; apps/api/src/email/email-template.seeder.ts:41-54 iterates every code/locale and creates or updates templates, so inspect seeder behavior before adding redundant special cases. The actual EmailCoreModule filename is apps/api/src/email/email.module.ts, not email-core.module.ts: :16-26 globally exports EmailAvailability and EmailScheduleService while keeping the repository private.\n\nUS-003 wiring and detached work: apps/api/src/auth/auth.module.ts:100-105 imports AuthRepositoryModule/AuthSessionsModule but no notifications module. apps/api/src/notifications/notifications.module.ts:6 imports LiveModule and :39 uses it in imports, so retain the prescribed split to avoid AuthModule -> NotificationsModule -> LiveModule -> AuthModule. PasswordResetModule imports the leaf store, auth repository, sessions and notifications, and AppModule imports PasswordResetModule; AuthModule imports only PasswordResetStoreModule, with the AuthService dependency introduced in US-003, not US-001. apps/api/src/projects/invites/project-invites.module.ts:23 demonstrates NotificationsModule supplying EmailDispatcher. apps/api/src/projects/invites/invite-mailer.ts:35-60 shows immediate scheduled send with retry=false and warn logging. apps/api/src/email/email-dispatcher.ts:108-140 catches channel errors, marks FAILED when retry=false and warns; it often returns FAILED rather than rejecting, so preserve final failure status and warning even when the task itself resolves. Do not duplicate retries or store the raw token/URL in schedule data. apps/api/src/projects/invites/project-invites.controller.ts:21-22 normalizes Accept-Language by trim/lowercase/startsWith('zh'); copy that local rule rather than importing a module-private helper. Public reset controller has no ApiBearerAuth and remains separate from AuthController.\n\nRequest timing/privacy: lookup is awaited, the entire token-write/schedule/send task is detached and wrapped in bookkeeping('auth.password-reset-request', ...), and every detached rejection is caught/warned without exposing raw token or URL. apps/api/src/action-context/audit-coverage.ts:53-58 defines async-local bookkeeping state, :100-106 closes scopes and ignores late writes, and :114-145 checks successful scopes. Wrapping only the token write is insufficient: cover schedule and send-status writes too, including writes that race handler completion. Add the exact reason sentence to audit-coverage.reasons.ts (existing session reasons at :38-39), update the closed EXPECTED_REASON_IDS list, and leave the seven unaudited surfaces unchanged. Unknown, disabled and email-off cases write nothing and produce the same success envelope. Once wired, changePassword also discards unused reset rows inside its existing audited transaction.\n\nUS-004 confirmation: locate the row by hash, refuse missing/used/expired (including equality)/disabled with the same localized ValidationAppException. Compute bcrypt before audited work; conditional markUsed, password update, tokenVersion increment, all-active-session revoke and deletion of other unused links commit with exactly one audit entry. Then invalidate locked session keys, tokenVersion tag and user-state key. Issue no session/tokens/cookies. API translations are separate from web translations and must nest currentPasswordWrong under 40003 and resetTokenInvalid under both -2 and 400 in apps/api/src/i18n/{en,zh}/auth.json, matching exception prefix/code lookup.\n\nUS-005 baseline and migration: apps/api/src/auth/sessions/auth-session.service.ts:26 and :36 define 30-second grace and 20-minute lost-response windows; :41-46 defines RotateOutcome without IP; :87-156 implements rotation. First use calls markUsed at :100, grace is :116-132, recovery is :135-152 and reuse is :155-156. Only recovery gains UA matching; do not bind login, first rotation or grace, move usedAt, enlarge the recovery window or enforce IP. apps/api/src/auth/sessions/prisma-auth-session.repository.ts:97-111 has markUsed/findToken and apps/api/src/auth/sessions/auth-session.domain.ts:31-36 has RefreshTokenDomain; add client writes and nullable usedUaHash mapping consistently. Hash missing UA as empty text; array UA uses its first element at the request boundary. usedUaHash stores the SHA-256 digest of the empty string when absent, not a literal empty digest field. New columns remain nullable so existing rows deploy without backfill; null means fail-closed reuse only on recovery, not on grace. Add migration 20261210110000_refresh_token_client before deploying code that reads/writes those columns, regenerate Prisma, then update all refresh/rotate call sites and doubles. apps/api/src/auth/auth.service.ts:161-220 passes rotation input and records recovery; summary gains presenting IP or unknown while reuse summary is unchanged. Controller request type is local because fastify is not a direct dependency. Repository uses transaction-scoped conditional session updates as the concurrency fence; do not weaken existing revoke-versus-rotation semantics. UA is a replay heuristic, not cryptographic proof; IP is audit-only.\n\nAffected callers/tests: text search found production refresh calls in auth.controller.ts:91 and auth.service.ts:184; changed signatures also affect auth.controller.spec.ts:210/229, auth.service.spec.ts:555-767, session-activity-fence.spec.ts:176/193, auth-session.service.spec.ts:87-241, and test/integration/auth/auth-sessions.integration.spec.ts:94/213/214. Existing test/integration/auth/refresh-rotation.integration.spec.ts:24-29 uses canRunDbTests, bootHttpApp, fixtureDb and resetThrottle; :75-76 builds the refresh HTTP call, :99-107 supplies bounded polling. Update lost-response tests to send the same explicit UA on original and retry, backdate usedAt by 31 seconds instead of sleeping and retain existing outcome/fence assertions. No trusted proxies in that integration harness: differing-IP recovery stays unit-level as specified. Extend email-schedule.repository.spec.ts abandoned-kind assertion, email seeder tests, catalog.spec.ts closed key lists and per-role snapshot without weakening unrelated assertions. API permission inventory lives at docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv; catalog PUBLIC_KEYS and IMPLICIT_KEYS are at apps/api/src/permissions/catalog.ts:41 and :75, INVENTORY_SCOPE_ROWS at :193, session rows at :204-207. New scopes/access cells must agree in all four surfaces. Regenerate root openapi.json and the generated CLI client with bun run generate after route/DTO changes; never edit generated client files. CLI business behavior is out of scope, generated contract artifacts are not. Workdirs remain the binding table values even where required root inventory/spec artifacts change.\n\nUS-006/007 web: apps/web/server/utils/api.ts:77-116 builds upstream URL, cookie-derived Bearer, Accept/client-ip headers and optional Content-Type, but no UA. Add the incoming User-Agent there without touching clientIpHeaders/proxyHeaders. apps/web/server/middleware/session-refresh.ts:7-10 already calls forwardToApi; :26-31 updates both response cookies and the in-flight SSR request cookie after refresh, so the one forwarding change covers SSR plus refresh/logout Nitro routes. Cookie policy is unchanged. apps/web/tests/server/forward-to-api.spec.ts:25-32 stubs Nitro globals and :49-68 checks individual header keys; new UA tests can extend this without rewriting existing assertions. apps/web/layouts/default.vue:408-449 has header actions with NotificationBell at :436 and logout at :444-446; add Account adjacent to logout, retaining inline nav/source order. Read docs/ux/redesign/MASTER-PLAN.md:35-43 before editing layout, update its Status/Decisions in the implementing PR and add Account to the existing command palette per app guidance, using existing tokens/primitives. This does not require a redesign or new top-level story. apps/web/pages/register.vue:77-115 provides vee-validate/zod/typed-schema, auth layout, toast and extractApiError conventions. apps/web/pages/login.vue:61 sets auth layout and :76-96 handles auth/safe redirects. New usePasswordActions remains a thin $api.post wrapper with exactly the three specified bodies. No new Nitro route or web generated client is needed.\n\nImportant UI error seam: apps/web/composables/useApi.ts:19-31 exposes ApiError.code (application ret, not HTTP status), :111-119 extracts HTTP status on raw fetch errors, :210-239 refreshes only on raw 401 then can replace a FetchError with ApiError, discarding its HTTP status. Ensure actual envelope errors still select the account wrong-current-password and reset-invalid states, not only synthetic mocks with status=403/400; use the known envelope codes where appropriate or minimally preserve status compatibility without weakening generic errors. Do not turn every 400 validation error into a password reset success. Forgot form deliberately shows the same terminal check-email state after resolved or rejected submission. Confirm-password mismatch prevents calls; backend remains authoritative for full complexity. On success clear account fields or navigate reset to /login?reset=1, never create/reset cookies locally. apps/web/middleware/auth.global.ts:7 lists only login/register; :21-30 uses that list for both anonymous protection and authenticated safe redirects. Use one guest-only predicate including exact /forgot-password and prefix /reset-password/ for both branches, preserving the invite exception at :11-13. Both new public pages use layout auth and all new keys live in both en/zh under auth.account, auth.forgot, auth.reset and nav.account. Existing Jest suites include tests/middleware/auth.spec.ts, tests/pages/login.spec.ts/login-redirect.spec.ts, tests/server/session-refresh.spec.ts/forward-to-api.spec.ts and tests/layouts/*.spec.ts; retain current login/register, safe redirect, header and proxy regressions.\n\nRefine self-audit (manual, against .nax/features/auth-passwords/spec.md and the re-read code): All 95 original criteria remain in their original stories with their original local AC numbers. Enumeration: US-001 AC-1 new/old password login, AC-2 caller access/refresh retained, AC-3 primed second-session cache revoked, AC-4 other user retained, AC-5 wrong-password 403/no mutation, AC-6 no failure audit, AC-7 exact successful audit, AC-8 agent rejected, AC-9 sessionless user rejected, AC-10 minimum length, AC-11 uppercase complexity, AC-12 delegated revoke ids, AC-13 already-revoked metadata unchanged, AC-14 implicit catalog, AC-15 throttle; US-002 AC-1 replace unused, AC-2 used row retained, AC-3 other user retained, AC-4 found shape/unknown null, AC-5 first/second mark counts, AC-6 TTL, AC-7 immediate SENDING schedule and two-minute lock, AC-8 abandoned reset failure, AC-9 reset never claimed even PENDING/past due, AC-10 English template, AC-11 Chinese template, AC-12 both locale seeds; US-003 AC-1 bounded detached token appearance/expiry, AC-2 hash-only storage, AC-3 exact dispatcher/template/URL/sixth false, AC-4 SENT schedule, AC-5 failed send still 200/FAILED, AC-6 unknown absence after same wait, AC-7 disabled absence, AC-8 email-off absence, AC-9 matching envelopes with audit checking on, AC-10 repeated replacement, AC-11 locale selection, AC-12 throttle, AC-13 public catalog, AC-14 change invalidates link, AC-15 bad email; US-004 AC-1 request-to-confirm-to-login seam, AC-2 consumed/replayed token, AC-3 expired unchanged password, AC-4 unknown no writes, AC-5 disabled-after-request unchanged password, AC-6 primed activity revoked immediately, AC-7 tokenVersion increment, AC-8 other links deleted, AC-9 exact audit, AC-10 exactly one concurrent success/audit, AC-11 complexity leaves token unused, AC-12 throttle, AC-13 public catalog, AC-14 no session/tokens; US-005 AC-1 deterministic UA hash/IP, AC-2 absent-header empty-input hash/null IP, AC-3 empty IP null, AC-4 first-use provenance persistence, AC-5 matching-UA lost-response recovery with unused successor and 31-second backdate, AC-6 different-UA reuse, AC-7 different-IP matching-UA recovered outcome, AC-8 real-first-use/null-legacy reuse, AC-9 presenting-IP audit, AC-10 unknown-IP audit, AC-11 mismatch revoke/outcome, AC-12 controller client propagation, AC-13 grace not bound, AC-14 first use not bound, AC-15 unchanged reuse audit; US-006 AC-1 forwarded UA, AC-2 SSR forwards UA, AC-3 no-header absence, AC-4 exact change action, AC-5 matched form body, AC-6 mismatch prevents call, AC-7 toast/cleared fields, AC-8 403 field message, AC-9 generic error, AC-10 header link, AC-11 locale parity; US-007 AC-1 exact request action, AC-2 exact confirm action, AC-3 resolved request state, AC-4 rejected request same state, AC-5 route token/body/login navigation, AC-6 invalid link recovery, AC-7 mismatch prevents call, AC-8 login link, AC-9 reset notice and not otherwise, AC-10 anonymous forgot allowed, AC-11 anonymous reset allowed, AC-12 authenticated forgot safe redirect, AC-13 locale parity. Regression qualifiers were retained, notably cached pre-mutation activity, existing caller tokens, already-revoked fields unchanged, same five-second absence wait, retry=false, both unbound rotation paths and login notice not otherwise. Each original AC is observable through HTTP/return values, collaborator calls, log output, persisted state, rendered UI or locale content; none was replaced with a quality gate. Negative-path anchors exist in every story: US-001 AC-5/8/9/10/11, US-002 AC-4 unknown and AC-5 repeated mark, US-003 AC-5/6/7/8/15, US-004 AC-2/3/4/5/10/11, US-005 AC-6/8/11, US-006 AC-6/8/9 and US-007 AC-4/6/7. No extra negative AC was needed. Failure-table no-email requirements are made explicit for disabled/email-off addresses, and failed-send warning logging remains explicit in US-003 AC-5. Five additional regression criteria were added solely in response to the refine request: US-002 AC-13 preserves abandoned INVITE handling; US-003 AC-16 preserves the caller session after adding link invalidation; US-006 AC-12 preserves existing proxy headers; US-007 AC-14/15 preserve anonymous/authenticated login/register routing. There are now 100 acceptance criteria; additional non-required hardening remains in suggestedCriteria. All 17 feature-level exclusions were compared item-by-item and retained verbatim; their US-specific prefixes do not move them out of the spec's feature-level list. No story-local out-of-scope block exists under the spec's ACs. All spec-recommended context files are retained, with at most five per story, and upstream-created store/service/controller/page files occur only in dependent context lists. Binding story ids, workdirs and dependency arrays are unchanged. US-003 and US-005 were lowered from expert to complex because the code already provides the relevant async email/bookkeeping and transactional rotation patterns; the authentication security override still requires three-session-tdd for every story. The controller skeleton now normalizes header arrays before the string-only helper, and recovery IP is explicitly the presenting input, not an enforced/read-back first-use IP. Test paths listed in expectedFiles are planned new feature outputs, not presumed existing helpers. No runtime implementation or test execution occurred during this audit.\n\nVerification and rollout: Implement each story's behavior with failing tests first under strict security isolation, using existing Vitest vi APIs (not Jest in API) and Jest for web. Keep module-compilation/DI tests beside source with mocked external providers and no DB. Put real persistence, atomicity and HTTP tests in apps/api/test/integration/**/*.integration.spec.ts; do not create us-XXX folders. DB suites require KODA_DB_TESTS=1 and canRunDbTests, skip explicitly only under NAX_SANDBOXED=1, and must run against real isolated test Postgres outside the sandbox before merge; skips are not verification. Do not run two DB reset suites against one database. Run targeted bun run test:scoped files and relevant existing regressions; generated acceptance stays in each app's .nax/features/auth-passwords/.nax-acceptance.test.ts and is not edited/copied into normal tests. API acceptance uses vitest.nax.config.ts with KODA_DB_TESTS=1; web acceptance uses bun test. Use the refined acceptance mapping for story filter ids. This planning run did not execute tests or migration/generation commands because shell tools are unavailable; implementation must verify them. Apply additive schema migrations, regenerate Prisma, merge signature/caller changes and contract generation, seed new locale templates through existing bootstrap, and ship web UA forwarding with API binding before claiming browser recovery verified. Existing pre-migration used tokens cannot recover outside grace because usedUaHash is null; that intentional fail-closed compatibility behavior may require login after a genuinely lost legacy refresh response. Do not promise uninterrupted legacy recovery. Keep raw reset tokens out of persistence/logs and avoid changing normal rotation, password policies beyond shared validation, email retry policy or CLI runtime behavior.",
+  "outOfScope": [
+    "DPoP or any cryptographic binding of refresh tokens: koda's refresh tokens are presented by the Nuxt server (httpOnly cookies, SSR refresh), which holds no browser key; #463 is closed by the User-Agent binding of the recovery path.",
+    "Enforcing the client IP on any refresh path; the IP is recorded and audited only, because enforcing it logs users out on mobile handoffs, carrier NAT and IPv4/IPv6 switching.",
+    "Binding normal rotation (steps 3 and 4) to the User-Agent; only the lost-response recovery (step 5) checks it.",
+    "A \"log out of all devices\" control and a list of active sessions per user.",
+    "Rejecting a new password equal to the current one, password history, and breached-password checks.",
+    "A reset path for agents or runners; they authenticate with API keys.",
+    "Re-sending a password reset email from the schedule; only the hash is stored, so a failed send is final and the user requests another link.",
+    "Rate limiting reset requests per email address beyond the per-client `AUTH_LOGIN_LIMIT` throttle.",
+    "Purging expired or used `PasswordResetToken` rows beyond deleting a user's unused tokens on a new request and on a confirm.",
+    "MFA, the Secure-cookie and TLS work of the prod deployment bundle, and email verification on registration.",
+    "Changing the CLI, which authenticates with agent API keys and never uses refresh tokens.",
+    "US-003 only: equal response time for known and unknown addresses beyond starting the token write and send detached; a timing side channel from the user lookup itself is accepted.",
+    "US-001 only: a runner-principal case is not tested separately; the `isUserPrincipal` check that refuses agents (AC-8) refuses runners the same way.",
+    "US-003 only: no test asserts the raw reset token is absent from log lines; the service logs only the user id and the failure reason, never the token or the URL.",
+    "US-005 only: the different-IP recovery is pinned by unit ACs (AC-7, AC-9) only; the integration harness does not configure trusted proxies, so it cannot vary the client IP.",
+    "US-005 only: refresh concurrency across API replicas; the API is single-replica by ruling.",
+    "US-005 only: a request with no User-Agent on both the first use and the lost-response retry recovers (both hashes are of the empty string); scripts and CLIs that send no User-Agent are not browsers and never hit the lost-response path in practice."
+  ],
+  "routingProfile": "native-codex"
+}
