@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { PrismaAuthSessionRepository } from './prisma-auth-session.repository';
@@ -25,6 +25,15 @@ import type { SessionRevokeReason } from './auth-session.domain';
  */
 export const REFRESH_REUSE_GRACE_MS = 30_000;
 
+/**
+ * How long after a token's use a lost response may still be recovered (rotation step 5).
+ *
+ * A browser that lost a refresh response keeps its previous access cookie, and refreshes again at the
+ * latest when that access token expires (15 minutes). 20 minutes covers that with margin; past it a
+ * re-presented token is revoked as reuse, so a stolen token cannot re-rotate an idle session at any time.
+ */
+export const LOST_RESPONSE_WINDOW_MS = 20 * 60_000;
+
 export type { SessionRevokeReason };
 
 export type RotateOutcome =
@@ -34,6 +43,8 @@ export type RotateOutcome =
 
 @Injectable()
 export class AuthSessionService {
+  private readonly logger = new Logger(AuthSessionService.name);
+
   constructor(
     private readonly sessions: PrismaAuthSessionRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
@@ -60,7 +71,14 @@ export class AuthSessionService {
    * 3. first use: insert the next token and drop the tokens used before the grace window;
    * 4. second use inside the grace window (a parallel refresh of the same browser): insert the next
    *    token and keep the session — both responses then hold a refresh token that works;
-   * 5. otherwise (used before the window, or no row at all): revoke the session as `reuse`.
+   * 5. used before the grace window but within LOST_RESPONSE_WINDOW_MS of its first use, and no token of
+   *    the session was used after it: the response that carried its successor never reached the client (a
+   *    navigation or a closed tab aborted the refresh after the API committed it), so the client presents
+   *    the newest token it holds again. Drop the undelivered successors (unused tokens older than the grace
+   *    window; a sibling a parallel retry just issued stays) and insert the next. `usedAt` is not moved, so
+   *    replays cannot slide the window. A thief replaying it instead is caught one step later (the real
+   *    holder's successor is gone, so presenting it hits step 6) or once the window has passed;
+   * 6. otherwise (a later token was used, or no row at all): revoke the session as `reuse`.
    */
   async rotate(input: {
     sessionId: string;
@@ -100,6 +118,24 @@ export class AuthSessionService {
             sessionId: input.sessionId,
             createdAt: input.now,
           });
+          return { kind: 'rotated' };
+        }
+
+        // A lost response: nothing after this token was ever used (step 5).
+        if (presented !== null && presented.usedAt !== null
+          && presented.usedAt.getTime() >= input.now.getTime() - LOST_RESPONSE_WINDOW_MS
+          && !(await this.sessions.hasTokenUsedAfter(input.sessionId, presented.usedAt, input.presentedTokenId))) {
+          await this.sessions.deleteUnusedTokens(
+            input.sessionId,
+            new Date(input.now.getTime() - REFRESH_REUSE_GRACE_MS),
+          );
+          await this.sessions.createToken({
+            id: input.nextTokenId,
+            sessionId: input.sessionId,
+            createdAt: input.now,
+          });
+          // Observable on purpose: a thief replaying a stolen newest token takes this path too.
+          this.logger.warn(`refresh session ${input.sessionId}: lost-response recovery re-rotated a used token`);
           return { kind: 'rotated' };
         }
 

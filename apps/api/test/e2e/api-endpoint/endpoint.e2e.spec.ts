@@ -379,7 +379,14 @@ describeIntegration('API Integration Tests', () => {
         .post('/api/auth/refresh')
         .set('Authorization', `Bearer ${loginData.refreshToken}`)
         .expect(200);
-      const rotated = body<{ accessToken: string; refreshToken: string }>(rotatedRes);
+      const second = body<{ accessToken: string; refreshToken: string }>(rotatedRes);
+      // The client used the successor too, so a replay of the first token is reuse, not a lost response.
+      const rotated = body<{ accessToken: string; refreshToken: string }>(
+        await request(httpServer)
+          .post('/api/auth/refresh')
+          .set('Authorization', `Bearer ${second.refreshToken}`)
+          .expect(200),
+      );
 
       const claimsOf = (token: string): { sid?: unknown; jti?: unknown } =>
         JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as { sid?: unknown; jti?: unknown };

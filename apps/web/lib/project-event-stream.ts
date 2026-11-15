@@ -4,8 +4,8 @@
  * Transient drops: the browser EventSource reconnects by itself; the next
  * open fires onResync so pages refetch what they may have missed.
  * Terminal failures (readyState CLOSED, e.g. 401 after the access cookie
- * expired, 403, 429): refresh auth, then reopen with backoff. The page keeps
- * working as a static page once the stream stops.
+ * expired, 403, 429): wait the backoff, then refresh auth and reopen. The page
+ * keeps working as a static page once the stream stops.
  *
  * US-007 (E/BUG-3): the refresh answers three states, not a boolean. Only an
  * `'unauthorized'` refresh means the session is gone (stop); an `'unavailable'`
@@ -212,13 +212,9 @@ export function createProjectEventStream(
     return true
   }
 
-  const recover = async (): Promise<void> => {
-    if (authedFailures >= MAX_TERMINAL_FAILURES) {
-      stopped = true
-      return
-    }
-    const delay = backoffMs(failures)
-    failures += 1
+  /** Refreshes auth, then reopens on 'ok' or 'unavailable'; any other answer stops the stream. */
+  const refreshThenReopen = async (): Promise<void> => {
+    if (stopped) return
     const outcome = await deps.refreshAuth()
     if (stopped) return
     if (outcome === 'unauthorized') {
@@ -234,11 +230,24 @@ export function createProjectEventStream(
       stopped = true
       return
     }
-    // 'ok' and 'unavailable' both reopen after the same backoff; an outage is not counted against
-    // MAX_TERMINAL_FAILURES, so a deploy can never end the stream, and backoffMs caps the wait.
+    // 'ok' and 'unavailable' both reopen; an outage is not counted against MAX_TERMINAL_FAILURES, so a
+    // deploy can never end the stream, and backoffMs caps the wait.
+    open()
+  }
+
+  const recover = (): void => {
+    if (authedFailures >= MAX_TERMINAL_FAILURES) {
+      stopped = true
+      return
+    }
+    const delay = backoffMs(failures)
+    failures += 1
+    // The refresh waits for the backoff instead of going out at once: a navigation closes the page's
+    // streams, and a refresh sent right then is aborted by the browser after the API already rotated the
+    // token, leaving a spent refresh cookie. An unloading page takes this timer with it.
     timer = deps.setTimer(() => {
       timer = null
-      open()
+      void refreshThenReopen()
     }, delay)
   }
 
@@ -291,7 +300,7 @@ export function createProjectEventStream(
       if (stopped || es.readyState !== EVENT_SOURCE_CLOSED) return
       es.close()
       source = null
-      void recover()
+      recover()
     }
   }
 

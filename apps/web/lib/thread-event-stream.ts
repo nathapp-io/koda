@@ -3,7 +3,7 @@
  *
  * Mirrors createProjectEventStream: the browser EventSource reconnects after transient drops and
  * the next open fires onResync; terminal failures (readyState CLOSED — 401 after the cookie
- * expired, 403, 429) refresh auth then reopen with backoff, giving up after MAX_TERMINAL_FAILURES.
+ * expired, 403, 429) wait the backoff, then refresh auth and reopen, giving up after MAX_TERMINAL_FAILURES.
  * US-007: the refresh is tri-state, so only an 'unauthorized' answer stops the stream — an API
  * outage ('unavailable') keeps retrying, capped at BACKOFF_CAP_MS per wait.
  * The stream lives only once a `ready` frame arrives; any stream error (transient or terminal)
@@ -84,13 +84,9 @@ export function createThreadEventStream(
     return true
   }
 
-  const recover = async (): Promise<void> => {
-    if (authedFailures >= MAX_TERMINAL_FAILURES) {
-      stopped = true
-      return
-    }
-    const delay = backoffMs(failures)
-    failures += 1
+  /** Refreshes auth, then reopens on 'ok' or 'unavailable'; any other answer stops the stream. */
+  const refreshThenReopen = async (): Promise<void> => {
+    if (stopped) return
     const outcome = await deps.refreshAuth()
     if (stopped) return
     if (outcome === 'unauthorized') {
@@ -106,11 +102,24 @@ export function createThreadEventStream(
       stopped = true
       return
     }
-    // 'ok' and 'unavailable' both reopen after the same backoff; an outage is not counted against
-    // MAX_TERMINAL_FAILURES, so a deploy can never end the stream, and backoffMs caps the wait.
+    // 'ok' and 'unavailable' both reopen; an outage is not counted against MAX_TERMINAL_FAILURES, so a
+    // deploy can never end the stream, and backoffMs caps the wait.
+    open()
+  }
+
+  const recover = (): void => {
+    if (authedFailures >= MAX_TERMINAL_FAILURES) {
+      stopped = true
+      return
+    }
+    const delay = backoffMs(failures)
+    failures += 1
+    // The refresh waits for the backoff instead of going out at once: a navigation closes the page's
+    // streams, and a refresh sent right then is aborted by the browser after the API already rotated the
+    // token, leaving a spent refresh cookie. An unloading page takes this timer with it.
     timer = deps.setTimer(() => {
       timer = null
-      open()
+      void refreshThenReopen()
     }, delay)
   }
 
@@ -153,7 +162,7 @@ export function createThreadEventStream(
       if (stopped || es.readyState !== EVENT_SOURCE_CLOSED) return
       es.close()
       source = null
-      void recover()
+      recover()
     }
   }
 

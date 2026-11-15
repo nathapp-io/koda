@@ -24,7 +24,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { fixtureDb } from '../../helpers/action-context';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
-import { AuthSessionService } from '../../../src/auth/sessions/auth-session.service';
+import { AuthSessionService, LOST_RESPONSE_WINDOW_MS } from '../../../src/auth/sessions/auth-session.service';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
@@ -153,7 +153,9 @@ describeIntegration('refresh rotation (PG)', () => {
 
   it('AC-4/5/6/7: a replay after the grace window is refused, revokes the session and is audited', async () => {
     const { userId, pair } = await newUserWithSession();
-    const rotated = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    // The client moved on: it used the successor too, so a replay of the first token is not a lost response.
+    const second = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    const rotated = data<TokenPair>(await refresh(second.refreshToken).expect(200));
 
     // The reuse must be outside the 30 s window; backdating the fixture is how the case avoids sleeping.
     const presentedId = tokenIdOf(pair);
@@ -187,12 +189,103 @@ describeIntegration('refresh rotation (PG)', () => {
     expect(await me(rotated.accessToken)).toBe(401);
   }, TIMEOUT);
 
+  /** Backdates a token's use and its undelivered successor's issue, as a refresh 31 s ago would leave them. */
+  const ageExchange = async (presented: TokenPair, successor: TokenPair, ageMs = 31_000): Promise<void> => {
+    const at = new Date(Date.now() - ageMs);
+    await db.refreshToken.update({ where: { id: tokenIdOf(presented) }, data: { usedAt: at } });
+    await db.refreshToken.update({ where: { id: tokenIdOf(successor) }, data: { createdAt: at } });
+  };
+
+  it('lost response: a replay after the grace window whose successor was never used re-rotates instead of revoking', async () => {
+    const { userId, pair } = await newUserWithSession();
+    // The successor never reaches the client (a navigation aborted the refresh after the API committed it).
+    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await ageExchange(pair, lost);
+
+    const resent = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+
+    expect(sessionIdOf(resent)).toBe(sessionIdOf(pair));
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedAt: null, revokedReason: null });
+    expect(await me(resent.accessToken)).toBe(200);
+    expect(await db.auditEntry.count({ where: { key: 'session.refresh', resourceId: userId } })).toBe(0);
+    // The undelivered successor is gone; the new chain keeps rotating.
+    expect(await db.refreshToken.findUnique({ where: { id: tokenIdOf(lost) } })).toBeNull();
+    await refresh(resent.refreshToken).expect(200);
+  }, TIMEOUT);
+
+  it('lost response: parallel retries of the same stale token all answer 200 and keep the session', async () => {
+    const { pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await ageExchange(pair, lost);
+
+    const responses = await Promise.all([refresh(pair.refreshToken), refresh(pair.refreshToken), refresh(pair.refreshToken)]);
+
+    expect(responses.map((res) => res.status)).toEqual([200, 200, 200]);
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedAt: null });
+    for (const res of responses) await refresh(data<TokenPair>(res).refreshToken).expect(200);
+  }, TIMEOUT);
+
+  it('lost response: a thief replaying the newest used token is caught when the real holder presents its successor', async () => {
+    const { userId, pair } = await newUserWithSession();
+    const holder = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await ageExchange(pair, holder);
+
+    const thief = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await refresh(holder.refreshToken).expect(401);
+
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedReason: 'reuse' });
+    expect(await db.auditEntry.count({ where: { key: 'session.refresh', resourceId: userId } })).toBe(1);
+    await refresh(thief.refreshToken).expect(401);
+    expect(await me(thief.accessToken)).toBe(401);
+  }, TIMEOUT);
+
+  it('lost response: a token used longer than the recovery window ago is reuse, even with nothing used after it', async () => {
+    const { userId, pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await ageExchange(pair, lost, LOST_RESPONSE_WINDOW_MS + 1_000);
+
+    await refresh(pair.refreshToken).expect(401);
+
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedReason: 'reuse' });
+    expect(await db.auditEntry.count({ where: { key: 'session.refresh', resourceId: userId } })).toBe(1);
+  }, TIMEOUT);
+
+  it('lost response: repeated replays do not slide the window (usedAt keeps the first use)', async () => {
+    const { pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await ageExchange(pair, lost);
+    const firstUse = (await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedAt;
+
+    await refresh(pair.refreshToken).expect(200);
+
+    expect((await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } })).usedAt).toEqual(firstUse);
+  }, TIMEOUT);
+
+  it('a later token used at the identical instant still counts as moving past the replayed one', async () => {
+    const { pair } = await newUserWithSession();
+    const second = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    await refresh(second.refreshToken).expect(200);
+    const at = new Date(Date.now() - 31_000);
+    await db.refreshToken.updateMany({ where: { id: { in: [tokenIdOf(pair), tokenIdOf(second)] } }, data: { usedAt: at } });
+
+    await refresh(pair.refreshToken).expect(401);
+
+    expect(await db.authSession.findUniqueOrThrow({ where: { id: sessionIdOf(pair) } }))
+      .toMatchObject({ revokedReason: 'reuse' });
+  }, TIMEOUT);
+
   // Branch fix B1: the 60 s activity fill and the reuse eviction share one per-session lock, so a lookup
   // that read the session while it was still live cannot write that answer into the cache after the reuse
   // revocation evicted it — which would keep the revoked access token working for the rest of the TTL.
   it('AC-7 (paused lookup): a fill paused across the reuse revocation cannot re-cache the live answer', async () => {
     const { pair } = await newUserWithSession();
     const rotated = data<TokenPair>(await refresh(pair.refreshToken).expect(200));
+    // The client used the successor, so the later replay of the first token is reuse, not a lost response.
+    await refresh(rotated.refreshToken).expect(200);
     const sessionId = sessionIdOf(pair);
     await db.refreshToken.update({ where: { id: tokenIdOf(pair) }, data: { usedAt: new Date(Date.now() - 31_000) } });
 

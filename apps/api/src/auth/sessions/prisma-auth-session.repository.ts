@@ -112,6 +112,30 @@ export class PrismaAuthSessionRepository extends AbstractPrismaRepository<AuthSe
   }
 
   /**
+   * Whether any other token of the session was used at or after `usedAt` — i.e. the client moved past the
+   * presented token. `gte` plus the id exclusion keeps a later use with an identical timestamp from hiding.
+   */
+  async hasTokenUsedAfter(sessionId: string, usedAt: Date, excludeTokenId: string): Promise<boolean> {
+    const later = await this.db.refreshToken.findFirst({
+      where: { sessionId, id: { not: excludeTokenId }, usedAt: { gte: usedAt } },
+      select: { id: true },
+    });
+    return later !== null;
+  }
+
+  /**
+   * Deletes the session's unused tokens created before `threshold`: the successors a lost response never
+   * delivered. Siblings issued after it (a parallel retry inside the grace window) are kept. Called only on
+   * the re-rotation path, where no token of the session was used after the presented one.
+   */
+  async deleteUnusedTokens(sessionId: string, threshold: Date): Promise<number> {
+    const { count } = await this.db.refreshToken.deleteMany({
+      where: { sessionId, usedAt: null, createdAt: { lt: threshold } },
+    });
+    return count;
+  }
+
+  /**
    * Deletes the session's tokens used before `threshold`. Unused tokens are never deleted, so a sibling
    * a concurrent refresh issued stays valid.
    */
