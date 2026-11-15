@@ -19,11 +19,11 @@ describe('PasswordResetController', () => {
   const TTL_KEY = 'THROTTLER:TTLdefault';
   const reflector = new Reflector();
 
-  let passwordReset: { request: ReturnType<typeof vi.fn> };
+  let passwordReset: { request: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
   let controller: PasswordResetController;
 
   beforeEach(() => {
-    passwordReset = { request: vi.fn(async () => undefined) };
+    passwordReset = { request: vi.fn(async () => undefined), confirm: vi.fn(async () => undefined) };
     controller = new PasswordResetController(passwordReset as unknown as PasswordResetService);
   });
 
@@ -70,5 +70,48 @@ describe('PasswordResetController', () => {
 
     expect(Reflect.getMetadata('__httpCode__', handler)).toBe(200);
     expect(Reflect.getMetadata('swagger/apiSecurity', PasswordResetController)).toBeUndefined();
+  });
+
+  /**
+   * auth-passwords US-004: the confirm route's contract — same public surface, same throttle, and the
+   * envelope the web client expects.
+   */
+  describe('confirmReset', () => {
+    it('AC-1: answers the Ok envelope with an empty body and passes the token and password through', async () => {
+      const result = await controller.confirmReset({ token: 'raw-token', newPassword: 'NewPassword123!' });
+
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual({});
+      expect(passwordReset.confirm.mock.calls).toEqual([
+        [{ token: 'raw-token', newPassword: 'NewPassword123!' }, expect.any(Date)],
+      ]);
+    });
+
+    it('AC-13 setup: declares the public confirm key behind RequiresGuard and @Public', () => {
+      const handler = PasswordResetController.prototype.confirmReset as unknown as object;
+
+      expect(reflector.get(REQUIRES_METADATA, handler)).toEqual({
+        keys: ['session.password.reset.confirm'], mode: 'all', enforcedBy: 'guard',
+      });
+      expect(Reflect.getMetadata(IS_PUBLIC_KEY, handler)).toBe(true);
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toContain(RequiresGuard);
+    });
+
+    it('AC-12: is throttled with the login limit and window', () => {
+      const handler = PasswordResetController.prototype.confirmReset as unknown as object;
+
+      expect(Reflect.getMetadata(LIMIT_KEY, handler)).toBe(AUTH_LOGIN_LIMIT);
+      expect(Reflect.getMetadata(TTL_KEY, handler)).toBe(AUTH_LOGIN_TTL_MS);
+      // No class-level throttle: only the two reset routes are limited.
+      expect(Reflect.getMetadata(LIMIT_KEY, PasswordResetController)).toBeUndefined();
+    });
+
+    it('AC-14: answers 200, is a POST and carries no @ApiBearerAuth', () => {
+      const handler = PasswordResetController.prototype.confirmReset as unknown as object;
+
+      expect(Reflect.getMetadata('__httpCode__', handler)).toBe(200);
+      expect(Reflect.getMetadata('path', handler)).toBe('password-reset/confirm');
+      expect(Reflect.getMetadata('swagger/apiSecurity', PasswordResetController)).toBeUndefined();
+    });
   });
 });

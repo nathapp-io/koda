@@ -42,6 +42,7 @@ const PUBLIC_KEY_LIST = [
   'session.login',
   'session.refresh',
   'session.password.reset.request',
+  'session.password.reset.confirm',
   'auth.register',
   'auth.registration.read',
   'health.read',
@@ -352,6 +353,17 @@ describe('PERMISSION_CATALOG', () => {
       approval: { approvable: false, floor: 'none', default: 'none' },
     });
     expect(PUBLIC_KEYS.has('session.password.reset.request')).toBe(true);
+  });
+
+  it('AC-13 (auth-passwords US-004): the password reset confirm key is public', () => {
+    expect(findCatalogEntry('session.password.reset.confirm')).toMatchObject({
+      key: 'session.password.reset.confirm',
+      access: 'public',
+      scope: 'any',
+      risk: 'medium',
+      approval: { approvable: false, floor: 'none', default: 'none' },
+    });
+    expect(PUBLIC_KEYS.has('session.password.reset.confirm')).toBe(true);
   });
 
   it('AC-9: ticket.delete is a role key scoped to a project', () => {

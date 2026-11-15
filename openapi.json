@@ -252,6 +252,37 @@
         ]
       }
     },
+    "/api/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "PasswordResetController_confirmReset",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConfirmDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The password was changed; no session is issued"
+          },
+          "400": {
+            "description": "The reset link is invalid or has expired"
+          },
+          "429": {
+            "description": "Too many requests"
+          }
+        },
+        "summary": "Set a new password with a reset token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/me/notifications": {
       "get": {
         "operationId": "MeNotificationsController_list",
@@ -17438,6 +17469,26 @@
         },
         "required": [
           "email"
+        ]
+      },
+      "PasswordResetConfirmDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "The raw token from the reset link"
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8,
+            "example": "StrongPass123!"
+          }
+        },
+        "required": [
+          "token",
+          "newPassword"
         ]
       },
       "NotificationDto": {

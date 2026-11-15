@@ -1,9 +1,28 @@
 import { Logger } from '@nestjs/common';
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import type { EmailScheduleRow } from '../../email/schedule/email-schedule.types';
+import {
+  authSessionCacheKey,
+  userAuthStateCacheKey,
+  userTokenVersionCacheTag,
+} from '../token-version.cache';
 import { PASSWORD_RESET_TTL_MS } from './password-reset.constants';
 import { hashPasswordResetToken } from './password-reset-token';
 import { PasswordResetService } from './password-reset.service';
+
+/**
+ * A pass-through bcrypt mock.
+ *
+ * The service's compiled `import * as bcrypt` takes a snapshot of the module's exports, so a
+ * `vi.spyOn(bcrypt, 'hash')` applied after the import never sees the service's own call. Replacing the
+ * module keeps the real KDF running while making the call observable.
+ */
+const bcryptHash = vi.hoisted(() => vi.fn());
+vi.mock('bcrypt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bcrypt')>();
+  bcryptHash.mockImplementation(actual.hash as unknown as (password: string, rounds: number) => Promise<string>);
+  return { ...actual, hash: bcryptHash, default: { ...actual, hash: bcryptHash } };
+});
 
 /**
  * auth-passwords US-003: the reset request's detached task, unit level.
@@ -29,8 +48,12 @@ describe('PasswordResetService', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   let service: PasswordResetService;
 
-  const build = (): PasswordResetService =>
-    new PasswordResetService(authRepo as never, tokens as never, schedule as never, dispatcher as never, email as never);
+  const build = (): PasswordResetService => new PasswordResetService(
+    authRepo as never, tokens as never, schedule as never, dispatcher as never, email as never,
+    { audited: vi.fn(), record: vi.fn() } as never,
+    { revokeAllForUser: vi.fn() } as never,
+    { invalidate: vi.fn() } as never,
+  );
 
   /** The raw token the task generated, read back out of the url it emailed. */
   const emailedRawToken = (): string => {
@@ -169,5 +192,172 @@ describe('PasswordResetService', () => {
 
     await service.request(user.email, 'en');
     await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('FAILED')));
+  });
+});
+
+/**
+ * auth-passwords US-004: the confirm's transaction, its refusals and its post-commit evictions, unit
+ * level. The route and the database are covered by the integration spec; every case here is about the
+ * order and the shape of the calls the service makes.
+ */
+describe('PasswordResetService.confirm', () => {
+  const RAW = 'raw-token-value';
+  const HASH = hashPasswordResetToken(RAW);
+  const NOW = new Date('2026-12-10T12:00:00.000Z');
+  const user = { id: 'user-1', disabled: false };
+  const liveRow = {
+    id: 'reset-1', userId: user.id, expiresAt: new Date('2026-12-10T12:30:00.000Z'), usedAt: null, userDisabled: false,
+  };
+
+  let authRepo: { findUserByEmail: ReturnType<typeof vi.fn> };
+  let tokens: {
+    replaceUnused: ReturnType<typeof vi.fn>;
+    findByHash: ReturnType<typeof vi.fn>;
+    markUsed: ReturnType<typeof vi.fn>;
+    discardUnusedFor: ReturnType<typeof vi.fn>;
+  };
+  let authSessions: { revokeAllForUser: ReturnType<typeof vi.fn> };
+  let authRepoWrites: { updatePasswordHash: ReturnType<typeof vi.fn>; bumpTokenVersion: ReturnType<typeof vi.fn> };
+  let audit: { audited: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn> };
+  let cache: { invalidate: ReturnType<typeof vi.fn> };
+  let schedule: { startPasswordResetSend: ReturnType<typeof vi.fn> };
+  let dispatcher: { sendOne: ReturnType<typeof vi.fn> };
+  let email: { configured: boolean; webUrl: ReturnType<typeof vi.fn> };
+  let service: PasswordResetService;
+
+  const build = (): PasswordResetService => new PasswordResetService(
+    authRepoWrites as never,
+    tokens as never,
+    schedule as never,
+    dispatcher as never,
+    email as never,
+    audit as never,
+    authSessions as never,
+    cache as never,
+  );
+
+  beforeEach(() => {
+    authRepo = { findUserByEmail: vi.fn(async () => user) };
+    tokens = {
+      replaceUnused: vi.fn(async () => undefined),
+      findByHash: vi.fn(async () => liveRow),
+      markUsed: vi.fn(async () => 1),
+      discardUnusedFor: vi.fn(async () => 0),
+    };
+    authRepoWrites = { updatePasswordHash: vi.fn(async () => undefined), bumpTokenVersion: vi.fn(async () => 1) };
+    authSessions = { revokeAllForUser: vi.fn(async () => ['s1', 's2']) };
+    audit = { audited: vi.fn(<T>(fn: () => Promise<T>) => fn()), record: vi.fn(async () => undefined) };
+    cache = { invalidate: vi.fn(async () => undefined) };
+    schedule = { startPasswordResetSend: vi.fn() };
+    dispatcher = { sendOne: vi.fn() };
+    email = { configured: true, webUrl: vi.fn((path: string) => `https://web.test${path}`) };
+    bcryptHash.mockClear();
+    service = build();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The `audited` entry callback the service passed, read back as the audit recorder would read it. */
+  const auditedEntry = (): Record<string, unknown> => {
+    const [, entriesOf] = audit.audited.mock.calls[0] as [() => Promise<unknown>, (result: unknown) => unknown];
+    return entriesOf(['s1', 's2']) as Record<string, unknown>;
+  };
+
+  it('AC-1: hashes the presented token, marks the row used and writes the new password in the audit transaction', async () => {
+    await service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW);
+
+    expect(tokens.findByHash).toHaveBeenCalledWith(HASH);
+    expect(audit.audited).toHaveBeenCalledTimes(1);
+    expect(tokens.markUsed).toHaveBeenCalledWith(liveRow.id, NOW);
+    expect(authRepoWrites.updatePasswordHash).toHaveBeenCalledWith(user.id, expect.stringMatching(/^\$2[aby]\$/));
+    expect(authRepoWrites.bumpTokenVersion).toHaveBeenCalledWith(user.id);
+    expect(authSessions.revokeAllForUser).toHaveBeenCalledWith(user.id, 'password-reset', NOW);
+    expect(tokens.discardUnusedFor).toHaveBeenCalledWith(user.id);
+  });
+
+  it('AC-1: hashes the new password before opening the transaction', async () => {
+    await service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW);
+
+    expect(bcryptHash).toHaveBeenCalledTimes(1);
+    expect(bcryptHash.mock.calls[0][0]).toBe('NewPassword123!');
+    expect(bcryptHash.mock.calls[0][1]).toBe(12);
+    // bcrypt resolved before `audited` was entered, so the transaction never spans the KDF.
+    expect(bcryptHash.mock.invocationCallOrder[0]).toBeLessThan(audit.audited.mock.invocationCallOrder[0]);
+  });
+
+  it('AC-9: records session.password.reset.confirm for the user', async () => {
+    await service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW);
+
+    expect(auditedEntry()).toEqual({
+      key: 'session.password.reset.confirm',
+      resourceType: 'user',
+      resourceId: user.id,
+      projectId: null,
+      summary: 'password reset',
+    });
+  });
+
+  it('AC-2/AC-10: a row already used (markUsed answers 0) is the same 400 and rolls the transaction back', async () => {
+    tokens.markUsed.mockResolvedValueOnce(0);
+
+    await expect(service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW)).rejects.toMatchObject({
+      prefix: 'auth.resetTokenInvalid', httpStatus: 400,
+    });
+    expect(authRepoWrites.updatePasswordHash).not.toHaveBeenCalled();
+    expect(authRepoWrites.bumpTokenVersion).not.toHaveBeenCalled();
+    expect(authSessions.revokeAllForUser).not.toHaveBeenCalled();
+    expect(tokens.discardUnusedFor).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unknown token', null],
+    ['a used row', { ...liveRow, usedAt: new Date('2026-12-10T11:00:00.000Z') }],
+    ['an expired row', { ...liveRow, expiresAt: NOW }],
+    ['a disabled user', { ...liveRow, userDisabled: true }],
+  ])('AC-3/AC-4/AC-5: %s is 400 auth.resetTokenInvalid with nothing written', async (_label, row) => {
+    tokens.findByHash.mockResolvedValueOnce(row);
+
+    await expect(service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW)).rejects.toMatchObject({
+      prefix: 'auth.resetTokenInvalid', httpStatus: 400,
+    });
+    expect(audit.audited).not.toHaveBeenCalled();
+    expect(authRepoWrites.updatePasswordHash).not.toHaveBeenCalled();
+    expect(cache.invalidate).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: evicts every revoked session and the user caches after the commit', async () => {
+    await service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW);
+
+    expect(cache.invalidate.mock.calls).toEqual([
+      [authSessionCacheKey('s1')],
+      [authSessionCacheKey('s2')],
+      [userTokenVersionCacheTag(user.id), { mode: 'tag' }],
+      [userAuthStateCacheKey(user.id)],
+    ]);
+    // The evictions happen after the transaction closed, never inside it.
+    expect(audit.audited.mock.invocationCallOrder[0])
+      .toBeLessThan(cache.invalidate.mock.invocationCallOrder[0]);
+  });
+
+  it('AC-6: a failing cache eviction does not undo the committed reset, and every eviction is still attempted', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    cache.invalidate.mockRejectedValue(new Error('cache down'));
+
+    await expect(service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW)).resolves.toBeUndefined();
+
+    // Three sessions-plus-user answers, all attempted, each failure logged rather than thrown.
+    expect(cache.invalidate).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenCalledTimes(4);
+    expect(String(warn.mock.calls[0][0])).toContain('cache down');
+  });
+
+  it('AC-14: answers void — no session and no token pair', async () => {
+    const result = await service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW);
+
+    expect(result).toBeUndefined();
+    expect(authSessions.revokeAllForUser).toHaveBeenCalled();
+    expect(Object.keys(authSessions)).toEqual(['revokeAllForUser']);
   });
 });
