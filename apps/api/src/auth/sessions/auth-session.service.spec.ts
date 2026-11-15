@@ -176,6 +176,37 @@ describe('AuthSessionService', () => {
     expect(deleted).toBeLessThan(created);
   });
 
+  it('recovers a matching User-Agent with the presenting IP, even after an IP change', async () => {
+    const { service, repository } = build();
+    const client = { uaHash: 'matching-hash', ip: '198.51.100.9' };
+    const input = { ...rotateInput(), client };
+    repository.markUsed.mockResolvedValue(0);
+    repository.findToken.mockResolvedValue({
+      ...token({ usedAt: new Date(input.now.getTime() - 31_000) }),
+      usedUaHash: client.uaHash,
+      usedIp: '203.0.113.7',
+    });
+    repository.hasTokenUsedAfter.mockResolvedValue(false);
+
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'recovered', ip: client.ip });
+    expect(repository.revokeSession).not.toHaveBeenCalled();
+  });
+
+  it('revokes a lost-response retry with a different User-Agent hash', async () => {
+    const { service, repository } = build();
+    const input = { ...rotateInput(), client: { uaHash: 'different-hash', ip: null } };
+    repository.markUsed.mockResolvedValue(0);
+    repository.findToken.mockResolvedValue({
+      ...token({ usedAt: new Date(input.now.getTime() - 31_000) }),
+      usedUaHash: 'original-hash',
+    });
+    repository.hasTokenUsedAfter.mockResolvedValue(false);
+
+    await expect(service.rotate(input)).resolves.toEqual({ kind: 'reused', userId: 'owner-id' });
+    expect(repository.revokeSession).toHaveBeenCalledWith('s1', 'reuse', input.now);
+    expect(repository.createToken).not.toHaveBeenCalled();
+  });
+
   it('revokes, without re-rotating, a stale token used longer than the lost-response window ago', async () => {
     // The recovery is bounded: a browser that lost a response refreshes again within one access-token
     // lifetime, so a token idle past the window is treated as a replay even when nothing later was used.
