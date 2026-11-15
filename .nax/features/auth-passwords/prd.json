@@ -3,7 +3,7 @@
   "feature": "auth-passwords",
   "branchName": "feat/auth-passwords",
   "createdAt": "2026-11-15T05:04:44.168Z",
-  "updatedAt": "2026-11-15T05:52:37.378Z",
+  "updatedAt": "2026-11-15T06:03:53.775Z",
   "userStories": [
     {
       "id": "US-001",
@@ -479,14 +479,17 @@
         "US-001",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Credential UI and SSR client-provenance forwarding connect to security-sensitive API contracts and error handling; security override applies across the web boundary."
+        "reasoning": "Credential UI and SSR client-provenance forwarding connect to security-sensitive API contracts and error handling; security override applies across the web boundary.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/server/utils/api.ts",
@@ -510,7 +513,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f03d0dc45355afa56bc029acba5a1bd694ec1d0c"
     },
     {
       "id": "US-007",
