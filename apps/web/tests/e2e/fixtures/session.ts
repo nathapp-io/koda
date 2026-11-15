@@ -1,16 +1,23 @@
 /**
- * One API login per user per Playwright worker. The API throttles login to
- * 5/min per IP (all e2e traffic is 127.0.0.1), so logging in per test trips
- * 429. Tokens are reused for up to 10 minutes (access tokens live 15).
+ * Two kinds of e2e login, kept apart on purpose (auth-sessions, #460):
  *
- * POST /auth/logout bumps the user's tokenVersion and revokes every cached
- * token: a test that logs out must use { fresh: true } and call
- * forgetSession() afterwards.
+ * - `getSession` — one cached API login per user per Playwright worker, for the
+ *   API client (fixtures/api-client.ts). It only ever presents its access token,
+ *   so its session never rotates. Tokens are reused for up to 10 minutes
+ *   (access tokens live 15).
+ * - `newBrowserSession` — an uncached login for one browser context
+ *   (`webLogin`). A browser rotates its refresh cookie (SSR refresh, the 401
+ *   retry, the refresh route), and the API revokes a whole session when a used
+ *   refresh token is presented again after the 30 s reuse grace. Sharing one
+ *   refresh token between contexts would let one test's rotation revoke the
+ *   session every later test (and the API client) runs on.
  *
- * A 429 fails fast with a clear message instead of sleeping: Playwright hooks
- * share the 30 s test timeout, so waiting out the 60 s throttle window would
- * fail anyway. A worker restarted after a failure (CI retries) empties this
- * cache and logs in again; that stays well under 5/min unless many tests fail.
+ * POST /auth/logout revokes only the session the token names, so a browser
+ * logout no longer touches the cached API session.
+ *
+ * Logins are throttled per IP (all e2e traffic is 127.0.0.1); playwright.config
+ * raises AUTH_LOGIN_THROTTLE_LIMIT for the suite. A 429 fails fast with a clear
+ * message instead of sleeping out the throttle window.
  */
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 const MAX_AGE_MS = 10 * 60_000;
@@ -32,7 +39,7 @@ async function loginOnce(email: string, password: string): Promise<E2ESession> {
   });
   if (res.status === 429) {
     throw new Error(
-      'Login throttled (429): more than 5 logins/min from this IP. Reuse getSession() instead of logging in per test.',
+      'Login throttled (429): too many logins/min from this IP. Raise AUTH_LOGIN_THROTTLE_LIMIT in playwright.config.ts.',
     );
   }
   if (!res.ok) throw new Error(`Login failed: ${res.status} ${await res.text()}`);
@@ -48,20 +55,15 @@ async function loginOnce(email: string, password: string): Promise<E2ESession> {
   return { accessToken, refreshToken, userId, obtainedAt: Date.now() };
 }
 
-export async function getSession(
-  email: string,
-  password: string,
-  opts: { fresh?: boolean } = {},
-): Promise<E2ESession> {
+export async function getSession(email: string, password: string): Promise<E2ESession> {
   const cached = cache.get(email);
-  if (!opts.fresh && cached && Date.now() - cached.obtainedAt < MAX_AGE_MS) return cached;
+  if (cached && Date.now() - cached.obtainedAt < MAX_AGE_MS) return cached;
   const session = await loginOnce(email, password);
   cache = new Map([...cache, [email, session]]);
   return session;
 }
 
-export function forgetSession(email: string): void {
-  const next = new Map(cache);
-  next.delete(email);
-  cache = next;
+/** A session of its own for one browser context; never cached (see the header). */
+export async function newBrowserSession(email: string, password: string): Promise<E2ESession> {
+  return await loginOnce(email, password);
 }

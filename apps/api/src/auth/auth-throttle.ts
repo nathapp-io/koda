@@ -2,8 +2,8 @@
  * Login/register/logout/public-invite throttle limit. Defaults to 5/min in
  * production — the spec calls this out as the brute-force defense on the auth
  * surface. E2E tests raise this via `AUTH_LOGIN_THROTTLE_LIMIT` because every
- * spec shares the same client IP, so even a small run trips 5/min once a
- * worker restart (CI retry) clears the per-worker session cache.
+ * spec shares the same client IP and every web login in the suite is a login
+ * of its own (one session per browser context).
  *
  * Resolved at class-load time: the value is captured into the @Throttle
  * metadata of every guarded handler, so changing the env mid-process has no
