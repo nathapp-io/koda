@@ -7,6 +7,7 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { NOTIFY_SERVICE } from '@nathapp/nestjs-notify';
 import { AUTH_LOGIN_LIMIT } from '../../../src/auth/auth-throttle';
+import { PrismaAuthRepository } from '../../../src/auth/prisma-auth.repository';
 import { hashPasswordResetToken } from '../../../src/auth/password-reset/password-reset-token';
 import { EmailDispatcher } from '../../../src/email/email-dispatcher';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -36,6 +37,29 @@ const NEW_PASSWORD = 'Replacement123!Aa';
 const RESET_PATH = '/reset-password/';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * A hand-released pause for one in-flight request (branch fix B2): the patched call announces itself, the
+ * test does its own work, then releases it. The timeout releases a pause nothing waits for, so a broken
+ * test fails its assertions instead of hanging the suite.
+ */
+const PAUSE_TIMEOUT_MS = 5_000;
+function pause(): { announce: () => void; arrived: Promise<void>; held: Promise<void>; release: () => void } {
+  let announce!: () => void;
+  let release!: () => void;
+  const arrived = new Promise<void>((resolve) => { announce = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const timer = setTimeout(() => release(), PAUSE_TIMEOUT_MS);
+  return {
+    announce,
+    arrived,
+    held,
+    release: () => {
+      clearTimeout(timer);
+      release();
+    },
+  };
+}
 
 async function waitFor<T>(probe: () => Promise<T | null | undefined | false>, what: string): Promise<T> {
   const deadline = Date.now() + WAIT_MS;
@@ -304,6 +328,39 @@ describeDb('password reset confirm (PG)', () => {
   it('AC-12: is throttled like login', async () => {
     for (let i = 0; i < AUTH_LOGIN_LIMIT; i += 1) await confirm(`unknown-${randomUUID()}`).expect(400);
     await confirm(`unknown-${randomUUID()}`).expect(429);
+  });
+
+  it('B2: a user disabled between the token lookup and the user row lock is refused, writing nothing', async () => {
+    // The token row was read (and not disabled then) and the new hash is being computed: the disable
+    // commits before the transaction takes the lock, so only the locked read can see it.
+    const token = await emailedToken(userEmail);
+    const before = await passwordHash();
+    const repo = app.get(PrismaAuthRepository);
+    const originalLock = repo.lockUser;
+    const paused = pause();
+    repo.lockUser = async (id: string) => {
+      paused.announce();
+      await paused.held;
+      return originalLock.call(repo, id);
+    };
+    try {
+      // `.then(...)` dispatches the request now: the pause below holds it inside its transaction.
+      const pending = confirm(token).then((response) => response);
+      await paused.arrived;
+      await db.user.update({ where: { id: userId }, data: { disabled: true } });
+      paused.release();
+
+      const response = await pending;
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({ ret: -2, message: resetTokenInvalid() });
+    } finally {
+      paused.release();
+      repo.lockUser = originalLock;
+    }
+
+    expect(await passwordHash()).toBe(before);
+    expect((await tokenRows(userId))[0].usedAt).toBeNull();
+    expect(await confirmEntries()).toEqual([]);
   });
 
   it('AC-14: the confirm issues no tokens and creates no session', async () => {

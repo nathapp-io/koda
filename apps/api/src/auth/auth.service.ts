@@ -150,7 +150,17 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    return this.issueSession(user);
+    // Branch fix B1: the hash proved above must still be the account's password at the moment the session
+    // is written, read under the user row lock every password write takes. A change that commits while
+    // this request is hashing therefore refuses this sign-in — 401, like a wrong password — instead of
+    // handing out a session its bulk revocation has already run past; and a change that arrives later
+    // waits for the session, then revokes it. Without the fence the new session would refresh for good,
+    // because a password change leaves `tokenVersion` alone.
+    const verifiedHash = user.passwordHash;
+    return this.issueSession(user, async () => {
+      const locked = await this.authRepo.lockUser(user.id);
+      return locked !== null && !locked.disabled && locked.passwordHash === verifiedHash;
+    });
   }
 
   async refresh(principal: IPrincipal, client: RefreshClient) {
@@ -257,8 +267,14 @@ export class AuthService {
     return UserResponseDto.from(user, await this.roleClaim(user.id));
   }
 
-  /** The session shape shared by register, login, refresh and invite acceptance. */
-  async issueSession(user: UserDomain): Promise<AuthResponseDto> {
+  /**
+   * The session shape shared by register, login, refresh and invite acceptance.
+   *
+   * `fence` (branch fix B1) is a credential re-check that `AuthSessionService.start` runs inside the
+   * session's own transaction, before the rows are written: a sign-in it refuses writes no session and
+   * answers like a wrong password.
+   */
+  async issueSession(user: UserDomain, fence?: () => Promise<boolean>): Promise<AuthResponseDto> {
     // Derive once so the JWT and response describe the same binding snapshot.
     const role = await this.roleClaim(user.id);
     const response = UserResponseDto.from(user, role);
@@ -266,12 +282,13 @@ export class AuthService {
     const tokenId = randomUUID();
     const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion, sessionId, tokenId);
     const accessToken = this.generateAccessToken(user.id, user.email, role, user.tokenVersion, sessionId);
-    await this.authSessions.start({
+    const started = await this.authSessions.start({
       userId: user.id,
       sessionId,
       tokenId,
       expiresAt: this.refreshExpiryOf(refreshToken),
-    });
+    }, fence);
+    if (!started) throw new AuthException({}, 'auth');
     return { accessToken, refreshToken, user: response };
   }
 
@@ -304,10 +321,15 @@ export class AuthService {
       // that committed while this request was hashing is visible in `locked`, and one still in flight
       // waits behind it.
       const locked = await this.authRepo.lockUser(user.id);
+      // The account as the lock sees it, not as the checks above saw it (branch fix B2): an administrative
+      // disable commits its own update on this row, so one that finished while this request was verifying
+      // or hashing is visible here and only here. It answers like the refusal above the transaction — 401,
+      // nothing written — instead of letting a disabled account change its own password.
+      if (!locked || locked.disabled) throw new AuthException({}, 'auth');
       // A concurrent change of the same user committed first, so the `currentPassword` this request
       // verified is no longer the account's password: answer the same 403 a wrong current password gets
       // and write nothing, instead of overwriting the change that won.
-      if (locked?.passwordHash !== verifiedHash) {
+      if (locked.passwordHash !== verifiedHash) {
         throw new ForbiddenAppException({}, 'auth.currentPasswordWrong');
       }
       // Revalidated under the lock as well: a change that won revokes every other session of the user, so

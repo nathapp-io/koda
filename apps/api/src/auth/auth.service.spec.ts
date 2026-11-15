@@ -120,7 +120,7 @@ describe('AuthService', () => {
     mockJwtStrategyProvider.sign.mockReset();
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
-    mockAuthSessions.start.mockReset();
+    mockAuthSessions.start.mockReset().mockResolvedValue(true);
     mockAuthSessions.rotate.mockReset();
     mockAuthSessions.revoke.mockReset();
     mockAuthSessions.isActive.mockReset();
@@ -191,7 +191,7 @@ describe('AuthService', () => {
       expect(mockAuthSessions.start).toHaveBeenCalledWith(expect.objectContaining({
         userId: mockUser.id,
         expiresAt: expect.any(Date),
-      }));
+      }), undefined);
       const refreshClaims = (mockJwtRefreshStrategyProvider.sign as Mock).mock.calls[0][0];
       const accessClaims = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
       expect(refreshClaims).toEqual(expect.objectContaining({ sid: expect.any(String), jti: expect.any(String) }));
@@ -199,7 +199,7 @@ describe('AuthService', () => {
       expect(mockAuthSessions.start).toHaveBeenCalledWith({
         userId: mockUser.id, sessionId: refreshClaims.sid, tokenId: refreshClaims.jti,
         expiresAt: expect.any(Date),
-      });
+      }, undefined);
     });
 
     it.each([true, false])('uses one role lookup for the response and claim (admin=%s)', async (admin) => {
@@ -534,6 +534,8 @@ describe('AuthService', () => {
       const userWithHash = { ...mockUser, passwordHash: hashedPassword };
 
       mockAuthRepository.findUserByEmail.mockResolvedValue(userWithHash);
+      // The lock still sees the password this sign-in verified.
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash: hashedPassword, disabled: false });
 
       const result = await service.login({
         email: mockUser.email,
@@ -544,6 +546,48 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('refreshToken');
       expect(result).toHaveProperty('user');
       expect(result.user.email).toBe(mockUser.email);
+    });
+
+    // Branch fix B1: the session is created behind the user row lock every password write takes, so the
+    // hash this sign-in verified is read again inside the transaction that writes the session.
+    it('B1: hands the session-start fence that re-reads the proved hash under the user row lock', async () => {
+      const password = 'Password123!';
+      const hashedPassword = await bcrypt.hash(password, 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: hashedPassword });
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash: hashedPassword, disabled: false });
+
+      await service.login({ email: mockUser.email, password });
+
+      const fence = mockAuthSessions.start.mock.calls[0][1] as () => Promise<boolean>;
+      expect(fence).toBeInstanceOf(Function);
+      await expect(fence()).resolves.toBe(true);
+      expect(mockAuthRepository.lockUser).toHaveBeenCalledWith(mockUser.id);
+    });
+
+    it.each([
+      ['a concurrent change committed', { passwordHash: 'hash-of-the-winning-change', disabled: false }],
+      ['the account was disabled concurrently', { passwordHash: 'hashed-password', disabled: true }],
+      ['the user row is gone', null],
+    ])('B1: the fence refuses when %s', async (_label, locked) => {
+      const password = 'Password123!';
+      const hashedPassword = await bcrypt.hash(password, 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: hashedPassword });
+      mockAuthRepository.lockUser.mockResolvedValue(locked);
+
+      await service.login({ email: mockUser.email, password });
+
+      const fence = mockAuthSessions.start.mock.calls[0][1] as () => Promise<boolean>;
+      await expect(fence()).resolves.toBe(false);
+    });
+
+    it('B1: a refused fence answers 401 like a wrong password, so no session is handed out', async () => {
+      const password = 'Password123!';
+      const hashedPassword = await bcrypt.hash(password, 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: hashedPassword });
+      // The change committed while the request was hashing: `start` wrote no session.
+      mockAuthSessions.start.mockResolvedValueOnce(false);
+
+      await expect(service.login({ email: mockUser.email, password })).rejects.toBeInstanceOf(AuthException);
     });
 
     it('should throw 401 error for invalid password', async () => {
@@ -978,8 +1022,8 @@ describe('AuthService', () => {
     beforeEach(async () => {
       const passwordHash = await bcrypt.hash(currentPassword, 4);
       mockAuthRepository.findUserById.mockResolvedValue({ ...mockUser, passwordHash });
-      // The row lock re-reads the hash the compare verified: no concurrent change happened.
-      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash });
+      // The row lock re-reads the row the checks above read: no concurrent change, no disable.
+      mockAuthRepository.lockUser.mockResolvedValue({ passwordHash, disabled: false });
       // The caller's session is still live when the transaction revalidates it.
       mockAuthSessions.isActive.mockResolvedValue(true);
       mockAuthSessions.revokeAllForUser.mockResolvedValue([]);
@@ -1023,7 +1067,7 @@ describe('AuthService', () => {
 
     it('B1: re-reads the verified hash under the user row lock and refuses a stale change without writes', async () => {
       // A concurrent change committed first: the account password is no longer the one proved above.
-      mockAuthRepository.lockUser.mockResolvedValueOnce({ passwordHash: 'hash-of-the-winning-change' });
+      mockAuthRepository.lockUser.mockResolvedValueOnce({ passwordHash: 'hash-of-the-winning-change', disabled: false });
 
       await expect(service.changePassword(principal, { currentPassword, newPassword }))
         .rejects.toBeInstanceOf(ForbiddenAppException);
@@ -1035,11 +1079,24 @@ describe('AuthService', () => {
       expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
     });
 
-    it('B1: treats a user row that vanished under the lock as a stale change too', async () => {
+    // Branch fix B2: an administrative disable that commits while this request verifies or hashes is only
+    // visible under the lock, and it must beat the write the way the refusal above the transaction does.
+    it('B2: refuses with 401 when the account was disabled under the lock, writing nothing', async () => {
+      mockAuthRepository.lockUser.mockResolvedValueOnce({ passwordHash: 'hashed-password', disabled: true });
+
+      await expect(service.changePassword(principal, { currentPassword, newPassword }))
+        .rejects.toBeInstanceOf(AuthException);
+
+      expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mockAuthSessions.revokeAllForUser).not.toHaveBeenCalled();
+      expect(mockPasswordResetTokens.discardUnusedFor).not.toHaveBeenCalled();
+    });
+
+    it('B1/B2: treats a user row that vanished under the lock as a signed-out account', async () => {
       mockAuthRepository.lockUser.mockResolvedValueOnce(null);
 
       await expect(service.changePassword(principal, { currentPassword, newPassword }))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
+        .rejects.toBeInstanceOf(AuthException);
       expect(mockAuthRepository.updatePasswordHash).not.toHaveBeenCalled();
     });
 

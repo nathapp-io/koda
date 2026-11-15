@@ -83,7 +83,8 @@ export class PrismaAuthRepository {
   }
 
   /**
-   * Locks the user row and answers the password hash stored under the lock (null when no row matches).
+   * Locks the user row and answers the state stored under the lock (null when no row matches): the
+   * password hash, and whether an administrator has disabled the account.
    *
    * One lock order for every password write (branch fix B1/B2): the user row first, then the rows that
    * hang off it — the reset tokens. `PasswordResetTokenStore.replaceUnused`,
@@ -91,13 +92,15 @@ export class PrismaAuthRepository {
    * confirmation holding a reset-token row can never wait for a user row a concurrent transaction holds
    * while that transaction waits for the reset-token row (Postgres would abort one of the two).
    *
-   * Inside a transaction the lock is also the re-check: a concurrent password write that committed first
-   * is visible in the answer here, and one that has not committed yet waits behind this lock. That is
-   * what makes the hash a caller verified before the transaction authoritative for its write.
+   * Inside a transaction the lock is also the re-check, and the answer is the row the caller's own checks
+   * never saw: a concurrent password write that committed first is visible in `passwordHash`, and a
+   * disable that committed first — the admin update takes the same row lock — in `disabled`. One that has
+   * not committed yet waits behind this lock. That is what makes a credential the caller verified before
+   * the transaction authoritative for its write.
    */
-  async lockUser(userId: string): Promise<{ passwordHash: string } | null> {
-    const rows = await this.db.$queryRaw<{ passwordHash: string }[]>`
-      SELECT "passwordHash" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+  async lockUser(userId: string): Promise<{ passwordHash: string; disabled: boolean } | null> {
+    const rows = await this.db.$queryRaw<{ passwordHash: string; disabled: boolean }[]>`
+      SELECT "passwordHash", "disabled" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
     return rows[0] ?? null;
   }
 

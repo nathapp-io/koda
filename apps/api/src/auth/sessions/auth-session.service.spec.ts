@@ -93,6 +93,37 @@ describe('AuthSessionService', () => {
     expect(repository.createToken).toHaveBeenCalledWith({ id: 't1', sessionId: 's1' });
   });
 
+  // Branch fix B1: login hands `start` the credentials it proved, read again under the user row lock the
+  // password writes take, so a change that wins cannot be overtaken by a session created after its
+  // revocation.
+  it('writes the session only once the fence has answered inside the transaction', async () => {
+    const { service, repository } = build();
+    const fence = vi.fn(async () => true);
+
+    await expect(service.start(
+      { userId: 'u1', sessionId: 's1', tokenId: 't1', expiresAt: at(7 * 24 * 60 * 60 * 1000) },
+      fence,
+    )).resolves.toBe(true);
+
+    expect(fence).toHaveBeenCalledTimes(1);
+    expect(fence.mock.invocationCallOrder[0]).toBeLessThan(repository.createSession.mock.invocationCallOrder[0]);
+    expect(repository.createSession).toHaveBeenCalledTimes(1);
+    expect(repository.createToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes no session and no token when the fence refuses, and answers false', async () => {
+    const { service, repository, txManager } = build();
+
+    await expect(service.start(
+      { userId: 'u1', sessionId: 's1', tokenId: 't1', expiresAt: at(7 * 24 * 60 * 60 * 1000) },
+      async () => false,
+    )).resolves.toBe(false);
+
+    expect(txManager.run).toHaveBeenCalledTimes(1);
+    expect(repository.createSession).not.toHaveBeenCalled();
+    expect(repository.createToken).not.toHaveBeenCalled();
+  });
+
   it('rotates an unused token: slides, marks it used, inserts the next and cleans old used tokens', async () => {
     const { service, repository, txManager } = build();
     const input = rotateInput();

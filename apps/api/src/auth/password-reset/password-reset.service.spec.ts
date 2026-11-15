@@ -245,7 +245,7 @@ describe('PasswordResetService.confirm', () => {
       discardUnusedFor: vi.fn(async () => 0),
     };
     authRepoWrites = {
-      lockUser: vi.fn(async () => ({ passwordHash: 'stored-hash' })),
+      lockUser: vi.fn(async () => ({ passwordHash: 'stored-hash', disabled: false })),
       updatePasswordHash: vi.fn(async () => undefined),
       bumpTokenVersion: vi.fn(async () => 1),
     };
@@ -325,6 +325,24 @@ describe('PasswordResetService.confirm', () => {
     expect(authRepoWrites.bumpTokenVersion).not.toHaveBeenCalled();
     expect(authSessions.revokeAllForUser).not.toHaveBeenCalled();
     expect(tokens.discardUnusedFor).not.toHaveBeenCalled();
+  });
+
+  // Branch fix B2: the token row's own `userDisabled` is read before bcrypt, so a disable that commits
+  // while the new hash is being computed is only visible under the user row lock.
+  it.each([
+    ['disabled under the lock', { passwordHash: 'stored-hash', disabled: true }],
+    ['its user row gone under the lock', null],
+  ])('B2: a user %s is the same 400, before any write', async (_label, locked) => {
+    authRepoWrites.lockUser.mockResolvedValueOnce(locked);
+
+    await expect(service.confirm({ token: RAW, newPassword: 'NewPassword123!' }, NOW)).rejects.toMatchObject({
+      prefix: 'auth.resetTokenInvalid', httpStatus: 400,
+    });
+    expect(tokens.markUsed).not.toHaveBeenCalled();
+    expect(authRepoWrites.updatePasswordHash).not.toHaveBeenCalled();
+    expect(authRepoWrites.bumpTokenVersion).not.toHaveBeenCalled();
+    expect(authSessions.revokeAllForUser).not.toHaveBeenCalled();
+    expect(cache.invalidate).not.toHaveBeenCalled();
   });
 
   it.each([

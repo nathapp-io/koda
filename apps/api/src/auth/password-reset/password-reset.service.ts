@@ -132,7 +132,13 @@ export class PasswordResetService {
       // first inverted it, so a confirmation could hold a token row while waiting for the user row a
       // concurrent request held, which waited for the token row: Postgres aborted one of the two, and the
       // request's reset email was lost silently.
-      await this.authRepo.lockUser(row.userId);
+      //
+      // `userDisabled` above came from the token's own read, which happened before bcrypt: an
+      // administrator who finished disabling the account in the meantime is only visible under this lock
+      // (branch fix B2). It is refused here, before any write, with the same 400 a dead link gets — a
+      // disabled account must not be able to spend a mailed link and change its password.
+      const locked = await this.authRepo.lockUser(row.userId);
+      if (!locked || locked.disabled) throw invalidToken();
       const marked = await this.tokens.markUsed(row.id, now);
       if (marked === 0) throw invalidToken();
       await this.authRepo.updatePasswordHash(row.userId, passwordHash);

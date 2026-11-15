@@ -5,6 +5,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { AUTH_CFG, IAuthConfig } from '../../../src/config/auth.config';
 import { AUTH_LOGIN_LIMIT } from '../../../src/auth/auth-throttle';
 import { PrismaAuthRepository } from '../../../src/auth/prisma-auth.repository';
+import { AuthSessionService } from '../../../src/auth/sessions/auth-session.service';
 import { hashPasswordResetToken } from '../../../src/auth/password-reset/password-reset-token';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -39,6 +40,29 @@ function lockBarrier(expected = 2): () => Promise<void> {
       release();
     }
     await gate;
+  };
+}
+
+/**
+ * A hand-released pause for one in-flight request (branch fix B1/B2).
+ *
+ * The patched call announces itself, the test does its own work, then releases it. The timeout releases a
+ * pause nothing waits for, so a broken test fails its assertions instead of hanging the suite.
+ */
+function pause(): { announce: () => void; arrived: Promise<void>; held: Promise<void>; release: () => void } {
+  let announce!: () => void;
+  let release!: () => void;
+  const arrived = new Promise<void>((resolve) => { announce = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const timer = setTimeout(() => release(), LOCK_BARRIER_TIMEOUT_MS);
+  return {
+    announce,
+    arrived,
+    held,
+    release: () => {
+      clearTimeout(timer);
+      release();
+    },
   };
 }
 
@@ -201,5 +225,74 @@ describeDb('password change (PG)', () => {
     const other = changed.status === 200 ? 'Reset123!Aa' : 'Change123!Aa';
     await login(email, winner);
     await request(server).post('/api/auth/login').send({ email, password: other }).expect(401);
+  });
+
+  it('B1: a login that proved the old password writes no session once a change has committed', async () => {
+    // The sign-in already compared the old password: it is held just before the session and its first
+    // refresh token are written, which is the window a password change has to be able to close.
+    const sessions = app.get(AuthSessionService);
+    const originalStart = sessions.start;
+    const paused = pause();
+    sessions.start = async (input, fence) => {
+      paused.announce();
+      await paused.held;
+      return originalStart.call(sessions, input, fence);
+    };
+    try {
+      // `.then(...)` dispatches the request now: the assertions below depend on it being in flight.
+      const staleLogin = request(server)
+        .post('/api/auth/login')
+        .send({ email, password: TEST_PASSWORD })
+        .then((response) => response);
+      await paused.arrived;
+
+      // The change commits while the login is paused: it revokes every session of the user and leaves
+      // `tokenVersion` alone, so a session created after it would refresh forever.
+      await change(pair.accessToken).expect(200);
+      paused.release();
+
+      const refused = await staleLogin;
+      expect(refused.status).toBe(401);
+      expect(JSON.stringify(refused.body)).not.toContain('refreshToken');
+    } finally {
+      paused.release();
+      sessions.start = originalStart;
+    }
+
+    // Only the changing caller's session exists: the refused sign-in wrote no session and no token.
+    expect(await db.authSession.count({ where: { userId } })).toBe(1);
+    expect(await login(email, NEW_PASSWORD)).toBeTruthy();
+  });
+
+  it('B2: a user disabled between the lookup and the user row lock is refused, writing nothing', async () => {
+    const repo = app.get(PrismaAuthRepository);
+    const originalLock = repo.lockUser;
+    const paused = pause();
+    repo.lockUser = async (id: string) => {
+      paused.announce();
+      await paused.held;
+      return originalLock.call(repo, id);
+    };
+    const before = await hash();
+    try {
+      // `.then(...)` dispatches the request now: the pause below holds it inside its transaction.
+      const pending = change(pair.accessToken).then((response) => response);
+      await paused.arrived;
+
+      // The administrative disable commits after the service read the row (not disabled) and before its
+      // transaction takes the lock, so only the locked read can see it.
+      await db.user.update({ where: { id: userId }, data: { disabled: true } });
+      paused.release();
+
+      const refused = await pending;
+      expect(refused.status).toBe(401);
+    } finally {
+      paused.release();
+      repo.lockUser = originalLock;
+    }
+
+    expect(await hash()).toBe(before);
+    expect(await entries()).toHaveLength(0);
+    expect((await db.authSession.findUniqueOrThrow({ where: { id: sid(pair) } })).revokedAt).toBeNull();
   });
 });

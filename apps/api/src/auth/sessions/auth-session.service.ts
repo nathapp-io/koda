@@ -58,12 +58,28 @@ export class AuthSessionService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  /** Writes the session of a sign-in and its first refresh token, together. */
-  async start(input: { userId: string; sessionId: string; tokenId: string; expiresAt: Date }): Promise<void> {
-    await bookkeeping('auth.session-start', () =>
+  /**
+   * Writes the session of a sign-in and its first refresh token, together. Answers whether the session
+   * exists.
+   *
+   * The optional `fence` runs inside the same transaction and before either row is written, and it is the
+   * caller's answer to "may this sign-in still have a session?" (branch fix B1). Login passes the
+   * credentials it proved there, and that check takes the user row lock every password write takes: so a
+   * password change either commits before this transaction — the fence then sees the new hash and refuses,
+   * and no session is written — or it waits for this transaction and revokes the session it wrote. Without
+   * the fence a session created just after a change's bulk revocation would outlive that change for good,
+   * because a change leaves `tokenVersion` (the only thing a refresh checks) alone.
+   */
+  async start(
+    input: { userId: string; sessionId: string; tokenId: string; expiresAt: Date },
+    fence?: () => Promise<boolean>,
+  ): Promise<boolean> {
+    return await bookkeeping('auth.session-start', () =>
       this.txManager.run(async () => {
+        if (fence !== undefined && !(await fence())) return false;
         await this.sessions.createSession({ id: input.sessionId, userId: input.userId, expiresAt: input.expiresAt });
         await this.sessions.createToken({ id: input.tokenId, sessionId: input.sessionId });
+        return true;
       }),
     );
   }
