@@ -50,8 +50,15 @@ test.each([{ status: 403 }, new ApiError(40003, 'wrong')])('AC-8 wrong password 
   if (!field) throw new Error('Missing current password field')
   expect(m.textOf(field)).toContain('auth.account.currentPasswordWrong'); expect(error).not.toHaveBeenCalled(); m.unmount()
 })
-test('AC-9 other failures use extractApiError', async () => {
-  changePassword.mockRejectedValue(new Error('server unavailable'))
+test('AC-9 HTTP 500 envelope is shown using extractApiError', async () => {
+  const failure = Object.assign(new Error('HTTP 500'), {
+    status: 500,
+    data: { ret: 50000, message: 'server unavailable' },
+  })
+  changePassword.mockRejectedValue(failure)
   const m = page(); await fill(m); await submit(m)
-  expect(error).toHaveBeenCalledWith('server unavailable'); m.unmount()
+  expect(changePassword).toHaveBeenCalledTimes(1)
+  expect(error).toHaveBeenCalledWith('server unavailable')
+  expect(m.text()).not.toContain('auth.account.currentPasswordWrong')
+  m.unmount()
 })

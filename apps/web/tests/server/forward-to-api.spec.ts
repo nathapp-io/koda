@@ -145,7 +145,8 @@ describe('browser User-Agent forwarding', () => {
     await forwardToApi(makeEvent('198.51.100.9'), '/auth/logout', { body: {} })
     const headers = rawMock.mock.calls.map((call) => (call as [string, { headers: Record<string, string> }])[1].headers)
     expect(headers[1]['User-Agent']).toBe('UA')
-    for (const name of ['Accept', 'Authorization', 'Content-Type', 'x-client-ip']) expect(headers[1][name]).toBe(headers[0][name])
+    expect(headers[0]['x-forwarded-for']).toBe('198.51.100.9')
+    for (const name of ['Accept', 'Authorization', 'Content-Type', 'x-client-ip', 'x-forwarded-for']) expect(headers[1][name]).toBe(headers[0][name])
   })
 })
 
