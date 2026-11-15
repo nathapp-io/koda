@@ -50,6 +50,14 @@ test.each([{ status: 403 }, new ApiError(40003, 'wrong')])('AC-8 wrong password 
   if (!field) throw new Error('Missing current password field')
   expect(m.textOf(field)).toContain('auth.account.currentPasswordWrong'); expect(error).not.toHaveBeenCalled(); m.unmount()
 })
+test('validation errors are associated with their password input', async () => {
+  const m = page(); await fill(m, 'different'); await submit(m)
+  const input = m.find('input').find(n => n.props.id === 'confirmNewPassword')
+  expect(input?.props['aria-invalid']).toBe('true')
+  expect(input?.props['aria-describedby']).toBe('confirmNewPassword-error')
+  expect(m.find('p').find(n => n.props.id === 'confirmNewPassword-error')).toBeDefined()
+  m.unmount()
+})
 test('AC-9 HTTP 500 envelope is shown using extractApiError', async () => {
   const failure = Object.assign(new Error('HTTP 500'), {
     status: 500,

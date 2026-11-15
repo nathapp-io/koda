@@ -44,18 +44,18 @@ const onSubmit = handleSubmit(async values => {
     <form class="space-y-4" @submit.prevent="onSubmit">
       <div class="space-y-2">
         <label for="currentPassword" class="text-sm font-medium">{{ t('auth.account.currentPassword') }}</label>
-        <input id="currentPassword" :value="currentPassword" type="password" autocomplete="current-password" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" @input="currentPassword = ($event.target as HTMLInputElement).value">
-        <p v-if="errors.currentPassword" class="text-sm text-status-rejected">{{ errors.currentPassword }}</p>
+        <input id="currentPassword" :aria-invalid="errors.currentPassword ? 'true' : undefined" :aria-describedby="errors.currentPassword ? 'currentPassword-error' : undefined" :value="currentPassword" type="password" autocomplete="current-password" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" @input="currentPassword = ($event.target as HTMLInputElement).value">
+        <p v-if="errors.currentPassword" id="currentPassword-error" class="text-sm text-status-rejected">{{ errors.currentPassword }}</p>
       </div>
       <div class="space-y-2">
         <label for="newPassword" class="text-sm font-medium">{{ t('auth.account.newPassword') }}</label>
-        <input id="newPassword" :value="newPassword" type="password" autocomplete="new-password" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" @input="newPassword = ($event.target as HTMLInputElement).value">
-        <p v-if="errors.newPassword" class="text-sm text-status-rejected">{{ errors.newPassword }}</p>
+        <input id="newPassword" :aria-invalid="errors.newPassword ? 'true' : undefined" :aria-describedby="errors.newPassword ? 'newPassword-error' : undefined" :value="newPassword" type="password" autocomplete="new-password" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" @input="newPassword = ($event.target as HTMLInputElement).value">
+        <p v-if="errors.newPassword" id="newPassword-error" class="text-sm text-status-rejected">{{ errors.newPassword }}</p>
       </div>
       <div class="space-y-2">
         <label for="confirmNewPassword" class="text-sm font-medium">{{ t('auth.account.confirmNewPassword') }}</label>
-        <input id="confirmNewPassword" :value="confirmNewPassword" type="password" autocomplete="new-password" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" @input="confirmNewPassword = ($event.target as HTMLInputElement).value">
-        <p v-if="errors.confirmNewPassword" class="text-sm text-status-rejected">{{ errors.confirmNewPassword }}</p>
+        <input id="confirmNewPassword" :aria-invalid="errors.confirmNewPassword ? 'true' : undefined" :aria-describedby="errors.confirmNewPassword ? 'confirmNewPassword-error' : undefined" :value="confirmNewPassword" type="password" autocomplete="new-password" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" @input="confirmNewPassword = ($event.target as HTMLInputElement).value">
+        <p v-if="errors.confirmNewPassword" id="confirmNewPassword-error" class="text-sm text-status-rejected">{{ errors.confirmNewPassword }}</p>
       </div>
       <Button type="submit" :disabled="isSubmitting">{{ t('auth.account.submit') }}</Button>
     </form>
