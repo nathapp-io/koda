@@ -30,6 +30,8 @@ export interface JourneyAccount {
 }
 
 export interface AuthFixture {
+  /** When the e2e seed wrote the fixtures (epoch ms). */
+  seededAt: number;
   accounts: Record<'valid' | 'replayable' | 'expired' | 'weak', JourneyAccount>
   /** The User-Agent the seeded refresh token is bound to. */
   userAgent: string

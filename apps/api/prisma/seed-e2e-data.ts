@@ -56,6 +56,8 @@ const JOURNEY_USER_AGENT = 'KodaE2E-UA/1.0';
  *   lost-response recovery — the only path on which the API compares the User-Agent.
  */
 export interface E2eAuthFixture {
+  /** When the seed wrote the fixtures (epoch ms). */
+  seededAt: number;
   /** One account per reset token, so a journey that spends a token cannot spoil another's. */
   accounts: Record<'valid' | 'replayable' | 'expired' | 'weak', E2eJourneyAccount>;
   /** The User-Agent the seeded refresh token is bound to. */
@@ -186,12 +188,16 @@ async function seedAuthJourney(db: PrismaClient): Promise<E2eAuthFixture> {
     data: {
       id: tokenId,
       sessionId,
-      usedAt: new Date(now.getTime() - 2 * 60_000),
+      // Just past the API's 30 s reuse grace, so the recovery fires at once instead of after a
+      // wait — and as late as the rules allow, because the API only recovers a lost response for
+      // 20 minutes after the token's use. A seed that backdated further would shorten that window.
+      usedAt: new Date(now.getTime() - 60_000),
       usedUaHash: refreshClientOf(JOURNEY_USER_AGENT, undefined).uaHash,
     },
   });
 
   return {
+    seededAt: now.getTime(),
     accounts,
     userAgent: JOURNEY_USER_AGENT,
     refreshToken: signRefreshToken(sessionUser.id, sessionId, tokenId),

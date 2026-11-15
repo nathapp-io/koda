@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { waitForHydration } from './fixtures/page-helpers'
-import { readAuthFixture, useChineseLocale, webUrl } from './fixtures/password-journeys'
+import { readAuthFixture, tryLogin, useChineseLocale, webUrl } from './fixtures/password-journeys'
 
 /**
  * koda #466: the `/reset-password/[token]` journey.
@@ -27,8 +27,9 @@ test.describe('the reset-password journey', () => {
 
   test('a valid token sets the password and signs nobody in', async ({ page }) => {
     const fixture = readAuthFixture()
+    const account = fixture.accounts.valid
 
-    await submitReset(page, fixture.accounts.valid.resetToken, NEW_PASSWORD)
+    await submitReset(page, account.resetToken, NEW_PASSWORD)
 
     // The password is set and the user is sent to the sign-in page with the notice.
     await expect(page).toHaveURL(`${webUrl()}/login?reset=1`)
@@ -38,6 +39,10 @@ test.describe('the reset-password journey', () => {
     const cookies = await page.context().cookies()
     expect(cookies.find((cookie) => cookie.name === 'koda_token')).toBeUndefined()
     expect(cookies.find((cookie) => cookie.name === 'koda_refresh')).toBeUndefined()
+
+    // ...and the password really changed: the new one signs in, the old one does not.
+    expect((await tryLogin(account.email, NEW_PASSWORD)).ok).toBe(true)
+    expect((await tryLogin(account.email, account.password)).ok).toBe(false)
   })
 
   test('a token that was already used shows the invalid-link state', async ({ page }) => {
