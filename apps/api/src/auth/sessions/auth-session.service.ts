@@ -36,6 +36,8 @@ export const REFRESH_REUSE_GRACE_MS = 30_000;
 export const LOST_RESPONSE_WINDOW_MS = 20 * 60_000;
 
 export type { SessionRevokeReason };
+/** Re-exported like the revoke reason: `rotate` takes it, so callers may name it from here. */
+export type { RefreshClient };
 
 export type RotateOutcome =
   | { kind: 'rotated' }

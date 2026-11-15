@@ -314,6 +314,26 @@ describeIntegration('refresh rotation (PG)', () => {
     expect(entries[0]).toMatchObject({ summary: 'refresh token reuse; session revoked' });
   }, TIMEOUT);
 
+  it('AC-15 (US-005): the User-Agent mismatch is the one reuse entry, with the unchanged summary', async () => {
+    const { userId, pair } = await newUserWithSession();
+    // A first use that bound the token to UA-1, whose successor the client never received.
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));
+    await ageExchange(pair, lost);
+
+    await refresh(pair.refreshToken, 'UA-2').expect(401);
+
+    // Exactly one entry: a mismatch falls through to step 6, so no recovery entry is written beside it.
+    const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      key: 'session.refresh',
+      resourceType: 'user',
+      resourceId: userId,
+      projectId: null,
+      summary: 'refresh token reuse; session revoked',
+    });
+  }, TIMEOUT);
+
   it('AC-8: a token whose first use stored no User-Agent (a legacy row) is never recovered', async () => {
     const { userId, pair } = await newUserWithSession();
     const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1').expect(200));

@@ -681,7 +681,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('answers the new pair and records a session.refresh entry when the rotation recovered a lost response', async () => {
+    it('AC-9: answers the new pair and records the recovery with the presenting IP', async () => {
       mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 0, passwordHash: 'h' });
       mockAuthSessions.rotate.mockResolvedValue({ kind: 'recovered', ip: '198.51.100.9' });
       const principal = {
