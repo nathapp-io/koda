@@ -36,6 +36,13 @@ const cacheKey = (req: Pick<MintRequest, 'jobId' | 'leaseEpoch' | 'repo' | 'purp
 };
 
 /**
+ * How many times the GitLab FIX gate may run. The gate's answer is bound to the credential it checked,
+ * so a rotation between the check and the issuance runs the gate again against the new credential; a
+ * credential that keeps moving is refused instead of being granted unchecked.
+ */
+const GITLAB_FIX_GATE_ATTEMPTS = 3;
+
+/**
  * One cached credential: the token a runner may hold and the repo it was minted for. US-003: the
  * repo id is what lets a rotated credential drop the tokens cached under it.
  */
@@ -163,12 +170,12 @@ export class GitTokenBroker {
     const write = purpose !== 'read' && !readOnly;
     if (purpose === 'fix' && repo.fixAllowUnprotected !== true) {
       // GitLab reports whether this token's own user can push, incorporating inherited and wildcard rules.
-      await this.gitlab.call(repo, 'write', (access) => this.gitlabChecker.getBranchPushState(access, repo.defaultBranch).then((state) => {
-        if (!state.protected || state.canPush) throw new RepoCheckException('default_branch_unprotected');
-      }));
+      // The grant is bound to the credential the check ran with, so a rotation between the check and the
+      // issuance repeats the check instead of handing out a credential that was never checked.
+      return this.gitlabFixGrant(req, now);
     }
-    // Stored repo credentials are purpose-specific. `call` above checks protection; resolve separately
-    // only after that gate to issue the token to the runner.
+    // Stored repo credentials are purpose-specific. The FIX gate above issues its own grant; every other
+    // mint resolves the credential its purpose names.
     const { token } = await this.gitlab.resolve(repo, write ? 'write' : 'read');
     return {
       jobId: req.jobId,
@@ -177,5 +184,37 @@ export class GitTokenBroker {
       expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString(),
       ...(readOnly ? { repoId: repo.id } : {}),
     };
+  }
+
+  /**
+   * The write token a GitLab FIX mint issues, after the default-branch gate.
+   *
+   * The gate asks GitLab whether the credential's own user can push to the default branch, so the token
+   * handed to the runner must be the one that was checked. A rotation between the check and the issuance
+   * moves the stored credential: the check is then repeated against the new one, and a credential that
+   * keeps moving is refused rather than granted unchecked.
+   */
+  private async gitlabFixGrant(req: MintRequest, now: Date): Promise<GitToken> {
+    const { repo } = req;
+    for (let attempt = 0; attempt < GITLAB_FIX_GATE_ATTEMPTS; attempt += 1) {
+      const checked = await this.gitlab.call(repo, 'write', async (access) => {
+        const state = await this.gitlabChecker.getBranchPushState(access, repo.defaultBranch);
+        if (!state.protected || state.canPush) throw new RepoCheckException('default_branch_unprotected');
+        return access.token;
+      });
+      // The stored credential is read again: it is the one that would be issued, so a rotation that
+      // happened during the check is visible here.
+      const current = await this.gitlab.resolve(repo, 'write');
+      if (current.token === checked) {
+        return {
+          jobId: req.jobId,
+          token: current.token,
+          username: 'oauth2',
+          expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString(),
+        };
+      }
+      // The credential moved under the check: run the gate again against the new one.
+    }
+    throw new RepoCheckException('provider_error');
   }
 }
