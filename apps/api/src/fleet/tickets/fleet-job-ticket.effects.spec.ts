@@ -290,6 +290,16 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
     }]]);
   });
 
+  it('AC-13: links a merge request of a GitLab repo on a host with a path prefix', async () => {
+    repo.findJobForPrLinks.mockResolvedValue({
+      id: 'j1', projectId: 'p', requestedById: 'u1',
+      resultPrUrl: 'https://gitlab.example.com/gl/g/sub/app/-/merge_requests/7',
+      repo: { provider: 'gitlab' as const, owner: 'g/sub', name: 'app', host: 'https://gitlab.example.com/gl' },
+    });
+    await effects.upsertPrLinks('j1');
+    expect(repo.upsertFleetPrLink).toHaveBeenCalledWith(expect.objectContaining({ ticketId: 't1', prNumber: 7 }));
+  });
+
   it('records ticket.link.add for a created link, with the job project and the ticket ref', async () => {
     await effects.upsertPrLinks('j1');
     expect(auditRecord.mock.calls).toEqual([

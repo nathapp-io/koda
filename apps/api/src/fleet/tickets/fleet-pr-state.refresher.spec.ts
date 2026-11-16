@@ -7,7 +7,9 @@ import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 const gh = { id: 'r1', projectId: 'p', provider: 'github' as const, owner: 'acme', name: 'app', githubInstallationId: BigInt(77) };
-const gl = { id: 'r2', projectId: 'p', provider: 'gitlab' as const, owner: 'grp', name: 'lib', githubInstallationId: null };
+const gl = { id: 'r2', projectId: 'p', provider: 'gitlab' as const, owner: 'grp', name: 'lib', githubInstallationId: null, host: 'https://gitlab.example.com' };
+/** The access the credential store answers a GitLab call with. */
+const access = { token: 'glpat', target: { apiBase: 'https://gitlab.example.com/api/v4', projectId: 42 } };
 const link = (id: string, prNumber: number, repo: typeof gh | typeof gl = gh, prState = 'open') => ({
   id, ticketId: `t-${id}`, url: `u${prNumber}`, prNumber, prState, externalRef: `${repo.owner}/${repo.name}#${prNumber}`, source: 'fleet',
   ticket: { id: `t-${id}`, status: 'IN_PROGRESS', projectId: 'p', number: 1, externalVcsId: null }, repo,
@@ -20,7 +22,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
   let repo: { findRefreshableFleetLinks: Mock };
   let github: { mintInstallationToken: Mock; getPullRequest: Mock };
   let gitlab: { getMergeRequest: Mock };
-  let gitlabTokens: { resolve: Mock };
+  let credentials: { call: Mock };
   let vcsRepo: { updateTicketLinkWithPrState: Mock };
   let prSync: { applyMergedPr: Mock };
   let events: { emit: Mock };
@@ -30,12 +32,12 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     repo = { findRefreshableFleetLinks: vi.fn().mockResolvedValue([]) };
     github = { mintInstallationToken: vi.fn().mockResolvedValue({ token: 'ghs', expiresAt: new Date() }), getPullRequest: vi.fn().mockResolvedValue(pr()) };
     gitlab = { getMergeRequest: vi.fn().mockResolvedValue(pr()) };
-    gitlabTokens = { resolve: vi.fn().mockResolvedValue('glpat') };
+    credentials = { call: vi.fn(async (_repo: unknown, _kind: unknown, fn: (a: unknown) => Promise<unknown>) => fn(access)) };
     vcsRepo = { updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }) };
     prSync = { applyMergedPr: vi.fn().mockResolvedValue('updated') };
     events = { emit: vi.fn() };
     refresher = new FleetPrStateRefresher(
-      repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
+      repo as never, github as never, gitlab as never, credentials as never, vcsRepo as never, prSync as never,
       testFleetConfig(), events as never, mockAuditRecorder,
     );
   });
@@ -48,11 +50,15 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     expect(github.getPullRequest.mock.calls).toEqual([['ghs', 'acme', 'app', 1], ['ghs', 'acme', 'app', 2]]);
   });
 
-  it('reads GitLab MRs with the project token', async () => {
+  it('AC-12: reads a GitLab MR with the repo credential and applies the state it read', async () => {
     repo.findRefreshableFleetLinks.mockResolvedValue([link('a', 4, gl)]);
+    gitlab.getMergeRequest.mockResolvedValue(pr({ draft: true }));
+
     await refresher.refresh();
-    expect(gitlabTokens.resolve).toHaveBeenCalledWith('p', 'grp', 'lib');
-    expect(gitlab.getMergeRequest).toHaveBeenCalledWith('glpat', 'grp', 'lib', 4);
+
+    expect(credentials.call).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2', host: 'https://gitlab.example.com' }), 'read', expect.any(Function));
+    expect(gitlab.getMergeRequest).toHaveBeenCalledWith(access, 4);
+    expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('a', 'draft');
   });
 
   it('writes a changed state, skips an unchanged one, and closes a 404', async () => {
@@ -183,7 +189,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
       return { result: 'updated', previousState: null };
     });
     const on = new FleetPrStateRefresher(
-      repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
+      repo as never, github as never, gitlab as never, credentials as never, vcsRepo as never, prSync as never,
       testFleetConfig({ sweepEnabled: true }), events as never, mockAuditRecorder,
     );
 

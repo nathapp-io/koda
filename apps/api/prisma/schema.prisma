@@ -850,6 +850,10 @@ model FleetRepo {
   owner                String // canonical, as returned by the provider
   name                 String // canonical, as returned by the provider
   defaultBranch        String
+  /// The forge host the repo lives on. GitHub rows keep `https://github.com`; a GitLab row names its
+  /// own host (`https://gitlab.com` or a self-hosted one), because the same owner and name can
+  /// exist on two GitLab hosts, so the host is part of the repo's identity.
+  host                 String   @default("https://github.com")
   githubInstallationId BigInt?
   createdById          String
   createdAt            DateTime @default(now())
@@ -876,10 +880,36 @@ model FleetRepo {
   providerCredentials ProviderCredential[]
   fleetFlows          FleetFlow[]
   ruleOverride       FleetRepoRuleOverride?
+  gitlabCredential   FleetRepoGitlabCredential?
 
-  @@unique([provider, owner, name])
+  @@unique([provider, host, owner, name])
   @@index([projectId])
   @@index([autoReview])
+}
+
+/// GitLab parity F1: the connection of one GitLab fleet repo — its numeric project id and its two
+/// stored tokens (a read token and a write token, each with the identity its verification found).
+/// The tokens are encrypted under `VCS_ENCRYPTION_KEY`; nothing else in koda reads this table.
+/// `*InvalidAt` is sticky: it is set when a call with that token is refused and cleared only when
+/// an admin replaces the token.
+model FleetRepoGitlabCredential {
+  id                  String    @id @default(cuid())
+  repoId              String    @unique
+  repo                FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  gitlabProjectId     Int
+  encryptedReadToken  String
+  encryptedWriteToken String
+  readTokenUserId     Int
+  readTokenUsername   String
+  writeTokenUserId    Int
+  writeTokenUsername  String
+  writeTokenIsBot     Boolean
+  readTokenExpiresAt  DateTime?
+  writeTokenExpiresAt DateTime?
+  readTokenInvalidAt  DateTime?
+  writeTokenInvalidAt DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 }
 
 /// #370: a repo's own rule files and project context, in place of the ones in its checkout. One row

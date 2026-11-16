@@ -528,7 +528,7 @@ describe('ApprovalGate', () => {
     /** The `agent.create` command this case redeems; a fresh registry per case takes one per pair. */
     const redeeming = (patch: Partial<TestRedeemState> = {}) => {
       const helper = configurableTestCommand('agent.create', { variant });
-      helper.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false, ...patch };
+      helper.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false, onlyWhenRedacted: false, ...patch };
       registry.register(helper.command);
 
       return helper;
@@ -576,7 +576,7 @@ describe('ApprovalGate', () => {
     });
 
     it('AC-4: redeem declared without a redact stores the whole input and still marks the request', async () => {
-      redeeming({ withoutRedact: true });
+      redeeming({ withoutRedact: true, onlyWhenRedacted: false });
       resolve.mockResolvedValue(agentMode);
 
       await gateAgentCreate({ name: 'a', secret: 's' });
@@ -641,6 +641,37 @@ describe('ApprovalGate', () => {
       expect(requests.findPendingDuplicate).not.toHaveBeenCalled();
       expect(requests.create).not.toHaveBeenCalled();
       expect(command.state.calls).toEqual([]);
+    });
+
+    /**
+     * US-004: a command whose body only sometimes carries a secret (the fleet repo create: a GitHub
+     * body names a repo, a GitLab body adds two tokens) redeems only when the redaction removed
+     * something. A body without a secret keeps the ordinary flow, so its request runs when it is
+     * approved.
+     */
+    it('US-004: a command that redeems only when redacted keeps the ordinary flow for a body without a secret', async () => {
+      redeeming({ onlyWhenRedacted: true, drop: ['secret'] });
+      resolve.mockResolvedValue(agentMode);
+
+      await gateAgentCreate({ name: 'a' });
+
+      const created = requests.create.mock.calls[0]?.[0];
+      expect(created?.input).toEqual({ name: 'a' });
+      expect(created?.inputHash).toBe(approvalInputHash({ name: 'a' }));
+      expect('redeem' in (created ?? {})).toBe(false);
+    });
+
+    it('US-004: the same command redeems a body that carried a secret', async () => {
+      redeeming({ onlyWhenRedacted: true, drop: ['secret'] });
+      resolve.mockResolvedValue(agentMode);
+
+      await gateAgentCreate({ name: 'a', secret: 's' });
+
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        input: { name: 'a' },
+        inputHash: approvalInputHash({ name: 'a' }),
+        redeem: true,
+      }));
     });
   });
 });

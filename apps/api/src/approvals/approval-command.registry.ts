@@ -33,6 +33,16 @@ const VARIANT_MAX_LENGTH = 100;
 export interface ApprovalRedeem<TInput> {
   /** The stored, hashed form of the parsed input; absent stores it whole. Never throws for parse's output. */
   redact?(input: TInput): unknown;
+  /**
+   * US-004: the request redeems only when the redaction actually removed something.
+   *
+   * The redeem mode is command-wide by default, because a command that redeems carries a secret in
+   * every body it accepts. A command whose body only sometimes carries one — the fleet repo create:
+   * a GitHub body names a repo, a GitLab body adds two tokens — declares this instead: the request
+   * redeems exactly when the redaction changed the input, so the body without a secret still runs
+   * when it is approved, as it always did.
+   */
+  onlyWhenRedacted?: boolean;
 }
 
 export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision = unknown> {

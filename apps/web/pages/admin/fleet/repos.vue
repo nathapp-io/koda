@@ -13,6 +13,10 @@ const { repos, hasMore, pending, checks, projects, load, loadProjects, check, ch
 const adminOnly = ref(false)
 const addOpen = ref(false)
 
+// US-008: the rotation dialog follows the repo's own gate — the API refuses the route without it.
+const { permissions } = useGlobalPermissions()
+const gitlabAllowed = computed(() => permissions.value.has('fleet.repo.credentials.update'))
+
 // ApiError.code is the envelope `ret`: a 403 arrives as ret 40003 (see pages/admin/users.vue).
 function isForbidden(err: unknown): boolean {
   return err instanceof ApiError && (err.code === 40003 || err.code === 403)
@@ -108,6 +112,7 @@ onMounted(() => reload())
             <TableHead>{{ t('fleet.repos.table.repo') }}</TableHead>
             <TableHead>{{ t('fleet.repos.table.project') }}</TableHead>
             <TableHead>{{ t('fleet.repos.table.provider') }}</TableHead>
+            <TableHead>{{ t('fleet.repos.table.gitlab') }}</TableHead>
             <TableHead>{{ t('fleet.repos.table.branch') }}</TableHead>
             <TableHead>{{ t('fleet.repos.table.reachability') }}</TableHead>
             <TableHead>{{ t('fleet.repos.autoReview.heading') }}</TableHead>
@@ -119,6 +124,25 @@ onMounted(() => reload())
             <TableCell class="font-medium">{{ repoName(repo) }}</TableCell>
             <TableCell>{{ projectLabel.get(repo.projectId) ?? repo.projectId }}</TableCell>
             <TableCell>{{ t(`fleet.repos.provider.${repo.provider}`) }}</TableCell>
+            <TableCell>
+              <!-- Only GitLab rows carry a connection; a GitHub row leaves the cell empty and an
+                   unconnected GitLab repo shows that, never a fabricated username or status. -->
+              <div v-if="repo.provider === 'gitlab'" class="space-y-1 text-xs">
+                <p>{{ repo.host }}</p>
+                <div v-if="repo.gitlab" class="flex flex-wrap items-center gap-1">
+                  <Badge :variant="repo.gitlab.readToken.status === 'ok' ? 'secondary' : 'destructive'">
+                    {{ t('fleet.repos.gitlab.readToken') }}: {{ t(`fleet.repos.gitlab.status.${repo.gitlab.readToken.status}`) }}
+                  </Badge>
+                  <Badge :variant="repo.gitlab.writeToken.status === 'ok' ? 'secondary' : 'destructive'">
+                    {{ t('fleet.repos.gitlab.writeToken') }}: {{ t(`fleet.repos.gitlab.status.${repo.gitlab.writeToken.status}`) }}
+                  </Badge>
+                  <Badge v-if="!repo.gitlab.writeToken.isBot" variant="outline" data-testid="fleet-repo-human-badge">
+                    {{ t('fleet.repos.gitlab.humanBadge') }}
+                  </Badge>
+                </div>
+                <p v-else class="text-muted-foreground">{{ t('fleet.repos.gitlab.none') }}</p>
+              </div>
+            </TableCell>
             <TableCell>{{ repo.defaultBranch }}</TableCell>
             <TableCell><FleetRepoReachabilityBadge :state="checks[repo.id]" /></TableCell>
             <TableCell>
@@ -127,6 +151,7 @@ onMounted(() => reload())
               <FleetRepoFixUnprotected v-if="repo.provider === 'github' && repo.githubInstallationId" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
             </TableCell>
             <TableCell class="space-x-1 whitespace-nowrap text-right">
+              <FleetRepoGitlabCredentialsDialog v-if="repo.provider === 'gitlab' && gitlabAllowed" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }"/>
               <FleetRepoRuleOverrideDialog :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
               <NuxtLink v-if="dispatchHref(repo)" :to="dispatchHref(repo)!" class="inline-flex h-8 items-center rounded-md border border-input px-3 text-xs hover:bg-muted" :data-testid="`fleet-repo-dispatch-${repo.owner}-${repo.name}`">
                 {{ t('fleet.repos.actions.dispatch') }}

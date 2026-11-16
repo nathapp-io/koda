@@ -314,6 +314,7 @@ describe('fleet OpenAPI contract', () => {
       ['/api/fleet/repos/{id}/auto-review', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}/fix-checks', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}/fix-unprotected', 'patch', 'fleet.repo.fix.unprotected'],
+      ['/api/fleet/repos/{id}/gitlab-credentials', 'patch', 'fleet.repo.credentials.update'],
       ['/api/fleet/repos/{id}/rule-override', 'get', 'fleet.repo.rules.configure'],
       ['/api/fleet/repos/{id}/rule-override', 'put', 'fleet.repo.rules.configure'],
       ['/api/fleet/repos/{id}/rule-override', 'delete', 'fleet.repo.rules.configure'],

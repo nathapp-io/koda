@@ -157,12 +157,12 @@ describe('configurableTestCommand', () => {
     const { command, state } = configurableTestCommand('agent.create');
 
     expect(command.redeem).toBeUndefined();
-    state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false };
+    state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false, onlyWhenRedacted: false };
     expect(command.redeem?.redact?.({ name: 'a', secret: 's' })).toEqual({ name: 'a' });
     expect(state.redeem.calls).toEqual([{ name: 'a', secret: 's' }]);
-    state.redeem = { calls: [], drop: [], answer: { value: null }, withoutRedact: false };
+    state.redeem = { calls: [], drop: [], answer: { value: null }, withoutRedact: false, onlyWhenRedacted: false };
     expect(command.redeem?.redact?.({ name: 'a' })).toBeNull();
-    state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: true };
+    state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: true, onlyWhenRedacted: false };
     expect(command.redeem).toEqual({});
   });
 
@@ -179,7 +179,7 @@ describe('configurableTestCommand', () => {
       parseDecision: { calls: [], result: 'ok', throws: false },
       onReject: { calls: [], throws: null },
       afterCommit: { calls: [], throws: null },
-      redeem: { calls: [], drop: ['secret'], answer: null, withoutRedact: false },
+      redeem: { calls: [], drop: ['secret'], answer: null, withoutRedact: false, onlyWhenRedacted: false },
     });
 
     reset();

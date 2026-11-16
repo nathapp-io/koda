@@ -94,7 +94,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findRepo(repoId: string): Promise<FleetRepoRef | null> {
     const r = await this.db.fleetRepo.findUnique({
       where: { id: repoId },
-      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, fixTrustDetectedChecks: true, fixAllowUnprotected: true },
+      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, host: true, fixTrustDetectedChecks: true, fixAllowUnprotected: true },
     });
     return r ? { ...r, provider: r.provider as FleetRepoRef['provider'] } : null;
   }
@@ -145,7 +145,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       where: { projectId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: PROJECT_CODE_LIMITS.maxRepos + PROJECT_CODE_LIMITS.maxUnavailable,
-      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true },
+      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, host: true },
     });
     return rows.map((r) => ({ ...r, provider: r.provider as FleetRepoRef['provider'] }));
   }

@@ -10,6 +10,7 @@ import type {
   AutoReviewPatch,
   FleetRepoRecord,
   FleetRepoRuleOverrideRecord,
+  GitLabCredentialView,
   IFleetRepoRepository,
   RuleOverrideActor,
   RuleOverrideSummary,
@@ -23,6 +24,21 @@ const RULE_OVERRIDE_SUMMARY_SELECT = {
   sha256: true, ruleFiles: true, rulesMode: true, contextMode: true, updatedAt: true,
 } as const;
 
+/**
+ * The GitLab credential columns a repo row carries: the connection's health, never its secrets.
+ * The encrypted tokens stay in the table, where only the credential store reads them.
+ */
+const GITLAB_CREDENTIAL_SELECT = {
+  gitlabProjectId: true,
+  readTokenUsername: true,
+  writeTokenUsername: true,
+  writeTokenIsBot: true,
+  readTokenExpiresAt: true,
+  writeTokenExpiresAt: true,
+  readTokenInvalidAt: true,
+  writeTokenInvalidAt: true,
+} as const;
+
 /** The rule-override summary columns as a repo row carries them. */
 interface RuleOverrideSummaryRow {
   sha256: string;
@@ -33,7 +49,10 @@ interface RuleOverrideSummaryRow {
 }
 
 /** A repo row with the rule-override summary relation, when the query asked for it. */
-type FleetRepoRow = Prisma.FleetRepoGetPayload<object> & { ruleOverride?: RuleOverrideSummaryRow | null };
+type FleetRepoRow = Prisma.FleetRepoGetPayload<object> & {
+  ruleOverride?: RuleOverrideSummaryRow | null;
+  gitlabCredential?: GitLabCredentialView | null;
+};
 
 /** The summary a stored override row answers, or null when the repo has none. */
 function toSummary(row: RuleOverrideSummaryRow | null | undefined): RuleOverrideSummary | null {
@@ -99,10 +118,11 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
   private toDomain(row: FleetRepoRow): FleetRepoRecord {
     return { ...row, autoReviewMaxCostUsd: row.autoReviewMaxCostUsd.toFixed(4),
       autoReviewEnabledByType: row.autoReviewEnabledByType === 'USER' || row.autoReviewEnabledByType === 'AGENT' ? row.autoReviewEnabledByType : null,
-      ruleOverride: toSummary(row.ruleOverride) };
+      ruleOverride: toSummary(row.ruleOverride),
+      gitlabCredential: row.gitlabCredential ?? null };
   }
 
-  async create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected' | 'ruleOverride'>): Promise<FleetRepoRecord> {
+  async create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected' | 'ruleOverride' | 'gitlabCredential'>): Promise<FleetRepoRecord> {
     try {
       return this.toDomain(await this.db.fleetRepo.create({ data }));
     } catch (error) {
@@ -128,7 +148,7 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
   }
 
   async findById(id: string): Promise<FleetRepoRecord | null> {
-    const row = await this.db.fleetRepo.findUnique({ where: { id }, include: { ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT } } });
+    const row = await this.db.fleetRepo.findUnique({ where: { id }, include: { ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT }, gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT } } });
     return row ? this.toDomain(row) : null;
   }
 
@@ -164,7 +184,7 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
 
   async findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>> {
     const where: Prisma.FleetRepoWhereInput = filters.projectId ? { projectId: filters.projectId } : {};
-    const rows = await Paginate(this.db.fleetRepo, page, { where, orderBy: [{ owner: 'asc' }, { name: 'asc' }, { id: 'asc' }], include: { ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT } } });
+    const rows = await Paginate(this.db.fleetRepo, page, { where, orderBy: [{ owner: 'asc' }, { name: 'asc' }, { id: 'asc' }], include: { ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT }, gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT } } });
     return rows.remap((m) => this.toDomain(m));
   }
 

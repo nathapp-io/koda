@@ -287,7 +287,8 @@ describe('ApprovalExecutionService', () => {
     });
     const repo = {
       findProject: vi.fn(async () => ({ id: 'p1' })),
-      findById: vi.fn(async () => ({ id: 'repo', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: 1n })),
+      // US-004: the create answers the stored row, so the re-read carries the whole record.
+      findById: vi.fn(async () => ({ id: 'repo', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: 1n, createdAt: now })),
       create: vi.fn(async (data) => {
         expect(active).toBe(true);
         return { ...data, id: 'repo', createdAt: now };
@@ -300,8 +301,9 @@ describe('ApprovalExecutionService', () => {
       expect(active).toBe(false);
       return { owner: 'acme', name: 'app', defaultBranch: 'main', installationId: 1n };
     }) };
-    const service = new FleetReposService(repo as never, github as never, {} as never, {} as never,
-      { record: vi.fn() } as never, s.tx as never, { record: vi.fn() } as never, { canHoldKey: vi.fn().mockResolvedValue(true) } as never);
+    const service = new FleetReposService(repo as never, github as never, {} as never, {} as never, {} as never,
+      { gitlabBotName: 'koda-fleet' } as never, { record: vi.fn() } as never, s.tx as never, { record: vi.fn() } as never,
+      { canHoldKey: vi.fn().mockResolvedValue(true) } as never);
     new FleetRepoRouteCommands(s.registry, service, { forContext: async () => ({ id: 'a1' }) } as never).onModuleInit();
     expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
     expect(repo.create).toHaveBeenCalledTimes(operation === 'create' ? 1 : 0);
@@ -842,7 +844,7 @@ describe('ApprovalExecutionService', () => {
         permissionKey: 'agent.create', variant: 'rest:test.redeem', projectId: null, origin: 'rest',
         actor: requester, redeem: true, input: redeemInput, inputHash: approvalInputHash(redeemInput), ...patch,
       }, { key: 'agent.create', variant: 'rest:test.redeem' });
-      s.test.state.redeem = { calls: [], drop: [], answer: null, withoutRedact: true };
+      s.test.state.redeem = { calls: [], drop: [], answer: null, withoutRedact: true, onlyWhenRedacted: false };
       return s;
     }
 
@@ -914,7 +916,7 @@ describe('ApprovalExecutionService', () => {
 
     it('AC-9: refuses a body whose redacted form is not the stored input', async () => {
       const s = redeemFixture();
-      s.test.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false };
+      s.test.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false, onlyWhenRedacted: false };
       const execute = vi.spyOn(s.test.command, 'execute');
 
       const error = await refusal(() =>
@@ -927,7 +929,7 @@ describe('ApprovalExecutionService', () => {
 
     it('AC-10: executes the re-sent body and answers the raw result', async () => {
       const s = redeemFixture();
-      s.test.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false };
+      s.test.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false, onlyWhenRedacted: false };
       s.test.state.toResult = (result) => ({ stored: result });
       const sent = { name: 'a', secret: 's' };
 

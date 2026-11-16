@@ -2,20 +2,38 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping, runInAuditScope } from '../../action-context/audit-coverage';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
-import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
 import { isTerminal } from '../jobs/job-state';
 import { FLEET_JOB_REPOSITORY, FleetRepoRef, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 
 const GITHUB_PR = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/;
 const GITLAB_MR = /^\/(.+)\/([^/]+)\/-\/merge_requests\/(\d+)\/?$/;
 
-/** The PR/MR number, only when the URL path names this job's own repo (plan D19). */
-export function prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'name'>, url: string): number | null {
+/** The path prefix of a GitLab host served below a path (`https://gitlab.example.com/gl` -> `/gl`), else ''. */
+function hostPathPrefix(host: string | undefined): string {
+  if (host === undefined) return '';
+  try {
+    return new URL(host).pathname.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The PR/MR number, only when the URL path names this job's own repo (plan D19). A GitLab repo on a
+ * host with a path prefix carries that prefix in every web url, so it is removed before the repo path
+ * is matched; GitHub urls never carry one.
+ */
+export function prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'name' | 'host'>, url: string): number | null {
   let path: string;
   try {
     path = new URL(url).pathname;
   } catch {
     return null;
+  }
+  if (repo.provider === 'gitlab') {
+    const prefix = hostPathPrefix(repo.host);
+    if (prefix !== '' && path.startsWith(`${prefix}/`)) path = path.slice(prefix.length);
   }
   const match = (repo.provider === 'github' ? GITHUB_PR : GITLAB_MR).exec(path);
   if (!match) return null;
@@ -35,7 +53,7 @@ export class PrAttributionService {
     @Inject(FLEET_JOB_REPOSITORY) private readonly repo: IFleetJobRepository,
     private readonly github: GitHubAppClient,
     private readonly gitlab: GitLabAccessChecker,
-    private readonly gitlabTokens: GitLabTokenSource,
+    private readonly credentials: GitLabRepoCredentials,
   ) {}
 
   async attribute(jobId: string, now = new Date()): Promise<'posted' | 'skipped' | 'failed'> {
@@ -60,7 +78,8 @@ export class PrAttributionService {
         const body = `Dispatched by ${who} via koda job ${job.id}`;
         const posted = repo.provider === 'github'
           ? repo.githubInstallationId !== null && (await this.github.commentOnPullRequest(repo.githubInstallationId, repo.owner, repo.name, number, body, attributionCtx))
-          : await this.gitlab.commentOnMergeRequest(repo.owner, repo.name, number, body, await this.gitlabTokens.resolve(repo.projectId, repo.owner, repo.name));
+          // US-002: the comment is posted with the repo's own write credential, on the repo's own host.
+          : await this.credentials.call(repo, 'write', (access) => this.gitlab.commentOnMergeRequest(access, number, body));
         if (!posted) this.logger.warn(`Job ${job.id}: attribution comment was not accepted`);
         return posted ? 'posted' : 'failed';
       } catch (error) {

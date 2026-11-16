@@ -54,7 +54,7 @@ interface MountedRepos {
  * which is how the real composable tells them apart.
  */
 function mountRepos(
-  over: { repos?: FleetRepo[]; check?: (id: string) => Promise<FleetRepoCheck>; failRepos?: unknown; confirm?: boolean } = {},
+  over: { repos?: FleetRepo[]; check?: (id: string) => Promise<FleetRepoCheck>; failRepos?: unknown; confirm?: boolean; allowed?: boolean } = {},
 ): MountedRepos {
   const check = over.check ?? (async (id: string) => checkOk(id))
   const api: Api = {
@@ -79,6 +79,14 @@ function mountRepos(
           return () => h('button', { 'data-testid': `fleet-repo-rules-${(props.repo as FleetRepo).owner}-${(props.repo as FleetRepo).name}`, onClick: () => emit('saved', repo('gitlab', { provider: 'gitlab', githubInstallationId: null, ruleOverride: { sha256: 'a'.repeat(64), ruleFiles: 3, rulesMode: 'merge', contextMode: null, updatedAt: '' } })) }, `Configure rule override (${(props.repo as FleetRepo).ruleOverride?.ruleFiles ?? 0})`)
         },
       }),
+      // US-008: the rotation dialog is a child the page mounts; this stub proves the page mounted it
+      // (its own behaviour is covered by tests/components/repo-gitlab-credentials-dialog.spec.ts).
+      FleetRepoGitlabCredentialsDialog: defineComponent({
+        props: { repo: { type: Object, required: true } },
+        setup(props) {
+          return () => h('button', { 'data-testid': `fleet-repo-rotate-${(props.repo as FleetRepo).owner}-${(props.repo as FleetRepo).name}` }, 'Rotate tokens')
+        },
+      }),
     },
     // The reachability badge is mounted for real: its label is the page's main output.
     fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview', 'FleetRepoFixChecks', 'FleetRepoFixUnprotected'],
@@ -94,7 +102,7 @@ function mountRepos(
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useFleetRepos: () => useFleetRepos(),
-      useGlobalPermissions: () => ({ permissions: computed(() => ({ has: () => true })) }),
+      useGlobalPermissions: () => ({ permissions: computed(() => ({ has: () => over.allowed ?? true })) }),
     },
   })
 
@@ -317,6 +325,16 @@ describe('Fleet repo reachability badge (behaviour)', () => {
     app.unmount()
   })
 
+  test('US-008 AC-11: the gitlab_host_blocked reason renders its fleet.repoReason text', () => {
+    const app = mountBadge({
+      status: 'done',
+      result: { ...checkOk('alpha', false), reason: 'gitlab_host_blocked' },
+    })
+    expect(app.text()).toContain('Unreachable')
+    expect(app.text()).toContain('The GitLab host resolves to an address inside this deployment')
+    app.unmount()
+  })
+
   test('an unknown reason code is shown raw rather than blank', () => {
     const app = mountBadge({
       status: 'done',
@@ -402,6 +420,69 @@ describe('Fleet AddRepoDialog (behaviour)', () => {
 
     expect(app.emitted('update:open')).toEqual([[false]])
     app.unmount()
+  })
+})
+
+describe('Fleet admin Repos GitLab connection (US-008)', () => {
+  const gitlab = (id: string, over: Partial<FleetRepo> = {}): FleetRepo =>
+    repo(id, { provider: 'gitlab', githubInstallationId: null, host: 'https://gitlab.example.com', ...over })
+
+  test('AC-5: a GitLab row shows its host and the human-account badge when the write token is human', async () => {
+    const human = gitlab('human', { gitlab: { projectId: 42, readToken: { username: 'jane', expiresAt: null, status: 'ok' }, writeToken: { username: 'jane', expiresAt: null, status: 'ok', isBot: false }, warnings: ['write_token_human'] } })
+    const { app, rowOf, settle, unmount } = mountRepos({ repos: [human] })
+    await settle()
+
+    expect(app.textOf(rowOf('human'))).toContain('https://gitlab.example.com')
+    expect(app.textOf(rowOf('human'))).toContain('Human account')
+    unmount()
+  })
+
+  test('AC-5: a bot write token shows no human-account badge', async () => {
+    const bot = gitlab('bot', { gitlab: { projectId: 42, readToken: { username: 'koda-bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'koda-bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] } })
+    const { app, rowOf, settle, unmount } = mountRepos({ repos: [bot] })
+    await settle()
+
+    expect(app.textOf(rowOf('bot'))).toContain('https://gitlab.example.com')
+    expect(app.textOf(rowOf('bot'))).not.toContain('Human account')
+    unmount()
+  })
+
+  test('AC-6: each token renders its own status, invalid and expiring included', async () => {
+    const mixed = gitlab('mixed', { gitlab: { projectId: 42, readToken: { username: 'jane', expiresAt: null, status: 'invalid' }, writeToken: { username: 'jane', expiresAt: '2026-12-01T00:00:00Z', status: 'expiring', isBot: true }, warnings: [] } })
+    const { app, rowOf, settle, unmount } = mountRepos({ repos: [mixed] })
+    await settle()
+
+    const row = app.textOf(rowOf('mixed'))
+    expect(row).toContain('Invalid')
+    expect(row).toContain('Expiring')
+    expect(row).not.toContain('Human account')
+    unmount()
+  })
+
+  test('a GitLab repo without a stored connection shows no token statuses or usernames', async () => {
+    const unconnected = gitlab('unconnected', { gitlab: null })
+    const { app, rowOf, settle, unmount } = mountRepos({ repos: [unconnected] })
+    await settle()
+
+    const row = app.textOf(rowOf('unconnected'))
+    expect(row).toContain('No tokens stored')
+    expect(row).not.toContain('Invalid')
+    expect(row).not.toContain('Expiring')
+    unmount()
+  })
+
+  test('AC-8: the rotation dialog is offered on GitLab rows only, and only with the permission', async () => {
+    const { app, settle, unmount } = mountRepos({ repos: [gitlab('glrepo'), repo('ghrepo')] })
+    await settle()
+
+    expect(app.find('[data-testid="fleet-repo-rotate-acme-glrepo"]')).toHaveLength(1)
+    expect(app.find('[data-testid="fleet-repo-rotate-acme-ghrepo"]')).toHaveLength(0)
+    unmount()
+
+    const denied = mountRepos({ repos: [gitlab('glrepo')], allowed: false })
+    await denied.settle()
+    expect(denied.app.find('[data-testid="fleet-repo-rotate-acme-glrepo"]')).toHaveLength(0)
+    denied.unmount()
   })
 })
 

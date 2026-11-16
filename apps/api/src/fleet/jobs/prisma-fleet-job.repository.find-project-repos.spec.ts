@@ -62,8 +62,16 @@ describe('PrismaFleetJobRepository.findProjectRepos (US-003 AC-5)', () => {
     await repo.findProjectRepos('p1');
 
     expect(fleetRepo.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true },
+      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, host: true },
     }));
+  });
+
+  it('US-003: carries the repo host, so a self-hosted clone url follows the row', async () => {
+    const { repo } = repoWith([row('gl', { provider: 'gitlab', host: 'https://gitlab.example.com' })]);
+
+    const [first] = await repo.findProjectRepos('p1');
+
+    expect(first).toMatchObject({ provider: 'gitlab', host: 'https://gitlab.example.com' });
   });
 
   it('keeps a GitLab repository and a null installation as they are stored', async () => {

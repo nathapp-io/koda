@@ -71,7 +71,13 @@ export function toPageResult<T>(page: IPageResult<T>): IPageResult<T> {
   return { total, current, size, hasNext, hasPrev, records };
 }
 
-/** Map a page's records without depending on the concrete Page class. */
+/**
+ * Map a page's records without depending on the concrete Page class.
+ *
+ * The mapper gets the record and nothing else: `Array.prototype.map` would also hand it the index
+ * and the array, and a mapper that takes a second argument (a clock, a view) would silently receive
+ * the index instead.
+ */
 export function remapPage<S, T>(page: IPageResult<S>, fn: (item: S) => T): IPageResult<T> {
-  return { ...toPageResult(page), records: page.records.map(fn) };
+  return { ...toPageResult(page), records: page.records.map((item) => fn(item)) };
 }

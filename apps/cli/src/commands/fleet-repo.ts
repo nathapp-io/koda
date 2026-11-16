@@ -1,9 +1,11 @@
 import { Command } from 'commander';
+import { readFile } from 'node:fs/promises';
 import {
   fleetReposControllerCheck,
   fleetReposControllerCreate,
   fleetReposControllerList,
   fleetReposControllerRemove,
+  fleetReposControllerRotateGitlabCredentials,
   projectFleetReposControllerList,
   type FleetRepoDto,
   type RepoCheckResultDto,
@@ -17,7 +19,33 @@ import { parsePositiveInt } from '../utils/parse-positive-int';
 import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetValidation, pageHint, splitRepoPath } from './fleet-shared';
 
 const PROVIDERS = ['github', 'gitlab'] as const;
+class TokenFileValidationError extends Error {}
 type Provider = (typeof PROVIDERS)[number];
+
+async function tokenFromFile(file: string): Promise<string> {
+  try {
+    const content = file === '-' ? await readStdin() : await readFile(file, 'utf8');
+    return content.replace(/\r?\n$/, '');
+  } catch (error) {
+    if (file !== '-' && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      handleFleetValidation(`Token file not found: ${file}`);
+      throw new TokenFileValidationError();
+    }
+    throw error;
+  }
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function printHumanTokenWarning(value: FleetRepoDto): void {
+  if (value.gitlab?.warnings.includes('write_token_human')) {
+    console.error(`Warning: GitLab write token belongs to human account ${value.gitlab.writeToken.username}.`);
+  }
+}
 
 function registerAdd(repo: Command): void {
   repo
@@ -25,23 +53,57 @@ function registerAdd(repo: Command): void {
     .description(`Register a repo for dispatch after koda proves it can broker git access (global admin). ${ADMIN_TOKEN_HINT}`)
     .requiredOption('--provider <provider>', 'github or gitlab')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .option('--host <url>', 'GitLab host URL')
+    .option('--read-token-file <path|->', 'Read token file, or - for stdin')
+    .option('--write-token-file <path|->', 'Write token file, or - for stdin')
+    .option('--confirm-bot', 'Confirm the write token belongs to the bot account')
     .option('--json', 'Output as JSON')
-    .action(async (ownerAndName: string, options: { provider: string; project?: string; json?: boolean }) => {
+    .action(async (ownerAndName: string, options: { provider: string; project?: string; host?: string; readTokenFile?: string; writeTokenFile?: string; confirmBot?: boolean; json?: boolean }) => {
       const parts = splitRepoPath(ownerAndName);
       if (!parts || !(PROVIDERS as readonly string[]).includes(options.provider)) {
         return handleFleetValidation(!parts ? `Expected owner/name, got "${ownerAndName}"` : `Unknown provider "${options.provider}": github or gitlab`);
       }
+      const hasGitlabOptions = options.host !== undefined || options.readTokenFile !== undefined || options.writeTokenFile !== undefined || options.confirmBot === true;
+      if (options.provider === 'github' && hasGitlabOptions) return handleFleetValidation('GitLab-only options cannot be used with --provider github');
       try {
         const ctx = await withContext({ projectSlug: options.project });
-        const created = unwrap<FleetRepoDto>(await fleetReposControllerCreate({
-          body: { projectSlug: ctx.projectSlug, provider: options.provider as Provider, owner: parts.owner, name: parts.name },
-        }));
+        let gitlabFields = {};
+        if (options.provider === 'gitlab') {
+          const readFile = options.readTokenFile;
+          const writeFile = options.writeTokenFile;
+          if (!readFile || !writeFile) return handleFleetValidation('GitLab registration requires --read-token-file and --write-token-file');
+          gitlabFields = { ...(options.host ? { host: options.host } : {}), readToken: await tokenFromFile(readFile), writeToken: await tokenFromFile(writeFile), ...(options.confirmBot ? { confirmBotAccount: true } : {}) };
+        }
+        const body = { projectSlug: ctx.projectSlug, provider: options.provider as Provider, owner: parts.owner, name: parts.name, ...gitlabFields };
+        const created = unwrap<FleetRepoDto>(await fleetReposControllerCreate({ body }));
+        printHumanTokenWarning(created);
         if (options.json) console.log(JSON.stringify(created, null, 2));
         else console.log(`Registered ${created.owner}/${created.name} (${created.id}), default branch ${created.defaultBranch}`);
         process.exit(0);
       } catch (err: unknown) {
+        if (err instanceof TokenFileValidationError) return;
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
       }
+    });
+}
+
+function registerCredentials(repo: Command): void {
+  repo.command('credentials <repoId>').description('Rotate GitLab repo credentials (global admin)')
+    .option('--read-token-file <path|->', 'Read token file, or - for stdin')
+    .option('--write-token-file <path|->', 'Write token file, or - for stdin')
+    .option('--confirm-bot', 'Confirm the write token belongs to the bot account')
+    .option('--json', 'Output as JSON')
+    .action(async (repoId: string, options: { readTokenFile?: string; writeTokenFile?: string; confirmBot?: boolean; json?: boolean }) => {
+      if (!options.readTokenFile && !options.writeTokenFile) return handleFleetValidation('Provide --read-token-file or --write-token-file');
+      try {
+        await withContext({}, { requireProject: false });
+        const body = { ...(options.readTokenFile ? { readToken: await tokenFromFile(options.readTokenFile) } : {}), ...(options.writeTokenFile ? { writeToken: await tokenFromFile(options.writeTokenFile) } : {}), ...(options.confirmBot ? { confirmBotAccount: true } : {}) };
+        const updated = unwrap<FleetRepoDto>(await fleetReposControllerRotateGitlabCredentials({ path: { id: repoId }, body }));
+        printHumanTokenWarning(updated);
+        if (options.json) console.log(JSON.stringify(updated, null, 2));
+        else console.log(`Updated GitLab credentials for ${updated.owner}/${updated.name} (${updated.id})`);
+        process.exit(0);
+      } catch (err: unknown) { if (err instanceof TokenFileValidationError) return; handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT }); }
     });
 }
 
@@ -120,6 +182,7 @@ export function registerFleetRepo(fleet: Command): void {
   const repo = fleet.command('repo');
   repo.description('Fleet repo registry');
   registerAdd(repo);
+  registerCredentials(repo);
   registerList(repo);
   registerRemove(repo);
   registerCheck(repo);

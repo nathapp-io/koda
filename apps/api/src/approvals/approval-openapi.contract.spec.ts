@@ -55,6 +55,7 @@ const gatedOperations = [
   ['patch', '/api/fleet/repos/{id}/auto-review'],
   ['patch', '/api/fleet/repos/{id}/fix-checks'],
   ['patch', '/api/fleet/repos/{id}/fix-unprotected'],
+  ['patch', '/api/fleet/repos/{id}/gitlab-credentials'],
   ['put', '/api/fleet/repos/{id}/rule-override'],
   ['delete', '/api/fleet/repos/{id}/rule-override'],
   ['patch', '/api/fleet/runners/{id}'],
@@ -197,7 +198,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 148 gated operations', () => {
+describe('OpenAPI contract for 149 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -291,9 +292,9 @@ describe('OpenAPI contract for 148 gated operations', () => {
     expect(openapi.paths['/api/projects/{slug}/flows/{flowId}/answers']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-5: 202 responses exist on exactly the 148 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 149 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(148);
+    expect(expected).toHaveLength(149);
     expect(operationsWith202()).toEqual(expected);
   });
 });

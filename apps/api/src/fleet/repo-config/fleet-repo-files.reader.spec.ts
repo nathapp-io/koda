@@ -117,17 +117,28 @@ describe('GitlabFleetRepoFilesReader', () => {
     listTree: vi.fn(async () => [{ path: '.nax/rules/a.md', type: 'blob', sha: 'a', size: null }]),
     getFile: vi.fn(async () => ({ sha: 'a', size: 1, content: Buffer.from('x') })),
   };
-  const tokens = { resolve: vi.fn(async () => 'glpat') };
-  const reader = new GitlabFleetRepoFilesReader(gitlab as never, tokens as never);
+  /** The access the credential store answers a GitLab call with. */
+  const access = { token: 'glpat', target: { apiBase: 'https://gitlab.example.com/api/v4', projectId: 42 } };
+  const credentials = {
+    call: vi.fn(async (_repo: unknown, _kind: unknown, fn: (a: unknown) => Promise<unknown>) => fn(access)),
+  };
+  const reader = new GitlabFleetRepoFilesReader(gitlab as never, credentials as never);
 
-  it('lists with the project token and a null size', async () => {
+  it('AC-14: lists the .nax entries through the read credential of the repo', async () => {
     await expect(reader.list(GL)).resolves.toEqual({ baseSha: 'c1', defaultBranch: 'trunk', files: [{ path: '.nax/rules/a.md', size: null, blobSha: 'a', group: 'rules' }] });
-    expect(tokens.resolve).toHaveBeenCalledWith('p1', 'grp/sub', 'app');
-    expect(gitlab.listTree).toHaveBeenCalledWith('glpat', 'grp/sub', 'app', '.nax', 'c1');
+    expect(credentials.call).toHaveBeenCalledWith(expect.objectContaining({ id: 'repo-2' }), 'read', expect.any(Function));
+    expect(gitlab.getBranchHead).toHaveBeenCalledWith(access, 'trunk');
+    expect(gitlab.listTree).toHaveBeenCalledWith(access, '.nax', 'c1');
   });
 
-  it('maps a missing VcsConnection to 409 repo_unreachable', async () => {
-    tokens.resolve.mockRejectedValueOnce(new RepoCheckException('vcs_connection_missing'));
+  it('AC-14: reads a file through the read credential of the repo', async () => {
+    await expect(reader.read(GL, '.nax/rules/a.md', 'c1')).resolves.toEqual({ path: '.nax/rules/a.md', blobSha: 'a', content: 'x' });
+    expect(credentials.call).toHaveBeenCalledWith(expect.objectContaining({ id: 'repo-2' }), 'read', expect.any(Function));
+    expect(gitlab.getFile).toHaveBeenCalledWith(access, '.nax/rules/a.md', 'c1');
+  });
+
+  it('maps a missing credential to 409 repo_unreachable', async () => {
+    credentials.call.mockRejectedValueOnce(new RepoCheckException('gitlab_credentials_missing'));
     await expect(reader.list(GL)).rejects.toBeInstanceOf(RepoUnreachableException);
   });
 });

@@ -1,0 +1,663 @@
+{
+  "project": "koda",
+  "feature": "gitlab-repo-credentials",
+  "branchName": "feat/gitlab-repo-credentials",
+  "createdAt": "2026-11-16T07:27:23.579Z",
+  "updatedAt": "2026-11-16T11:18:16.391Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Credential record and encrypted per-repo store",
+      "description": "**Goal** — Persist a host-aware GitLab connection per fleet repo and expose only safe credential health summaries.\n\n**Motivation** — gitlab.com Free has no project access tokens to mint per job (deferred by the owner). The read/write split therefore comes from two stored tokens per repo.\n\n**Approach** — Data model (verbatim):\n`FleetRepo` gains `host String @default(\"https://github.com\")`. Its uniqueness changes from `@@unique([provider, owner, name])` to `@@unique([provider, host, owner, name])`. Migration `20261216090000_fleet_repo_gitlab_credentials`:\n\n- adds the column;\n- sets `host = 'https://gitlab.com'` on existing `provider = 'gitlab'` rows; GitHub rows keep the default;\n- swaps the unique index;\n- creates the table below.\n\n```prisma\nmodel FleetRepoGitlabCredential {\n  id                  String    @id @default(cuid())\n  repoId              String    @unique\n  repo                FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)\n  gitlabProjectId     Int\n  encryptedReadToken  String\n  encryptedWriteToken String\n  readTokenUserId     Int\n  readTokenUsername   String\n  writeTokenUserId    Int\n  writeTokenUsername  String\n  writeTokenIsBot     Boolean\n  readTokenExpiresAt  DateTime?\n  writeTokenExpiresAt DateTime?\n  readTokenInvalidAt  DateTime?\n  writeTokenInvalidAt DateTime?\n  createdAt           DateTime  @default(now())\n  updatedAt           DateTime  @updatedAt\n}\n```\n\n`FleetRepo` gains the back-relation `gitlabCredential FleetRepoGitlabCredential?`. Tokens are encrypted with `encryptToken` / `decryptToken` (`apps/api/src/common/utils/encryption.util.ts`) under the existing `VCS_ENCRYPTION_KEY` (`vcsConfig.encryptionKey`), like `VcsConnection.encryptedToken`. No existing row gets a credential record. An existing GitLab fleet repo is \"not connected\" until an admin adds tokens (design §6.3, no legacy fallback; koda-wk has no GitLab fleet repo).\n\nCredential store (verbatim):\n`GitLabRepoCredentials` (`apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts`) is the only reader and writer of the table, through the module-private `PrismaGitlabCredentialRepository` (`apps/api/src/fleet/git-broker/prisma-gitlab-credential.repository.ts`). Its methods:\n\n- `save(repoId: string, input: GitLabCredentialInput): Promise<void>` upserts and clears both `*InvalidAt` fields of the tokens it replaces. `GitLabCredentialInput` carries `gitlabProjectId` plus, for each token it replaces, the token and its verified user, expiry and (write only) `isBot`. Either token may be absent on a rotation.\n- `resolve(repo: { id: string; host: string }, kind: 'read' | 'write'): Promise<GitLabAccess>` returns `{ token, target: { apiBase: string; projectId: number } }`, where `apiBase = host + '/api/v4'`. It throws `RepoCheckException('gitlab_credentials_missing')` when the repo has no record, and `RepoCheckException('vcs_encryption_key_missing')` when the key is unset.\n- `call<T>(repo, kind, fn: (access: GitLabAccess) => Promise<T>): Promise<T>` resolves, runs `fn`, and when `fn` throws `RepoCheckException('gitlab_token_invalid')` calls `markInvalid(repo.id, kind)` before rethrowing.\n- `markInvalid(repoId: string, kind: 'read' | 'write'): Promise<void>` sets that token's `*InvalidAt` to now.\n- `assertKeyConfigured(): void` throws `RepoCheckException('vcs_encryption_key_missing')` when `vcsConfig.encryptionKey` is unset.\n\n`GitLabAccess` is `{ token: string; target: { apiBase: string; projectId: number } }` everywhere in this spec. `*InvalidAt` clears only when `save` replaces that token. A later successful call does not clear it, because the admin is expected to rotate the token.\n`resolve` takes `host?: string`. An absent host means `https://gitlab.com`, so a repo object that does not carry the column (older fixtures, narrow selects) still resolves against the default. A stored token that fails to decrypt under the configured key throws `RepoCheckException('gitlab_token_invalid')`, as `GitLabTokenSource.resolve` does today, and marks nothing.\n\n**How the repo row carries the credential (no secrets).** `PrismaFleetRepoRepository` loads `gitlabCredential` with a select that leaves out both encrypted columns. It maps the result to the optional `FleetRepoRecord.gitlabCredential?: GitLabCredentialView | null`, with these fields:\n\n- `gitlabProjectId`;\n- `readTokenUsername`, `writeTokenUsername`, `writeTokenIsBot`;\n- both expiries and both `*InvalidAt` fields.\n\n`FleetRepoRecord` also gains `host?: string`, where absent means `https://github.com` for GitHub rows.\n\n`gitlabTokenStatus(expiresAt: Date | null, invalidAt: Date | null, now: Date): 'ok' | 'invalid' | 'expiring'` (`gitlab-repo-credentials.ts`) is pure:\n\n- `invalid` when `invalidAt` is set;\n- otherwise `expiring` when `expiresAt` is 14 days or less after `now`;\n- otherwise `ok`.\n\n`FleetRepoDto.from(r, now = new Date())` builds the `gitlab` field from `r.gitlabCredential` with it.\n\nDTO contract (verbatim):\n`FleetRepoDto` gains `host: string` and `gitlab: { projectId: number; readToken: GitLabTokenSummaryDto; writeToken: GitLabTokenSummaryDto & { isBot: boolean }; warnings: string[] } | null`:\n\n- `GitLabTokenSummaryDto` is `{ username, expiresAt: string | null, status: 'ok' | 'invalid' | 'expiring' }`;\n- `warnings` is `['write_token_human']` when `isBot` is false, otherwise `[]`;\n- `gitlab` is `null` for a GitHub repo and for a GitLab repo with no record.\n\nWire the service and module-private repository into GitBrokerModule; extend safe repo mappings and DTO specs without changing the assertions for other fields. Use the existing transaction-aware Prisma client so a later registration's repo insert and credential save share one transaction. Add new store/health unit specs and DB persistence/projection specs as part of this implementation.\n\n**Scope** — In: schema, upgrade migration, encrypted store, sticky invalidity and safe response projections. Out: host validation and HTTP client/caller migration (US-002), broker mint/cache (US-003), registration/check workflow (US-004), rotation route/permissions (US-005), old-source deletion (US-006), CLI/web (US-007/008), legacy credential backfill, token re-keying and background token-health polling.\n\n**Interface** — `save(repoId: string, input: GitLabCredentialInput): Promise<void>`; `resolve(repo: { id: string; host?: string }, kind: 'read' | 'write'): Promise<GitLabAccess>`; `call<T>(repo, kind, fn: (access: GitLabAccess) => Promise<T>): Promise<T>`; `markInvalid(repoId: string, kind: 'read' | 'write'): Promise<void>`; `assertKeyConfigured(): void`; `gitlabTokenStatus(expiresAt: Date | null, invalidAt: Date | null, now: Date): 'ok' | 'invalid' | 'expiring'`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After the migration, FleetRepoGitlabCredential rows can be created for a FleetRepo, and deleting that FleetRepo deletes its credential row.",
+        "AC-2 [integration] Two FleetRepo rows with the same provider, owner and name but different host values can both be created.",
+        "AC-3 [integration] A second FleetRepo with the same provider, host, owner and name is refused with Prisma error code P2002.",
+        "AC-4 [integration] A FleetRepo created without host reads back with host equal to https://github.com.",
+        "AC-5 [unit] GitLabRepoCredentials.save followed by resolve({ id, host: 'https://gitlab.example.com' }, 'write') returns the saved write token and target { apiBase: 'https://gitlab.example.com/api/v4', projectId: <saved gitlabProjectId> }.",
+        "AC-6 [unit] resolve(repo, 'read') returns the read token, not the write token, for the same record.",
+        "AC-7 [unit] The repository row written by save stores encryptedReadToken and encryptedWriteToken values that differ from the plaintext tokens and decrypt to them with decryptToken under the configured key.",
+        "AC-8 [unit] resolve for a repo with no record throws RepoCheckException with reason gitlab_credentials_missing.",
+        "AC-9 [unit] resolve with vcsConfig.encryptionKey unset throws RepoCheckException with reason vcs_encryption_key_missing.",
+        "AC-10 [unit] call(repo, 'read', fn) whose fn throws RepoCheckException('gitlab_token_invalid') sets readTokenInvalidAt (and not writeTokenInvalidAt) and rethrows the same exception.",
+        "AC-11 [unit] call(repo, 'write', fn) whose fn throws RepoCheckException('provider_error') sets neither *InvalidAt field and rethrows.",
+        "AC-12 [unit] A save that replaces only the write token clears writeTokenInvalidAt, keeps readTokenInvalidAt, and keeps the stored read token.",
+        "AC-13 [unit] gitlabTokenStatus returns invalid when invalidAt is set, expiring when expiresAt is 14 days or less after now, and ok otherwise (including a null expiresAt).",
+        "AC-14 [integration] PrismaFleetRepoRepository.findById for a GitLab repo with a credential record returns gitlabCredential with the usernames, writeTokenIsBot and expiries, and without encryptedReadToken or encryptedWriteToken keys.",
+        "AC-15 [unit] FleetRepoDto.from for a GitLab row whose gitlabCredential.writeTokenIsBot is false returns gitlab.warnings ['write_token_human'], and for a GitHub row returns host https://github.com and gitlab null."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "gitlab",
+        "prisma",
+        "security",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New encrypted credential abstraction, migration and read-model boundary span schema, repositories, DI and DTOs; security override requires isolated TDD with real DB persistence verification.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/src/common/utils/encryption.util.ts",
+        "apps/api/src/fleet/git-broker/git-broker.module.ts",
+        "apps/api/src/fleet/repos/dto/fleet-repo.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261216090000_fleet_repo_gitlab_credentials/migration.sql",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts",
+        "apps/api/src/fleet/git-broker/prisma-gitlab-credential.repository.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.spec.ts",
+        "apps/api/test/integration/fleet/fleet-repo-gitlab-credentials.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the upgrade migration runs on pre-existing GitLab and GitHub FleetRepo rows, their host values become https://gitlab.com and https://github.com respectively without creating credential records.",
+        "When call succeeds after that token was marked invalid, the stored invalidAt timestamp remains unchanged.",
+        "When save replaces only the read token, the write token and writeTokenInvalidAt remain unchanged while readTokenInvalidAt becomes null."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetRepo` gains `host` and the `gitlabCredential` back-relation, its unique index becomes `(provider, host, owner, name)`, and the `FleetRepoGitlabCredential` model is added."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/dto/fleet-repo.dto.spec.ts",
+          "reason": "the serialised `FleetRepoDto` gains `host` and `gitlab` (null for GitHub rows); every other field assertion stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "24c092f733984a7c78aba8a4b24c1dbf09092ff7"
+    },
+    {
+      "id": "US-002",
+      "title": "Host safety and access-based GitLab client",
+      "description": "**Goal** — Enforce the approved GitLab host rule and route existing GitLab API readers/writers through the correct per-repo credential kind.\n\n**Motivation** — The owner wants koda to work on GitLab repos as close to GitHub as possible, on gitlab.com and on self-hosted GitLab.\n\n**Approach** — Host rule (owner decision A), verbatim:\n`parseGitLabHost(input: string): string` (`apps/api/src/fleet/git-broker/gitlab-host.ts`) returns the canonical form: lower-case scheme and host, an optional port and path prefix, no trailing slash. It throws `RepoCheckException('gitlab_host_invalid')` for:\n\n- a non-`https:` scheme;\n- userinfo, a query or a fragment;\n- an unparseable value.\n\nAn absent host means `https://gitlab.com`.\n\n`assertGitLabHostAllowed(host: string): Promise<void>` resolves the host name (`dns.lookup`, all addresses) and throws `RepoCheckException('gitlab_host_blocked')` when any resolved address is blocked. For each address, `assertGitLabHostAllowed` itself first checks a literal block list (`fd00:ec2::254`, the AWS IPv6 metadata address). Only then does it ask `classifyAddress(address, allowedCidrs)` (`apps/api/src/webhook/outbound/address-classifier.ts`, unchanged), with `allowedCidrs = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7']`. The order matters, because in `classifyAddress` an allow-listed CIDR wins over its blocked ranges, and `fd00:ec2::254` is inside `fc00::/7`. Loopback, link-local (`169.254.0.0/16`, `fe80::/10`, which covers the metadata address `169.254.169.254`) and CGNAT (`100.64.0.0/10`, which covers `100.100.100.200`) stay blocked by the classifier itself.\n\n`isClassifiableGitLabHost(host)` is true when the host name contains `gitlab`. Until nax #2957 ships, registration refuses other names with `RepoCheckException('gitlab_host_unclassified')`.\n\nGitLab client, verbatim:\n`GitLabAccessChecker` (`apps/api/src/fleet/git-broker/gitlab-access-checker.ts`) stops reading `vcsConfig.gitlabApiUrl` and stops addressing projects by `owner/name`. Every request it sends first awaits `assertGitLabHostAllowed` for the target's host. `FleetHttpClient` already refuses to follow redirects. The error mapping is shared by every method:\n\n- 401 is `gitlab_token_invalid`;\n- 403 is `app_permissions_insufficient`;\n- 404 keeps each method's current meaning, and for `getTokenSelf` a 404 is `gitlab_token_invalid` (as `verifyRepo` maps it today);\n- any other status is `provider_error`.\n\n`GitLabAccess` is `{ token: string; target: { apiBase: string; projectId: number } }` everywhere in this spec.\n\nCaller targets, verbatim:\n- `FleetPrStateRefresher.readerFor` (`tickets/fleet-pr-state.refresher.ts`): `credentials.call(repo, 'read', (a) => gitlab.getMergeRequest(a, number))`. `RefreshRepo` gains `host`.\n- `PrAttributionService` (`sync/pr-attribution.service.ts`): `credentials.call(repo, 'write', (a) => gitlab.commentOnMergeRequest(a, number, body))`.\n- `GitlabFleetRepoFilesReader` (`repo-config/gitlab-fleet-repo-files.reader.ts`): `credentials.call(repo, 'read', ...)` with the access-based client calls.\n\nRetain existing refresh application, attribution posted/failed/skipped and files-reader refusal behavior. Pass repo host through the refresher select and all credential calls; resolve's default covers old fixtures without host. Add `gitlab_credentials_missing`, `gitlab_host_invalid`, `gitlab_host_blocked`, `gitlab_host_unclassified`, `gitlab_read_token_writable`, `gitlab_read_token_no_access` and `gitlab_project_mismatch` to RepoCheckReason and RepoCheckResultDto's REASONS and API en/zh messages. `vcs_connection_missing` and `vcs_connection_mismatch` stay in `RepoCheckReason`, `REASONS` and the web locales, although nothing in the fleet throws them after US-006. Existing timeout/no-redirect behavior is unchanged: FleetHttpClient maps 3xx to provider_unreachable. Do not include any GitLab body in a RepoCheckException payload. Change existing client/caller specs to the target access-based URLs and status mapping, retaining pagination, missing-resource, GitHub and outcome regression assertions; stub DNS/transport for HTTPS test targets rather than relaxing production host checks.\n\n**Scope** — In: host functions, GitLabAccessChecker conversion, new reasons and existing refresher/attribution/config-file migrations. Out: store implementation (US-001), broker mint/cache/clone host plumbing (US-003), create/check verification orchestration (US-004), rotation/permissions (US-005), deleting the old source (US-006), web translations (US-008), purpose/read-only job mints, API rate limiting, connection pinning, accepting CGNAT hosts or hostnames without gitlab, changing VCS_GITLAB_API_URL, and independent missing-credential caller tests.\n\n**Interface** — Target signatures (verbatim):\n- `commentOnMergeRequest(access: GitLabAccess, iid, body): Promise<boolean>`;\n- `getMergeRequest(access, iid): Promise<VcsPrStatus | null>`;\n- `getBranchHead(access, branch): Promise<string>`;\n- `listTree(access, path, ref): Promise<ForgeTreeEntry[]>`;\n- `getFile(access, path, ref): Promise<ForgeFile | null>`;\n- `getTokenSelf(apiBase, token): Promise<{ scopes: string[]; expiresAt: Date | null }>`;\n- `getCurrentUser(apiBase, token): Promise<{ id: number; username: string; bot: boolean }>`;\n- `findProject(apiBase, token, pathOrId: string | number): Promise<{ id: number; owner: string; name: string; defaultBranch: string; accessLevel: number }>` .\n\n`verifyRepo` is removed.\n`parseGitLabHost(input: string): string`; `assertGitLabHostAllowed(host: string): Promise<void>`; `isClassifiableGitLabHost(host)`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] parseGitLabHost('HTTPS://GitLab.Example.com:8443/gl/') returns https://gitlab.example.com:8443/gl.",
+        "AC-2 [unit] parseGitLabHost throws RepoCheckException with reason gitlab_host_invalid for http://gitlab.example.com, https://user@gitlab.example.com, https://gitlab.example.com/?a=1 and https://gitlab.example.com/#x.",
+        "AC-3 [unit] isClassifiableGitLabHost is true for https://gitlab.corp.example and false for https://git.corp.example.",
+        "AC-4 [unit] With dns.lookup stubbed to return 192.168.1.20, assertGitLabHostAllowed('https://gitlab.lan') resolves.",
+        "AC-5 [unit] With dns.lookup stubbed to return 127.0.0.1, 169.254.169.254, ::ffff:169.254.169.254, 100.100.100.200 or fd00:ec2::254, assertGitLabHostAllowed throws RepoCheckException with reason gitlab_host_blocked.",
+        "AC-6 [unit] With dns.lookup stubbed to return both 192.168.1.20 and 169.254.169.254, assertGitLabHostAllowed throws gitlab_host_blocked.",
+        "AC-7 [unit] GitLabAccessChecker.getMergeRequest(access, 7) requests <apiBase>/projects/<projectId>/merge_requests/7 with header private-token set to access.token.",
+        "AC-8 [unit] Any GitLabAccessChecker method whose host check throws gitlab_host_blocked sends no request through FleetHttpClient.request.",
+        "AC-9 [unit] A GitLabAccessChecker call answered 401 throws RepoCheckException('gitlab_token_invalid'), and one answered 403 throws RepoCheckException('app_permissions_insufficient').",
+        "AC-10 [unit] getTokenSelf(apiBase, token) returns the scopes array and expiresAt parsed from expires_at, with expiresAt null when expires_at is null.",
+        "AC-11 [unit] getCurrentUser(apiBase, token) returns { id, username, bot }, with bot false when the response omits it.",
+        "AC-12 [unit] FleetPrStateRefresher refreshing a GitLab-repo PR link calls GitLabRepoCredentials.call with that repo and kind read, and the MR state read through it is applied to the link.",
+        "AC-13 [unit] PrAttributionService attributing a GitLab job calls GitLabRepoCredentials.call with kind write and posts the attribution body through commentOnMergeRequest(access, iid, body).",
+        "AC-14 [unit] GitlabFleetRepoFilesReader.list calls GitLabRepoCredentials.call with kind read and returns the .nax entries from listTree(access, '.nax', baseSha).",
+        "AC-15 [unit] A GitLabAccessChecker call answered 500 with a JSON body throws a RepoCheckException whose response payload is exactly { reason: 'provider_error' }, carrying none of the GitLab body."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "gitlab",
+        "security",
+        "ssrf",
+        "credentials"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Host checks reuse the existing address classifier and HTTP client, but converting the client and three caller modules is cross-module integration; credential and SSRF boundaries still require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/webhook/outbound/address-classifier.ts",
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+        "apps/api/src/fleet/sync/pr-attribution.service.ts",
+        "apps/api/src/fleet/repo-config/gitlab-fleet-repo-files.reader.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-host.ts",
+        "apps/api/src/fleet/git-broker/gitlab-host.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "isClassifiableGitLabHost returns false for https://git.corp.example/gitlab because gitlab appears only in the path, not the hostname.",
+        "getTokenSelf returns gitlab_token_invalid when the token-self endpoint responds 404.",
+        "When listTree requests another page after DNS changes to a blocked address, it sends no HTTP request for that page."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts",
+          "reason": "every call moves to the access-based signatures (`GitLabAccess` is a token plus a target of api base and numeric project id); URLs in the assertions become the api base plus /projects/ and the numeric id instead of the url-encoded owner and name; `verifyRepo` cases move to `getTokenSelf`, `getCurrentUser` and `findProject`; a non-200 that was `provider_error` becomes `gitlab_token_invalid` for 401 and `app_permissions_insufficient` for 403."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-pr-state.refresher.spec.ts",
+          "reason": "the GitLab reader is resolved through `GitLabRepoCredentials.call` with kind `read` instead of `GitLabTokenSource.resolve`; the refresh outcomes stay the same."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/pr-attribution.service.spec.ts",
+          "reason": "the GitLab comment is posted through `GitLabRepoCredentials.call` with kind `write`; the posted/failed/skipped outcomes stay the same."
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/fleet-repo-files.reader.spec.ts",
+          "reason": "the GitLab reader is built with `GitLabRepoCredentials` instead of `GitLabTokenSource`, and its forge-refusal cases come from `GitLabRepoCredentials.call`; the GitHub cases and the refusal mapping stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "509e565c50022565deb31f335543a01ab09deaf9"
+    },
+    {
+      "id": "US-003",
+      "title": "RUN broker mint, repo eviction and host-aware clone URLs",
+      "description": "**Goal** — Mint GitLab RUN write credentials from each repo's connection and preserve that host through clone assignment and cache eviction.\n\n**Motivation** — Today a GitLab fleet repo borrows its project's ticket-sync token (`GitLabTokenSource.resolve(projectId, owner, name)`, `apps/api/src/fleet/git-broker/gitlab-token.source.ts`).\n\n**Approach** — Broker and clone URL (verbatim):\n`GitTokenBroker.fresh` (`git-token.broker.ts`) answers a GitLab mint with no `purpose` and no `readOnly` (the RUN write mint) from `GitLabRepoCredentials.resolve(repo, 'write')`, with `username: 'oauth2'` and the existing `gitlabTokenTtlSec` lifetime. GitLab purpose and read-only requests stay refused here; feature 2 opens them.\n`GitTokenBroker.evictRepo(repoId)` drops every cached token minted for that repo. To find them, each cache entry records the id of the repo it was minted for (the cache value becomes `{ token: GitToken, repoId: string }`; the returned `GitToken` is unchanged). `evict(jobId)` keeps its key-prefix rule.\n\n`cloneUrlFor(repo, cfg)` (`clone-url.ts`) builds a GitLab clone URL from `repo.host` when present. `FleetRepoRef` (`jobs/domain/fleet-job.domain.ts`) gains `host?: string`. `PrismaFleetJobRepository.findRepo` and `findProjectRepos` (`jobs/prisma-fleet-job.repository.ts`) select it. `placement.service.ts` and `project-repos-assign.ts` pass that repo to `cloneUrlFor` unchanged. `RefreshRepo` (`tickets/prisma-fleet-tickets.repository.ts`) gains `host?: string` from its select. The attribution and files reader already receive a `FleetRepoRef`. Every GitLab read path passes `host` through to `resolve`, whose `https://gitlab.com` default covers a missing value.\n\nAC-authoritative clone fallback: for a GitLab repo without host, cloneUrlFor still builds from cfg.gitlabApiUrl as today; GitHub always builds from cfg.githubApiUrl whatever host holds. This clone helper fallback is separate from credential resolve's gitlab.com fallback. Include path prefixes and GitLab subgroup owner paths without putting credentials into the URL. Coordinate RefreshRepo's select with US-002, where its consumer migrates. Update broker specs, purpose specs and sync.service.token-purpose.spec.ts construction mocks to GitLabRepoCredentials while retaining every existing GitHub/purpose/readOnly/TTL regression assertion. Update exact host-select tests and assignment integration so a stored custom host reaches the ASSIGN cloneUrl. Missing per-repo credentials become the fixed mint error gitlab_credentials_missing; do not use a legacy fallback.\n\n**Scope** — In: RUN write mint, repo-aware cache values and evictRepo, FleetRepoRef/narrow selects, clone URL and assignment host propagation. Out: encrypted store (US-001), access checker/read callers (US-002), registration (US-004), invoking eviction on rotation (US-005), old-source deletion (US-006), REVIEW/FIX/AGENT and purpose/read-only GitLab mints, runner forge identity and opening project-code GitLab gates.\n\n**Interface** — `GitLabRepoCredentials.resolve(repo, 'write')`; `GitTokenBroker.evictRepo(repoId)`; cache value `{ token: GitToken, repoId: string }`; `cloneUrlFor(repo, cfg)`; `FleetRepoRef` gains `host?: string`. Returned `GitToken` and existing `mint`, `evict(jobId)` and cache-key semantics remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] GitTokenBroker.mint for a GitLab repo with no purpose and no readOnly returns the token from GitLabRepoCredentials.resolve(repo, 'write') with username: 'oauth2'.",
+        "AC-2 [unit] GitTokenBroker.mint for a GitLab repo with purpose: 'read' returns { ok: false } with reason provider_error and does not call GitLabRepoCredentials.resolve.",
+        "AC-3 [unit] A GitLab mint whose resolve throws gitlab_credentials_missing returns { ok: false } with reason gitlab_credentials_missing.",
+        "AC-4 [unit] After evictRepo(repoId), the next mint for a job on that repo calls GitLabRepoCredentials.resolve again instead of returning the cached token.",
+        "AC-5 [unit] evictRepo(repoId) leaves cached tokens of jobs on other repos in place: their next mint returns the cached token without calling resolve.",
+        "AC-6 [unit] cloneUrlFor({ provider: 'gitlab', host: 'https://gitlab.example.com/gl', owner: 'g/sub', name: 'app' }, cfg) returns https://gitlab.example.com/gl/g/sub/app.git.",
+        "AC-7 [unit] cloneUrlFor for a GitLab repo without host returns the URL built from cfg.gitlabApiUrl, as today.",
+        "AC-8 [unit] cloneUrlFor for a GitHub repo returns the URL built from cfg.githubApiUrl, whatever host holds.",
+        "AC-9 [integration] A job assigned on a GitLab repo whose row has host https://gitlab.example.com carries clone URL https://gitlab.example.com/<owner>/<name>.git in its assign payload.",
+        "AC-10 [unit] GitTokenBroker.mint for a GitLab repo with readOnly: true and no purpose returns { ok: false } and does not call GitLabRepoCredentials.resolve."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "gitlab",
+        "security",
+        "credentials",
+        "broker"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential cache isolation and invalidation span minting, repo projections and assignment; strict TDD protects read/write refusal and GitHub compatibility.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/git-token.broker.ts",
+        "apps/api/src/fleet/git-broker/clone-url.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/git-broker/git-token.broker.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-gitlab-clone-assignment.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a GitLab RUN write token is cached, a later readOnly request for that job still returns provider_error without returning the cached token.",
+        "When evict(jobId) runs after cache entries gain repoId metadata, it still removes all purpose/epoch/read-only entries with that job prefix and leaves other jobs cached."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.spec.ts",
+          "reason": "the GitLab write mint is answered from `GitLabRepoCredentials.resolve(repo, 'write')` instead of `GitLabTokenSource.resolve(projectId, owner, name)`; the `username: 'oauth2'`, TTL and purpose/read-only refusal assertions stay."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.purpose.spec.ts",
+          "reason": "the broker's third constructor argument becomes a `GitLabRepoCredentials` mock instead of a `GitLabTokenSource` mock; every purpose assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts",
+          "reason": "the `GitTokenBroker` it builds takes a `GitLabRepoCredentials` mock instead of a `GitLabTokenSource` mock; every token-purpose assertion stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "05c7d76ab06ff51b2bd5d8f61dad4b9424c91f69"
+    },
+    {
+      "id": "US-004",
+      "title": "GitLab registration, safe approval input and reachability check",
+      "description": "**Goal** — Register and check GitLab repos using verified per-repo tokens, host and numeric project identity, with safe approval redaction and human-account warnings.\n\n**Motivation** — That gives one token for every purpose, one GitLab repo per project, and one global GitLab URL (`VCS_GITLAB_API_URL`).\n\n**Approach** — Registration and check (verbatim):\n`CreateFleetRepoDto` gains, for `provider: 'gitlab'` only:\n\n- `host?: string`;\n- `readToken: string` and `writeToken: string`, both 1 to 512 characters and never returned;\n- `confirmBotAccount?: boolean`.\n\nA GitHub create that carries any of these fields gets 400 `fleet.repoGitlabFieldsOnGitHub`. A GitLab create without both tokens gets 400 from validation.\n\n`FleetReposService.prepareCreate` verifies a GitLab repo before its transaction, in this order (first failure wins, each a `RepoCheckException` 422):\n\n1. Host: `parseGitLabHost`, then `isClassifiableGitLabHost`, then `assertGitLabHostAllowed`.\n2. `GET /personal_access_tokens/self` with each token. For the write token the scopes must include both `api` and `write_repository`, otherwise `gitlab_scope_missing`. For the read token the scopes must include `read_api` and `read_repository`, otherwise `gitlab_scope_missing`. A read token that also has `api` or `write_repository` is refused with `gitlab_read_token_writable`. `expires_at` gives the expiry.\n3. `GET /user` with each token gives `{ id, username, bot }`.\n4. `GET /projects/<url-encoded owner/name>` with the write token. Developer access or above is needed, otherwise `gitlab_access_insufficient`. The response gives the canonical path, `default_branch` and the numeric `id`.\n5. `GET /projects/<id>` with the read token must answer 200, otherwise `gitlab_read_token_no_access`.\n\n`writeTokenIsBot` is true when any of these hold:\n\n- `/user` answered `bot: true` for the write token;\n- its username equals `fleetConfig.gitlabBotName`;\n- `confirmBotAccount` is true.\n\n`prepareCreate` calls `GitLabRepoCredentials.assertKeyConfigured()` before step 1, so a missing key costs no outbound call. Inside the existing `txManager.run` closure, `GitLabRepoCredentials.save(row.id, …)` runs right after `repo.create`. The response is then built from `repo.findById(row.id)`, so the create response carries `gitlab`, including `warnings`.\n\nWhen it is false the save still succeeds (owner decision: allow with a warning). The `fleet.repo.create` audit summary becomes `registered gitlab; write token belongs to a person (<username>)` instead of `registered gitlab`.\n\n`FleetRepoDto` gains `host: string` and `gitlab: { projectId: number; readToken: GitLabTokenSummaryDto; writeToken: GitLabTokenSummaryDto & { isBot: boolean }; warnings: string[] } | null`:\n\n- `GitLabTokenSummaryDto` is `{ username, expiresAt: string | null, status: 'ok' | 'invalid' | 'expiring' }`;\n- `warnings` is `['write_token_human']` when `isBot` is false, otherwise `[]`;\n- `gitlab` is `null` for a GitHub repo and for a GitLab repo with no record.\n\n`FleetReposService.prepareCheck` for a GitLab repo re-runs steps 2, 4 and 5 against the stored tokens and the stored `gitlabProjectId`, using `GitLabRepoCredentials.resolve` and the client directly. It does not use `call`, so `prepare` writes nothing. The existing returned closure compares the re-read row with `row` using `isDeepStrictEqual`. That comparison now leaves out `gitlabCredential` on both sides, so a token marked invalid by another caller in between does not turn the check into a conflict. When the verdict is `gitlab_token_invalid` for a token kind, the closure calls `GitLabRepoCredentials.markInvalid(repoId, kind)` after that comparison and before returning the result. It does not run step 3 and writes nothing else.\n\nApproval redaction, verbatim relevant create contract:\nBoth secret-bearing routes register `redeem.redact` with `redactSecret` (`apps/api/src/approvals/route/redact-secret.ts`), exactly as `provider-credential-route.commands.ts` does, so no approval request row ever stores a token:\n- `fleet.repo.create` redacts `readToken` and `writeToken`.\n\nTarget service constructor (verbatim): the constructor parameters are, in order: `repo` (`FLEET_REPO_REPOSITORY`), `github` (`GitHubAppClient`), `gitlab` (`GitLabAccessChecker`), `credentials` (`GitLabRepoCredentials`, replacing `GitLabTokenSource`), `broker` (`GitTokenBroker`, added for `evictRepo`), `fleetConfig` (`@Inject(FLEET_CFG)` `Pick<IFleetConfig, 'gitlabBotName'>`, added), `activity`, `txManager`, `audit`, `permissions`. GitLab create and check run the verification above. `findByIdentity` keeps its signature and matches any host for now (feature 4 adds host matching to the flow entry).\n\nUse the DTO projection created in US-001; do not duplicate secret read paths. The response's readToken/writeToken names under gitlab are summary objects, never supplied plaintext fields. Preserve GitHub create/check behavior, P2002 conflict behavior and before-transaction HTTP. Preserve the existing GitHub approval regression assertions as well; the current engine treats redeem as command-wide, so the redaction/unchanged-GitHub tension identified in analysis must be clarified rather than worked around by changing expected GitHub outcomes. Update every construction fixture listed in the analysis, plus repo route command parse/run and integration GitLab cases: remove VcsConnection seeding, supply two tokens and stub target forge calls. Keep the invisible-repo case 422 with the new read-access reason. Add API en/zh fleet.repoGitlabFieldsOnGitHub. After the API contract changes in US-004 and US-005, `bun run generate` from the repo root regenerates `openapi.json` and `apps/cli/src/generated/`, which US-007 uses.\n\n**Scope** — In: create DTO/verification, bot detection/audit/warnings, reachability prepare/closure behavior, create redaction, fixture adaptation, API messages and generated create/response contract. Out: store schema/projection internals (US-001), host/client implementation (US-002), mint/cache/clone behavior (US-003), rotation route/catalog (US-005), old-source deletion (US-006), CLI/web (US-007/008), retries and host-aware flow identity matching.\n\n**Interface** — `host?: string`; `readToken: string`; `writeToken: string`; `confirmBotAccount?: boolean` on CreateFleetRepoDto for GitLab; `FleetRepoDto.from(r, now = new Date())`; existing `prepareCreate` and `prepareCheck` return deferred closures, with no database write in the HTTP preparation phase.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/fleet/repos with provider: 'github' and a readToken answers 400 with the fleet.repoGitlabFieldsOnGitHub message and creates no row.",
+        "AC-2 [unit] prepareCreate for GitLab with host http://gitlab.example.com throws gitlab_host_invalid before any GitLabAccessChecker call.",
+        "AC-3 [unit] prepareCreate for GitLab with host https://git.corp.example throws gitlab_host_unclassified before any GitLabAccessChecker call.",
+        "AC-4 [unit] prepareCreate for GitLab with no host verifies against https://gitlab.com/api/v4.",
+        "AC-5 [unit] A write token whose getTokenSelf scopes lack write_repository or api, or a read token whose scopes lack read_api or read_repository, makes prepareCreate throw gitlab_scope_missing before GitLabRepoCredentials.save is called.",
+        "AC-6 [unit] A read token whose getTokenSelf scopes are ['read_api', 'read_repository', 'api'] makes prepareCreate throw gitlab_read_token_writable.",
+        "AC-7 [unit] A write token whose findProject access level is 20 makes prepareCreate throw gitlab_access_insufficient.",
+        "AC-8 [unit] A read token for which findProject(apiBase, readToken, <project id>) throws repo_not_found makes prepareCreate throw gitlab_read_token_no_access.",
+        "AC-9 [integration] A successful GitLab create stores a FleetRepo with the canonical owner, name and default branch from findProject, and the given host. It also stores a credential record whose gitlabProjectId, token usernames and expiries come from the verification calls.",
+        "AC-10 [unit] A write token whose getCurrentUser answers bot: false with a username other than fleetConfig.gitlabBotName, and no confirmBotAccount, is saved with writeTokenIsBot false. The fleet.repo.create audit summary is registered gitlab; write token belongs to a person (<username>).",
+        "AC-11 [unit] The same write token with confirmBotAccount: true is saved with writeTokenIsBot true, and the audit summary is registered gitlab.",
+        "AC-12 [unit] A write token whose getTokenSelf throws gitlab_token_invalid makes prepareCreate throw gitlab_token_invalid, and GitLabRepoCredentials.save is not called.",
+        "AC-13 [integration] A successful GitLab create whose write token belongs to a person answers with gitlab.warnings ['write_token_human'] and gitlab.writeToken.username set, and the response holds no readToken or writeToken field at its top level (gitlab.readToken and gitlab.writeToken are the specified summary objects, never plaintext tokens).",
+        "AC-14 [unit] The fleet.repo.create route command's redeem.redact returns the input with readToken and writeToken replaced by the redactSecret marker and every other field unchanged.",
+        "AC-15 [unit] check for a GitLab repo whose stored read token now answers 401 returns reachable: false with reason gitlab_token_invalid without a conflict, and calls GitLabRepoCredentials.markInvalid(repoId, 'read') only from the returned closure, not from prepareCheck itself."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "gitlab",
+        "security",
+        "credentials",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Ordered multi-token verification crosses approval preparation, transaction atomicity, DTO validation and health state; strict security TDD preserves first-failure and no-secret invariants.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/repos/dto/create-fleet-repo.dto.ts",
+        "apps/api/src/fleet/repos/fleet-repo-route.commands.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts",
+        "apps/api/src/approvals/approval-command.registry.ts"
+      ],
+      "suggestedCriteria": [
+        "When GitLab create omits either token or supplies an empty or over-512-character token, validation answers 400 before any forge request.",
+        "When the current repo differs only in gitlabCredential invalid timestamps after prepareCheck, the returned closure returns its prepared verdict instead of a conflict.",
+        "When a different repo identity is re-read after prepareCheck, the closure throws the existing conflict without marking either token invalid.",
+        "When the write user has bot: true or its username equals fleetConfig.gitlabBotName, registration stores writeTokenIsBot true without admin confirmation."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "the service is built with the target constructor arguments; GitLab create and check are verified with the stored or supplied tokens through `GitLabAccessChecker.getTokenSelf`, `getCurrentUser` and `findProject` instead of `verifyRepo` and `GitLabTokenSource`; the GitHub cases stay unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.auto-review.spec.ts",
+          "reason": "`FleetReposService` is built with the target constructor arguments (a `GitLabRepoCredentials` mock in place of the `GitLabTokenSource` mock, plus `GitTokenBroker` and fleet-config mocks after it); every auto-review assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.disable-auto-review.spec.ts",
+          "reason": "`FleetReposService` is built with the target constructor arguments (a `GitLabRepoCredentials` mock in place of the `GitLabTokenSource` mock, plus `GitTokenBroker` and fleet-config mocks after it); every assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.fix-checks.spec.ts",
+          "reason": "`FleetReposService` is built with the target constructor arguments (a `GitLabRepoCredentials` mock in place of the `GitLabTokenSource` mock, plus `GitTokenBroker` and fleet-config mocks after it); every fix-checks assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.fix-unprotected.spec.ts",
+          "reason": "`FleetReposService` is built with the target constructor arguments (a `GitLabRepoCredentials` mock in place of the `GitLabTokenSource` mock, plus `GitTokenBroker` and fleet-config mocks after it); every fix-unprotected assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.rule-override.spec.ts",
+          "reason": "`FleetReposService` is built with the target constructor arguments (a `GitLabRepoCredentials` mock in place of the `GitLabTokenSource` mock, plus `GitTokenBroker` and fleet-config mocks after it); every rule-override assertion stays."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "where it builds `FleetReposService`, it passes the target constructor arguments (a `GitLabRepoCredentials` mock in place of the `GitLabTokenSource` mock, plus `GitTokenBroker` and fleet-config mocks after it); every approval assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repo-route.commands.spec.ts",
+          "reason": "the `fleet.repo.create` registration gains `redeem.redact`; its parse and run assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-repos.integration.spec.ts",
+          "reason": "the GitLab create cases stop seeding a project `VcsConnection` and send `readToken` and `writeToken` with the forge calls stubbed; the 422 case for a repo the token cannot see stays a 422 with the new reason; the GitHub cases stay."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the changed create body and repo response."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "09c9131a2d44850849f617ad439372091be0b0f6"
+    },
+    {
+      "id": "US-005",
+      "title": "Permission-gated GitLab credential rotation",
+      "description": "**Goal** — Rotate either or both per-repo GitLab tokens through a high-risk global permission and secret-redacted approval route, invalidating cached mints on success.\n\n**Motivation** — gitlab.com Free has no project access tokens to mint per job (deferred by the owner). The read/write split therefore comes from two stored tokens per repo.\n\n**Approach** — Rotation (verbatim):\n`PATCH /fleet/repos/:id/gitlab-credentials` with `{ readToken?, writeToken?, confirmBotAccount? }`:\n\n- At least one token is required, otherwise 400 `fleet.repoGitlabCredentialsEmpty`.\n- The route needs the new global catalog key `fleet.repo.credentials.update`, tier `high` through the `fleet.repo.` prefix in `HIGH_RISK_PREFIXES`.\n- The host check (step 1) runs on the stored host. Then each supplied token gets exactly these calls:\n  - new write token: `getTokenSelf` with the write-scope rule, `getCurrentUser`, and `findProject(apiBase, token, <stored gitlabProjectId>)`. Developer access or above is needed, otherwise `gitlab_access_insufficient`; a `repo_not_found` becomes `gitlab_project_mismatch`.\n  - new read token: `getTokenSelf` with the read-scope and not-writable rules, `getCurrentUser`, and `findProject(apiBase, token, <stored gitlabProjectId>)`. A `repo_not_found` becomes `gitlab_read_token_no_access`.\n- Rotation goes through the same approval route machinery as the other repo writes. It adds `FLEET_REPO_ROUTE_VARIANTS.gitlabCredentials = 'rest:fleet-repos.gitlab-credentials'`, the controller route in `fleet-repos.controller.ts`, and `'fleet.repo.credentials.update': ['global']` in the scope map of `permissions/catalog.ts`.\n- On success it calls `GitLabRepoCredentials.save`, then `GitTokenBroker.evictRepo(repoId)`, and records audit `fleet.repo.credentials.update` with summary `read token replaced`, `write token replaced` or `read and write tokens replaced`.\n- A GitHub repo gets 400 `fleet.repoNotGitlab`.\n\nApproval redaction (verbatim):\nBoth secret-bearing routes register `redeem.redact` with `redactSecret` (`apps/api/src/approvals/route/redact-secret.ts`), exactly as `provider-credential-route.commands.ts` does, so no approval request row ever stores a token:\n- `fleet.repo.credentials.update` redacts whichever tokens are present.\n\nReuse the registration rules exactly: assertKeyConfigured before outbound calls; stored-host parsing, classifiability and all-address safety; write scopes api + write_repository; read scopes read_api + read_repository and neither api nor write_repository; getCurrentUser metadata; bot flag OR exact fleetConfig.gitlabBotName equality OR confirmBotAccount. Validate supplied token fields through UpdateGitlabCredentialsDto and leave absent token fields absent; registration's explicit 1..512-character contract is owned by CreateFleetRepoDto. Preserve untouched token and metadata/invalidity, and clear invalidity only for the replaced kind through save. Shared client 401 maps to gitlab_token_invalid, 403 to app_permissions_insufficient; no verification failure mutates saved credentials or evicts cache. No HTTP inside the mutating transaction. Integrate RequiresGuard/Requires, ApprovalGated, routeGate.run with global scope, pending response and normal safe FleetRepoDto response, following the existing fix-unprotected route. Add UpdateGitlabCredentialsDto and FleetReposService.rotateGitlabCredentials, and redact parsed patch tokens without inserting keys for absent ones.\n\nUpdate permissions/catalog.spec.ts closed lists, role-matrix.json (every role gains the same cell values as fleet.repo.create with no other changes), gated-fleet-admin-routes.integration.spec.ts key list and permission/approval cases, and fleet-repo-route.commands.spec.ts parse/run/redact assertions without weakening the existing commands. Add one REST row for PATCH /fleet/repos/:id/gitlab-credentials (area fleet/repos, write, global, key fleet.repo.credentials.update) to docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv, modelled on POST /fleet/repos. Add API en/zh fleet.repoGitlabCredentialsEmpty and fleet.repoNotGitlab. After the API contract changes in US-004 and US-005, `bun run generate` from the repo root regenerates `openapi.json` and `apps/cli/src/generated/`, which US-007 uses. Concurrent rotations are last-save-wins; both evict. The legacy no-record/project-id bootstrap ambiguity is recorded in analysis; do not introduce a VcsConnection fallback.\n\n**Scope** — In: partial credential verification/replacement, route/DTO/service, permission catalog/inventory/matrix, approval redemption redaction, audit/cache integration, API messages and generated rotation contract. Out: store internals (US-001), host/client implementation (US-002), eviction implementation (US-003), create/check flow (US-004), old-source deletion (US-006), CLI/web (US-007/008), concurrent-rotation serialization and per-job token minting.\n\n**Interface** — `PATCH /fleet/repos/:id/gitlab-credentials` with `{ readToken?, writeToken?, confirmBotAccount? }`; `FleetReposService.rotateGitlabCredentials`; `UpdateGitlabCredentialsDto`; `FLEET_REPO_ROUTE_VARIANTS.gitlabCredentials = 'rest:fleet-repos.gitlab-credentials'`; `'fleet.repo.credentials.update': ['global']`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] PATCH /api/fleet/repos/:id/gitlab-credentials with an empty body answers 400 with the fleet.repoGitlabCredentialsEmpty message.",
+        "AC-2 [integration] The same route on a GitHub repo answers 400 with the fleet.repoNotGitlab message.",
+        "AC-3 [integration] A valid new writeToken replaces the stored write token (a following GitLabRepoCredentials.resolve(repo, 'write') returns it), keeps the stored read token, and records audit fleet.repo.credentials.update with summary write token replaced.",
+        "AC-4 [unit] rotateGitlabCredentials with a new write token whose findProject(apiBase, token, <stored gitlabProjectId>) throws repo_not_found throws gitlab_project_mismatch and saves nothing.",
+        "AC-5 [unit] rotateGitlabCredentials with a new readToken whose scopes include write_repository throws gitlab_read_token_writable and saves nothing.",
+        "AC-6 [unit] A successful rotation calls GitTokenBroker.evictRepo with the repo id after GitLabRepoCredentials.save.",
+        "AC-7 [unit] A failed rotation does not call GitTokenBroker.evictRepo.",
+        "AC-8 [unit] Rotating both tokens records the audit summary read and write tokens replaced.",
+        "AC-9 [unit] A rotated write token that is a person's, with no confirmBotAccount, is saved with writeTokenIsBot false.",
+        "AC-10 [unit] The fleet.repo.credentials.update route command's redeem.redact replaces each present token with the redactSecret marker and leaves an absent token absent.",
+        "AC-11 [unit] findCatalogEntry('fleet.repo.credentials.update') returns an entry with risk high and scope global.",
+        "AC-12 [integration] A user without fleet.repo.credentials.update gets 403 from the route, and the stored tokens are unchanged.",
+        "AC-13 [integration] An agent principal calling the route gets an approval-pending answer, and the stored ApprovalRequest input holds the redactSecret marker in place of each submitted token.",
+        "AC-14 [unit; failure-table-derived] When a supplied token answers 401 during rotation verification, rotateGitlabCredentials throws gitlab_token_invalid and saves nothing."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "gitlab",
+        "security",
+        "permissions",
+        "approvals",
+        "credentials"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "High-risk credential mutation integrates RBAC, approval redaction/redemption, forge verification, transaction writes, audit and cache invalidation; strict security TDD is mandatory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/fleet-repos.controller.ts",
+        "apps/api/src/fleet/repos/fleet-repo-route.commands.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/repos/dto/update-gitlab-credentials.dto.ts",
+        "apps/api/src/fleet/repos/fleet-repos.gitlab-credentials.spec.ts",
+        "apps/api/test/integration/fleet/fleet-gitlab-credentials-rotation.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When only confirmBotAccount is submitted without either token, the route returns 400 fleet.repoGitlabCredentialsEmpty.",
+        "When a new read token cannot see the stored numeric project id, rotation throws gitlab_read_token_no_access without saving or evicting.",
+        "When only a read token is rotated successfully, the audit summary is read token replaced and the write token metadata is unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the closed key lists gain `fleet.repo.credentials.update` next to `fleet.repo.create`; every other assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repo-route.commands.spec.ts",
+          "reason": "the registry gains the `fleet.repo.credentials.update` command with its parse and `redeem.redact`; the existing commands' assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/gated-fleet-admin-routes.integration.spec.ts",
+          "reason": "the gated `keys` list gains `fleet.repo.credentials.update`; the existing routes' assertions stay."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role block gains the cell for `fleet.repo.credentials.update` with the same values as its `fleet.repo.create` cell; no other cell changes."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "one REST row for PATCH /fleet/repos/:id/gitlab-credentials (area fleet/repos, write, global, key fleet.repo.credentials.update), modelled on the POST /fleet/repos row."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d3e9010acd99c8458e5403586854f828fb38c9f7"
+    },
+    {
+      "id": "US-006",
+      "title": "Remove the fleet's per-project GitLab token source",
+      "description": "**Goal** — Delete the obsolete fleet token source and its DI registration so fleet uses only GitLabRepoCredentials.\n\n**Motivation** — Today a GitLab fleet repo borrows its project's ticket-sync token (`GitLabTokenSource.resolve(projectId, owner, name)`, `apps/api/src/fleet/git-broker/gitlab-token.source.ts`).\n\n**Approach** — Verbatim story scope: Deletes `gitlab-token.source.ts` and its spec and drops it from `GitBrokerModule`. Deletion only.\n\n`apps/api/src/fleet/git-broker/git-broker.module.ts` — `GitLabTokenSource` leaves the providers and exports.\n\n`vcs_connection_missing` and `vcs_connection_mismatch` stay in `RepoCheckReason`, `REASONS` and the web locales, although nothing in the fleet throws them after US-006.\n\n**Verification note:** the removal is checked by the build/static gate `bun run --cwd apps/api type-check` and `bun run --cwd apps/api lint`. No acceptance criterion asserts an absence.\n\nAdd a DB-free module compilation spec beside GitBrokerModule, mocking its external collaborators. Do not move DI coverage into test/integration. Keep ticket sync and its VcsConnection intact.\n\n**Scope** — In: obsolete source/spec deletion, provider/export removal and DB-free module compilation. Out: consumer rewrites (US-002/003/004), new store (US-001), rotation (US-005), deleting legacy reason strings, changing ticket-sync code or opening later GitLab features.\n\n**Interface** — GitBrokerModule resolves `GitLabRepoCredentials` and `GitTokenBroker` through the new per-repo store; `GitLabTokenSource` has no replacement compatibility API.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] GitBrokerModule compiles in a module spec with its external collaborators mocked, and resolves GitLabRepoCredentials and GitTokenBroker without a GitLabTokenSource provider."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "gitlab",
+        "security",
+        "credentials",
+        "cleanup"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Binding deletion-only story removes a credential source and changes DI resolution; security override retains strict TDD despite small runtime scope.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/git-broker.module.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts",
+        "apps/api/src/fleet/git-broker/git-token.broker.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/git-broker/git-broker.module.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/git-broker.module.ts",
+          "reason": "`GitLabTokenSource` leaves the providers and exports."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9a08bf0f8d7fcc3e610d15f4e96ab27fa8d99893"
+    },
+    {
+      "id": "US-007",
+      "title": "CLI GitLab repo registration and token rotation",
+      "description": "**Goal** — Let CLI users register and rotate GitLab repo tokens from files or stdin using generated API operations and safe output.\n\n**Motivation** — The owner wants koda to work on GitLab repos as close to GitHub as possible, on gitlab.com and on self-hosted GitLab.\n\n**Approach** — Verbatim story design: `koda fleet repo add` gains `--host`, `--read-token-file`, `--write-token-file` and `--confirm-bot`. Adds `koda fleet repo credentials <id>` with the same token flags. Both print the human-account warning.\n\nShared create contract, verbatim:\n`CreateFleetRepoDto` gains, for `provider: 'gitlab'` only:\n- `host?: string`;\n- `readToken: string` and `writeToken: string`, both 1 to 512 characters and never returned;\n- `confirmBotAccount?: boolean`.\n\nRotation contract, verbatim:\n`PATCH /fleet/repos/:id/gitlab-credentials` with `{ readToken?, writeToken?, confirmBotAccount? }`.\nAt least one token is required, otherwise 400 `fleet.repoGitlabCredentialsEmpty`.\n\nResponse contract, verbatim:\n`FleetRepoDto` gains `host: string` and `gitlab: { projectId: number; readToken: GitLabTokenSummaryDto; writeToken: GitLabTokenSummaryDto & { isBot: boolean }; warnings: string[] } | null`:\n- `GitLabTokenSummaryDto` is `{ username, expiresAt: string | null, status: 'ok' | 'invalid' | 'expiring' }`;\n- `warnings` is `['write_token_human']` when `isBot` is false, otherwise `[]`;\n- `gitlab` is `null` for a GitHub repo and for a GitLab repo with no record.\n\nUse apps/cli/src/commands/fleet-repo.ts and fleet-shared.ts patterns: retain subgroup parsing, withContext, generated calls, envelope unwrap and validation exit 3. Registration requires both token-file flags for gitlab; reject GitHub with host or any GitLab-only flags before requests. Map --confirm-bot to confirmBotAccount. Read token files (including '-' stdin), trim the trailing newline, and name a missing file in the validation error without exposing its contents. Rotation permits either token flag and sends only supplied token fields (plus confirmation when supplied), uses stored repo connection and requires no project context. Do not add a host-changing rotation option to the API. Human warning names gitlab.writeToken.username on stderr and preserves exit 0. --json emits the safe returned repo, not a request/token echo; keep warnings off stdout. Existing GitHub request bodies and list/rm/check behavior stay unchanged.\n\nAfter the API contract changes in US-004 and US-005, `bun run generate` from the repo root regenerates `openapi.json` and `apps/cli/src/generated/`, which US-007 uses. Never hand-edit generated files or use handwritten HTTP to compensate for an outdated contract. Update fleet-repo.spec.ts to mock the regenerated API operation and token inputs as part of implementation.\n\n**Scope** — In: CLI add options, token input/validation, credentials subcommand, warning/JSON/exit behavior. Out: API verification/storage (US-001/002/004/005), broker behavior (US-003), source deletion (US-006), web UI (US-008), plaintext token flags and local duplication of backend scope/host/identity rules.\n\n**Interface** — `koda fleet repo add <ownerAndName> --provider gitlab [--host <host>] --read-token-file <path|-> --write-token-file <path|-> [--confirm-bot] [--json]`; `koda fleet repo credentials <id> [--read-token-file <path|->] [--write-token-file <path|->] [--confirm-bot] [--json]`; generated POST /fleet/repos and PATCH /fleet/repos/<id>/gitlab-credentials.",
+      "acceptanceCriteria": [
+        "AC-1 [cli] koda fleet repo add group/app --provider gitlab --host https://gitlab.example.com --read-token-file r.txt --write-token-file w.txt sends POST /fleet/repos with host, readToken and writeToken read from those files, trimmed of a trailing newline.",
+        "AC-2 [cli] --read-token-file - reads the read token from stdin.",
+        "AC-3 [cli] koda fleet repo add group/app --provider gitlab without both token files exits 3 and sends no request.",
+        "AC-4 [cli] koda fleet repo add owner/name --provider github --host https://x exits 3 and sends no request.",
+        "AC-5 [cli] When the created repo's gitlab.warnings contains write_token_human, the command writes a warning naming the write token's username to stderr and exits 0.",
+        "AC-6 [cli] --json prints the created repo as JSON, with no token values in it.",
+        "AC-7 [cli] koda fleet repo credentials <id> --write-token-file w.txt sends PATCH /fleet/repos/<id>/gitlab-credentials with only writeToken.",
+        "AC-8 [cli] koda fleet repo credentials <id> with neither token flag exits 3 and sends no request.",
+        "AC-9 [cli] A token file that does not exist exits 3 with a message naming the file, and sends no request.",
+        "AC-10 [cli; audit-regression] Given the resolved project slug is 'web', when koda fleet repo add owner/name --provider github runs without GitLab-only flags, fleetReposControllerCreate receives exactly { body: { projectSlug: 'web', provider: 'github', owner: 'owner', name: 'name' } }, preserving the existing GitHub request body."
+      ],
+      "tags": [
+        "cli",
+        "fleet",
+        "gitlab",
+        "security",
+        "credentials"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard Commander/client extension with file/stdin secret handling and output discipline; credentials invoke the security override for strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet-repo.ts",
+        "apps/cli/src/commands/fleet-shared.ts",
+        "apps/cli/src/commands/fleet-repo.spec.ts",
+        "apps/cli/src/utils/api.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "suggestedCriteria": [
+        "When --confirm-bot is supplied on GitLab registration or rotation, the generated request body includes confirmBotAccount: true.",
+        "When a rotation response contains write_token_human, the credentials command writes the returned username warning to stderr and exits 0.",
+        "When --json is used with a human-account warning, stdout remains parseable as exactly the returned repo JSON."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/fleet-repo.spec.ts",
+          "reason": "the `add` request body gains the GitLab fields only for `--provider gitlab`; the GitHub body assertions stay unchanged."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cf2980238b594a86f854c35a19d46a3b15be5820"
+    },
+    {
+      "id": "US-008",
+      "title": "Web GitLab registration, credential health and rotation dialog",
+      "description": "**Goal** — Expose GitLab repo connection setup, human warnings, token health and permission-gated rotation in the Nuxt admin UI.\n\n**Motivation** — The owner wants koda to work on GitLab repos as close to GitHub as possible, on gitlab.com and on self-hosted GitLab.\n\n**Approach** — Verbatim story design: `AddRepoDialog.vue` gains the GitLab fields. The repo admin list shows the host, the token statuses and the human-account badge. Adds a `RepoGitlabCredentialsDialog.vue` for rotation, and en/zh strings.\n\nShared registration contract (verbatim):\n`CreateFleetRepoDto` gains, for `provider: 'gitlab'` only:\n- `host?: string`;\n- `readToken: string` and `writeToken: string`, both 1 to 512 characters and never returned;\n- `confirmBotAccount?: boolean`.\n\nResponse contract (verbatim):\n`FleetRepoDto` gains `host: string` and `gitlab: { projectId: number; readToken: GitLabTokenSummaryDto; writeToken: GitLabTokenSummaryDto & { isBot: boolean }; warnings: string[] } | null`:\n- `GitLabTokenSummaryDto` is `{ username, expiresAt: string | null, status: 'ok' | 'invalid' | 'expiring' }`;\n- `warnings` is `['write_token_human']` when `isBot` is false, otherwise `[]`;\n- `gitlab` is `null` for a GitHub repo and for a GitLab repo with no record.\n\nRotation contract (verbatim):\n`PATCH /fleet/repos/:id/gitlab-credentials` with `{ readToken?, writeToken?, confirmBotAccount? }`.\nAt least one token is required, otherwise 400 `fleet.repoGitlabCredentialsEmpty`.\nThe route needs the new global catalog key `fleet.repo.credentials.update`, tier `high` through the `fleet.repo.` prefix in `HIGH_RISK_PREFIXES`.\n\nUse the existing Vue form/composable/dialog patterns, not React/Next.js or a generated web client. On GitLab provider selection show optional host, read/write password inputs and dedicated-bot checkbox; hide and omit these fields for GitHub. Validate either token empty with fleet.repos.gitlab.tokensRequired. Map checkbox to confirmBotAccount and omit host when empty. After successful create show fleet.repos.gitlab.humanWarning with gitlab.writeToken.username when warnings includes write_token_human; do not discard the warning invisibly by immediately closing/resetting its only display. Existing cancellation clears the draft, and raw token inputs must not remain in shared repo state.\n\nOn the admin list show the repo host, both returned token statuses (ok/invalid/expiring), and fleet.repos.gitlab.humanBadge when writeToken.isBot is false; handle gitlab:null for unconnected repos without rendering fabricated usernames/statuses. Offer RepoGitlabCredentialsDialog only on GitLab rows when useGlobalPermissions contains fleet.repo.credentials.update. Follow RepoFixUnprotected's permission, saving/pending and extractApiError pattern; send only supplied tokens/confirmation and leave the dialog open on refusal with the extracted API error. Add API requests to useFleetRepos and extend the hand-written FleetRepo/NewFleetRepo/rotation body types in lib/fleet-types.ts. API-owned scope, host and bot decisions are not reimplemented in the UI. Do not add polling or auto-check all repos on mount. Depends on US-004 and US-005; use the rotation contract in mocked component tests.\n\nReason localization (verbatim): `RepoCheckException(reason)` (422, `git-broker/repo-check.exception.ts`). Its `RepoCheckReason` union gains `gitlab_credentials_missing`, `gitlab_host_invalid`, `gitlab_host_blocked`, `gitlab_host_unclassified`, `gitlab_read_token_writable`, `gitlab_read_token_no_access` and `gitlab_project_mismatch`, and `RepoCheckResultDto`'s `REASONS` list (`repos/dto/repo-check-result.dto.ts`) gains the same. New API messages go into `src/i18n/en/fleet.json` and `src/i18n/zh/fleet.json`. The web shows each reason from `fleet.repoReason.<reason>` in `apps/web/i18n/locales/{en,zh}.json` (read by `RepoReachabilityBadge.vue`), where the new reasons get strings (US-008).\n`vcs_connection_missing` and `vcs_connection_mismatch` stay in `RepoCheckReason`, `REASONS` and the web locales, although nothing in the fleet throws them after US-006.\n\nEvery new form, warning, health and rotation string has en/zh under fleet.repos.gitlab; reachability reason strings use fleet.repoReason as specified. Extend tests/i18n/fleet-locale-parity.spec.ts's ENUMS['fleet.repoReason'] with exactly the seven new reasons and retain other lists. Extend existing page/form/composable specs and add the new dialog spec, mocking Nuxt API and permission boundaries.\n\n**Scope** — In: GitLab conditional registration form, admin host/health/human badge, rotation dialog/composable/types, API error display and en/zh UI/reason strings. Out: API storage/host/verification/approval implementation (US-001/002/004/005), broker/clone (US-003), source removal (US-006), CLI (US-007), global layout/navigation redesign, health polling and opening GitHub-only fleet features.\n\n**Interface** — `POST /fleet/repos` receives `{ projectSlug, provider, owner, name, host?, readToken, writeToken, confirmBotAccount? }` for GitLab; `PATCH /fleet/repos/<id>/gitlab-credentials` receives only supplied `{ readToken?, writeToken?, confirmBotAccount? }`; `RepoGitlabCredentialsDialog.vue` consumes the safe FleetRepo record and updates the displayed record on save through the existing composable pattern.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] In AddRepoDialog, choosing provider gitlab shows host, read token, write token and dedicated bot account inputs; choosing github hides them.",
+        "AC-2 [unit] Submitting the GitLab form calls POST /fleet/repos with host, readToken, writeToken and confirmBotAccount, and leaves host out when the field is empty.",
+        "AC-3 [unit] The GitLab form refuses to submit, showing the fleet.repos.gitlab.tokensRequired message, when either token is empty.",
+        "AC-4 [unit] After a create whose response has gitlab.warnings ['write_token_human'], the dialog shows the fleet.repos.gitlab.humanWarning text with the write token's username.",
+        "AC-5 [unit] The repo admin list shows a GitLab repo's host, and a badge with the fleet.repos.gitlab.humanBadge text when gitlab.writeToken.isBot is false.",
+        "AC-6 [unit] The repo admin list shows each token's status, using fleet.repos.gitlab.status.invalid for an invalid token and fleet.repos.gitlab.status.expiring for an expiring one.",
+        "AC-7 [unit] RepoGitlabCredentialsDialog submitting only a new write token calls PATCH /fleet/repos/<id>/gitlab-credentials with only writeToken.",
+        "AC-8 [unit] RepoGitlabCredentialsDialog is offered only for GitLab repos and only when the viewer holds fleet.repo.credentials.update.",
+        "AC-9 [unit] A refused rotation shows the API error through extractApiError and keeps the dialog open.",
+        "AC-10 [unit] Every new string has an en and a zh entry under fleet.repos.gitlab.",
+        "AC-11 [unit] The repo reachability badge shows the fleet.repoReason.gitlab_host_blocked text for a check result with reason gitlab_host_blocked, and each of the seven new reasons has an en and a zh string.",
+        "AC-12 [unit; audit-regression] When AddRepoDialog submits valid projectSlug, owner and name with provider github, POST /fleet/repos receives exactly those four fields and no host, readToken, writeToken or confirmBotAccount, preserving the existing GitHub form payload."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "gitlab",
+        "security",
+        "credentials",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Conditional secret-bearing forms, permission-gated rotation and cross-component response/locale changes span the Nuxt UI; credentials/access checks require strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/AddRepoDialog.vue",
+        "apps/web/pages/admin/fleet/repos.vue",
+        "apps/web/components/fleet/RepoFixUnprotected.vue",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/composables/useFleetRepos.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/RepoGitlabCredentialsDialog.vue",
+        "apps/web/tests/components/repo-gitlab-credentials-dialog.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the add dialog switches from GitLab to GitHub before submission, the GitHub request contains none of host, readToken, writeToken or confirmBotAccount.",
+        "When the rotation dialog is cancelled and reopened, both token inputs are empty.",
+        "When a GitLab repo response has gitlab:null, the admin row remains renderable and offers credential setup to an authorized viewer without showing a human-account badge."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "the `ENUMS['fleet.repoReason']` list gains `gitlab_credentials_missing`, `gitlab_host_invalid`, `gitlab_host_blocked`, `gitlab_host_unclassified`, `gitlab_read_token_writable`, `gitlab_read_token_no_access` and `gitlab_project_mismatch`, so it still equals the API's reason values; the other enum lists stay."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6c3fe512649d117c8e1b40a0d869bee6e6a5824b"
+    }
+  ],
+  "analysis": "FEATURE AND DONE: F1 of four GitLab-parity slices replaces fleet's per-project ticket-sync credential with an encrypted per-repo read/write connection. Completion means GitLab registration and reachability checks verify that connection, RUN mints and clone URLs use it, MR refresh/config reads use its read token, attribution uses its write token, rotation is permission/approval gated and evicts cached credentials, and CLI/web expose setup, rotation, status and the human-account warning. GitHub behavior and ticket sync must remain unchanged. The first live target is freqtrade/quant-crypto-trader, not a hardcoded fixture or special case. No runner protocol change or opening of REVIEW/FIX/AGENT is part of F1.\n\nDISCOVERY AND AUTHORITY: codebase-memory MCP and shell execution are unavailable in this session; findings come from direct Read/Grep/Glob of the execution repository. The current feature source exists at .nax/features/gitlab-repo-credentials/spec.md:345. The user-supplied spec and its Binding Story Structure are authoritative, including the later binding dependencies that differ from the narrative Stories section. The broader design at docs/superpowers/specs/2026-11-16-gitlab-parity-design.md:1 describes the whole parity arc, not permission to implement features 2–4. In particular its broader host-aware flow matching, forge-connected guards, runner identity and redirect/error prose must not override this F1 spec or its ACs. The eight story ids and workdirs are fixed. US-006 depends ONLY on US-002, and US-008 depends ONLY on US-004. Do not silently strengthen those arrays. Operational ordering risk: deleting GitLabTokenSource under US-006 before US-003/US-004 replace their remaining consumers breaks imports/DI; reconcile execution/merge ordering with those consumer changes without broadening this deletion-only story or adding a compatibility fallback. Other staged-compilation seams also need coordination: US-001's missing-credential exception uses a reason assigned to the vocabulary expansion in US-002; US-002 removes verifyRepo before US-004 replaces FleetReposService's old invocation. These are implementation-order/type-boundary risks, not permission to add stories, change the binding DAG, retain a legacy secret fallback or move full registration behavior into the client story. US-008 consumes the rotation contract specified here even though US-005 is not a declared prerequisite; frontend tests mock that boundary and integrated validation needs the completed route. US-004 requires the target FleetReposService constructor to inject GitTokenBroker, but evictRepo itself is owned by US-003 and used by US-005.\n\nARCHITECTURE AND CONVENTIONS: This is an enhancement to a Bun-managed Turborepo, not greenfield. API is NestJS/Fastify with Prisma 7 and Vitest; use Nathapp repository/transaction, exception, permission and approval patterns. Read .nax/mono/apps/api/context.md before implementation and the Nathapp capability catalog before new Nest code; docs MCP is unavailable in this planning session. CLI is Commander with a generated hey-api client, envelope helpers and Jest. Despite the supplied detected-stack table saying Next.js, web is Nuxt 4/Vue SSR with Nuxt-native composables, vee-validate/zod, shadcn components and Jest: .nax/mono/apps/web/context.md:19 and apps/web/components/fleet/AddRepoDialog.vue:58. Do not add a generated web client or backend rules in the browser. User-facing API messages and web messages use separate en/zh systems. Never edit generated AGENTS.md or generated CLI files by hand. Root package.json:19-23 defines spec export and generate; run bun run generate from the repo root after US-004 and US-005 to update openapi.json and apps/cli/src/generated/ before US-007. Workdirs remain the binding package paths even though API generation and the permission inventory also affect root artifacts.\n\nUS-001 DATA AND SECRET BOUNDARY: apps/api/prisma/schema.prisma:846-883 currently defines FleetRepo with no host/credential relation and a global @@unique([provider, owner, name]). Add host default https://github.com; backfill existing gitlab rows to https://gitlab.com; replace uniqueness with (provider, host, owner, name); create the one-to-one cascading credential table in migration 20261216090000_fleet_repo_gitlab_credentials. Do not seed credentials or copy VcsConnection tokens. Existing GitLab rows become unconnected; GitHub retains its existing configured URL behavior. apps/api/src/fleet/git-broker/gitlab-token.source.ts:8-29 demonstrates the old project-bound lookup, encryption-key refusal and decrypt-error normalization. apps/api/src/common/utils/encryption.util.ts:7-25 already provides randomized AES-256-GCM encryption and :33-70 decryption under the existing hex master key; reuse it, do not add crypto or token plaintext storage. Store/service owns secret-table access via a module-private PrismaGitlabCredentialRepository. Safe projection of credential summaries by the repo repository is the explicitly allowed non-secret read boundary; never include either encrypted column there. apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts:25-37,100-119,135-138,173-177 has the summary-select/toDomain/include pattern to extend. create catches P2002 and translates the existing conflict; raw DB integration AC-3 must still observe P2002. apps/api/src/fleet/repos/domain/fleet-repo.domain.ts:36-68 needs optional host and GitLabCredentialView so older fixtures stay valid; omit read-model-only gitlabCredential from repository create input types. apps/api/src/fleet/repos/dto/fleet-repo.dto.ts:62-103 explicitly projects the response and serializes dates/BigInt; extend rather than exposing an ORM object. New DTO summaries never expose ids of token users unless requested by the design, encrypted columns, or plaintext. The from(r, now = new Date()) optional clock is security-health presentation, not a refresh or write. Beware list() currently passes FleetRepoDto.from as a callback at apps/api/src/fleet/repos/fleet-repos.service.ts:283-284; ensure adding a second optional Date argument does not accidentally consume an array index. apps/api/src/fleet/git-broker/git-broker.module.ts:10-15 currently imports VcsModule and exports the old source; wire the new service/repository here and keep the repository private. Token invalidity is sticky until that token is replaced; successful calls never clear it; decrypt failures do not mark a remote invalidity. Date status is invalid first, then expiring at <=14 days including already-expired dates, then ok (including no expiry).\n\nUS-002 NETWORK AND CLIENT: apps/api/src/fleet/git-broker/gitlab-access-checker.ts:18-26 injects the one global URL; :29-104 addresses MR/branch/tree/file resources by encoded owner/name; :106-128 combines scope/access verification in verifyRepo. Replace that coupling with GitLabAccess (token, target.apiBase, target.projectId), getTokenSelf/getCurrentUser/findProject, and shared status normalization, preserving existing method-specific 404 meanings. getTokenSelf 404 is invalid; 403 is app_permissions_insufficient, not the old invalid-token mapping. Preserve listTree pagination bounds at :67-88 and the file/base64/ref behavior at :94-103. Requests must recheck all resolved addresses for the target host before EVERY HTTP request, including paginated requests, while retaining FleetHttpClient timeout/no-redirect behavior (apps/api/src/fleet/git-broker/fleet-http-client.ts:21-47). This does not pin DNS to the eventual TCP connection; do not claim full rebinding protection. Host parsing preserves optional port and path prefix while rejecting non-HTTPS, credentials, query and fragment. Classification inspects hostname, not a path containing gitlab. apps/api/src/webhook/outbound/address-classifier.ts:17-32 blocks private/link-local/CGNAT ranges and :82-96 permits allow-listed CIDRs before blocks; leave this shared classifier unchanged and give it the four private/LAN CIDRs only after GitLab's literal fd00:ec2::254 metadata block. IPv4-mapped metadata addresses must remain blocked. apps/api/src/fleet/git-broker/repo-check.exception.ts:3-17 and apps/api/src/fleet/repos/dto/repo-check-result.dto.ts:4-8 maintain a closed reason vocabulary; add the seven new codes, retaining vcs_connection_missing/vcs_connection_mismatch. Do not echo provider response bodies in errors. MR reader migration is at apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts:123-132; its per-link catch at :111-118 must still skip failed refreshes. RefreshRepo at apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:30-32 and its select at :237 must carry host. apps/api/src/fleet/sync/pr-attribution.service.ts:58-69 wraps comments in a claim and returns posted/failed/skipped; use call(write) without changing those outcomes or logging secrets. apps/api/src/fleet/repo-config/gitlab-fleet-repo-files.reader.ts:15-27 wraps list/read in forgeCall and maps missing files; use call(read) with access-based client calls, preserving that mapping. Existing unit tests often use an HTTP fake on localhost; apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts:17-20 and apps/api/test/integration/fleet/fleet-repos.integration.spec.ts:33-41 currently bypass any HTTPS/host check via global config. Adapt by injecting/stubbing forge/host boundaries in tests, NOT by relaxing production HTTPS or loopback blocking.\n\nUS-003 CACHE AND HOST PROPAGATION: apps/api/src/fleet/git-broker/git-token.broker.ts:30-35 defines the existing purpose/job/epoch keys, :48 the token-only cache, :66-88 lookup/pruning/error normalization, :91-93 job-prefix eviction, and :123-126 the GitLab write branch. Change values to { token: GitToken, repoId: string } without changing keys, reuse margin, TTL, returned GitToken, GitHub permission logic or error redaction. evictRepo must invalidate every entry associated with the repo and leave others reusable. Purpose/read-only refusals must not be bypassable by a cached write entry. Keep both refusal regressions; F1's stored read token is only for existing API read callers, not new read-only job mints. apps/api/src/fleet/git-broker/clone-url.ts:1-16 strips API prefixes today; use repo.host for GitLab, retaining cfg.gitlabApiUrl fallback when host is absent (US-003 AC-7), unlike credential resolve's distinct default of https://gitlab.com. GitHub ignores repo.host and continues using cfg.githubApiUrl. FleetRepoRef at apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:351-362 needs host?: string. apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:94-100 and :143-150 use narrow selects that must include host. apps/api/src/fleet/jobs/placement.service.ts:321 and apps/api/src/fleet/jobs/project-repos-assign.ts:42 already pass repo unchanged to cloneUrlFor; retain that path. Do not open project/thread GitLab support through project-repos-assign's GitHub-only gate. Exact-column assertions in apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-project-repos.spec.ts:59-65 will need the new selected field. Assignment integration must prove the real row's host survives into the ASSIGN clone URL, not just test a helper fixture.\n\nUS-004 REGISTRATION/CHECK TRANSACTION BOUNDARY: apps/api/src/fleet/repos/dto/create-fleet-repo.dto.ts:4-10 currently accepts only projectSlug/provider/owner/name; add conditional fields and required 1..512-char GitLab tokens without silently stripping GitLab-only fields from a GitHub request instead of rejecting them. apps/api/src/fleet/repos/fleet-repos.service.ts:35-44 lists current constructor dependencies; replace the old source and insert broker plus FLEET_CFG gitlabBotName in exactly the target order. :50-88 separates HTTP preparation from txManager.run; preserve this safety and project recheck. Verify key before outbound calls; host gates, both token-self/scope checks, both user checks, write project/canonicalization/Developer access, then read access to the numeric id, in that order. Store immediately after repo.create in the same transaction; re-read to obtain safe summary before building response. writeTokenIsBot is bot flag OR exact configured bot-name equality OR admin confirmation; no refusal for a human and no new same-user-id rejection rule is specified even though the motivation recommends one bot identity. Audit only the fixed spec summary plus verified username. apps/api/src/fleet/repos/fleet-repos.service.ts:317-343 prepares a verdict then compares row equality in the closure; exclude gitlabCredential from both sides, resolve/check directly rather than call(), defer markInvalid until after comparison, and do not repeat /user or alter stored canonical metadata during a check. Construction fixtures in fleet-repos.service.spec.ts:13, auto-review, disable-auto-review, fix-checks, fix-unprotected, rule-override and approvals/approval-execution.service.spec.ts need the target parameter order while preserving unrelated assertions. Approval create currently registers prepare/run with no redaction at apps/api/src/fleet/repos/fleet-repo-route.commands.ts:64-70; mirror redeem.redact, not ad-hoc masking or logging. Approval compatibility requires explicit clarification, not weakened assertions: apps/api/test/integration/fleet/gated-fleet-admin-routes.integration.spec.ts:70-77 currently expects GitHub approval to execute immediately, while apps/api/src/approvals/approval-command.registry.ts:26-35 and apps/api/src/approvals/route/route-command.ts:79-81 make redeem a command-wide mode, even if redact finds no token fields. The spec requires create redaction and also says existing GitHub/gated-route assertions stay. Do not assume a conditional redeem helper exists or change those regression expectations to accept altered GitHub behavior; resolve this shared-command contract tension before implementation. GitLab approval inputs must still never store supplied tokens.\n\nUS-005 ROTATION/AUTHORIZATION: apps/api/src/fleet/repos/fleet-repos.controller.ts:157-177 is the fix-unprotected controller pattern: RequiresGuard, global Requires key, ApprovalGated, routeGate.run variant/projectId:null, pending response, JsonResponse. Use this pattern for PATCH /fleet/repos/:id/gitlab-credentials and validate a nonempty token patch (confirm-only is empty). apps/api/src/fleet/repos/fleet-repo-route.commands.ts:16-25 and :104-114 show variant registration and parsed {id,patch}. apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts:37-46,69-81 explain redemption and redaction preserving absent fields; apps/api/src/approvals/route/redact-secret.ts:8 fixes the marker as <redacted>. Permission catalog contains high-risk fleet.repo. at apps/api/src/permissions/catalog.ts:173-177 and inventory scope rows at :256-260. Add the global action, inventory TSV REST row and the role-matrix cell matching fleet.repo.create for EVERY role, without unrelated permission drift. Preserve existing keys/snapshots and extend catalog/gated-route assertions. Preflight stored host and supplied tokens against stored project id, map missing write-project to gitlab_project_mismatch and missing read-project to gitlab_read_token_no_access, save only verified replacements, then evict repo cache and audit exactly the relevant replacement summary. Network work must not be held inside a DB transaction. Failed verification must not save or evict. Existing credentials for the untouched kind, its invalid marker, user and expiry remain unchanged. No optimistic locking for simultaneous rotations; last save wins as explicitly deferred. Legacy-reconnection ambiguity to resolve before implementing that edge: migration creates no credential row, but rotation verification requires the stored gitlabProjectId, which lives only in that absent row, and a first upsert requires both encrypted tokens while the route allows one. The spec promises admins can add legacy credentials via rotation but does not give an alternative project-id discovery algorithm for that case. Do not invent a VcsConnection fallback, silently restore the old one-repo-per-project rule, or add a new rejection to the acceptance criteria; surface this gap for clarification.\n\nUS-006 REMOVAL: apps/api/src/fleet/git-broker/git-broker.module.ts:6,12-13 and gitlab-token.source.ts/spec.ts are the deletion targets. Direct text search also finds old-source imports in service/broker/refresher/attribution/files reader and sync.service.token-purpose.spec.ts:8,30; their replacements belong to US-002/003/004, not new work in this deletion-only story. Keep legacy reason values/locales and all ticket-sync sources. DI compilation is a no-DB unit spec beside GitBrokerModule with external Prisma/config/transaction collaborators mocked, never an integration suite. Static build/lint verify removed references; absence is not an AC.\n\nUS-007 CLIENT: apps/cli/src/commands/fleet-repo.ts:21-44 has generated create + context resolution, JSON/human formatting and API error handling; extend it and register the credentials command at :119-126. apps/cli/src/commands/fleet-shared.ts:40-46 already splits GitLab subgroup paths and :101-103 routes validation to exit 3. Read supplied files or '-' stdin and strip a trailing newline before sending; missing files/required flags and GitHub-only invalid combinations must fail before any API request. Do not locally replicate forge scope/host/identity validation. Use the regenerated endpoint, not a handwritten PATCH. Warning goes to stderr even with --json, names the returned write username, does not change successful exit status, and never prints submitted tokens. The rotation command must not require project context. Existing Jest tests at apps/cli/src/commands/fleet-repo.spec.ts:5-12 mock the generated boundary and :49-66 pin subgroup bodies and validation exit behavior; preserve GitHub/list/rm/check assertions while updating GitLab add fixtures.\n\nUS-008 UI: apps/web/components/fleet/AddRepoDialog.vue:9-46 defines existing form fields; :87-97 schema/defaults and :101-115 resets/closes on success. Add GitLab-only host/password-token/confirmation inputs and conditional required-token error, omit empty host in request, and make successful human warnings visibly available before draft reset/close removes them. apps/web/pages/admin/fleet/repos.vue:58-66 intentionally loads rows without a forge fan-out, :118-139 renders per-row status/actions; add host, read/write status, human badge and GitLab-only permission-gated rotation without opening GitHub-only feature controls or adding polling. apps/web/components/fleet/RepoFixUnprotected.vue:21-43 demonstrates useGlobalPermissions, saved vs pending and extractApiError without closing on failure; the new dialog follows this existing client pattern. apps/web/composables/useFleetRepos.ts:75-99 already owns create/PATCH and union results; extend it for rotation and body types in apps/web/lib/fleet-types.ts:145-169. No secrets enter long-lived shared state, URLs or repo response models. apps/web/components/fleet/RepoReachabilityBadge.vue:20-24 maps structured reason codes to fleet.repoReason keys; add both locale entries and extend the exact enum parity list at apps/web/tests/i18n/fleet-locale-parity.spec.ts:24-28 without removing old reasons or changing other enums. New form/status/warning text is under fleet.repos.gitlab in en/zh. Existing mount harness and page tests are apps/web/tests/pages/admin-fleet-repos.spec.ts:57-99, which mount real badges and stub permissions/API/components; extend these plus composable and new dialog specs rather than relying only on static source checks.\n\nTESTING AND RISK CONTROLS: Every story touches credentials, authorization or removal of their source, so all use strict three-session-tdd regardless of scope; US-006 remains a binding deletion-only story with a DI behavior criterion. API unit specs are src/**/*.spec.ts and use vi; DB behavior belongs under test/integration/**/*.integration.spec.ts. Existing regression anchors include fleet-repo.dto.spec.ts, gitlab-access-checker.spec.ts, fleet-pr-state.refresher.spec.ts, pr-attribution.service.spec.ts, fleet-repo-files.reader.spec.ts, git-token.broker.spec.ts, git-token.broker.purpose.spec.ts, sync.service.token-purpose.spec.ts, fleet-repos.service.spec.ts and the other service-construction specs, fleet-repo-route.commands.spec.ts, permissions/catalog.spec.ts, fleet-repos.integration.spec.ts and gated-fleet-admin-routes.integration.spec.ts. Keep unrelated GitHub assertions intact. API DB runs must actually run outside NAX_SANDBOXED=1 using the shared canRunDbTests gate and host test:scoped path; skipped suites are not migration/transaction verification. DB global setup resets a dedicated *_test database; do not run two DB suites concurrently against it. Standard DB tests use prisma db push, so review/apply the committed migration separately to establish its existing-row backfill and index replacement rather than claiming db-push alone tests upgrade SQL. Module compilation must stay DB-free. CLI Jest mocks generated boundaries; web Jest uses existing Vue harness. Generated acceptance files are separate .nax feature tests, never edited/copied into test discovery. No implementation or tests were run during this PRD-only task.\n\nFAILURE-TABLE TRACEABILITY: host syntax and no-request behavior map to US-002 AC-2/8 and US-004 AC-2; unclassified hostname maps to US-002 AC-3/US-004 AC-3; blocked and mixed DNS addresses to US-002 AC-5/6/8; changed DNS on a later request is the explicitly table-derived US-002 AC-16. Registration/rotation invalid tokens share US-002 AC-9 and US-004 AC-12 (rotation also has table-derived AC-14); stored invalid-token state and existing caller failure paths use US-001 AC-10 and table-derived US-002 AC-17. Required scopes map to US-004 AC-5 and table-derived AC-16; writable reads to US-004 AC-6/US-005 AC-5; Developer access to US-004 AC-7; invisible read project to US-004 AC-8; wrong rotation project to US-005 AC-4; no record to US-001 AC-8/US-003 AC-3; unset encryption key to US-001 AC-9 (registration/rotation reuse the same assertion and are not separately tested as deferred); human warning/audit to US-001 AC-15/US-004 AC-10/13; duplicate identity to US-001 AC-3 and the existing conflict mapping. Additional ACs explicitly labeled failure-table-derived enumerate requirements, not invented enhancements. The spec's testing exclusions are copied verbatim into outOfScope and are not converted into extra independent tests. Risks requiring particular care are secret persistence through approval inputs, stale cache returns after rotation, wrong-token-kind use, partial-rotation state loss, permissive host classification, exact reason/locale parity, HTTP work inside transactions and accidental spillover into later parity slices.\n\nREFINE AUDIT: Manually compared every original criterion against .nax/features/gitlab-repo-credentials/spec.md:528-643. Preservation inventory (all remain in their original stories): US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10; US-004 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13; US-006 AC-1; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9; US-008 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11. That is 89 original ACs, with no dropped regression qualifiers: same record/configured key, untouched token markers, null expiry, as-today clone fallback, whatever GitHub host holds, no conflict, only from the returned closure/not prepareCheck, every other field unchanged, absent tokens absent and no-request/error-body clauses remain explicit. US-004 AC-13 now identifies the forbidden fields at the response top level, reconciling its wording with the explicitly required nested gitlab.readToken/writeToken summary objects without allowing plaintext tokens. No deprecated file-check tags occur. The four failure-table-derived ACs from the first draft remain; the refinement adds only requested negative/regression assertions (US-006 AC-2, US-004 AC-17, US-007 AC-10, US-008 AC-12). US-002 AC-17 now names observable existing outcomes rather than a vague files refusal: the files path uses forgeCall at apps/api/src/fleet/repo-config/fleet-repo-files.reader.ts:47-55 and throws RepoUnreachableException(reason), HTTP 409, defined at repo-config.exceptions.ts:4-7. Every story now includes a negative path; every changed existing path has a regression or replacement assertion. All original 21 feature-level out-of-scope items from spec.md:347-367 remain verbatim; there are no story-local under-AC deferral blocks to relocate. contextFiles retains every spec-recommended context file within the five-file limit; US-004 uses its remaining slot for the real approval-command contract rather than a less-critical test fixture. New files remain outputs, not self-context. All dependencies/workdirs remain exactly the Binding Story Structure, including its unusual US-006/US-008 entries; every dependency id exists. US-002 complexity is reduced from expert to complex because it extends existing HTTP/address-classifier infrastructure rather than inventing it. Strict three-session-tdd remains for every story solely because each touches credentials or access control. No implementation or test execution was performed in this refinement.",
+  "outOfScope": [
+    "REVIEW, FIX and AGENT jobs, purpose and read-only GitLab mints, and the RUN forge identity for GitLab (feature 2 of GitLab parity).",
+    "Threads with project code, the project brief, the knowledge index, PR rulings and review events on GitLab (feature 3 of GitLab parity).",
+    "Flows, auto-review, fix-checks, the FIX protected-branch gate and CI pipeline status on GitLab (feature 4 of GitLab parity), including host-aware matching in `findByIdentity` for the nax flow entry.",
+    "Minting short-lived GitLab tokens per job (project or group access tokens through the API); deferred by the owner because gitlab.com Free does not offer them.",
+    "Inbound GitLab webhooks; the 2026-09-27 ruling stands and GitLab stays poll-driven.",
+    "Ticket sync (`apps/api/src/vcs/`) and its `VcsConnection` token, which keep working unchanged.",
+    "Self-hosted GitLab hosts whose name lacks `gitlab`; they wait for nax #2957 and are refused with `gitlab_host_unclassified` until then.",
+    "Pinning the TCP connection to the address `assertGitLabHostAllowed` checked; a DNS answer that changes between the check and the connect is not defended against.",
+    "CGNAT addresses (`100.64.0.0/10`, used by some overlay networks) as self-hosted GitLab hosts; they stay blocked.",
+    "Changing `VCS_GITLAB_API_URL`, which ticket sync still reads.",
+    "A background poller for token health; a token is marked invalid only when a call it makes answers 401.",
+    "Migrating any existing GitLab fleet repo onto a credential record; an admin adds its tokens through rotation.",
+    "US-004 only: the registration verification calls are not retried; a transient GitLab failure answers `provider_unreachable` or `provider_error` and the admin repeats the call.",
+    "US-005 only: concurrent rotations of one repo; the last save wins, and both evict the broker cache.",
+    "US-002 only: per-request rate limiting of GitLab API calls; the existing poll intervals bound them.",
+    "US-002 only: `gitlab_credentials_missing` on the refresher, attribution and files paths is not tested separately; each goes through `GitLabRepoCredentials.call`, whose `resolve` refusal is pinned by US-001 AC-8, and each path's existing catch handles it.",
+    "US-004 only: `gitlab_host_blocked` through `prepareCreate` is not tested separately; AC-2 and AC-3 pin that the host step runs before any GitLab call, and US-002 AC-5, AC-6 and AC-8 pin the blocking itself.",
+    "US-004 only: `vcs_encryption_key_missing` at registration and the duplicate-repo conflict are not tested separately; the first is the store's own refusal (US-001 AC-9 covers `resolve`, and `save` uses the same key check), and the second is the existing create conflict on Prisma `P2002` (US-001 AC-3).",
+    "US-004 only: no test asserts token values are absent from log lines; the service logs only repo ids and reason codes, never a token, and the audit summaries are fixed strings pinned by AC-10 and AC-11.",
+    "US-005 only: no test asserts token values are absent from log lines; the service logs only repo ids and reason codes, never a token, and the audit summaries are fixed strings pinned by AC-3 and AC-8.",
+    "US-001 only: a stored token that fails to decrypt under a changed `VCS_ENCRYPTION_KEY` answers `gitlab_token_invalid` and is not marked invalid; re-keying stored tokens is not supported."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}

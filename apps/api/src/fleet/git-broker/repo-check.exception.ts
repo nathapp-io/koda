@@ -13,8 +13,16 @@ export type RepoCheckReason =
   | 'vcs_connection_mismatch'
   | 'vcs_encryption_key_missing'
   | 'gitlab_token_invalid'
+  | 'gitlab_credentials_missing'
   | 'gitlab_access_insufficient'
-  | 'gitlab_scope_missing';
+  | 'gitlab_scope_missing'
+  // US-002 (GitLab parity F1): the host rule and the two token kinds of a repo.
+  | 'gitlab_host_invalid'
+  | 'gitlab_host_blocked'
+  | 'gitlab_host_unclassified'
+  | 'gitlab_read_token_writable'
+  | 'gitlab_read_token_no_access'
+  | 'gitlab_project_mismatch';
 
 /** 422: the forge refused or could not confirm runner git access (spec §7.1). */
 export class RepoCheckException extends AppException {

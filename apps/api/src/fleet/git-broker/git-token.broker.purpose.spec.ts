@@ -9,7 +9,8 @@ const minted = { token: 'minted', expiresAt: new Date(NOW.getTime() + 60 * 60_00
 
 describe('GitTokenBroker job purposes', () => {
   const github = { mintInstallationToken: vi.fn(), mintReadOnlyToken: vi.fn(), mintReviewToken: vi.fn(), isBranchProtected: vi.fn() };
-  const gitlabClient = { resolve: vi.fn() };
+  /** US-003: the GitLab write mint reads the repo's own credential record. */
+  const credentials = { resolve: vi.fn() };
   let broker: GitTokenBroker;
 
   beforeEach(() => {
@@ -18,7 +19,7 @@ describe('GitTokenBroker job purposes', () => {
     github.mintReadOnlyToken.mockResolvedValue({ token: 'readonly', expiresAt: minted.expiresAt });
     github.mintReviewToken.mockResolvedValue({ token: 'review', expiresAt: minted.expiresAt });
     github.isBranchProtected.mockResolvedValue(true);
-    broker = new GitTokenBroker({ gitTokenReuseMarginSec: 300, gitlabTokenTtlSec: 3600 }, github as never, gitlabClient as never);
+    broker = new GitTokenBroker({ gitTokenReuseMarginSec: 300, gitlabTokenTtlSec: 3600 }, github as never, credentials as never);
   });
 
   it('AC-1, AC-2: mints a review token and never a write token', async () => {
@@ -93,7 +94,7 @@ describe('GitTokenBroker job purposes', () => {
     await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab, purpose }, NOW)).resolves.toEqual({
       ok: false, error: { jobId: 'j1', reason: 'provider_error' },
     });
-    expect(gitlabClient.resolve).not.toHaveBeenCalled();
+    expect(credentials.resolve).not.toHaveBeenCalled();
     expect(github.mintInstallationToken).not.toHaveBeenCalled();
   });
 
@@ -188,23 +189,23 @@ describe('GitTokenBroker job purposes', () => {
       expect(github.mintInstallationToken).toHaveBeenCalledTimes(1);
     });
 
-    it('AC-9: rejects a GitLab read purpose with provider_error before any token lookup', async () => {
+    it('US-003 AC-2: rejects a GitLab read purpose with provider_error before any credential lookup', async () => {
       await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab, purpose: 'read' }, NOW)).resolves.toEqual({
         ok: false, error: { jobId: 'j1', reason: 'provider_error' },
       });
-      expect(gitlabClient.resolve).not.toHaveBeenCalled();
+      expect(credentials.resolve).not.toHaveBeenCalled();
       expect(github.mintReadOnlyToken).not.toHaveBeenCalled();
       expect(github.mintInstallationToken).not.toHaveBeenCalled();
     });
 
     it('AC-9: never falls back to a stored GitLab credential already cached by a write mint', async () => {
-      gitlabClient.resolve.mockResolvedValue('glpat-stored');
+      credentials.resolve.mockResolvedValue({ token: 'glpat-stored', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 4711 } });
       const write = await broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab }, NOW);
       expect(write).toMatchObject({ ok: true, token: { token: 'glpat-stored' } });
       await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab, purpose: 'read' }, NOW)).resolves.toEqual({
         ok: false, error: { jobId: 'j1', reason: 'provider_error' },
       });
-      expect(gitlabClient.resolve).toHaveBeenCalledTimes(1);
+      expect(credentials.resolve).toHaveBeenCalledTimes(1);
     });
   });
 });

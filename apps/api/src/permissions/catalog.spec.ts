@@ -750,6 +750,24 @@ describe('fleet.repo.rules.configure', () => {
 });
 
 /**
+ * US-005: the rotation of a repo's GitLab tokens is a global, high-risk repo write. It replaces a
+ * secret a fleet job authenticates with, so an agent's write has to be able to wait for a human.
+ */
+describe('fleet.repo.credentials.update', () => {
+  it('AC-11: is a global, high-risk role key', () => {
+    expect(findCatalogEntry('fleet.repo.credentials.update')).toMatchObject({
+      key: 'fleet.repo.credentials.update', access: 'role', scope: 'global', risk: 'high',
+    });
+  });
+
+  it('AC-11: is approvable, so an agent caller waits for a human', () => {
+    expect(findCatalogEntry('fleet.repo.credentials.update')?.approval).toMatchObject({
+      approvable: true, default: 'agent',
+    });
+  });
+});
+
+/**
  * US-013: the three fleet approval adapter routes and the assistant fleet alias are gone, so their four
  * keys leave the catalog together with the one seed entry that named them. A stored role that still
  * names one is rewritten by the `20261111090000_retire_fleet_approval_keys` migration, because

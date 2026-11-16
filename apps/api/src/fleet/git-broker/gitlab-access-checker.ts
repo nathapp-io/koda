@@ -1,38 +1,69 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
+import { Injectable } from '@nestjs/common';
 import { FleetHttpClient } from './fleet-http-client';
-import type { CanonicalRepo } from './github-app-client';
+import type { GitLabAccess } from './gitlab-repo-credentials';
+import { assertGitLabHostAllowed } from './gitlab-host';
 import { RepoCheckException } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
 import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
-const DEVELOPER = 30;
+/** The GitLab access level a fleet job needs: Developer or above. */
+export const GITLAB_DEVELOPER_ACCESS = 30;
+
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (typeof v === 'object' && v !== null ? (v as Obj) : {});
+/** The access level of one `project_access` / `group_access` entry; 0 when it carries none. */
 const level = (v: unknown): number => {
   const n = obj(v).access_level;
   return typeof n === 'number' ? n : 0;
 };
 
+/**
+ * US-002 (GitLab parity F1): the GitLab API client of the fleet.
+ *
+ * Every call is addressed by an access: the token to present and the target to address — the repo's
+ * own api base and its numeric GitLab project id, never an owner/name pair, because two hosts can
+ * hold the same path. Every request passes the host check first, so a repo row can never make koda
+ * talk to an address inside the deployment.
+ */
 @Injectable()
 export class GitLabAccessChecker {
-  constructor(
-    @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'gitlabApiUrl'>,
-    private readonly http: FleetHttpClient,
-  ) {}
+  constructor(private readonly http: FleetHttpClient) {}
 
-  async commentOnMergeRequest(owner: string, name: string, iid: number, body: string, token: string): Promise<boolean> {
-    const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
-    const res = await this.http.request('POST', `${api}/projects/${encodeURIComponent(`${owner}/${name}`)}/merge_requests/${iid}/notes`, { 'private-token': token }, { body });
-    return res.status === 201;
+  /** The project url of an access: the api base plus the numeric project id. */
+  private projectUrl(access: GitLabAccess): string {
+    return `${trimSlashes(access.target.apiBase)}/projects/${access.target.projectId}`;
+  }
+
+  /** The host check every request passes before it leaves the process. */
+  private async guard(target: string): Promise<void> {
+    await assertGitLabHostAllowed(target);
+  }
+
+  /**
+   * The shared status mapping: 401 is an invalid token, 403 is not enough permission, and anything
+   * else is a fault of the provider. The caller keeps the meaning of its own 404.
+   */
+  private fail(status: number): never {
+    if (status === 401) throw new RepoCheckException('gitlab_token_invalid');
+    if (status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    throw new RepoCheckException('provider_error');
+  }
+
+  /** Posts a note on a merge request. False when the merge request is gone or the note was refused. */
+  async commentOnMergeRequest(access: GitLabAccess, iid: number, body: string): Promise<boolean> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('POST', `${this.projectUrl(access)}/merge_requests/${iid}/notes`, { 'private-token': access.token }, { body });
+    if (res.status === 201) return true;
+    if (res.status === 404) return false;
+    this.fail(res.status);
   }
 
   /** Fleet C9 §3.4: one MR's state with the project's GitLab token. Null when the MR does not exist. */
-  async getMergeRequest(token: string, owner: string, name: string, iid: number): Promise<VcsPrStatus | null> {
-    const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
-    const res = await this.http.request('GET', `${api}/projects/${encodeURIComponent(`${owner}/${name}`)}/merge_requests/${iid}`, { 'private-token': token });
+  async getMergeRequest(access: GitLabAccess, iid: number): Promise<VcsPrStatus | null> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/merge_requests/${iid}`, { 'private-token': access.token });
     if (res.status === 404) return null;
-    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    if (res.status !== 200) this.fail(res.status);
     const b = obj(res.body);
     if (typeof b.state !== 'string' || typeof b.web_url !== 'string') throw new RepoCheckException('provider_error');
     const mergedBy = obj(b.merged_by).username;
@@ -50,15 +81,12 @@ export class GitLabAccessChecker {
     };
   }
 
-  private project(owner: string, name: string): string {
-    return `${this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '')}/projects/${encodeURIComponent(`${owner}/${name}`)}`;
-  }
-
   /** Fleet S3 §4.1: the commit a branch points at. */
-  async getBranchHead(token: string, owner: string, name: string, branch: string): Promise<string> {
-    const res = await this.http.request('GET', `${this.project(owner, name)}/repository/branches/${encodeURIComponent(branch)}`, { 'private-token': token });
+  async getBranchHead(access: GitLabAccess, branch: string): Promise<string> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/branches/${encodeURIComponent(branch)}`, { 'private-token': access.token });
     if (res.status === 404) throw new RepoCheckException('repo_not_found');
-    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    if (res.status !== 200) this.fail(res.status);
     const id = obj(obj(res.body).commit).id;
     if (typeof id !== 'string') throw new RepoCheckException('provider_error');
     return id;
@@ -71,13 +99,16 @@ export class GitLabAccessChecker {
    * Fleet S3 §4.1: recursive tree under `path` at `ref`. FleetHttpClient exposes no headers, so paging stops at the first short
    * page; more than TREE_MAX_PAGES full pages is refused (a `.nax/` that large is not a config dir).
    */
-  async listTree(token: string, owner: string, name: string, path: string, ref: string): Promise<ForgeTreeEntry[]> {
+  async listTree(access: GitLabAccess, path: string, ref: string): Promise<ForgeTreeEntry[]> {
     const out: ForgeTreeEntry[] = [];
     for (let page = 1; page <= GitLabAccessChecker.TREE_MAX_PAGES; page += 1) {
+      // The host is checked again before every page: the answer of the resolver may have changed
+      // since the page before, and a page must never leave the process towards a blocked address.
+      await this.guard(access.target.apiBase);
       const query = `path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}&recursive=true&per_page=${GitLabAccessChecker.TREE_PAGE}&page=${page}`;
-      const res = await this.http.request('GET', `${this.project(owner, name)}/repository/tree?${query}`, { 'private-token': token });
+      const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/tree?${query}`, { 'private-token': access.token });
       if (res.status === 404) return [];
-      if (res.status !== 200 || !Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+      if (res.status !== 200 || !Array.isArray(res.body)) this.fail(res.status);
       for (const raw of res.body) {
         const e = obj(raw);
         if ((e.type === 'blob' || e.type === 'tree') && typeof e.path === 'string' && typeof e.id === 'string') {
@@ -90,10 +121,11 @@ export class GitLabAccessChecker {
   }
 
   /** Fleet S3 §4.1: one file at a ref (files API, base64). Null when absent. */
-  async getFile(token: string, owner: string, name: string, path: string, ref: string): Promise<ForgeFile | null> {
-    const res = await this.http.request('GET', `${this.project(owner, name)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`, { 'private-token': token });
+  async getFile(access: GitLabAccess, path: string, ref: string): Promise<ForgeFile | null> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`, { 'private-token': access.token });
     if (res.status === 404) return null;
-    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    if (res.status !== 200) this.fail(res.status);
     const b = obj(res.body);
     if (typeof b.blob_id !== 'string' || typeof b.size !== 'number' || b.encoding !== 'base64' || typeof b.content !== 'string') {
       throw new RepoCheckException('provider_error');
@@ -101,29 +133,62 @@ export class GitLabAccessChecker {
     return { sha: b.blob_id, size: b.size, content: Buffer.from(b.content, 'base64') };
   }
 
-  async verifyRepo(owner: string, name: string, token: string): Promise<CanonicalRepo> {
-    const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
-    const headers = { 'private-token': token };
+  /** The scopes and the expiry of a token. A token the instance does not know is an invalid token. */
+  async getTokenSelf(apiBase: string, token: string): Promise<{ scopes: string[]; expiresAt: Date | null }> {
+    await this.guard(apiBase);
+    const res = await this.http.request('GET', `${trimSlashes(apiBase)}/personal_access_tokens/self`, { 'private-token': token });
+    if (res.status === 404) throw new RepoCheckException('gitlab_token_invalid');
+    if (res.status !== 200) this.fail(res.status);
+    const b = obj(res.body);
+    if (!Array.isArray(b.scopes)) throw new RepoCheckException('provider_error');
+    const scopes = b.scopes.filter((s): s is string => typeof s === 'string');
+    if (b.expires_at === null || b.expires_at === undefined) return { scopes, expiresAt: null };
+    if (typeof b.expires_at !== 'string') throw new RepoCheckException('provider_error');
+    const expiresAt = new Date(b.expires_at);
+    if (Number.isNaN(expiresAt.getTime())) throw new RepoCheckException('provider_error');
+    return { scopes, expiresAt };
+  }
 
-    const self = await this.http.request('GET', `${api}/personal_access_tokens/self`, headers);
-    if ([401, 403, 404].includes(self.status)) throw new RepoCheckException('gitlab_token_invalid');
-    if (self.status !== 200) throw new RepoCheckException('provider_error');
-    const scopes = obj(self.body).scopes;
-    if (!Array.isArray(scopes) || !scopes.includes('write_repository')) throw new RepoCheckException('gitlab_scope_missing');
+  /** The account behind a token: a bot account is reported as one. */
+  async getCurrentUser(apiBase: string, token: string): Promise<{ id: number; username: string; bot: boolean }> {
+    await this.guard(apiBase);
+    const res = await this.http.request('GET', `${trimSlashes(apiBase)}/user`, { 'private-token': token });
+    if (res.status !== 200) this.fail(res.status);
+    const b = obj(res.body);
+    if (typeof b.id !== 'number' || typeof b.username !== 'string') throw new RepoCheckException('provider_error');
+    return { id: b.id, username: b.username, bot: b.bot === true };
+  }
 
-    const project = await this.http.request('GET', `${api}/projects/${encodeURIComponent(`${owner}/${name}`)}`, headers);
-    if (project.status === 404) throw new RepoCheckException('repo_not_found');
-    if (project.status !== 200) throw new RepoCheckException('provider_error');
-    const body = obj(project.body);
-    const permissions = obj(body.permissions);
-    if (Math.max(level(permissions.project_access), level(permissions.group_access)) < DEVELOPER) {
-      throw new RepoCheckException('gitlab_access_insufficient');
-    }
-    const path = body.path_with_namespace;
-    if (typeof path !== 'string' || typeof body.default_branch !== 'string' || !path.includes('/')) {
+  /**
+   * One project of an instance: its numeric id, its canonical path, its default branch and the
+   * access level of the token (the higher of the project and the group access).
+   */
+  async findProject(
+    apiBase: string,
+    token: string,
+    pathOrId: string | number,
+  ): Promise<{ id: number; owner: string; name: string; defaultBranch: string; accessLevel: number }> {
+    await this.guard(apiBase);
+    const path = typeof pathOrId === 'number' ? String(pathOrId) : encodeURIComponent(pathOrId);
+    const res = await this.http.request('GET', `${trimSlashes(apiBase)}/projects/${path}`, { 'private-token': token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) this.fail(res.status);
+    const b = obj(res.body);
+    const fullPath = b.path_with_namespace;
+    if (typeof b.id !== 'number' || typeof fullPath !== 'string' || typeof b.default_branch !== 'string' || !fullPath.includes('/')) {
       throw new RepoCheckException('provider_error');
     }
-    const cut = path.lastIndexOf('/');
-    return { owner: path.slice(0, cut), name: path.slice(cut + 1), defaultBranch: body.default_branch };
+    const cut = fullPath.lastIndexOf('/');
+    const permissions = obj(b.permissions);
+    return {
+      id: b.id,
+      owner: fullPath.slice(0, cut),
+      name: fullPath.slice(cut + 1),
+      defaultBranch: b.default_branch,
+      accessLevel: Math.max(level(permissions.project_access), level(permissions.group_access)),
+    };
   }
 }
+
+/** The api base without its trailing slashes, so a url is built the same way every time. */
+const trimSlashes = (apiBase: string): string => apiBase.replace(/\/+$/, '');

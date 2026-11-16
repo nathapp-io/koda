@@ -5,7 +5,7 @@ import { FleetJobKind, FleetJobState } from '../../common/enums';
 import type { GitToken } from '../common/protocol';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { GitHubAppClient } from '../git-broker/github-app-client';
-import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
 import { FenceService } from './fence.service';
 import { SyncService } from './sync.service';
 import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain';
@@ -27,7 +27,7 @@ function harness(command: FleetJobKind) {
   github.mintReadOnlyToken.mockResolvedValue({ token: 'read-token', expiresAt: new Date('2030-01-01T00:00:00Z') });
   github.isBranchProtected.mockResolvedValue(false);
   github.mintInstallationToken.mockResolvedValue({ token: 'write-token', expiresAt: new Date('2030-01-01T00:00:00Z') });
-  const broker = new GitTokenBroker({ gitTokenReuseMarginSec: 30, gitlabTokenTtlSec: 300 } as never, github, createMock<GitLabTokenSource>());
+  const broker = new GitTokenBroker({ gitTokenReuseMarginSec: 30, gitlabTokenTtlSec: 300 } as never, github, createMock<GitLabRepoCredentials>());
   const txManager = createMock<ITransactionManager>({ run: async (fn) => fn() });
   const fence = createMock<FenceService>();
   fence.holds.mockReturnValue(true);

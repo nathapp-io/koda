@@ -3,7 +3,7 @@ import { apiPath } from '~/lib/api-path'
 import { extractApiError } from '~/composables/useApi'
 import { mapLimit } from '~/lib/map-limit'
 import { FLEET_LIST_SIZE } from '~/lib/fleet-types'
-import type { FleetPage, FleetRepo, FleetRepoCheck, FleetRuleOverride, FleetRuleOverrideBody, NewFleetRepo } from '~/lib/fleet-types'
+import type { FleetGitlabCredentialsBody, FleetPage, FleetRepo, FleetRepoCheck, FleetRuleOverride, FleetRuleOverrideBody, NewFleetRepo } from '~/lib/fleet-types'
 import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 
 export type AutoReviewBody = { enabled: false } | { enabled: true; profiles?: string[]; maxCostUsd?: number }
@@ -78,6 +78,18 @@ export function useFleetRepos() {
     return created
   }
 
+  /**
+   * US-008: `PATCH /fleet/repos/:id/gitlab-credentials` — the rotation of a repo's stored GitLab
+   * tokens. The body carries only what the caller supplied; the API fills the rest back. A 202
+   * approval request is distinguished by its `permissionKey` marker, like every other write.
+   */
+  async function rotateGitlabCredentials(id: string, body: FleetGitlabCredentialsBody): Promise<FleetRepo | ApprovalRequestSummary> {
+    const data = await $api.patch<FleetRepo | ApprovalRequestSummary>(apiPath`/fleet/repos/${id}/gitlab-credentials`, { ...body })
+    if ('permissionKey' in data) return data
+    repos.value = repos.value.map((repo) => repo.id === id ? data : repo)
+    return data
+  }
+
   async function setAutoReview(id: string, body: AutoReviewBody): Promise<AutoReviewResult> {
     const data = await $api.patch<FleetRepo | ApprovalRequestSummary>(apiPath`/fleet/repos/${id}/auto-review`, body)
     if ('permissionKey' in data) return { kind: 'pending', request: data }
@@ -124,5 +136,5 @@ export function useFleetRepos() {
     checks.value = Object.fromEntries(Object.entries(checks.value).filter(([key]) => key !== id))
   }
 
-  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, setAutoReview, setFixChecks, setFixUnprotected, getRuleOverride, setRuleOverride, clearRuleOverride, remove }
+  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, rotateGitlabCredentials, setAutoReview, setFixChecks, setFixUnprotected, getRuleOverride, setRuleOverride, clearRuleOverride, remove }
 }

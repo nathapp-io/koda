@@ -1447,7 +1447,14 @@
       "vcs_encryption_key_missing": "服务器无法解密已保存的 GitLab 令牌",
       "gitlab_token_invalid": "已保存的 GitLab 令牌无效",
       "gitlab_access_insufficient": "GitLab 令牌无法推送到此仓库",
-      "gitlab_scope_missing": "GitLab 令牌缺少必需的权限范围"
+      "gitlab_scope_missing": "GitLab 令牌缺少必需的权限范围",
+      "gitlab_credentials_missing": "该 GitLab 仓库没有保存的凭证",
+      "gitlab_host_invalid": "该 GitLab 主机不是有效的 https 地址",
+      "gitlab_host_blocked": "该 GitLab 主机解析到本部署内部的地址",
+      "gitlab_host_unclassified": "该 GitLab 主机未被识别为 GitLab 实例",
+      "gitlab_read_token_writable": "该 GitLab 读取令牌也可能拥有写权限；请保存只读令牌",
+      "gitlab_read_token_no_access": "该 GitLab 读取令牌无法读取此仓库",
+      "gitlab_project_mismatch": "该 GitLab 令牌属于另一个项目"
     },
     "credentials": {
       "title": "凭据面板",
@@ -1992,6 +1999,7 @@
         "repo": "仓库",
         "project": "项目",
         "provider": "平台",
+        "gitlab": "GitLab",
         "branch": "默认分支",
         "reachability": "可达性"
       },
@@ -2043,6 +2051,33 @@
         "name": "仓库名称",
         "submit": "添加仓库",
         "submitting": "正在检查访问权限…"
+      },
+      "gitlab": {
+        "host": "主机",
+        "hostPlaceholder": "https://gitlab.example.com",
+        "hostHint": "gitlab.com 留空即可；自建实例填写完整的 https 地址。",
+        "readToken": "读取令牌",
+        "readTokenHint": "对仓库具有读取权限的令牌。",
+        "writeToken": "写入令牌",
+        "writeTokenHint": "可以推送分支并创建合并请求的令牌。",
+        "confirmBot": "此写入令牌属于专用机器人账号",
+        "tokensRequired": "请填写读取令牌和写入令牌。",
+        "humanWarning": "写入令牌属于人类账号 {username}，fleet 任务将以该用户身份操作。如非有意为之，请改用专用机器人账号。",
+        "done": "完成",
+        "humanBadge": "人类账号",
+        "none": "未保存令牌",
+        "rotate": "轮换令牌",
+        "status": { "ok": "正常", "invalid": "无效", "expiring": "即将过期" },
+        "dialog": {
+          "title": "轮换 GitLab 令牌",
+          "hint": "替换已保存的读取或写入令牌。只有填写的字段会被更改，令牌不会再显示。",
+          "readToken": "新读取令牌（可选）",
+          "writeToken": "新写入令牌（可选）",
+          "confirmBot": "新写入令牌属于专用机器人账号",
+          "save": "保存",
+          "saving": "保存中…",
+          "pending": "审批待处理；已保存的令牌尚未更改。"
+        }
       }
     },
     "jobs": {

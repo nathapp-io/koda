@@ -73,4 +73,18 @@ describe('remapPage', () => {
     const mapped = remapPage(new Page({ current: 1, size: 2 }, 3, [1, 2]), (n: number) => n * 10);
     expect(mapped).toEqual(expect.objectContaining({ total: 3, current: 1, size: 2, hasNext: true, records: [10, 20] }));
   });
+
+  /**
+   * US-004: `Array.prototype.map` hands the mapper the index and the array as well. A mapper that
+   * takes a second argument (a clock, a view) would silently receive the index instead — the fleet
+   * repo list answered 500 for a repo with a GitLab credential, because the clock was the index.
+   */
+  it('hands the mapper the record and nothing else', () => {
+    const seen: unknown[][] = [];
+    remapPage(new Page({ current: 1, size: 2 }, 2, ['a', 'b']), (record: string, ...rest: unknown[]) => {
+      seen.push([record, ...rest]);
+      return record;
+    });
+    expect(seen).toEqual([['a'], ['b']]);
+  });
 });

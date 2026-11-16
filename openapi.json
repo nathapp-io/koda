@@ -8894,7 +8894,17 @@
       },
       "post": {
         "operationId": "FleetReposController_create",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -8933,6 +8943,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The body is not valid: a GitHub repo carries no GitLab field, a GitLab repo needs both tokens"
           },
           "403": {
             "description": "fleet.repo.create is missing globally"
@@ -9229,6 +9242,91 @@
           }
         ],
         "summary": "Allow FIX on an unprotected default branch for a registered repo (fleet.repo.fix.unprotected, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/repos/{id}/gitlab-credentials": {
+      "patch": {
+        "operationId": "FleetReposController_rotateGitlabCredentials",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGitlabCredentialsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body names no token, or the repo is not a GitLab repo"
+          },
+          "403": {
+            "description": "fleet.repo.credentials.update is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          },
+          "422": {
+            "description": "The new token was refused: { reason }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate the GitLab tokens of a registered repo (fleet.repo.credentials.update, global)",
         "tags": [
           "fleet"
         ]
@@ -21690,6 +21788,27 @@
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,100}$"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "The GitLab host the repo lives on; gitlab.com when absent"
+          },
+          "readToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The GitLab read token; stored encrypted and never returned"
+          },
+          "writeToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The GitLab write token; stored encrypted and never returned"
+          },
+          "confirmBotAccount": {
+            "type": "boolean",
+            "description": "Confirm the write token belongs to a bot account"
           }
         },
         "required": [
@@ -21739,6 +21858,93 @@
           "updatedAt"
         ]
       },
+      "GitLabTokenSummaryDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "The GitLab username the token belongs to"
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "When the token expires (ISO 8601)"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "invalid",
+              "expiring"
+            ],
+            "type": "string",
+            "description": "The health of the token"
+          }
+        },
+        "required": [
+          "username",
+          "status"
+        ]
+      },
+      "GitLabWriteTokenSummaryDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "The GitLab username the token belongs to"
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "When the token expires (ISO 8601)"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "invalid",
+              "expiring"
+            ],
+            "type": "string",
+            "description": "The health of the token"
+          },
+          "isBot": {
+            "type": "boolean",
+            "description": "Whether the write token belongs to a bot account"
+          }
+        },
+        "required": [
+          "username",
+          "status",
+          "isBot"
+        ]
+      },
+      "GitLabCredentialDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "number",
+            "description": "The numeric GitLab project id"
+          },
+          "readToken": {
+            "$ref": "#/components/schemas/GitLabTokenSummaryDto"
+          },
+          "writeToken": {
+            "$ref": "#/components/schemas/GitLabWriteTokenSummaryDto"
+          },
+          "warnings": {
+            "description": "The warnings about this connection",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "readToken",
+          "writeToken",
+          "warnings"
+        ]
+      },
       "FleetRepoDto": {
         "type": "object",
         "properties": {
@@ -21760,6 +21966,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "host": {
+            "type": "string",
+            "description": "The forge host the repo lives on"
           },
           "defaultBranch": {
             "type": "string"
@@ -21817,6 +22027,16 @@
                 "$ref": "#/components/schemas/RuleOverrideSummaryDto"
               }
             ]
+          },
+          "gitlab": {
+            "nullable": true,
+            "description": "The GitLab connection of the repo, when it has one",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GitLabCredentialDto"
+              }
+            ]
           }
         },
         "required": [
@@ -21825,6 +22045,7 @@
           "provider",
           "owner",
           "name",
+          "host",
           "defaultBranch",
           "createdAt",
           "autoReview",
@@ -21857,8 +22078,15 @@
               "vcs_connection_mismatch",
               "vcs_encryption_key_missing",
               "gitlab_token_invalid",
+              "gitlab_credentials_missing",
               "gitlab_access_insufficient",
-              "gitlab_scope_missing"
+              "gitlab_scope_missing",
+              "gitlab_host_invalid",
+              "gitlab_host_blocked",
+              "gitlab_host_unclassified",
+              "gitlab_read_token_writable",
+              "gitlab_read_token_no_access",
+              "gitlab_project_mismatch"
             ],
             "type": "string"
           },
@@ -21921,6 +22149,27 @@
         "required": [
           "allowUnprotected"
         ]
+      },
+      "UpdateGitlabCredentialsDto": {
+        "type": "object",
+        "properties": {
+          "readToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The new GitLab read token; stored encrypted and never returned"
+          },
+          "writeToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The new GitLab write token; stored encrypted and never returned"
+          },
+          "confirmBotAccount": {
+            "type": "boolean",
+            "description": "Confirm the new write token belongs to a bot account"
+          }
+        }
       },
       "RuleOverrideFileDto": {
         "type": "object",

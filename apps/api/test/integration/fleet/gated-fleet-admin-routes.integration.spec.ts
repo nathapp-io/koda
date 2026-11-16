@@ -12,7 +12,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { canRunDbTests } from '../../helpers/test-environment';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
-const keys = ['fleet.repo.create', 'fleet.repo.delete', 'fleet.repo.check', 'fleet.runner.update', 'fleet.runner.delete', 'fleet.analytics.delete'];
+const keys = ['fleet.repo.create', 'fleet.repo.delete', 'fleet.repo.check', 'fleet.repo.credentials.update', 'fleet.runner.update', 'fleet.runner.delete', 'fleet.analytics.delete'];
 interface Pending { id: string; permissionKey: string; projectId: string | null }
 interface Decided { status: string; result: unknown }
 
@@ -133,6 +133,14 @@ describeIntegration('gated fleet admin routes', () => {
     const runner = await insertRunner(db, { createdById: world.ids.root });
     await request(server()).delete(`/api/fleet/runners/${runner.id}`).set(auth(world.tokens.root)).expect(204);
     expect(await db.runner.findUnique({ where: { id: runner.id } })).toBeNull();
+    expect(await db.approvalRequest.count()).toBe(0);
+  });
+  it('US-005: the rotation key reaches the route, and a non-GitLab repo opens no request', async () => {
+    // The agent holds `fleet.repo.credentials.update` (it is in the granted key list), so a 400 here is
+    // the route's own refusal — not the missing permission — and it happens before an approval request.
+    const res = await request(server()).patch(`/api/fleet/repos/${world.repoId}/gitlab-credentials`)
+      .set(auth(agent.apiKey)).send({ writeToken: 'glpat-write' }).expect(400);
+    expect(res.body.message).toBe('This repository is not a GitLab repository');
     expect(await db.approvalRequest.count()).toBe(0);
   });
   it('a keyless agent cannot mutate or open a request', async () => {
