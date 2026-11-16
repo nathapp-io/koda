@@ -6,7 +6,7 @@
       :aria-label="t('fleet.repos.fixUnprotected.toggle')"
       @update:checked="toggle"
     />
-    <span class="text-xs text-muted-foreground">{{ t('fleet.repos.fixUnprotected.hint') }}</span>
+    <span class="text-xs text-muted-foreground">{{ t(props.repo.provider === 'gitlab' ? 'fleet.repos.fixUnprotected.hintGitlab' : 'fleet.repos.fixUnprotected.hint') }}</span>
     <p v-if="notice" class="text-xs text-muted-foreground">{{ notice }}</p>
     <p v-if="error" role="alert" class="text-xs text-muted-foreground">{{ error }}</p>
   </div>

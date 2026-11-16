@@ -151,12 +151,24 @@ describe('Fleet admin Repos page (behaviour)', () => {
     delete (globalThis as Record<string, unknown>).useApi
   })
 
-  test('mounts fix-checks and fix-unprotected switches only for GitHub repos with installations (AC-8)', async () => {
-    const { app, settle, unmount } = mountRepos({ repos: [repo('github'), repo('gitlab', { provider: 'gitlab', githubInstallationId: null }), repo('no-install', { githubInstallationId: null })] })
+  test('GitLab FIX override mounts only for connected repos and keeps other controls GitHub-only (US-005 AC-1/2/3)', async () => {
+    const connected = repo('connected', {
+      provider: 'gitlab', githubInstallationId: null,
+      gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] },
+    })
+    const unconnected = repo('unconnected', { provider: 'gitlab', githubInstallationId: null, gitlab: null })
+    const { app, settle, unmount } = mountRepos({ repos: [repo('github'), connected, unconnected, repo('no-install', { githubInstallationId: null })] })
     await settle()
     const labels = app.find('[data-stub="switch"]').map((node) => node.props['aria-label'])
-    // Only the one GitHub repo with an installation gets switches: auto-review, fix-checks and the unprotected override.
-    expect(labels).toEqual(['Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch'])
+    expect(labels).toEqual([
+      'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
+      'Allow fixes on an unprotected default branch',
+    ])
+    const connectedRow = app.find('[data-testid="fleet-repo-acme-connected"]')[0]
+    const unconnectedRow = app.find('[data-testid="fleet-repo-acme-unconnected"]')[0]
+    expect(app.find('[data-stub="switch"]', connectedRow)).toHaveLength(1)
+    expect(app.find('[data-stub="switch"]', unconnectedRow)).toHaveLength(0)
+    expect(app.find('[data-stub="switch"]', connectedRow).map((node) => node.props['aria-label'])).toEqual(['Allow fixes on an unprotected default branch'])
     unmount()
   })
 

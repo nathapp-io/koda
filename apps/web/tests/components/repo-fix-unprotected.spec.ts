@@ -74,10 +74,22 @@ describe('FleetRepoFixUnprotected', () => {
     failed.app.unmount()
   })
 
-  test('fix-unprotected keys have non-empty English and Chinese translations', () => {
-    for (const locale of [enLocale, zhLocale]) {
-      const keys = (locale as { fleet: { repos: { fixUnprotected: Record<string, string> } } }).fleet.repos.fixUnprotected
-      for (const key of ['toggle', 'pending', 'hint']) expect(keys[key].trim().length).toBeGreaterThan(0)
+  test('selects GitLab and GitHub provider-specific safety copy (AC-4)', () => {
+    const github = mounted()
+    expect(github.app.text()).toBe('fleet.repos.fixUnprotected.hint')
+    github.app.unmount()
+    const gitlab = mounted({ current: repo({ provider: 'gitlab', githubInstallationId: null, gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] } }) })
+    expect(gitlab.app.text()).toBe('fleet.repos.fixUnprotected.hintGitlab')
+    gitlab.app.unmount()
+  })
+
+  test('fix-unprotected keys have exact provider safety text in English and Chinese (AC-5)', () => {
+    const en = (enLocale as { fleet: { repos: { fixUnprotected: Record<string, string> } } }).fleet.repos.fixUnprotected
+    const zh = (zhLocale as { fleet: { repos: { fixUnprotected: Record<string, string> } } }).fleet.repos.fixUnprotected
+    expect(en.hintGitlab).toBe('Override: FIX jobs may push even when the bot account can push to the default branch (it has no protection rule, or the rule lets the bot push). Leave off unless the repository cannot be protected.')
+    expect(zh.hintGitlab).toBe('覆盖：即使机器人账号可以推送到默认分支（默认分支没有保护规则，或保护规则允许机器人推送），FIX 任务也可以推送。除非仓库无法设置保护，否则请保持关闭。')
+    for (const locale of [en, zh]) {
+      for (const key of ['toggle', 'pending', 'hint', 'hintGitlab']) expect(locale[key].trim().length).toBeGreaterThan(0)
     }
   })
 })
