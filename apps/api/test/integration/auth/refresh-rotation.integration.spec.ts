@@ -18,6 +18,7 @@ import request from 'supertest';
 import { vi } from 'vitest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
+import { configureTrustProxy, resetTrustProxyConfig } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { canRunDbTests } from '../../helpers/test-environment';
 import { resetDb } from '../../helpers/reset-db';
@@ -25,6 +26,7 @@ import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/h
 import { fixtureDb } from '../../helpers/action-context';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { AuthSessionService, LOST_RESPONSE_WINDOW_MS } from '../../../src/auth/sessions/auth-session.service';
+import { TRUSTED_PROXIES } from '../../../src/common/trusted-proxies';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
@@ -68,10 +70,24 @@ describeIntegration('refresh rotation (PG)', () => {
     return { userId: user.id, pair: data<TokenPair>(res) };
   };
 
-  /** Presents a refresh token; `userAgent` is the header the client sends (auth-passwords US-005). */
-  const refresh = (refreshToken: string, userAgent?: string) => {
+  /**
+   * Presents a refresh token; `userAgent` is the header the client sends (auth-passwords US-005) and
+   * `clientIp`, when given, is what the Nuxt proxy sends on the browser's behalf — the same address in
+   * both client headers (#470).
+   */
+  const refresh = (refreshToken: string, userAgent?: string, clientIp?: string) => {
     const call = request(server).post('/api/auth/refresh').set('Authorization', `Bearer ${refreshToken}`);
-    return userAgent === undefined ? call : call.set('User-Agent', userAgent);
+    if (userAgent !== undefined) call.set('User-Agent', userAgent);
+    if (clientIp !== undefined) call.set('X-Forwarded-For', clientIp).set('X-Client-Ip', clientIp);
+    return call;
+  };
+
+  /**
+   * #470: production enables trust proxy from `TRUSTED_PROXIES` in `main.ts`; the harness deliberately does
+   * not, so a case that exercises a forwarded address configures that same list and `afterEach` restores it.
+   */
+  const trustTheWebProxy = (): void => {
+    configureTrustProxy({ enabled: true, trustedProxies: TRUSTED_PROXIES });
   };
 
   const me = async (accessToken: string): Promise<number> =>
@@ -124,6 +140,11 @@ describeIntegration('refresh rotation (PG)', () => {
   // Every case logs in; the login route is throttled at 5/min per address.
   beforeEach(() => {
     resetThrottle(app);
+  });
+
+  // Trust proxy is process-wide module state: a case that configures it must not leak into the next one.
+  afterEach(() => {
+    resetTrustProxyConfig();
   });
 
   it('AC-1: refresh answers 200 with a refresh JWT whose jti differs from the presented one', async () => {
@@ -275,6 +296,43 @@ describeIntegration('refresh rotation (PG)', () => {
     expect(presented.usedUaHash).toBe(sha256('UA-1'));
     expect(presented.usedIp).toEqual(expect.any(String));
     expect(presented.usedIp).not.toBe('');
+  }, TIMEOUT);
+
+  // ── #470: the recorded address is the browser the proxy forwards, not the proxy's own ──────────────
+  it('#470: a request through a trusted proxy records the forwarded client IP, not the socket peer', async () => {
+    trustTheWebProxy();
+    const { pair } = await newUserWithSession();
+
+    // The harness listener is loopback and its peer is what `req.ip` would have written.
+    await refresh(pair.refreshToken, 'UA-1', '203.0.113.7').expect(200);
+
+    const presented = await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } });
+    expect(presented.usedIp).toBe('203.0.113.7');
+  }, TIMEOUT);
+
+  it('#470: a peer outside the trusted list cannot name the address it is recorded under', async () => {
+    // The forwarded header is honoured only from a proxy the API trusts; loopback is outside this list.
+    configureTrustProxy({ enabled: true, trustedProxies: ['10.0.0.0/8'] });
+    const { pair } = await newUserWithSession();
+
+    await refresh(pair.refreshToken, 'UA-1', '203.0.113.7').expect(200);
+
+    const presented = await db.refreshToken.findUniqueOrThrow({ where: { id: tokenIdOf(pair) } });
+    expect(presented.usedIp).toMatch(/^(::ffff:)?127\.0\.0\.1$/);
+  }, TIMEOUT);
+
+  it('#470: the lost-response recovery audit summary names the IP the retry presented', async () => {
+    trustTheWebProxy();
+    const { userId, pair } = await newUserWithSession();
+    const lost = data<TokenPair>(await refresh(pair.refreshToken, 'UA-1', '203.0.113.7').expect(200));
+    await ageExchange(pair, lost);
+
+    await refresh(pair.refreshToken, 'UA-1', '198.51.100.9').expect(200);
+
+    const entries = await db.auditEntry.findMany({ where: { key: 'session.refresh', resourceId: userId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.summary)
+      .toBe('refresh token lost-response recovery; session kept; ip 198.51.100.9');
   }, TIMEOUT);
 
   it('AC-5: a lost-response retry with the same User-Agent answers 200 and keeps the session', async () => {

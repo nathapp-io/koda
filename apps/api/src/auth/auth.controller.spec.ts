@@ -1,11 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
+import {
+  AuthException,
+  JsonResponse,
+  configureTrustProxy,
+  resetTrustProxyConfig,
+} from '@nathapp/nestjs-common';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { refreshClientOf, type RefreshRequestLike } from './sessions/refresh-client';
+import { TRUSTED_PROXIES } from '../common/trusted-proxies';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -195,9 +201,19 @@ const mockUser = {
   });
 
   describe('POST /auth/refresh', () => {
-    /** The way Fastify hands the raw request to a handler (auth-passwords US-005). */
-    const request = (headers: Record<string, string | string[] | undefined>, ip?: string): RefreshRequestLike =>
-      ({ headers, ip });
+    /**
+     * The shape Fastify hands a handler (auth-passwords US-005). `peer` is the socket peer — the address
+     * the trusted-proxy resolver falls back to — and there is no `ip` field: Fastify's `req.ip` is the
+     * socket peer whatever the proxy forwarded, which is what #470 fixed.
+     */
+    const request = (
+      headers: Record<string, string | string[] | undefined>,
+      peer?: string,
+    ): RefreshRequestLike => ({ headers, socket: peer === undefined ? undefined : { remoteAddress: peer } });
+
+    afterEach(() => {
+      resetTrustProxyConfig();
+    });
 
     it('should return new tokens with valid refresh token', async () => {
       // refresh endpoint receives IPrincipal (id field), not JwtPayload (sub field)
@@ -227,6 +243,32 @@ const mockUser = {
       await controller.refresh(user, request({ 'user-agent': ['UA-1', 'UA-2'] }, '203.0.113.7'));
 
       expect(authService.refresh).toHaveBeenCalledWith(user, refreshClientOf('UA-1', '203.0.113.7'));
+    });
+
+    it('#470: behind a trusted proxy it hands the forwarded address, not the socket peer', async () => {
+      const user = { id: mockUser.id, revoked: false, authorities: [], extra: {} } as never;
+      mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
+      configureTrustProxy({ enabled: true, trustedProxies: TRUSTED_PROXIES });
+
+      await controller.refresh(user, request({
+        'user-agent': 'UA-1',
+        'x-forwarded-for': '203.0.113.7',
+      }, '172.25.0.6'));
+
+      expect(authService.refresh).toHaveBeenCalledWith(user, refreshClientOf('UA-1', '203.0.113.7'));
+    });
+
+    it('#470: an untrusted peer cannot name its own address', async () => {
+      const user = { id: mockUser.id, revoked: false, authorities: [], extra: {} } as never;
+      mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
+      configureTrustProxy({ enabled: true, trustedProxies: ['10.0.0.0/8'] });
+
+      await controller.refresh(user, request({
+        'user-agent': 'UA-1',
+        'x-forwarded-for': '203.0.113.7',
+      }, '172.25.0.6'));
+
+      expect(authService.refresh).toHaveBeenCalledWith(user, refreshClientOf('UA-1', '172.25.0.6'));
     });
 
     it('hashes the empty string when the request carries no user-agent header', async () => {

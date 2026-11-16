@@ -58,6 +58,11 @@ export interface HttpAppOptions {
  * Config factories read process.env during AppFactory.create, so the flags are
  * set only for the create call and restored afterwards (test files share one
  * process under maxWorkers: 1).
+ *
+ * Trust proxy is deliberately left unconfigured, as `@nathapp/nestjs-common` ships it: production
+ * enables it in `main.ts` from `TRUSTED_PROXIES`. A spec that asserts a forwarded client address
+ * configures that same list itself and resets it afterwards — otherwise `getClientIp` answers the
+ * socket peer, exactly as `req.ip` does (#470).
  */
 export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication> {
   // A KB delete now persists recovery intents even when its vector table is in memory.

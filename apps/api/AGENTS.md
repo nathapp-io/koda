@@ -118,6 +118,10 @@ Important rules:
 - password hashing uses bcrypt
 - API key lookup must stay deterministic for lookup-by-hash behavior
 - public routes must opt out explicitly
+- a route that needs the client address reads it with `getClientIp(req)` and the
+  `TRUSTED_PROXIES` list (`src/common/trusted-proxies.ts`), never Fastify's `req.ip`:
+  the adapter configures no `trustProxy`, so `req.ip` is the socket peer — the Nuxt
+  proxy's address in every proxied deployment (koda #470)
 
 ## Data Model
 
