@@ -52,7 +52,7 @@ describe('catalog parity', () => {
     expect(() => flattenCatalog({ a: { b: 1 } })).toThrow('a.b');
   });
 
-  it.each([null, 'x', ['x']])('AC-4/5/6: rejects invalid root %j', (root) => {
+  it.each([[null], ['x'], [['x']]])('AC-4/5/6: rejects invalid root %j', (root) => {
     expect(() => flattenCatalog(root)).toThrow();
   });
 
