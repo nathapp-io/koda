@@ -5,6 +5,7 @@ import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 import { APP_CFG, IAppConfig } from './config/app.config';
 import { FastifyRuntimePlugin } from './common/bootstrap/fastify-runtime.plugin';
 import { createFastifyAdapter } from './common/fastify-adapter';
+import { TRUSTED_PROXIES } from './common/trusted-proxies';
 
 async function bootstrap() {
   const app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter(), {
@@ -17,14 +18,12 @@ async function bootstrap() {
   // bootstrap plugin so the HTTP test harness runs the exact same steps.
   app.usePlugin(new FastifyRuntimePlugin());
 
-  // H2: the throttler guard's IP tracker (getClientIp) only honours forwarded
-  // headers when trust proxy is configured via configureTrustProxy(). Trust the
-  // loopback/private-network proxies (e.g. the Nuxt /api proxy) so rate limiting
-  // tracks real client IPs instead of collapsing all proxied traffic into one bucket.
-  app.configureTrustProxy({
-    enabled: true,
-    trustedProxies: ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
-  });
+  // H2: getClientIp() only honours forwarded headers when trust proxy is configured via
+  // configureTrustProxy(). Trust the loopback/private-network proxies (e.g. the Nuxt /api proxy) so the
+  // throttler tracks real client IPs instead of collapsing all proxied traffic into one bucket, and so
+  // the refresh route records the browser's address rather than the web container's (#470). Fastify's
+  // own `req.ip` is unaffected by this — it stays the socket peer (see `createFastifyAdapter`).
+  app.configureTrustProxy({ enabled: true, trustedProxies: TRUSTED_PROXIES });
 
   const { port, host } = app.get<IAppConfig>(APP_CFG);
 
