@@ -120,4 +120,18 @@ describe('catalog parity', () => {
       'date.dateTimeFromatWithDay',
     ]);
   });
+
+  it('AC-19: keeps a JSON string leaf named __proto__', () => {
+    const flattened = flattenCatalog(JSON.parse('{"__proto__":"English"}'));
+
+    expect(Object.keys(flattened)).toEqual(['__proto__']);
+    expect(flattened['__proto__']).toBe('English');
+  });
+
+  it('AC-20: reports an untranslated __proto__ leaf as drift', () => {
+    const en: CatalogSet = { namespace: flattenCatalog(JSON.parse('{"__proto__":"English"}')) };
+    const zh: CatalogSet = { namespace: flattenCatalog(JSON.parse('{"__proto__":"English"}')) };
+
+    expect(diffCatalogs(en, zh, []).untranslated).toContain('namespace.__proto__');
+  });
 });

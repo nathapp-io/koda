@@ -16,13 +16,23 @@ export function flattenCatalog(value: unknown): Record<string, string> {
     throw new TypeError('Catalog root must be a non-array object');
   }
 
-  const flattened: Record<string, string> = {};
+  // A null-prototype dictionary: `__proto__` is a legal JSON key, and assigning it on an
+  // ordinary object hits the inherited setter instead of creating an own property, which
+  // would drop the leaf and let the parity guard report no drift for an untranslated entry.
+  const flattened: Record<string, string> = Object.create(null) as Record<string, string>;
 
   function visit(node: object, path: string): void {
     for (const [key, child] of Object.entries(node)) {
       const childPath = path ? `${path}.${key}` : key;
       if (typeof child === 'string') {
-        flattened[childPath] = child;
+        // Define the own property explicitly, so the key stays an own data property
+        // whatever the dictionary's prototype is.
+        Object.defineProperty(flattened, childPath, {
+          value: child,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       } else if (child !== null && typeof child === 'object' && !Array.isArray(child)) {
         visit(child, childPath);
       } else {
