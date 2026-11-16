@@ -1,14 +1,14 @@
 {
   "validation": {
-    "required": "This field is required",
-    "isEmail": "Must be a valid email address",
-    "minLength": "Must be at least {min} characters long",
-    "maxLength": "Must be at most {max} characters long",
-    "isString": "Must be a string",
+    "required": "此字段为必填项",
+    "isEmail": "必须是有效的邮箱地址",
+    "minLength": "长度至少为 {min} 个字符",
+    "maxLength": "长度不能超过 {max} 个字符",
+    "isString": "必须是字符串",
     "isNotEmpty": "不能为空",
-    "isEnum": "Invalid value",
-    "isUrl": "Must be a valid URL",
-    "isBoolean": "Must be a boolean",
+    "isEnum": "无效的值",
+    "isUrl": "必须是有效的 URL",
+    "isBoolean": "必须是布尔值",
     "isIn": "必须是允许的值之一",
     "isArray": "必须是列表",
     "keyFormat": "必须以小写字母开头，且只能包含小写字母、数字和连字符",
@@ -17,9 +17,9 @@
     "webhookSecretMinLength": "Webhook 密钥长度至少为 32 个字符"
   },
   "errors": {
-    "notFound": "Resource not found",
-    "forbidden": "Access denied",
-    "unauthorized": "Unauthorized",
-    "invalidTransition": "Invalid ticket transition"
+    "notFound": "未找到资源",
+    "forbidden": "访问被拒绝",
+    "unauthorized": "未授权操作",
+    "invalidTransition": "无效的工单状态转换"
   }
 }
