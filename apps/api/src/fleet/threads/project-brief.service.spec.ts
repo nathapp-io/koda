@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { GitHubAppClient } from '../git-broker/github-app-client';
+import type { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import type { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import type { ForgeFile } from '../git-broker/forge-tree';
 import type { FleetRepoRecord, IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
@@ -55,6 +57,8 @@ describe('ProjectBriefService', () => {
   let clock: number;
   let github: GitHubMock;
   let repos: ReposMock;
+  let gitlabCredentials: { call: Mock; resolve: Mock; markInvalid: Mock };
+  let gitlabChecker: { getBranchHead: Mock; getFile: Mock };
   let service: ProjectBriefService;
 
   /** Only `.nax/context.md` exists, holding `text`. */
@@ -79,11 +83,131 @@ describe('ProjectBriefService', () => {
       getFile: vi.fn<(token: string, owner: string, name: string, path: string, ref: string) => Promise<ForgeFile | null>>(async () => null),
     };
     repos = { findById: vi.fn<(id: string) => Promise<FleetRepoRecord | null>>(async () => repoRecord()) };
+    gitlabCredentials = {
+      resolve: vi.fn(),
+      markInvalid: vi.fn(),
+      call: vi.fn(async (_repo, _kind, fn) => fn({ token: 'read-token', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 42 } })),
+    };
+    gitlabChecker = {
+      getBranchHead: vi.fn(async () => HEAD),
+      getFile: vi.fn(async () => null),
+    };
     service = new ProjectBriefService(
       github as unknown as GitHubAppClient,
       repos as unknown as IFleetRepoRepository,
+      gitlabCredentials as unknown as GitLabRepoCredentials,
+      gitlabChecker as unknown as GitLabAccessChecker,
       () => clock,
     );
+  });
+
+  const useGitLab = (): void => {
+    repos.findById.mockResolvedValue(repoRecord({ provider: 'gitlab', githubInstallationId: null }));
+    gitlabChecker.getBranchHead.mockResolvedValue('abcdef1234');
+    gitlabChecker.getFile.mockImplementation(async (_access, path) => path === CONTEXT_FILE ? forgeFile('hello') : null);
+  };
+
+  it('US-003 AC-1/2: reads a GitLab context using a separate read call per request', async () => {
+    useGitLab();
+    const accessA = { token: 'a', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 42 } };
+    const accessB = { token: 'b', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 42 } };
+    gitlabCredentials.call.mockImplementationOnce(async (_repo, kind, fn) => { expect(kind).toBe('read'); return fn(accessA); });
+    gitlabCredentials.call.mockImplementationOnce(async (_repo, kind, fn) => { expect(kind).toBe('read'); return fn(accessB); });
+    expect(await service.resolveRepoContext('r1')).toBe('Repository context (acme/koda .nax/context.md @ abcdef1):\nhello');
+    expect(gitlabChecker.getBranchHead).toHaveBeenCalledWith(accessA, 'main');
+    expect(gitlabChecker.getFile).toHaveBeenCalledWith(accessB, CONTEXT_FILE, 'abcdef1234');
+    expect(gitlabCredentials.call).toHaveBeenCalledTimes(2);
+    expect(gitlabCredentials.call).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'r1' }), 'read', expect.any(Function));
+    expect(github.mintInstallationToken).not.toHaveBeenCalled();
+    expect(github.getBranchHead).not.toHaveBeenCalled();
+    expect(github.getFile).not.toHaveBeenCalled();
+  });
+
+  it('US-003 AC-3: falls back to GitLab AGENTS.md', async () => {
+    useGitLab();
+    gitlabChecker.getFile.mockImplementation(async (_access, path) => path === FALLBACK_FILE ? forgeFile('agents') : null);
+    expect(await service.resolveRepoContext('r1')).toBe('Repository context (acme/koda AGENTS.md @ abcdef1):\nagents');
+    expect(gitlabChecker.getFile).toHaveBeenNthCalledWith(2, expect.anything(), FALLBACK_FILE, 'abcdef1234');
+  });
+
+  it('US-003 AC-4: missing credentials degrades without a checker call', async () => {
+    useGitLab();
+    gitlabCredentials.call.mockRejectedValue(new RepoCheckException('gitlab_credentials_missing'));
+    expect(await service.resolveRepoContext('r1')).toBe(`${UNAVAILABLE} (no credentials)`);
+    expect(gitlabChecker.getBranchHead).not.toHaveBeenCalled();
+  });
+
+  it('US-003 AC-5: serves the shared GitLab cache inside its TTL', async () => {
+    useGitLab();
+    const first = await service.resolveRepoContext('r1');
+    clock = TTL_MS - 1;
+    expect(await service.resolveRepoContext('r1')).toBe(first);
+    expect(gitlabChecker.getBranchHead).toHaveBeenCalledTimes(1);
+  });
+
+  it('US-003 AC-6: missing credentials after TTL do not serve stale text', async () => {
+    useGitLab();
+    await service.resolveRepoContext('r1');
+    clock = TTL_MS;
+    gitlabCredentials.call.mockRejectedValue(new RepoCheckException('gitlab_credentials_missing'));
+    expect(await service.resolveRepoContext('r1')).toBe(`${UNAVAILABLE} (no credentials)`);
+  });
+
+  it('US-003 AC-7: other post-TTL failures serve cached text', async () => {
+    useGitLab();
+    await service.resolveRepoContext('r1');
+    clock = TTL_MS;
+    gitlabChecker.getBranchHead.mockRejectedValue(new RepoCheckException('gitlab_token_invalid'));
+    expect(await service.resolveRepoContext('r1')).toBe('Repository context (acme/koda .nax/context.md @ abcdef1, cached):\nhello');
+  });
+
+  it('US-003 AC-10: credential call invalidates a refused read token before degradation', async () => {
+    useGitLab();
+    const order: string[] = [];
+    gitlabCredentials.markInvalid.mockImplementation(async () => { order.push('invalidated'); });
+    gitlabCredentials.call.mockImplementation(async (_repo, kind, fn) => {
+      try { return await fn({ token: 'read-token', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 42 } }); }
+      catch (error) {
+        if (error instanceof RepoCheckException && error.reason === 'gitlab_token_invalid') {
+          await gitlabCredentials.markInvalid('r1', kind);
+        }
+        throw error;
+      }
+    });
+    gitlabChecker.getBranchHead.mockImplementation(async () => { order.push('401'); throw new RepoCheckException('gitlab_token_invalid'); });
+    expect(await service.resolveRepoContext('r1')).toBe(`${UNAVAILABLE} (read failed)`);
+    expect(gitlabCredentials.markInvalid).toHaveBeenCalledWith('r1', 'read');
+    expect(order).toEqual(['401', 'invalidated']);
+  });
+
+  it('US-003 AC-8: a GitLab file failure without cache degrades to read failed', async () => {
+    useGitLab();
+    gitlabChecker.getFile.mockRejectedValue(new RepoCheckException('provider_error'));
+    expect(await service.resolveRepoContext('r1')).toBe(`${UNAVAILABLE} (read failed)`);
+  });
+
+  it('US-003 AC-11: a GitLab timeout serves cached text', async () => {
+    vi.useFakeTimers();
+    try {
+      useGitLab();
+      await service.resolveRepoContext('r1');
+      clock = TTL_MS;
+      gitlabChecker.getBranchHead.mockImplementation(() => new Promise<string>(() => {}));
+      const pending = service.resolveRepoContext('r1');
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+      await expect(pending).resolves.toContain(', cached):\nhello');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('US-003 AC-12: a GitLab timeout without cache degrades to timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      useGitLab();
+      gitlabChecker.getBranchHead.mockImplementation(() => new Promise<string>(() => {}));
+      const pending = service.resolveRepoContext('r1');
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+      await expect(pending).resolves.toBe(`${UNAVAILABLE} (timeout)`);
+    } finally { vi.useRealTimers(); }
   });
 
   it('AC-1: a GitHub repository whose .nax/context.md has text returns the header and the text', async () => {
@@ -93,6 +217,8 @@ describe('ProjectBriefService', () => {
     expect(github.mintInstallationToken).toHaveBeenCalledWith(BigInt(9), 'koda');
     expect(github.getBranchHead).toHaveBeenCalledWith('installation-token', 'acme', 'koda', 'main');
     expect(github.getFile).toHaveBeenCalledWith('installation-token', 'acme', 'koda', CONTEXT_FILE, HEAD);
+    expect(gitlabCredentials.call).not.toHaveBeenCalled();
+    expect(gitlabCredentials.resolve).not.toHaveBeenCalled();
   });
 
   it('AC-2: a missing .nax/context.md falls back to AGENTS.md', async () => {
@@ -121,13 +247,14 @@ describe('ProjectBriefService', () => {
 
   const noContextCases: Array<{ name: string; id: string | null; record: FleetRepoRecord; reason: string }> = [
     { name: 'a null repository id', id: null, record: repoRecord(), reason: 'no repository' },
-    { name: 'a GitLab repository', id: 'r1', record: repoRecord({ provider: 'gitlab' }), reason: 'not a GitHub repository' },
+    { name: 'a GitLab repository', id: 'r1', record: repoRecord({ provider: 'gitlab' }), reason: 'no credentials' },
     { name: 'a GitHub repository without an installation', id: 'r1', record: repoRecord({ githubInstallationId: null }), reason: 'no installation' },
   ];
 
   for (const { name, id, record, reason } of noContextCases) {
     it(`AC-5: ${name} answers unavailable (${reason}) and calls no GitHub method`, async () => {
       repos.findById.mockResolvedValue(record);
+      if (record.provider === 'gitlab') gitlabCredentials.call.mockRejectedValue(new RepoCheckException('gitlab_credentials_missing'));
       expect(await service.resolveRepoContext(id)).toBe(`${UNAVAILABLE} (${reason})`);
       expect(github.mintInstallationToken).not.toHaveBeenCalled();
       expect(github.getBranchHead).not.toHaveBeenCalled();
