@@ -170,6 +170,30 @@ describe('useFleetRepos', () => {
     expect(del).toHaveBeenCalledWith('/fleet/repos/r1/rule-override')
   })
 
+  test('rotateGitlabCredentials patches the rotation route with only the given body and replaces the repo', async () => {
+    const original = { ...repo('a'), gitlab: null }
+    const saved = {
+      ...repo('a'),
+      gitlab: {
+        projectId: 42,
+        readToken: { username: 'koda-bot', expiresAt: null, status: 'ok' },
+        writeToken: { username: 'koda-bot', expiresAt: null, status: 'ok', isBot: true },
+        warnings: [],
+      },
+    }
+    const patch = jest.fn(async () => saved)
+    withApi({ get: jest.fn(async () => pageOf([original])), patch })
+    const { useFleetRepos } = await import(composablePath)
+    const fleet = useFleetRepos()
+    await fleet.load()
+
+    const result = await fleet.rotateGitlabCredentials('a', { writeToken: 'glpat-new' })
+
+    expect(patch).toHaveBeenCalledWith('/fleet/repos/a/gitlab-credentials', { writeToken: 'glpat-new' })
+    expect(result).toEqual(saved)
+    expect(fleet.repos.value[0]).toEqual(saved)
+  })
+
   test('create posts the body and appends; remove deletes, drops the row and its check', async () => {
     const post = jest.fn()
       .mockImplementationOnce(async () => repo('b'))

@@ -117,6 +117,28 @@ export interface FleetRunnerSummary {
 
 export type FleetProvider = 'github' | 'gitlab'
 
+/** The health of one stored GitLab token (`GitLabTokenSummaryDto`). */
+export const GITLAB_TOKEN_STATUSES = ['ok', 'invalid', 'expiring'] as const
+export type GitLabTokenStatus = (typeof GITLAB_TOKEN_STATUSES)[number]
+
+export interface GitLabTokenSummary {
+  username: string
+  expiresAt: string | null
+  status: GitLabTokenStatus
+}
+
+/**
+ * The GitLab connection of a repo (`GitLabCredentialDto`): the numeric project id, the health of
+ * its two tokens and the warnings the admin has to see. Null for a GitHub repo and for a GitLab
+ * repo with no stored credentials.
+ */
+export interface FleetRepoGitlab {
+  projectId: number
+  readToken: GitLabTokenSummary
+  writeToken: GitLabTokenSummary & { isBot: boolean }
+  warnings: string[]
+}
+
 export interface FleetRuleOverrideSummary {
   sha256: string
   ruleFiles: number
@@ -145,6 +167,8 @@ export interface FleetRepo {
   provider: FleetProvider
   owner: string
   name: string
+  /** The forge host the repo lives on (gitlab.com default for a GitLab repo). */
+  host: string
   defaultBranch: string
   githubInstallationId: string | null
   autoReview: boolean
@@ -157,6 +181,8 @@ export interface FleetRepo {
   /** FIX may push although the default branch is unprotected (audited override, default off). */
   fixAllowUnprotected: boolean
   ruleOverride: FleetRuleOverrideSummary | null
+  /** Null for a GitHub repo and for a GitLab repo with no stored credentials. */
+  gitlab: FleetRepoGitlab | null
   createdAt: string
 }
 
@@ -165,6 +191,19 @@ export interface NewFleetRepo {
   provider: FleetProvider
   owner: string
   name: string
+  /** GitLab only: the host the repo lives on (gitlab.com when absent). */
+  host?: string
+  /** GitLab only: both tokens are required by the API and never returned. */
+  readToken?: string
+  writeToken?: string
+  confirmBotAccount?: boolean
+}
+
+/** The body of PATCH /fleet/repos/:id/gitlab-credentials: only the supplied keys are sent. */
+export interface FleetGitlabCredentialsBody {
+  readToken?: string
+  writeToken?: string
+  confirmBotAccount?: boolean
 }
 
 export interface FleetRepoCheck {

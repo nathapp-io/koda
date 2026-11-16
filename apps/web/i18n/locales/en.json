@@ -1447,7 +1447,14 @@
       "vcs_encryption_key_missing": "The server cannot decrypt the stored GitLab token",
       "gitlab_token_invalid": "The stored GitLab token is invalid",
       "gitlab_access_insufficient": "The GitLab token cannot push to this repository",
-      "gitlab_scope_missing": "The GitLab token lacks a required scope"
+      "gitlab_scope_missing": "The GitLab token lacks a required scope",
+      "gitlab_credentials_missing": "This GitLab repository has no stored credentials",
+      "gitlab_host_invalid": "The GitLab host is not a valid https address",
+      "gitlab_host_blocked": "The GitLab host resolves to an address inside this deployment",
+      "gitlab_host_unclassified": "The GitLab host is not recognised as a GitLab instance",
+      "gitlab_read_token_writable": "The GitLab read token may also write; store a read-only token",
+      "gitlab_read_token_no_access": "The GitLab read token cannot read this repository",
+      "gitlab_project_mismatch": "The GitLab token belongs to another project"
     },
     "credentials": {
       "title": "Credential board",
@@ -1992,6 +1999,7 @@
         "repo": "Repository",
         "project": "Project",
         "provider": "Provider",
+        "gitlab": "GitLab",
         "branch": "Default branch",
         "reachability": "Reachability"
       },
@@ -2043,6 +2051,33 @@
         "name": "Repository name",
         "submit": "Add repo",
         "submitting": "Checking access…"
+      },
+      "gitlab": {
+        "host": "Host",
+        "hostPlaceholder": "https://gitlab.example.com",
+        "hostHint": "Leave empty for gitlab.com. A self-hosted instance uses its full https address.",
+        "readToken": "Read token",
+        "readTokenHint": "A token with read access to the repository.",
+        "writeToken": "Write token",
+        "writeTokenHint": "A token that can push branches and open merge requests.",
+        "confirmBot": "This write token belongs to a dedicated bot account",
+        "tokensRequired": "Enter a read token and a write token.",
+        "humanWarning": "The write token belongs to the human account {username}. Fleet jobs will act as this user. Use a dedicated bot account unless that is intended.",
+        "done": "Done",
+        "humanBadge": "Human account",
+        "none": "No tokens stored",
+        "rotate": "Rotate tokens",
+        "status": { "ok": "OK", "invalid": "Invalid", "expiring": "Expiring" },
+        "dialog": {
+          "title": "Rotate GitLab tokens",
+          "hint": "Replace the stored read or write token. Only the fields you fill in change, and tokens are never shown again.",
+          "readToken": "New read token (optional)",
+          "writeToken": "New write token (optional)",
+          "confirmBot": "The new write token belongs to a dedicated bot account",
+          "save": "Save",
+          "saving": "Saving…",
+          "pending": "Approval is pending; the stored tokens have not changed."
+        }
       }
     },
     "jobs": {
