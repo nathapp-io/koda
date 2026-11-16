@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: GitLab read features (GitLab parity F3)
 
 ## Summary
@@ -78,7 +77,7 @@ private `fail`.
 | Method | Request | Answer |
 |:--|:--|:--|
 | `getMergeRequest` (existing) | unchanged | adds `headSha` when the body's `sha` is a string; leaves it absent otherwise |
-| `getTree(access, ref)` | `GET <project>/repository/tree?ref=<ref>&recursive=true&per_page=100&page=<n>`, n = 1.. | `{ entries: ForgeTreeEntry[]; truncated: boolean }`, mapped as `listTree` maps them (`size: null`). Paging stops at the first page shorter than 100. When page `TREE_FULL_MAX_PAGES` (100) is full, the method stops and answers `truncated: true` with the entries read so far. 404 throws `repo_not_found`; a 200 whose body is not an array throws `provider_error`. |
+| `getTree(access, ref)` | `GET <project>/repository/tree?ref=<ref>&recursive=true&per_page=100&page=<n>`, n = 1.. | `{ entries: ForgeTreeEntry[]; truncated: boolean }`, mapped as `listTree` maps them (`size: null`). Paging stops at the first page shorter than 100. When page `TREE_FULL_MAX_PAGES` (a static `= 100` beside `TREE_MAX_PAGES`) is full, the method stops and answers `truncated: true` with the entries read so far, including for a tree of exactly 10000 entries. A 404 on any page throws `repo_not_found`; a 200 whose body is not an array throws `provider_error`. |
 | `listMergeRequestNotes(access, iid)` | `GET <project>/merge_requests/<iid>/notes?per_page=100` (one page) | the `body` strings of the notes, in response order; 404 throws `repo_not_found`; a 200 whose body is not an array throws `provider_error` |
 | `getMergeRequestDiscussion(access, iid, discussionId)` | `GET <project>/merge_requests/<iid>/discussions/<encodeURIComponent(discussionId)>` | `{ authors: string[] }`, the `author.username` of each note that has one; 404 answers `null`; a 200 whose `notes` is not an array throws `provider_error` |
 | `getMemberAccessLevel(access, username)` | `GET <project>/members/all?query=<encodeURIComponent(username)>&per_page=100` | the `access_level` of the entry whose `username` equals `username` case-insensitively; `0` when none matches; 404 throws `repo_not_found`; a 200 whose body is not an array throws `provider_error` |
@@ -90,7 +89,9 @@ username and confirms the exact match itself (`query` matches fuzzily).
 ### Threads with project code
 
 `PrismaFleetJobRepository.findProjectRepos` also selects `gitlabCredential: { select: { writeTokenUserId,
-writeTokenUsername } }` and projects `gitlabWriteUser` exactly as `findRepo` does (null when there is no row).
+writeTokenUsername } }` and maps it to `gitlabWriteUser: { id, username }`, or `null` when there is no row. The
+`gitlabCredential` relation is destructured out of the row first, so a returned `FleetRepoRef` carries
+`gitlabWriteUser` and no `gitlabCredential` key (unlike `findRepo`, which spreads the raw row).
 `fetchableProjectRepos` keeps a repo when it is GitHub with an installation, **or** GitLab with a truthy
 `gitlabWriteUser`. `unavailableReason` answers `no installation` for a GitLab repo whose `gitlabWriteUser` is
 null or absent, and null for one that has it. A ref built without the field (older fixtures and callers) is
@@ -108,12 +109,31 @@ repo's **read** token, `username: 'oauth2'` and the `repoId`. This feature adds 
 1. reads the head with `GitLabAccessChecker.getBranchHead(access, defaultBranch)`, then `.nax/context.md` and
    then `AGENTS.md` with `getFile(access, path, sha)`, each in its own `GitLabRepoCredentials.call(repo, 'read', fn)`;
 2. answers `Repository context: unavailable (no credentials)` when that first `call` throws
-   `gitlab_credentials_missing`. It answers this even when a cached entry exists, since a repo without
-   credentials has no read access to serve. There is no separate `resolve` before the reads;
+   `gitlab_credentials_missing`. A cached entry inside its 300000 ms TTL is still served without any `call`, as
+   on GitHub. After the TTL, `gitlab_credentials_missing` is the one failure that does not fall back to the
+   cached text: the read's failure handling checks for it and answers `unavailable (no credentials)`, because
+   the repo has lost its read access. Every other failure keeps the `, cached` fallback. There is no separate
+   `resolve` before the reads;
 3. shares the GitHub path's cache (keyed by repo id and checked against the head sha), the 3000 ms deadline, the
    masking and capping, and the `, cached` fallback.
 
 `UnavailableReason` gains `no credentials`.
+
+### Branching and new dependencies
+
+In every changed class, the GitLab branch is taken **if and only if `provider === 'gitlab'`**. A repo or ref
+with any other provider, or with none (older fixtures), takes the GitHub path unchanged.
+
+New constructor dependencies are appended after the existing required ones, in this order:
+`GitLabRepoCredentials`, then `GitLabAccessChecker`.
+
+- `ProjectBriefService(github, repos, gitlabCredentials, gitlabChecker, @Optional() now?)`
+- `KnowledgeRepoIndexer(state, github, store, embeddings, rag, audit, gitlabCredentials, gitlabChecker, clock = Date.now)`
+- `FleetPrRulingsService(repo, txManager, audit, ticketEffects, github, actors, gitlabCredentials, gitlabChecker)`
+- `ReviewEventMinter(events, repos, github, writer, gitlabCredentials, gitlabChecker)`
+
+An existing spec that builds one of these positionally without the new arguments keeps working on its GitHub
+cases. Only the specs whose GitLab cases this feature changes are listed in `### Modifies`.
 
 ### Knowledge index
 
@@ -133,7 +153,9 @@ repo's **read** token, `username: 'oauth2'` and the `repoId`. This feature adds 
     `tree truncated`, as on GitHub), and `getFile(access, path, head)` for each kept file;
   - a GitLab tree entry has `size: null`, so the allowlist cannot skip a large file before it is fetched. A
     fetched file whose `ForgeFile.size` is above `MAX_KNOWLEDGE_FILE_BYTES` is therefore counted in
-    `skippedCount`, any earlier rows for its path are deleted as for a removed file, and it is not chunked.
+    `skippedCount`, and any earlier rows for its path are deleted as the GitHub missing-file branch deletes
+    them: `store.deleteFile(projectId, 'repo:<repoId>:<path>')`, then `state.deleteFile(repoId, path)`. It is not
+    chunked. The GitLab files API returns the whole body, so the file is read into memory before the skip.
 - The provider check moves: a GitHub repo with no installation still records `no installation`, and the
   `not a GitHub repository` reason goes away.
 
@@ -158,14 +180,19 @@ repo's **read** token, `username: 'oauth2'` and the `repoId`. This feature adds 
 - The `fleet.rulings.notDraft` message drops "GitHub":
   - en: "Only draft RUN jobs with a pull or merge request can be ruled";
   - zh: "只能裁定具有拉取请求或合并请求的草稿 RUN 作业".
+- The `fleet.rulings.invalidPr` message drops "GitHub" too:
+  - en: "The job must identify a pull or merge request";
+  - zh: "任务必须指定拉取请求或合并请求".
 
 ### Review events
 
 - The bot-review parser's `LOGIN` accepts either the GitHub login pattern (unchanged) or a GitLab username:
   `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$`.
 - `FleetReposService.findReviewRepo` adds `provider` and `host` to its projection.
-- `ReviewEventMinter.mintOne`, for a GitHub repo:
-  - first drops every login that does not match the GitHub login pattern;
+- `ReviewEventMinter.mintOne` keeps its order: the bot-only skip, then `writer.guard`, then `findReviewRepo`.
+  Only after `findReviewRepo` is the provider known. Then, for a GitHub repo:
+  - it drops every login that does not match the GitHub login pattern, skipping the row `no-writer` when none is
+    left;
   - then runs exactly as today. A GitHub event whose logins pass the old pattern makes the same calls.
 - For a GitLab repo, each forge request runs in its own `GitLabRepoCredentials.call(repo, 'read', fn)`:
   - `writers` keeps each login whose `getMemberAccessLevel` is at least `GITLAB_DEVELOPER_ACCESS` (30) (owner
@@ -204,15 +231,17 @@ Symbols this feature changes. The baseline only locates the code. Implement the 
 - `RulingTargetRepo`. Baseline: `{ provider, owner, name, githubInstallationId }`. Target: adds `id: string` and `host?: string`.
 - `FleetReposService.findReviewRepo(id)`. Baseline: `{ id, projectId, owner, name, githubInstallationId, defaultBranch }`. Target: adds `provider` and `host`.
 
-Patterns to mirror: the GitHub branch of each changed method, and feature 1's `fleet-repo-files.router.ts`, which
-answers a GitLab read through `GitLabRepoCredentials.call`.
+Patterns to mirror: the GitHub branch of each changed method; `gitlab-fleet-repo-files.reader.ts`, which answers
+each GitLab read through its own `GitLabRepoCredentials.call`; and `fleet-pr-state.refresher.ts`, which reads
+`getMergeRequest` that way.
 
 ### Failure Handling
 
 | Case | Behaviour | Story |
 |:--|:--|:--|
-| GitLab answers 401 to a read | the read token is marked invalid (`call`), and the feature takes its existing failure path | US-002..US-006 |
+| GitLab answers 401 to a read | the read token is marked invalid (`call`), and the feature takes its existing failure path | US-003..US-006 |
 | Brief read fails or times out | the cached text marked `, cached`, else `unavailable (read failed)` / `unavailable (timeout)` | US-003 |
+| Brief read after the TTL finds no credential row | `unavailable (no credentials)`, even with a cached entry | US-003 |
 | Knowledge tree over 100 pages | the pass fails with `tree truncated` | US-004 |
 | Rulings MR read fails | `snapshotForFix` answers `head-unreadable`; `assertItemIndex` fails open | US-005 |
 | Review discussion read fails | the decision is minted unverified | US-006 |
@@ -321,7 +350,7 @@ None. Every story changes existing files and adds its tests to the existing spec
 - `apps/api/src/fleet/jobs/placement.service.project-code.spec.ts` — line 108 expects a GitLab repo with no credential to be unavailable with reason `not a GitHub repository`; with this story it is `no installation`. Replace that reason and keep the rest of the expectation unchanged.
 - `apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-project-repos.spec.ts` — the mapped-row `toEqual` (lines 43-46) and the exact `select` assertion (lines 59-66) pin the projection before this story; the row now also carries `gitlabWriteUser` (null for a repo without a credential row) and the select adds `gitlabCredential: { select: { writeTokenUserId: true, writeTokenUsername: true } }`. Add both to the expectations.
 - `apps/api/test/integration/fleet/fleet-project-code-repository.integration.spec.ts` — lines 78-83 `toEqual` whole rows from `findProjectRepos`; each row now also carries `gitlabWriteUser` (null for both rows there, since neither has a credential row). Add `gitlabWriteUser: null` to each expected row.
-- `apps/api/test/integration/fleet/fleet-project-code-token-fence.integration.spec.ts` — the `pc-gitlab` repo has no credential row and stays refused with `repo_not_assigned`; add a GitLab repo with a credential row whose request is granted. The existing refusal assertion stays valid and must not be weakened.
+- `apps/api/test/integration/fleet/fleet-project-code-token-fence.integration.spec.ts` — the `pc-gitlab` repo has no credential row and stays refused with `repo_not_assigned`; add a GitLab repo with a credential row whose request is granted. The suite sets only `GITHUB_*` and `FLEET_SYNC_WAIT_MS` today; add `VCS_ENCRYPTION_KEY` to `ENV_KEYS` and set it before the app boots, and seed the credential row through `GitLabRepoCredentials.save` so the stored tokens decrypt. The existing refusal assertion stays valid and must not be weakened.
 
 **US-003**
 
@@ -336,8 +365,8 @@ None. Every story changes existing files and adds its tests to the existing spec
 
 - `apps/api/test/integration/fleet/fleet-pr-rulings.integration.spec.ts` — AC-2's `gitlab` case expects a draft RUN on a GitLab MR to be refused with 409 and the text "with a GitHub pull request"; with this story that target is eligible. Remove `gitlab` from AC-2's refused kinds, change the message text AC-2 checks to "with a pull or merge request", and add the GitLab draft target as an accepted case.
 - `apps/api/src/fleet/rulings/fleet-pr-rulings.preflight.spec.ts` — "AC-6: assertItemIndex reads nothing for a GitLab repo" asserts no forge read for GitLab; with this story a GitLab repo's notes are read. Replace that case with one asserting a GitLab repo without a credential row fails open and reads no GitHub method.
-- `apps/api/src/i18n/en/fleet.json` — `fleet.rulings.notDraft` "409" text changes to "Only draft RUN jobs with a pull or merge request can be ruled".
-- `apps/api/src/i18n/zh/fleet.json` — `fleet.rulings.notDraft` "409" text changes to "只能裁定具有拉取请求或合并请求的草稿 RUN 作业".
+- `apps/api/src/i18n/en/fleet.json` — `fleet.rulings.notDraft` "409" text changes to "Only draft RUN jobs with a pull or merge request can be ruled", and `fleet.rulings.invalidPr` "400" text to "The job must identify a pull or merge request".
+- `apps/api/src/i18n/zh/fleet.json` — `fleet.rulings.notDraft` "409" text changes to "只能裁定具有拉取请求或合并请求的草稿 RUN 作业", and `fleet.rulings.invalidPr` "400" text to "任务必须指定拉取请求或合并请求".
 
 **US-006**
 
@@ -354,7 +383,7 @@ None. Every story changes existing files and adds its tests to the existing spec
 - AC-1 [unit] `GitLabAccessChecker.getMergeRequest(access, 7)` for a 200 body whose `sha` is `"abc123"` returns an object with `headSha: 'abc123'`, and for a body with no `sha` returns an object with no `headSha` property.
 - AC-2 [unit] `getTree(access, 'h1')` requests `GET <apiBase>/projects/<projectId>/repository/tree?ref=h1&recursive=true&per_page=100&page=1`, then page 2 when page 1 holds 100 entries, and stops after a page of fewer than 100, returning `{ entries, truncated: false }` with the blob and tree entries of both pages mapped as `{ path, type, sha: id, size: null }`.
 - AC-3 [unit] `getTree` when each of 100 pages holds 100 entries makes exactly 100 requests and returns `truncated: true` with the 10000 entries read.
-- AC-4 [unit] `getTree` throws `RepoCheckException` with reason `repo_not_found` when GitLab answers 404 to page 1.
+- AC-4 [unit] `getTree` throws `RepoCheckException` with reason `repo_not_found` when GitLab answers 404 to page 1, and also when page 1 holds 100 entries and page 2 answers 404.
 - AC-5 [unit] `listMergeRequestNotes(access, 4)` requests `GET <apiBase>/projects/<projectId>/merge_requests/4/notes?per_page=100` and returns the `body` strings of the notes in response order, ignoring an entry whose `body` is not a string.
 - AC-6 [unit] `listMergeRequestNotes` throws `RepoCheckException` with reason `provider_error` for a 200 response whose body is an object instead of an array.
 - AC-7 [unit] `getMergeRequestDiscussion(access, 4, 'd/1')` requests `GET <apiBase>/projects/<projectId>/merge_requests/4/discussions/d%2F1` and returns `{ authors: ['alice', 'bob'] }` for a body whose `notes` carry authors `alice` and `bob` and one note with no author.
@@ -383,16 +412,17 @@ None. Every story changes existing files and adds its tests to the existing spec
 - AC-3 [unit] For a GitLab repo whose `.nax/context.md` is absent and whose `AGENTS.md` holds `agents`, `resolveRepoContext` returns the `AGENTS.md` section.
 - AC-4 [unit] For a GitLab repo whose first `GitLabRepoCredentials.call` throws `RepoCheckException('gitlab_credentials_missing')`, `resolveRepoContext` returns `Repository context: unavailable (no credentials)` and calls no `GitLabAccessChecker` method.
 - AC-5 [unit] A second `resolveRepoContext` for the same GitLab repo within 300000 ms returns the cached section and calls `getBranchHead` only once in total.
-- AC-6 [unit] For a GitLab repo whose cached entry exists and whose next `getBranchHead` throws `RepoCheckException('gitlab_token_invalid')` after the TTL, `resolveRepoContext` returns the cached text marked `, cached`.
-- AC-7 [unit] For a GitLab repo with no cached entry and a `getFile` that throws, `resolveRepoContext` returns `Repository context: unavailable (read failed)`.
-- AC-8 [unit] For a GitHub repo, `resolveRepoContext` calls `GitHubAppClient.mintInstallationToken`, `getBranchHead` and `getFile` with the same arguments as before and never calls `GitLabRepoCredentials.resolve` or `call`.
+- AC-6 [unit] For a GitLab repo with a cached entry, a `resolveRepoContext` after the 300000 ms TTL whose first `GitLabRepoCredentials.call` throws `RepoCheckException('gitlab_credentials_missing')` returns `Repository context: unavailable (no credentials)`, not the cached text.
+- AC-7 [unit] For a GitLab repo whose cached entry exists and whose next `getBranchHead` throws `RepoCheckException('gitlab_token_invalid')` after the TTL, `resolveRepoContext` returns the cached text marked `, cached`.
+- AC-8 [unit] For a GitLab repo with no cached entry and a `getFile` that throws, `resolveRepoContext` returns `Repository context: unavailable (read failed)`.
+- AC-9 [unit] For a GitHub repo, `resolveRepoContext` calls `GitHubAppClient.mintInstallationToken`, `getBranchHead` and `getFile` with the same arguments as before and never calls `GitLabRepoCredentials.resolve` or `call`.
 
 ### US-004
 
 - AC-1 [integration] `PrismaKnowledgeIndexRepository.findRepo(id)` returns `gitlabConnected: true` and the repo's `host` for a GitLab repo with a credential row, and `gitlabConnected: false` for a GitLab repo without one.
 - AC-2 [integration] `findAllGitlabRepos()` returns the GitLab repos with a credential row, ordered by `createdAt` then `id`, and omits GitLab repos without a row and every GitHub repo.
 - AC-3 [unit] `KnowledgePoller.poll()` enqueues every repo id from `findAllGithubRepos` and then every repo id from `findAllGitlabRepos`, each with reason `'poll'`.
-- AC-4 [unit] `KnowledgePoller.poll()` when `findAllGithubRepos` rejects still enqueues every repo id from `findAllGitlabRepos`, and resolves without throwing.
+- AC-4 [unit] `KnowledgePoller.poll()` when `findAllGithubRepos` rejects still enqueues every repo id from `findAllGitlabRepos`, when `findAllGitlabRepos` rejects still enqueues every repo id from `findAllGithubRepos`, and in both cases resolves without throwing.
 - AC-5 [unit] `KnowledgeRepoIndexer.indexRepo` for a GitLab repo with `gitlabConnected: false` finishes with status `skipped` and `lastError` `no credentials`, resolves `{ status: 'skipped', reason: 'no credentials' }`, and calls neither `claim` nor any forge method.
 - AC-6 [unit] `indexRepo` for a GitHub repo whose `githubInstallationId` is null resolves `{ status: 'skipped', reason: 'no installation' }`.
 - AC-7 [unit] `indexRepo` for a connected GitLab repo reads the head with `GitLabAccessChecker.getBranchHead(access, defaultBranch)`, the tree with `getTree(access, head)` and each kept file with `getFile(access, path, head)`, each through its own `GitLabRepoCredentials.call(repo, 'read', fn)` (never `'write'`), writes the files' chunks with `replaceFile`, and resolves `{ status: 'indexed' }`.
@@ -400,7 +430,7 @@ None. Every story changes existing files and adds its tests to the existing spec
 - AC-9 [unit] `indexRepo` for a connected GitLab repo whose head equals the stored `indexedSha`, with no unembedded files and an unchanged patterns key, resolves `{ status: 'unchanged' }` and does not call `getTree`.
 - AC-10 [unit] `indexRepo` for a connected GitLab repo whose `getTree` answers `truncated: true` finishes `failed` with `lastError` `tree truncated` and resolves `{ status: 'failed', reason: 'tree truncated' }`.
 - AC-11 [unit] `indexRepo` for a connected GitLab repo where `getFile` answers a `docs/big.md` whose `size` is 262145 does not call `replaceFile` for it, adds 1 to the finished `skippedCount`, and indexes the other kept files.
-- AC-12 [unit] `indexRepo` for a connected GitLab repo whose `docs/big.md` had stored rows and now fetches with `size` 262145 calls `deleteFile` for `repo:<repoId>:docs/big.md` and deletes its `KnowledgeRepoFile` row.
+- AC-12 [unit] `indexRepo` for a connected GitLab repo whose `docs/big.md` had stored rows and now fetches with `size` 262145 calls `KnowledgeChunkStore.deleteFile(projectId, 'repo:<repoId>:docs/big.md')` and the state repository's `deleteFile(repoId, 'docs/big.md')`.
 - AC-13 [unit] `indexRepo` for a connected GitLab repo whose `getBranchHead` throws `RepoCheckException('gitlab_token_invalid')` finishes `failed` with `lastError` `gitlab_token_invalid`.
 
 ### US-005
@@ -414,10 +444,11 @@ None. Every story changes existing files and adds its tests to the existing spec
 - AC-7 [unit] `FleetPrRulingsService.snapshotForFix(repo, 12)` for a GitLab repo with a pending ruling, whose `getMergeRequest` answers `state: 'open'` and `headSha: 'h1'`, returns `{ headSha: 'h1', rulings: [...] }` with that ruling, and calls `getMergeRequest` with the access `GitLabRepoCredentials.call(repo, 'read', fn)` passes; `call` is never invoked with `'write'`.
 - AC-8 [unit] `snapshotForFix` for a GitLab repo answers `{ notSent: 'pr-not-open' }` when `getMergeRequest` returns `null`, and also when it returns `state: 'closed'`.
 - AC-9 [unit] `snapshotForFix` for a GitLab repo answers `{ notSent: 'head-unreadable' }` when `getMergeRequest` returns an open MR with no `headSha`, and also when `GitLabRepoCredentials.call` throws.
-- AC-10 [unit] `assertItemIndex` for a GitLab target whose `listMergeRequestNotes` answers bodies none of which contains `NAX_ITEM_INDEX_MARKER` throws the `fleet.rulings.noItemIndex` conflict.
-- AC-11 [unit] `assertItemIndex` for a GitLab target resolves without throwing when one note body contains `NAX_ITEM_INDEX_MARKER`, and also when `listMergeRequestNotes` answers 100 bodies none of which contains it.
-- AC-12 [unit] `assertItemIndex` for a GitLab target resolves without throwing when `GitLabRepoCredentials.call` throws `RepoCheckException('gitlab_credentials_missing')`.
-- AC-13 [unit] `snapshotForFix` and `assertItemIndex` for a GitHub repo call `GitHubAppClient.mintThreadReadToken` as before and never call `GitLabRepoCredentials.call`.
+- AC-10 [unit] `FleetPrRulingsService.preflight(projectId, jobId, dto)` with the ruling repository's `findTarget` answering an eligible draft GitLab target (repo id `r1`, host `https://gitlab.example.com`, PR 12) calls `GitLabRepoCredentials.call` with `{ id: 'r1', host: 'https://gitlab.example.com' }` and `'read'`, and `listMergeRequestNotes` with the access it passes and 12.
+- AC-11 [unit] `assertItemIndex` for a GitLab target whose `listMergeRequestNotes` answers bodies none of which contains `NAX_ITEM_INDEX_MARKER` throws the `fleet.rulings.noItemIndex` conflict.
+- AC-12 [unit] `assertItemIndex` for a GitLab target resolves without throwing when one note body contains `NAX_ITEM_INDEX_MARKER`, and also when `listMergeRequestNotes` answers 100 bodies none of which contains it.
+- AC-13 [unit] `assertItemIndex` for a GitLab target resolves without throwing when `GitLabRepoCredentials.call` throws `RepoCheckException('gitlab_credentials_missing')`.
+- AC-14 [unit] `snapshotForFix` and `assertItemIndex` for a GitHub repo call `GitHubAppClient.mintThreadReadToken` as before and never call `GitLabRepoCredentials.call`.
 
 ### US-006
 
