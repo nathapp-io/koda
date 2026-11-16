@@ -1,0 +1,211 @@
+{
+  "project": "koda",
+  "feature": "api-i18n-zh-completion",
+  "branchName": "feat/api-i18n-zh-completion",
+  "createdAt": "2026-11-16T02:35:25.687Z",
+  "updatedAt": "2026-11-16T03:17:05.560Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Translate the Chinese common catalog and repair the two placeholders",
+      "description": "**Goal** — Replace exactly twelve English-valued Chinese common-catalog entries and restore the two missing {value} placeholders without changing catalog structure.\n\n**Motivation** — #467 makes the catalog text visible; for these keys that text is English.\n\n**Approach** —\n### Catalog translations\n\n`apps/api/src/i18n/zh/common.json`, `validation` (eight entries, all reachable from DTO constraints):\n\n| Key | zh |\n|:--|:--|\n| `validation.required` | `此字段为必填项` |\n| `validation.isEmail` | `必须是有效的邮箱地址` |\n| `validation.minLength` | `长度至少为 {min} 个字符` |\n| `validation.maxLength` | `长度不能超过 {max} 个字符` |\n| `validation.isString` | `必须是字符串` |\n| `validation.isEnum` | `无效的值` |\n| `validation.isUrl` | `必须是有效的 URL` |\n| `validation.isBoolean` | `必须是布尔值` |\n\n`apps/api/src/i18n/zh/common.json`, `errors` (four entries, no reader in this repo):\n\n| Key | zh |\n|:--|:--|\n| `errors.notFound` | `未找到资源` |\n| `errors.forbidden` | `访问被拒绝` |\n| `errors.unauthorized` | `未授权操作` |\n| `errors.invalidTransition` | `无效的工单状态转换` |\n\nWording follows the neighbouring catalogs: `tickets.invalidTransition` is already\n`无效的工单状态转换`, `tickets`' `40003` is `访问被拒绝`, and `auth`/`exception` `40000` is `未授权操作`.\nThe four `errors.*` keys are translated rather than deleted so the key set stays at 386 = 386 (see Out of\nScope) and because the `@nathapp/nestjs-common` exception convention that may look them up is outside\nthis repository.\n\nThe `en` catalogs do not change.\n\n### Placeholder repair\n\n`apps/api/src/i18n/zh/validation.json` (class-validator defaults this repo ships; no DTO references the\n`validation.*` namespace today):\n\n| Key | zh (before) | zh (after) |\n|:--|:--|:--|\n| `min` | `{property}的值必须至少为{constraints.0}` | `{property} 的值 \"{value}\" 必须至少为 {constraints.0}` |\n| `max` | `{property}的值必须小于或等于{constraints.0}` | `{property} 的值 \"{value}\" 必须小于或等于 {constraints.0}` |\n\nThese are the only two placeholder mismatches in either catalog today; repairing them lets the parity\ncheck compare placeholder sets across every namespace with no exception. The other entries in that file\nare unchanged.\n\nChange exactly the 12 values in `apps/api/src/i18n/zh/common.json` and the two `validation.min` /\n`validation.max` values in `apps/api/src/i18n/zh/validation.json` to the strings in Design. Keep the\nexisting JSON shape, nesting and key order; do not touch `en` or any other zh entry.\n\n**Scope** — In: only the fourteen specified Chinese JSON string values, preserving all keys and key order. Out: parity helper/spec creation belongs to US-002; endpoint integration assertions belong to US-003; do not modify DTOs, filters or message syntax. Nearby feature exclusions remain:\n- Deleting the four `common.errors.*` keys. They have no reader in this repository, but the\n  `@nathapp/nestjs-common` convention that may read them is not source-available here and translation is\n  behaviour-neutral; deletion can be a separate decision.\n- The `date.*` format patterns: identical by design and allow-listed, not translated.\n- The other 14 entries in `zh/validation.json`; only the two placeholder repairs change.\n- Translating the en side.\n\n**Interface** — Existing JSON namespaces, dotted keys and interpolation tokens remain unchanged; this story introduces no TypeScript interface.\n\n**Verification** — No-test: catalog text only; the parity spec in US-002 is the automated guard. Review the story-local diff for exact values, JSON order and unchanged key sets.",
+      "acceptanceCriteria": [
+        "When the eight target validation values in apps/api/src/i18n/zh/common.json are read, their mapping is exactly {required: '此字段为必填项', isEmail: '必须是有效的邮箱地址', minLength: '长度至少为 {min} 个字符', maxLength: '长度不能超过 {max} 个字符', isString: '必须是字符串', isEnum: '无效的值', isUrl: '必须是有效的 URL', isBoolean: '必须是布尔值'}, placeholders included.",
+        "When the four errors values in apps/api/src/i18n/zh/common.json are read, their mapping is exactly {notFound: '未找到资源', forbidden: '访问被拒绝', unauthorized: '未授权操作', invalidTransition: '无效的工单状态转换'}.",
+        "When min and max in apps/api/src/i18n/zh/validation.json are read, they equal '{property} 的值 \"{value}\" 必须至少为 {constraints.0}' and '{property} 的值 \"{value}\" 必须小于或等于 {constraints.0}' respectively, with no other entry in that file changed.",
+        "When the US-001 catalog diff is reviewed, it contains only those fourteen string-value changes, preserving existing JSON shape, nesting and key order, with en untouched and both catalogs still containing 386 keys.",
+        "When the repaired zh/validation.json min and max values are inspected for the previously dropped {value} placeholder, neither value omits the literal token '{value}'."
+      ],
+      "tags": [
+        "api",
+        "i18n",
+        "bugfix",
+        "catalog"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "A tightly bounded declarative edit to two existing JSON files, with exact supplied strings, no new dependency and no algorithm or security implementation change; honor the spec's explicit catalog-only no-test designation.",
+        "noTestJustification": "The spec explicitly classifies US-001 as no-test: catalog text only, with no executable logic or shape changes. Exact translation and placeholder edits are reviewed here; the dependent US-002 parity guard and US-003 route assertions provide automated behavioral verification.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/i18n/zh/common.json",
+        "apps/api/src/i18n/zh/validation.json",
+        "apps/api/src/i18n/en/common.json"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/i18n/zh/common.json",
+          "reason": "the 12 values in Design; every other value and the key order stay."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/validation.json",
+          "reason": "`min` and `max` only."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "36e71c97c6d05ace487d8a18d34abb15d94d5e78"
+    },
+    {
+      "id": "US-002",
+      "title": "Add the catalog parity helper and spec",
+      "description": "**Goal** — Introduce a pure catalog diff helper and API-wide guard that exposes locale file/key drift, untranslated identical values and placeholder loss.\n\n**Motivation** — No API parity guard exists.\n\n**Approach** —\n### Parity helper\n\nNew `apps/api/test/helpers/catalog-parity.ts`, pure and database-free:\n\n**Interface** —\n```ts\nexport interface CatalogSet { [namespace: string]: Record<string, string> }\nexport interface CatalogDiff {\n  missingFiles: string[];        // a namespace file in en with no zh file\n  extraFiles: string[];          // a namespace file in zh with no en file\n  missingKeys: string[];         // `${namespace}.${key}` in en, absent in zh\n  extraKeys: string[];           // `${namespace}.${key}` in zh, absent in en\n  untranslated: string[];        // `${namespace}.${key}` byte-identical outside the allow-list\n  placeholderMismatches: string[]; // `${namespace}.${key}` whose placeholder multisets differ\n}\nexport function flattenCatalog(value: unknown): Record<string, string>\nexport function placeholders(value: string): string[]\nexport function diffCatalogs(en: CatalogSet, zh: CatalogSet, allowedIdentical: readonly string[]): CatalogDiff\n```\n\n- A `CatalogSet` key is a namespace file name without `.json` (`common`, `date`, …); its value is that\n  file flattened to dotted keys (`validation.minLength`).\n- `flattenCatalog` walks nested objects into dotted keys. Every leaf in the catalogs is a string. A\n  non-object root, an array, or a non-string leaf throws with the offending key/path, so a future shape\n  change fails loudly instead of being skipped.\n- `placeholders` returns the `{...}` tokens of a value, in order (the catalogs use single-brace tokens;\n  no other style appears in either locale).\n- `diffCatalogs` receives already-flattened catalogs and compares file sets, key sets, untranslated\n  values (only for keys both sides share) and placeholder multisets (sorted arrays). `allowedIdentical`\n  entries use the same `${namespace}.${key}` form and are exempt from the untranslated check only.\n\n### Parity spec\n\nNew `apps/api/test/unit/i18n/catalog-parity.spec.ts`:\n\n- Loads every `*.json` under `apps/api/src/i18n/en` and `apps/api/src/i18n/zh` at test time, resolving\n  the directory from `__dirname` as the existing i18n specs do (`join(__dirname,\n  '../../../src/i18n')`).\n- Asserts that `diffCatalogs(en, zh, ALLOWED_IDENTICAL)` returns six empty arrays — the composition\n  flattens every namespace first. A failure names the namespace and key, so the fix is mechanical.\n- Declares `ALLOWED_IDENTICAL` as a local constant in this spec file: exactly the five `date.*` keys —\n  `date.dateFormat`, `date.dateTimeFormat`, `date.queryDateFormat`, `date.dateFormatWithDay`,\n  `date.dateTimeFromatWithDay` (the key's spelling is part of the contract) — with a comment saying a\n  date format pattern is not language-specific.\n- Drives `flattenCatalog`, `placeholders` and `diffCatalogs` with synthetic fixtures to prove each gap\n  class is reported: missing/extra file, missing/extra key, untranslated value, allow-listed identical\n  value (not reported), dropped placeholder, renamed placeholder, extra placeholder.\n\n**Scope** — In: the two new pure helper/guard files, full dynamic en/zh catalog loading, exact five-key allow-list and synthetic fixtures. Out: translating or repairing catalogs belongs to US-001; route assertions belong to US-003; app bootstrap is excluded. Do not use allow-list entries to bypass placeholder parity. Nearby feature exclusions remain:\n- The web-side parity specs, including `apps/web/tests/i18n/locale-parity.spec.ts`.\n- The `date.*` format patterns: identical by design and allow-listed, not translated.\n- Adding a third locale.\n- Detecting a `zh` value that is English but not byte-identical to its `en` counterpart (for example a\n  stray punctuation change); the guard checks byte identity and review covers the rest.\n\n**Verification** — Write fixture-driven failing unit cases before implementing the helper; then compose real filesystem catalogs and assert the complete six-array empty CatalogDiff after US-001. The default bun run test already discovers test/unit/**/*.spec.ts, so no configuration or database is needed. The five contextFiles prioritize the existing i18n test style, both common catalogs, the English date keys and repaired Chinese validation placeholders. Also read apps/api/src/i18n/zh/date.json, the sixth spec-recommended context file omitted only to respect the five-file limit, to confirm intentional format equality.",
+      "acceptanceCriteria": [
+        "Given the repository's en and zh catalogs flattened namespace by namespace, diffCatalogs(en, zh, ALLOWED_IDENTICAL) returns exactly {missingFiles: [], extraFiles: [], missingKeys: [], extraKeys: [], untranslated: [], placeholderMismatches: []}.",
+        "flattenCatalog({ a: { b: 'x' }, c: 'y' }) returns { 'a.b': 'x', c: 'y' }.",
+        "flattenCatalog({ a: { b: 1 } }) throws an error naming the dotted key a.b.",
+        "flattenCatalog(null) throws for a non-object root.",
+        "flattenCatalog('x') throws for a non-object root.",
+        "flattenCatalog(['x']) throws for an array root.",
+        "placeholders('长度至少为 {min} 个字符') returns ['{min}'].",
+        "placeholders('无占位符') returns [].",
+        "Given en = {namespace: {key: 'English'}} and zh = {namespace: {}}, diffCatalogs(en, zh, []) reports 'namespace.key' in missingKeys.",
+        "Given en = {namespace: {}} and zh = {namespace: {key: '中文'}}, diffCatalogs(en, zh, []) reports 'namespace.key' in extraKeys.",
+        "Given both catalogs contain namespace.key with the identical string 'English' and no allow-list entry, diffCatalogs(en, zh, []) reports 'namespace.key' in untranslated.",
+        "Given both catalogs contain namespace.key with the identical string 'English' and allowedIdentical = ['namespace.key'], diffCatalogs(en, zh, allowedIdentical) does not report 'namespace.key' in untranslated.",
+        "Given en.namespace.key contains '{value}' and zh.namespace.key drops that token, diffCatalogs(en, zh, []) reports 'namespace.key' in placeholderMismatches.",
+        "Given en.namespace.key contains '{min}' and zh.namespace.key uses '{max}' instead, diffCatalogs(en, zh, []) reports 'namespace.key' in placeholderMismatches.",
+        "Given zh.namespace.key adds a placeholder absent from en.namespace.key, diffCatalogs(en, zh, []) reports 'namespace.key' in placeholderMismatches.",
+        "Given en contains namespace and zh has no corresponding namespace file, diffCatalogs(en, zh, []) reports 'namespace' in missingFiles.",
+        "Given zh contains namespace and en has no corresponding namespace file, diffCatalogs(en, zh, []) reports 'namespace' in extraFiles.",
+        "When the guard applies its local ALLOWED_IDENTICAL constant, the exempt keys are exactly ['date.dateFormat', 'date.dateTimeFormat', 'date.queryDateFormat', 'date.dateFormatWithDay', 'date.dateTimeFromatWithDay']."
+      ],
+      "tags": [
+        "api",
+        "i18n",
+        "catalog-parity",
+        "unit"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two new files implement small, deterministic recursive flattening and catalog-comparison functions using filesystem fixtures and ordinary Vitest assertions; no database, runtime integration or security logic. The spec explicitly binds the parity guard as its own story.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/i18n/en/common.json",
+        "apps/api/src/i18n/zh/common.json",
+        "apps/api/src/i18n/en/date.json",
+        "apps/api/src/i18n/zh/date.json",
+        "apps/api/src/i18n/zh/validation.json",
+        "apps/api/test/unit/i18n/webhooks-translation-keys.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/helpers/catalog-parity.ts",
+        "apps/api/test/unit/i18n/catalog-parity.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "placeholders('{value} {constraints.0} {value}') returns ['{value}', '{constraints.0}', '{value}'] in occurrence order.",
+        "Given en.namespace.key contains '{value} {value}' and zh.namespace.key contains '{value}' once, diffCatalogs reports 'namespace.key' in placeholderMismatches.",
+        "Given shared values contain the same placeholder multiset in different orders, diffCatalogs does not report their key in placeholderMismatches.",
+        "Given 'namespace.key' is allow-listed but its placeholder multisets differ, diffCatalogs still reports 'namespace.key' in placeholderMismatches.",
+        "flattenCatalog({ a: { b: ['x'] } }) throws an error naming a.b."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "972e62637ea13aca24306522627a7c29568eb277"
+    },
+    {
+      "id": "US-003",
+      "title": "Prove the Chinese DTO answer on two public routes",
+      "description": "**Goal** — Extend the two existing password-reset integration cases to pin resolved and interpolated Chinese validation responses while preserving English fallback and all existing assertions.\n\n**Motivation** — #467 makes the catalog text visible; for these keys that text is English.\n\n**Approach** —\n### End-to-end `zh` answers\n\nTwo public DTO routes already have DB-backed integration specs and need no auth:\n\n- `apps/api/test/integration/auth/password-reset-request.integration.spec.ts`, AC-15: add a request with\n  `Accept-Language: zh-CN` and `email: 'not-an-address'`; assert `message` is\n  `必须是有效的邮箱地址` and `errors.email` is `['必须是有效的邮箱地址']`, while the existing en assertion of AC-15 stays.\n- `apps/api/test/integration/auth/password-reset-confirm.integration.spec.ts`, AC-11: extend the local\n  `confirm` helper with an optional `acceptLanguage` (mirroring `requestReset` in the sibling spec) and\n  send `newPassword: 'aB1!'` with `Accept-Language: zh-CN`; `aB1!` passes the complexity rule and fails\n  only `MinLength(8)`, so the body is the Chinese bound `长度至少为 8 个字符`. Validation runs before the\n  token lookup, so any non-empty token string is enough. The existing en assertions are unchanged.\n\nBoth specs keep their shared DB gate (`canRunDbTests()`); they run under `test:scoped` outside the nax\nsandbox.\n\n**Source-aware implementation notes** — The first design bullet is corrected to the authoritative AC's one-element errors.email array rather than a scalar. The current request AC-15 does not yet assert the exact English sentence, and confirm AC-11 currently tests complexity with lowercase1! rather than the MinLength sentence. Keep all existing status, no-write, password, token and audit assertions. Add explicit English requests/assertions for 'Must be a valid email address' and 'Must be at least 8 characters long' without replacing the existing complexity scenario. Assert errors.newPassword = ['长度至少为 8 个字符'] for the Chinese short-password response, and assert neither Chinese response body contains $t(. Both cases must exercise the real HTTP validation path, not mocked translations.\n\n**Scope** — In: only apps/api/test/integration/auth/password-reset-request.integration.spec.ts AC-15 and apps/api/test/integration/auth/password-reset-confirm.integration.spec.ts AC-11 plus the local confirm helper; preserve all existing callers, fixtures and assertions. Out: catalog modifications belong to US-001; parity helper/spec belongs to US-002; changing production auth code or DTOs is excluded. Do not add separate integration suites. Nearby feature exclusions remain:\n- Any change to the validation filter; #467 owns that path.\n- Any change to the `key|{\"args\"}` message format; #467 defines it.\n- Re-introducing or removing `$t(...)` wrappers; #467 removed them.\n- Runtime verification against a deployed instance; the acceptance is the specs above.\n\n**Interface** — Preserve requestReset(address: string, acceptLanguage?: string). Extend the existing local confirm(token: string, newPassword: string = NEW_PASSWORD) helper with an optional third acceptLanguage?: string parameter; undefined sends no Accept-Language header, while a supplied value is set on the existing Supertest request. The new helper parameter is test-local and does not change an API DTO or controller contract.\n\n**Verification** — Use strict three-session TDD isolation for the password-reset security path. Run both targeted integration files together under bun run test:scoped on the host with real test Postgres and the existing canRunDbTests() gate. Retain resetThrottle, SMTP spies, bootHttpApp and existing server ownership; skips inside the sandbox do not establish acceptance.",
+      "acceptanceCriteria": [
+        "When POST /api/auth/password-reset receives {email: 'not-an-address'} with Accept-Language: zh-CN, it returns HTTP 400.",
+        "When POST /api/auth/password-reset receives {email: 'not-an-address'} with Accept-Language: zh-CN, its message equals '必须是有效的邮箱地址'.",
+        "When POST /api/auth/password-reset receives {email: 'not-an-address'} with Accept-Language: zh-CN, its errors.email equals ['必须是有效的邮箱地址'].",
+        "When the same invalid-email password-reset request omits Accept-Language, its message remains 'Must be a valid email address'.",
+        "When POST /api/auth/password-reset/confirm receives a non-empty token and newPassword: 'aB1!' with Accept-Language: zh-CN, it returns HTTP 400.",
+        "When POST /api/auth/password-reset/confirm receives a non-empty token and newPassword: 'aB1!' with Accept-Language: zh-CN, its message equals '长度至少为 8 个字符'.",
+        "When POST /api/auth/password-reset/confirm receives a non-empty token and newPassword: 'aB1!' with Accept-Language: zh-CN, its errors.newPassword equals ['长度至少为 8 个字符'].",
+        "When the same short-password confirm request omits Accept-Language, its message remains 'Must be at least 8 characters long'.",
+        "When the zh-CN invalid-email password-reset response body is serialized, it does not contain '$t('.",
+        "When the zh-CN short-password confirm response body is serialized, it does not contain '$t('."
+      ],
+      "tags": [
+        "api",
+        "i18n",
+        "integration",
+        "auth",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing DB-backed integration files and one backward-compatible local helper extension; the security override requires strict three-session TDD because these are public password-reset authentication paths, even though production auth logic is unchanged. This integration-only story is explicitly required by the binding spec.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/test/integration/auth/password-reset-request.integration.spec.ts",
+        "apps/api/test/integration/auth/password-reset-confirm.integration.spec.ts",
+        "apps/api/src/auth/dto/password-reset-request.dto.ts",
+        "apps/api/src/auth/dto/password-reset-confirm.dto.ts",
+        "apps/api/src/i18n/zh/common.json"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/auth/password-reset-request.integration.spec.ts",
+          "reason": "AC-15 gains the `zh-CN` request; the existing en assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/auth/password-reset-confirm.integration.spec.ts",
+          "reason": "the `confirm` helper gains an optional `acceptLanguage` parameter, defaulting to no header, and AC-11 gains the `zh-CN` request."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7517288017fd5c7c5c782dc9ead8bd347f61d210"
+    }
+  ],
+  "analysis": "Goal and completion: close #468 by translating exactly twelve English-valued Chinese common-catalog entries, repairing two dropped {value} placeholders, introducing a pure API catalog parity guard, and demonstrating Chinese validation responses and English fallback on two existing public reset routes. The binding decomposition is exactly US-001, US-002 and US-003, all scoped to apps/api; US-002 and US-003 depend only on US-001. US-002 remains a separate guard/helper story and US-003 remains a separate integration story because the spec explicitly binds that structure.\n\nExploration and architecture: codebase-memory MCP tools are unavailable in this session, so discovery used targeted Read, Glob and Grep calls against this repository only. No code or test execution capability is exposed, so this analysis records source inspection rather than executed verification. The API is the system of record, built with NestJS/Fastify, not a new service. apps/api/src/main.ts:10 creates the Fastify app through AppFactory and apps/api/src/main.ts:39-42 installs global pipes, filters and guards. apps/api/src/app.module.ts:84-90 configures I18nCoreModule with fallbackLanguage 'en' and the i18n resources directory. The implementation needs no new Nest module, runtime dependency, persistence change or client-side logic. Repository guidance is in .nax/mono/apps/api/context.md:1; follow it rather than editing generated AGENTS.md files. Actual API package scripts and versions are authoritative if context summaries drift: apps/api/package.json:42-63 includes Nathapp 4.2.4 packages, Nest 12 and class-validator. The supplied generic context calls web Next.js, but repository guidance calls it Nuxt; web is entirely outside this feature and should not be explored or changed.\n\nCatalog baseline and affected readers: apps/api/src/i18n/zh/common.json:2-17 contains the validation entries; the eight target values at lines 3-7 and 9-11 remain English, while existing Chinese values such as isNotEmpty, isIn, passwordComplexity and webhookSecretMinLength must stay untouched. apps/api/src/i18n/zh/common.json:19-23 contains the four English common.errors values. Their English counterparts are apps/api/src/i18n/en/common.json:2-23. A direct source search found no common.errors.* reader under apps/api/src; the spec says no repository reader exists, but external Nathapp exception conventions are not source-available, so translate rather than delete them. apps/api/src/i18n/zh/validation.json:6-7 omit {value}, whereas apps/api/src/i18n/en/validation.json:6-7 retain {property}, {value} and {constraints.0}. Only min and max change. The supplied spec describes 'other 14 entries', but the inspected validation.json has fourteen total entries (twelve other entries); treat that exclusion as preserving every non-min/max value, not permission to add or remove anything. A glob confirms matching lists of 32 JSON namespace files per locale. The spec supplies the baseline of 386 flattened keys per locale and 17 identical values before completion (12 common values plus five intentional date patterns); these aggregate value/key counts were not independently recomputed in this tool-only session. Both date catalogs at apps/api/src/i18n/en/date.json:2-6 and apps/api/src/i18n/zh/date.json:2-6 are identical. Preserve dateTimeFromatWithDay exactly, including its existing spelling. The parity guard must discover files dynamically rather than hardcode the current namespace/key counts.\n\nCatalog consumers and impact: catalog resources are loaded by i18n at runtime rather than imported by individual DTOs. PasswordResetRequestDto binds common.validation.isEmail and the maxLength bound at apps/api/src/auth/dto/password-reset-request.dto.ts:9-11. PasswordResetConfirmDto uses plain keys and key|JSON arguments at apps/api/src/auth/dto/password-reset-confirm.dto.ts:12-20, including common.validation.minLength|{\"min\":8}. RegisterDto and related auth DTOs reuse these common keys (apps/api/src/auth/dto/register.dto.ts:9-24; login and change-password DTOs also match direct search). Consequently translating the common catalog corrects responses across those existing consumers without changing any decorator or filter. The PASSWORD_COMPLEXITY expression at apps/api/src/auth/dto/register.dto.ts:5 accepts aB1!, so that fixture isolates MinLength(8) instead of producing two errors. The two reset handlers explicitly use @Public() and bind the existing DTOs at apps/api/src/auth/password-reset/password-reset.controller.ts:32-46 and :55-66; no registration toggle, bearer token or real reset token is needed for the new invalid-input requests. Validation precedes token lookup. Email-locale selection in the controller is a separate concern from validation-language resolution and must not be modified.\n\nExisting tests and proposed guard: apps/api/test/unit/i18n/webhooks-translation-keys.spec.ts:13-16 demonstrates node:path join(__dirname, '../../../src/i18n'); its tests bootstrap I18nCoreModule at :25-37, but the new parity test must only use filesystem JSON loading plus pure helpers, not copy that bootstrap. A glob found eight existing namespace-focused i18n specs and no catalog-parity helper or spec. Add exactly apps/api/test/helpers/catalog-parity.ts and apps/api/test/unit/i18n/catalog-parity.spec.ts. CatalogSet contains already-flattened namespaces; flattenCatalog rejects unsupported shapes with a path; placeholders returns full single-brace tokens in occurrence order; diffCatalogs compares locale file and key sets, shared identical strings, and sorted placeholder multisets, with an allow-list that affects only untranslated results. Preserve duplicate placeholder occurrences rather than comparing unique sets. The local ALLOWED_IDENTICAL constant contains exactly the five date keys. Namespace/key diagnostics come from CatalogDiff arrays; report missing namespaces as namespace names and missing/shared keys as namespace.key. Use synthetic fixtures for each listed gap class and dynamically read all *.json files in both directories for the repository assertion. apps/api/vitest.config.ts:27-29 includes both src/**/*.spec.ts and test/**/*.spec.ts; apps/api/package.json:12-19 excludes integration/e2e for ordinary unit runs and provides test:scoped. Thus the spec-prescribed test/unit location is already discovered without config edits, a database or app bootstrap, despite the general preference for colocated src unit tests.\n\nIntegration changes and important source/spec discrepancy: apps/api/test/integration/auth/password-reset-request.integration.spec.ts:88-91 already has requestReset(address, acceptLanguage?) with a conditional Accept-Language header. Its AC-15 at :348-357 currently asserts status 400, a nonempty response, no token/schedule writes and no send; it does NOT currently assert an exact English message. apps/api/test/integration/auth/password-reset-confirm.integration.spec.ts:118-119 has confirm(token, newPassword = NEW_PASSWORD) without a language parameter. Its AC-11 at :316-327 tests the lowercase1! complexity rejection and preserved password/token/audit state, not an English MinLength sentence. Preserve all those assertions verbatim in intent and add explicit no-header English email/MinLength assertions required by US-003; do not replace the existing complexity test with the short-password fixture. Extend confirm with an optional third acceptLanguage parameter, defaulting to no header, preserving every existing caller and default password. Add zh-CN requests inside the named cases using aB1! and a non-empty token for MinLength. The design's shorthand saying errors.email 'is' a string is resolved toward the authoritative AC: it must be the one-element array ['必须是有效的邮箱地址']; likewise errors.newPassword is ['长度至少为 8 个字符']. Assert HTTP 400, exact top-level message, exact field array, and absence of $t( in each Chinese body. This pins real request-language resolution and interpolation in addition to static catalog parity.\n\nVerification and isolation: both existing integration suites gate their describe blocks with canRunDbTests() (request spec:29; confirm spec:30). apps/api/test/helpers/test-environment.ts:1 re-exports the shared gate; test/helpers/test-environment.ts:3-11 requires KODA_DB_TESTS=1 and excludes NAX_SANDBOXED=1. Keep that gate unchanged. The suites use bootHttpApp, fixtureDb, resetDb, resetThrottle, environment restoration and SMTP spies; retain these fixtures, do not add an actual SMTP dependency, extra listener or a new test harness. Run the pure parity spec from apps/api with bun run test:scoped test/unit/i18n/catalog-parity.spec.ts and ordinary bun run test. Run both DB-backed files together with bun run test:scoped test/integration/auth/password-reset-request.integration.spec.ts test/integration/auth/password-reset-confirm.integration.spec.ts outside the sandbox via declared host testScoped when available. A skip is not verification. Per repository guidance, DB-mode runs select explicit KODA_TEST_DATABASE_URL, otherwise compose test Postgres on port 5433, otherwise Testcontainers, and reset the test database; do not run simultaneous DB commands against one database. A second checkout must use a private container/separate test DB. Quality checks are pipeline gates, not acceptance criteria. US-001 follows the spec's explicit no-test classification for catalog-only edits, with exact review and automated guard coverage supplied by US-002; US-002 uses ordinary TDD for pure helper behavior. US-003 uses three-session-tdd because it touches password-reset authentication paths even though the changes are integration-only.\n\nRisks and migration: exact Simplified Chinese text, spaces, URL capitalization and brace tokens are contractual, so preserve JSON shape, order and all non-target values. Broadening the identical-value allow-list, silently ignoring arrays/non-string leaves, comparing placeholder sets instead of multisets, or loading only selected namespaces would undermine the guard. Byte-identical detection intentionally cannot detect English paraphrases or punctuation-only drift. Translation changes are intentional externally visible fixes, while English values, response envelopes, statuses, DTO bounds and auth behavior remain unchanged. No schema migration, rollout migration, OpenAPI export, generated CLI client update or new package is required because controller/DTO contracts do not change. Land US-001 first; US-002 and US-003 can then proceed independently. The story-local catalog diff must contain only fourteen changed string values; the full feature also legitimately adds two test/helper files and modifies two integration files. Completion is exact catalog review, six empty parity diff arrays with fixture-proven failure reporting, and host-executed Chinese/English integration responses—not testing against a deployed instance.\n\nRefine-pass AC inventory (spec numbering maps to this PRD's acceptanceCriteria positions): US-001 spec AC1 exact eight validation translations including placeholders -> PRD AC1; AC2 exact four error translations -> AC2; AC3 exact min/max repairs with every other entry unchanged -> AC3; AC4 only fourteen value edits, English untouched and 386 keys per locale -> AC4. PRD AC5 explicitly restates the negative placeholder-loss regression already required by spec AC3, without expanding catalog scope. US-002 spec AC1 six empty repository diff arrays -> PRD AC1; AC2 flattening -> AC2; AC3 dotted-path invalid-leaf error -> AC3; AC4 null/string/array rejection -> AC4-6; AC5 token/no-token results -> AC7-8; AC6 missing/extra keys -> AC9-10; AC7 identical-value rejection and allow-list exemption -> AC11-12; AC8 dropped/renamed/extra tokens -> AC13-15; AC9 missing/extra namespace files -> AC16-17; AC10 exact five date allow-list entries -> AC18. US-003 spec AC1 Chinese invalid-email status/message/error array -> PRD AC1-3; AC2 unchanged English invalid-email answer -> AC4; AC3 Chinese short-password status/message/error array -> AC5-7; AC4 unchanged English short-password answer -> AC8; AC5 neither Chinese body contains $t( -> AC9-10. All nineteen spec criteria remain in their original stories, including the unchanged-entry, untouched-English, key-count and fallback regression anchors. Every assertion is observable through catalog/diff content, helper return/exception or HTTP response. Negative paths are explicit missing-token prevention for US-001, malformed shapes and catalog mismatches for US-002, and HTTP 400 invalid input for US-003.\n\nRefine-pass scope and routing checks: all twelve feature exclusions remain verbatim in outOfScope and no exclusion is converted into a new acceptance obligation. Story descriptions retain the exact design except the documented errors.email array correction toward the AC. All three story IDs and binding dependencies remain unchanged; US-002's repository assertion and US-003's Chinese responses require US-001, but neither depends on the other. The two newly created files appear only in US-002 expectedFiles. All contextFiles exist and are spec-recommended after replacing US-002's unlisted English validation context with the explicitly recommended Chinese validation catalog; its sixth recommended file, zh/date.json, is referenced in the description because the context list is capped at five. Catalog-only no-test routing is explicitly required by the spec; pure helper TDD is medium; password-reset integration routing retains the mandatory security override. No extra helper, dependency, migration or production API change was introduced by this audit.",
+  "outOfScope": [
+    "The `apps/web` catalogs; the web catalog is complete and is not changed here.",
+    "The web-side parity specs, including `apps/web/tests/i18n/locale-parity.spec.ts`.",
+    "Deleting the four `common.errors.*` keys. They have no reader in this repository, but the\n  `@nathapp/nestjs-common` convention that may read them is not source-available here and translation is\n  behaviour-neutral; deletion can be a separate decision.",
+    "The `date.*` format patterns: identical by design and allow-listed, not translated.",
+    "Any change to the validation filter; #467 owns that path.",
+    "Any change to the `key|{\"args\"}` message format; #467 defines it.",
+    "Re-introducing or removing `$t(...)` wrappers; #467 removed them.",
+    "The other 14 entries in `zh/validation.json`; only the two placeholder repairs change.",
+    "Translating the en side.",
+    "Adding a third locale.",
+    "Detecting a `zh` value that is English but not byte-identical to its `en` counterpart (for example a\n  stray punctuation change); the guard checks byte identity and review covers the rest.",
+    "Runtime verification against a deployed instance; the acceptance is the specs above."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}

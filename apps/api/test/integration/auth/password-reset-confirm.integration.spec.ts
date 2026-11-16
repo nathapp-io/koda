@@ -114,8 +114,10 @@ describeDb('password reset confirm (PG)', () => {
     (await db.user.findUniqueOrThrow({ where: { id } })).tokenVersion;
   const confirmEntries = (id = userId) =>
     db.auditEntry.findMany({ where: { key: 'session.password.reset.confirm', resourceId: id } });
-  const confirm = (token: string, newPassword: string = NEW_PASSWORD) =>
-    request(server).post('/api/auth/password-reset/confirm').send({ token, newPassword });
+  const confirm = (token: string, newPassword: string = NEW_PASSWORD, acceptLanguage?: string) => {
+    const call = request(server).post('/api/auth/password-reset/confirm').send({ token, newPassword });
+    return acceptLanguage === undefined ? call : call.set('Accept-Language', acceptLanguage);
+  };
   const login = (password: string, address = userEmail) =>
     request(server).post('/api/auth/login').send({ email: address, password });
   const me = (accessToken: string) =>
@@ -314,11 +316,19 @@ describeDb('password reset confirm (PG)', () => {
     expect(await confirmEntries()).toHaveLength(1);
   });
 
-  it('AC-11: a newPassword that fails the complexity rule answers 400 and the token stays unused', async () => {
+  it('AC-11: password validation answers localized 400 before token use', async () => {
     const token = await emailedToken(userEmail);
     const before = await passwordHash();
 
     await confirm(token, 'lowercase1!').expect(400);
+
+    const english = await confirm(token, 'aB1!').expect(400);
+    expect(english.body.message).toBe('Must be at least 8 characters long');
+
+    const chinese = await confirm(token, 'aB1!', 'zh-CN').expect(400);
+    expect(chinese.body.message).toBe('长度至少为 8 个字符');
+    expect(chinese.body.errors.newPassword).toEqual(['长度至少为 8 个字符']);
+    expect(JSON.stringify(chinese.body)).not.toContain('$t(');
 
     expect(await passwordHash()).toBe(before);
     expect(await unusedRows(userId)).toHaveLength(1);
