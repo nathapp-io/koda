@@ -97,6 +97,15 @@ describe('FleetReposService', () => {
     expect(gitlab.findProject).toHaveBeenCalledWith('https://gitlab.com/api/v4', 'glpat-1', 'group/app');
   });
 
+  it('US-003: stores the GitLab instance host on the row, so its clone url follows the instance', async () => {
+    gitlabTokens.resolve.mockResolvedValue('glpat-1');
+    gitlab.getTokenSelf.mockResolvedValue({ scopes: ['write_repository'], expiresAt: null });
+    gitlab.findProject.mockResolvedValue({ id: 42, owner: 'group', name: 'app', defaultBranch: 'main', accessLevel: 30 });
+    repo.create.mockResolvedValue(created({ provider: 'gitlab', owner: 'group', githubInstallationId: null }));
+    await make().create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' });
+    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gitlab', host: 'https://gitlab.com' }));
+  });
+
   it('refuses a GitLab token without write_repository', async () => {
     gitlabTokens.resolve.mockResolvedValue('glpat-1');
     gitlab.getTokenSelf.mockResolvedValue({ scopes: ['read_api'], expiresAt: null });

@@ -356,6 +356,11 @@ export interface FleetRepoRef {
   name: string;
   defaultBranch: string;
   githubInstallationId: bigint | null;
+  /**
+   * US-003: the host the repo lives on. A GitLab repo names its own host (the same owner and name
+   * can exist on two GitLab hosts), so the clone url and the credential target follow it.
+   */
+  host?: string;
   fixTrustDetectedChecks?: boolean;
   /** FIX override: skip the default-branch protection check before minting FIX write credentials. */
   fixAllowUnprotected?: boolean;

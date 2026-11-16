@@ -16,6 +16,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { forgeWebBase } from '../git-broker/clone-url';
 import { GITLAB_DEVELOPER_ACCESS, GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
@@ -69,6 +70,10 @@ export class FleetReposService {
         name: verified.name,
         defaultBranch: verified.defaultBranch,
         githubInstallationId: verified.installationId,
+        // US-003: the row names the host the repo lives on. The legacy registration has no host field
+        // yet (US-004 adds it), so a GitLab repo gets the configured instance's web base — the column
+        // default names the GitHub host, which a GitLab repo never lives on.
+        ...(dto.provider === 'gitlab' ? { host: forgeWebBase(this.vcsConfig.gitlabApiUrl) } : {}),
         createdById: actorId,
       });
       await this.activity.record({

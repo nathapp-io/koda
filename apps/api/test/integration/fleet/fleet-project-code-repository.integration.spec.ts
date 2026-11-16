@@ -32,11 +32,12 @@ describeIntegration('PrismaFleetJobRepository project-code projections (PG, S5b 
 
   /** A fleet repo whose id and `createdAt` the test controls, so ordering is never insertion order. */
   const fleetRepo = (input: {
-    id: string; projectId: string; name?: string; createdAt: string; provider?: string; installation?: bigint | null;
+    id: string; projectId: string; name?: string; createdAt: string; provider?: string; installation?: bigint | null; host?: string;
   }) => prisma.fleetRepo.create({
     data: {
       id: input.id, projectId: input.projectId, provider: input.provider ?? 'github', owner: 'acme', name: input.name ?? input.id,
       defaultBranch: 'main', githubInstallationId: input.installation === undefined ? BigInt(7) : input.installation,
+      ...(input.host === undefined ? {} : { host: input.host }),
       createdById: creatorId, createdAt: new Date(input.createdAt),
     },
   });
@@ -67,17 +68,18 @@ describeIntegration('PrismaFleetJobRepository project-code projections (PG, S5b 
     expect(found.map((r) => r.id)).not.toContain(foreign.id);
   });
 
-  it('US-003 AC-5: maps the rows to FleetRepoRef, keeping a GitLab provider and a null installation as stored', async () => {
+  it('US-003 AC-5: maps the rows to FleetRepoRef, keeping a GitLab provider, its host and a null installation as stored', async () => {
     const web = await project('mapping');
     await fleetRepo({ id: 'map-github', projectId: web.id, createdAt: '2026-01-01T00:00:00.000Z' });
-    await fleetRepo({ id: 'map-gitlab', projectId: web.id, createdAt: '2026-01-02T00:00:00.000Z', provider: 'gitlab', installation: null });
+    await fleetRepo({ id: 'map-gitlab', projectId: web.id, createdAt: '2026-01-02T00:00:00.000Z', provider: 'gitlab', installation: null, host: 'https://gitlab.example.com' });
 
     const found = await repo.findProjectRepos(web.id);
 
     expect(found).toEqual([
-      { id: 'map-github', projectId: web.id, provider: 'github', owner: 'acme', name: 'map-github', defaultBranch: 'main', githubInstallationId: BigInt(7) },
+      { id: 'map-github', projectId: web.id, provider: 'github', owner: 'acme', name: 'map-github', defaultBranch: 'main', githubInstallationId: BigInt(7), host: 'https://github.com' },
       // The fence and the ASSIGN walk classify these two as unavailable; the projection must not hide that.
-      { id: 'map-gitlab', projectId: web.id, provider: 'gitlab', owner: 'acme', name: 'map-gitlab', defaultBranch: 'main', githubInstallationId: null },
+      // US-003: the host travels with the row, so the clone url of a self-hosted repo follows it.
+      { id: 'map-gitlab', projectId: web.id, provider: 'gitlab', owner: 'acme', name: 'map-gitlab', defaultBranch: 'main', githubInstallationId: null, host: 'https://gitlab.example.com' },
     ]);
   });
 
