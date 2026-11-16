@@ -30,10 +30,10 @@ export function carriesRuleOverride(command: FleetJobKind): boolean {
  * identity for two distinct forges.
  */
 export function gitIdentityFor(
-  provider: 'github' | 'gitlab',
+  repo: Pick<FleetRepoRef, 'provider' | 'gitlabWriteUser'>,
   cfg: Pick<IFleetConfig, 'githubAppSlug' | 'gitlabBotName' | 'gitlabBotEmail'>,
 ): GitIdentity {
-  if (provider === 'gitlab') return { name: cfg.gitlabBotName, email: cfg.gitlabBotEmail };
+  if (repo.provider === 'gitlab') return { name: repo.gitlabWriteUser?.username ?? cfg.gitlabBotName, email: cfg.gitlabBotEmail };
   const bot = `${cfg.githubAppSlug ?? 'koda-fleet'}[bot]`;
   return { name: bot, email: `${bot}@users.noreply.github.com` };
 }

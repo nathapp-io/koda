@@ -145,6 +145,47 @@ describe('GitLabAccessChecker', () => {
     });
   });
 
+  describe('getBranchPushState (US-001)', () => {
+    it('AC-1: reads protected and can_push for the branch with the access token', async () => {
+      respond = () => ({ status: 200, body: { protected: true, can_push: false } });
+      await expect(checker.getBranchPushState(access, 'main')).resolves.toEqual({ protected: true, canPush: false });
+      expect(lastRequest()).toEqual(expect.objectContaining({
+        method: 'GET', url: `${API_BASE}/projects/${PROJECT_ID}/repository/branches/main`,
+        headers: { 'private-token': 'glpat' },
+      }));
+    });
+
+    it('AC-2: URL-encodes branch names', async () => {
+      respond = () => ({ status: 200, body: { protected: false, can_push: true } });
+      await checker.getBranchPushState(access, 'release/1.0');
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/repository/branches/release%2F1.0`);
+    });
+
+    it.each([
+      [404, 'repo_not_found'],
+      [401, 'gitlab_token_invalid'],
+      [403, 'app_permissions_insufficient'],
+      [500, 'provider_error'],
+    ] as const)('AC-3 through AC-6: maps status %i', async (status, reason) => {
+      respond = () => ({ status, body: {} });
+      await expect(checker.getBranchPushState(access, 'main')).rejects.toMatchObject({ reason });
+    });
+
+    it.each([
+      [{ protected: true }, 'missing can_push'],
+      [{ protected: 'true', can_push: false }, 'non-boolean protected'],
+    ])('AC-7: rejects malformed response (%s)', async (body) => {
+      respond = () => ({ status: 200, body });
+      await expect(checker.getBranchPushState(access, 'main')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
+    it('AC-8: rejects a blocked host before sending a request', async () => {
+      lookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+      await expect(checker.getBranchPushState(access, 'main')).rejects.toMatchObject({ reason: 'gitlab_host_blocked' });
+      expect(sent).toEqual([]);
+    });
+  });
+
   describe('.nax reads (fleet S3 §4.1)', () => {
     it('reads the branch head', async () => {
       respond = () => ({ status: 200, body: { commit: { id: 'c1' } } });

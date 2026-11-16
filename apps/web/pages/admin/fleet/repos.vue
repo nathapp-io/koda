@@ -148,7 +148,7 @@ onMounted(() => reload())
             <TableCell>
               <FleetRepoAutoReview v-if="repo.provider === 'github' && repo.githubInstallationId" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
               <FleetRepoFixChecks v-if="repo.provider === 'github' && repo.githubInstallationId" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
-              <FleetRepoFixUnprotected v-if="repo.provider === 'github' && repo.githubInstallationId" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
+              <FleetRepoFixUnprotected v-if="(repo.provider === 'github' && repo.githubInstallationId) || (repo.provider === 'gitlab' && repo.gitlab !== null)" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }" />
             </TableCell>
             <TableCell class="space-x-1 whitespace-nowrap text-right">
               <FleetRepoGitlabCredentialsDialog v-if="repo.provider === 'gitlab' && gitlabAllowed" :repo="repo" @saved="(updated: FleetRepo) => { const index = repos.findIndex(r => r.id === updated.id); if (index >= 0) repos[index] = updated }"/>

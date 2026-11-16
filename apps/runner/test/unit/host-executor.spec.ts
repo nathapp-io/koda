@@ -929,11 +929,19 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'RUN starts without a forge identity' }));
   });
 
-  test('US-008 AC-5: GitLab RUN gets no injected identity', async () => {
+  test('US-004 AC-6: GitLab RUN with shims gets login-only identity', async () => {
     const w = await injectedWorld('RUN', { provider: 'gitlab', binDir: 'shim-bin' });
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBe('login-only');
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe(w.row.assign.gitIdentity.name);
+  });
+
+  test('US-004 AC-7: GitLab RUN without shims has no identity and warns', async () => {
+    const w = await injectedWorld('RUN', { provider: 'gitlab' });
     await w.ex.spawn(w.row);
     expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBeUndefined();
     expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBeUndefined();
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'RUN starts without a forge identity' }));
   });
 
   test('US-008: a failed GitHub RUN start propagates and leaves no forge-token file', async () => {
@@ -1148,6 +1156,20 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     expect(w.calls[0]?.options.env['NAX_FORGE_IDENTITY']).toBeUndefined();
     expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);                       // nax reads this, then deletes it
     expect((await stat(w.tokenPath)).mode & 0o777).toBe(0o600);
+  });
+
+  test('US-004 AC-8: GitLab REVIEW receives its login and token file', async () => {
+    const w = await injectedWorld('REVIEW', { provider: 'gitlab', review: { prNumber: 42, botLogin: 'koda-bot' } });
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe('koda-bot');
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
+  });
+
+  test('US-004 AC-9: GitLab FIX step receives its login and token file', async () => {
+    const w = await injectedWorld('FIX', { provider: 'gitlab', review: { prNumber: 42, botLogin: 'koda-bot' } });
+    await w.ex.spawnFixStep(w.row);
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe('koda-bot');
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
   });
 
   test('AC-7: spawn passes the assign\'s bot login as NAX_FORGE_LOGIN', async () => {

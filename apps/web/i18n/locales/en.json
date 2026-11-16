@@ -2009,7 +2009,8 @@
       "fixUnprotected": {
         "toggle": "Allow fixes on an unprotected default branch",
         "pending": "Approval is pending; the saved setting has not changed.",
-        "hint": "Override: FIX jobs may push even though the default branch has no protection rule. Leave off unless the repository cannot be protected."
+        "hint": "Override: FIX jobs may push even though the default branch has no protection rule. Leave off unless the repository cannot be protected.",
+        "hintGitlab": "Override: FIX jobs may push even when the bot account can push to the default branch (it has no protection rule, or the rule lets the bot push). Leave off unless the repository cannot be protected."
       },
       "fixChecks": {
         "toggle": "Trust detected checks for fixes",

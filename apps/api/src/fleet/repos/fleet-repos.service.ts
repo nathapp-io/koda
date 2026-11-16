@@ -294,15 +294,20 @@ export class FleetReposService {
   /**
    * The FIX unprotected-branch override (default off): when on, the git token broker mints FIX write
    * credentials without checking the default branch's protection. Enabling needs a GitHub App
-   * installation, the only way a FIX gets credentials; disabling is always allowed. The write and its
+   * installation or stored GitLab credentials; disabling is always allowed. The write and its
    * audit share one transaction, and the principal is in the signature for the approval engine.
    */
   async configureFixUnprotected(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateFixUnprotectedDto): Promise<FleetRepoDto> {
     return this.txManager.run(async () => {
       const row = await this.repo.findById(id);
       if (!row) throw new NotFoundAppException({}, 'fleet.repos');
-      if (dto.allowUnprotected && (row.provider !== 'github' || row.githubInstallationId === null)) {
-        throw new FixUnprotectedException('github app required');
+      if (dto.allowUnprotected) {
+        if (row.provider === 'github' && row.githubInstallationId === null) {
+          throw new FixUnprotectedException('github app required');
+        }
+        if (row.provider === 'gitlab' && row.gitlabCredential == null) {
+          throw new FixUnprotectedException('gitlab credentials required');
+        }
       }
       const updated = await this.repo.updateFixUnprotected(id, dto.allowUnprotected);
       await this.audit.record({

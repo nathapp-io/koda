@@ -81,6 +81,17 @@ export class GitLabAccessChecker {
     };
   }
 
+  /** The branch protection state and whether this access token's user can push to the branch. */
+  async getBranchPushState(access: GitLabAccess, branch: string): Promise<{ protected: boolean; canPush: boolean }> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/branches/${encodeURIComponent(branch)}`, { 'private-token': access.token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) this.fail(res.status);
+    const body = obj(res.body);
+    if (typeof body.protected !== 'boolean' || typeof body.can_push !== 'boolean') throw new RepoCheckException('provider_error');
+    return { protected: body.protected, canPush: body.can_push };
+  }
+
   /** Fleet S3 §4.1: the commit a branch points at. */
   async getBranchHead(access: GitLabAccess, branch: string): Promise<string> {
     await this.guard(access.target.apiBase);

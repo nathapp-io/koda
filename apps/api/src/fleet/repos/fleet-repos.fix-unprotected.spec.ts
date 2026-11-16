@@ -77,16 +77,28 @@ describe('FleetReposService.configureFixUnprotected', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { provider: 'gitlab' },
-    { githubInstallationId: null },
-  ])('refuses to enable on a repo without a GitHub App installation: %o', async (overrides) => {
-    repo.findById.mockResolvedValue(row(overrides));
-    const error = await configure(true).catch((thrown: unknown) => thrown);
-    expect(error).toBeInstanceOf(FixUnprotectedException);
-    expect(error).toMatchObject({ reason: 'github app required', status: 422 });
+  it('US-003 AC-10 enables GitLab override when credentials exist', async () => {
+    repo.findById.mockResolvedValue(row({ provider: 'gitlab', githubInstallationId: null, gitlabCredential: { gitlabProjectId: 4 } }));
+    await expect(configure(true)).resolves.toMatchObject({ fixAllowUnprotected: true });
+    expect(repo.updateFixUnprotected).toHaveBeenCalledExactlyOnceWith('r1', true);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'fleet.repo.fix.unprotected' }));
+  });
+
+  it.each([{ provider: 'gitlab', githubInstallationId: null, gitlabCredential: null }, { provider: 'gitlab', githubInstallationId: null }])(
+    'US-003 AC-11 refuses GitLab without credentials: %o', async (overrides) => {
+      repo.findById.mockResolvedValue(row(overrides));
+      const error = await configure(true).catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(FixUnprotectedException);
+      expect(error).toMatchObject({ reason: 'gitlab credentials required', status: 422 });
+      expect(repo.updateFixUnprotected).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    },
+  );
+
+  it('US-003 AC-12 retains GitHub installation requirement', async () => {
+    repo.findById.mockResolvedValue(row({ githubInstallationId: null }));
+    await expect(configure(true)).rejects.toMatchObject({ reason: 'github app required', status: 422 });
     expect(repo.updateFixUnprotected).not.toHaveBeenCalled();
-    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it.each([

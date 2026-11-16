@@ -88,13 +88,29 @@ describeIntegration('fleet repo fix-unprotected route (PG)', () => {
       .toMatchObject({ resourceType: 'fleet-repo', projectId: world.projectId });
   });
 
-  it('enabling on a GitLab repo answers 422 with the github app reason and stores nothing', async () => {
+  it('enabling on a GitLab repo without stored credentials answers 422 with the gitlab credentials reason', async () => {
     const target = await repo({ provider: 'gitlab', githubInstallationId: null });
     const res = await patch(target.id, { allowUnprotected: true }).expect(422);
-    expect(JSON.stringify(res.body)).toContain('github app required');
+    expect(JSON.stringify(res.body)).toContain('gitlab credentials required');
     // The refusal is worded by the module's own 422 message, not a bare reason code.
-    expect(String(res.body.message)).toContain('FIX on an unprotected default branch cannot be allowed: github app required');
+    expect(String(res.body.message)).toContain('FIX on an unprotected default branch cannot be allowed: gitlab credentials required');
     expect((await stored(target.id)).fixAllowUnprotected).toBe(false);
+  });
+
+  it('enabling on a GitLab repo with stored credentials answers 200 and stores the flag', async () => {
+    const target = await repo({ provider: 'gitlab', githubInstallationId: null });
+    await db.fleetRepoGitlabCredential.create({
+      data: {
+        repoId: target.id, gitlabProjectId: 4711, encryptedReadToken: 'enc-read', encryptedWriteToken: 'enc-write',
+        readTokenUserId: 11, readTokenUsername: 'koda-read', writeTokenUserId: 12, writeTokenUsername: 'koda-bot', writeTokenIsBot: true,
+      },
+    });
+    const body = data<RepoBody>(await patch(target.id, { allowUnprotected: true }).expect(200));
+    expect(body).toMatchObject({ id: target.id, fixAllowUnprotected: true });
+    expect((await stored(target.id)).fixAllowUnprotected).toBe(true);
+    // The setting is an audited repo write, under the key the route already asks for.
+    expect(await db.auditEntry.findFirst({ where: { key: KEY, resourceId: target.id, summary: 'fix on unprotected default branch allowed' } }))
+      .toMatchObject({ resourceType: 'fleet-repo', projectId: world.projectId });
   });
 
   it('enabling on a GitHub repo without an installation answers 422 with the github app reason', async () => {

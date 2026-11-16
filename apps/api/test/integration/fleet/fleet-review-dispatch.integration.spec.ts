@@ -54,22 +54,31 @@ describeIntegration('fleet REVIEW dispatch (PG)', () => {
     await dispatch(world.repoId, 51, 'FIX').expect(409);
   });
 
-  it('US-002 AC-1/8: rejects FIX and keeps the existing REVIEW GitLab rejection reason', async () => {
+  it('US-002 AC-1/8: dispatches a GitLab REVIEW and FIX with a PR number', async () => {
     const repo = await prisma.fleetRepo.create({
       data: { projectId: world.projectId, provider: 'gitlab', owner: 'acme', name: 'gitlab-fix', defaultBranch: 'main', createdById: world.ids.root },
     });
-    const fixResponse = await dispatch(repo.id, 7, 'FIX').expect(422);
-    expect(JSON.stringify(fixResponse.body)).toContain('fix is GitHub-only');
-    const reviewResponse = await dispatch(repo.id, 7, 'REVIEW').expect(422);
-    expect(JSON.stringify(reviewResponse.body)).toContain('review is GitHub-only');
+    const review = data<{ job: { id: string; command: string; feature: string; state: string } }>(await dispatch(repo.id, 7, 'REVIEW').expect(201));
+    expect(review.job).toEqual(expect.objectContaining({ command: 'REVIEW', feature: 'review-pr-7', state: 'QUEUED' }));
+    // FIX shares the PR feature with REVIEW, and one repository holds one active job per feature: another PR number.
+    const fix = data<{ job: { id: string; command: string; feature: string; state: string } }>(await dispatch(repo.id, 8, 'FIX').expect(201));
+    expect(fix.job).toEqual(expect.objectContaining({ command: 'FIX', feature: 'review-pr-8', state: 'QUEUED' }));
+    expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: fix.job.id } }))
+      .toEqual(expect.objectContaining({ command: 'FIX', feature: 'review-pr-8', state: 'QUEUED' }));
   });
 
-  it('US-003 AC-3/4: rejects a REVIEW for a GitLab repo before dispatch normalization', async () => {
+  it('US-003 AC-3/4: refuses a GitLab REVIEW without a PR number by dispatch normalization', async () => {
     const repo = await prisma.fleetRepo.create({
       data: { projectId: world.projectId, provider: 'gitlab', owner: 'acme', name: 'gitlab-review', defaultBranch: 'main', createdById: world.ids.root },
     });
-    const response = await dispatch(repo.id).expect((result) => { if (result.status !== 422) throw new Error(JSON.stringify(result.body)); });
-    expect(JSON.stringify(response.body)).toContain('review is GitHub-only');
+    const reviewWithoutPr = (repoId: string) => request(server).post('/api/projects/web/fleet/jobs')
+      .set(auth()).send({ command: 'REVIEW', repoId, maxCostUsd: 1 });
+    const response = await reviewWithoutPr(repo.id).expect(400);
+    // The provider no longer refuses: the request is normalized like a GitHub one, which needs the PR number.
+    expect(String(response.body.message)).toContain('prNumber required for REVIEW');
+    const github = await reviewWithoutPr(world.repoId).expect(400);
+    expect(github.body.message).toBe(response.body.message);
+    expect(await prisma.fleetJob.count({ where: { repoId: repo.id } })).toBe(0);
   });
 
   it('US-003 AC-6: reports bot_review when the only runner lacks botReview', async () => {

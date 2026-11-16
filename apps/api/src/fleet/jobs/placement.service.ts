@@ -318,7 +318,7 @@ export class PlacementService {
     if (withOverride) await this.repo.setRuleOverrideSummary(job.id, ruleOverrideSummaryOf(ruleOverride));
     const after = await this.repo.findById(job.id);
     if (!after) return null;
-    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), await this.attachProjectRepos(withKodaTools(thread, runner.capabilities), job, runner.capabilities), ruleOverride);
+    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo, this.fleetConfig), await this.attachProjectRepos(withKodaTools(thread, runner.capabilities), job, runner.capabilities), ruleOverride);
     if (thread) await this.repo.pinThreadRunner(thread.threadId, runner.id);
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
     const live = await this.transitions.record({ before: job, after, by: 'server', now, actor: SYSTEM_ACTOR, reason: `assigned to ${runner.name}` });

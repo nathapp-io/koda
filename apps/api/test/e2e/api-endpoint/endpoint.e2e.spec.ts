@@ -6666,20 +6666,23 @@ describeIntegration('fleet AGENT dispatch route (US-004)', () => {
     expect(detail.agent).toEqual(agentInput);
   });
 
-  it('US-004 AC-2/4/9: applies provider and required-agent dispatch validation', async () => {
-    const gitlabRefusal = await request(server()).post(base).set(auth(world.tokens.root))
-      .send(payload('flow-gitlab', { repoId: gitlabRepoId })).expect(422);
-    expect(gitlabRefusal.body.message).toContain('agent is GitHub-only');
+  it('US-004 AC-2/4/9: applies the required-agent validation and dispatches a GitLab repo', async () => {
     const missingAgent = await request(server()).post(base).set(auth(world.tokens.root))
       .send(payload('flow-no-agent', { agent: undefined })).expect(400);
     expect(missingAgent.body.message).toContain('agent required for AGENT');
-    for (const [command, reason] of [['REVIEW', 'review is GitHub-only'], ['FIX', 'fix is GitHub-only']] as const) {
+    // A GitLab repo dispatches AGENT, REVIEW and FIX like a GitHub one.
+    const agent = await request(server()).post(base).set(auth(world.tokens.root))
+      .send(payload('flow-gitlab', { repoId: gitlabRepoId })).expect(201);
+    expect(data<{ job: { command: string; state: string } }>(agent).job).toMatchObject({ command: 'AGENT', state: 'QUEUED' });
+    // REVIEW and FIX share the PR feature, and one repository holds one active job per feature: another PR number.
+    for (const [command, prNumber] of [['REVIEW', 7], ['FIX', 8]] as const) {
       const response = await request(server()).post(base).set(auth(world.tokens.root)).send({
-        repoId: gitlabRepoId, command, prNumber: 7, maxCostUsd: 1,
-      }).expect(422);
-      expect(response.body.message).toContain(reason);
+        repoId: gitlabRepoId, command, prNumber, maxCostUsd: 1,
+      }).expect(201);
+      expect(data<{ job: { command: string; feature: string; state: string } }>(response).job)
+        .toMatchObject({ command, feature: `review-pr-${prNumber}`, state: 'QUEUED' });
     }
-    expect(await db.fleetJob.count({ where: { repoId: gitlabRepoId } })).toBe(0);
+    expect(await db.fleetJob.count({ where: { repoId: gitlabRepoId } })).toBe(3);
   });
 
   it('US-004 AC-3: refuses a project member without fleet.job.dispatch', async () => {

@@ -286,7 +286,7 @@ export class HostExecutor implements JobExecutor {
 
   /** A login-only forge identity is safe only when this job's gh shim is on nax's PATH. */
   private async runIdentityEnv(job: JobRow, binDir: string | null): Promise<Record<string, string>> {
-    if (job.command !== 'RUN' || job.assign.repo.provider !== 'github') return {};
+    if (job.command !== 'RUN') return {};
     if (binDir === null) {
       this.deps.log.warn('RUN starts without a forge identity', { jobId: job.jobId });
       return {};

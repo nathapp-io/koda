@@ -146,16 +146,20 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     expect(jobs[0]).toMatchObject({ command: 'FIX', requestedById: world.ids.dev });
   });
 
-  it('AC-12: REVIEW and FIX on GitLab store no action', async () => {
+  it('AC-12: REVIEW and FIX on GitLab store a pending action and dispatch it', async () => {
     await prisma.fleetRepo.update({ where: { id: world.repoId }, data: { provider: 'gitlab' } });
     try {
       for (const [toolCallId, command] of [['gitlab-review', 'REVIEW'], ['gitlab-fix', 'FIX']] as const) {
-        const response = await callTool(toolCallId, { repo: 'acme/app', command, prNumber: 7023, maxCostUsd: 1 }).expect(200);
+        const response = await callTool(toolCallId, { repo: 'acme/app', command, prNumber: 7024, maxCostUsd: 1 }).expect(200);
         const result = resultOf(response);
-        expect(result.isError).toBe(true);
-        expect(result.content).toContain(command === 'FIX' ? 'fix is GitHub-only' : 'review is GitHub-only');
-        expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId } })).toBe(0);
+        expect({ isError: result.isError, pending: result.content.startsWith('pending ') }).toEqual({ isError: false, pending: true });
+        const action = await actionOf(toolCallId);
+        expect(action.preview.split('\n')[2]).toBe('pull request: #7024');
+        expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId } })).toBe(1);
       }
+      // The approval dispatches the GitLab job like a GitHub one.
+      await decide((await actionOf('gitlab-review')).id, 'approve').expect(200);
+      expect(await jobWith('review-pr-7024')).toMatchObject({ command: 'REVIEW', repoId: world.repoId, requestedById: world.ids.dev });
     } finally {
       await prisma.fleetRepo.update({ where: { id: world.repoId }, data: { provider: 'github' } });
     }

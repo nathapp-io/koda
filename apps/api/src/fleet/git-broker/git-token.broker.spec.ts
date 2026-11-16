@@ -17,6 +17,7 @@ describe('GitTokenBroker', () => {
       { gitTokenReuseMarginSec: 300, gitlabTokenTtlSec: 3_600 },
       app as never,
       credentials as never,
+      { getBranchPushState: vi.fn() } as never,
     );
   });
 
@@ -107,11 +108,12 @@ describe('GitTokenBroker', () => {
     expect(credentials.resolve).toHaveBeenCalledTimes(2);
   });
 
-  it('US-003 AC-10: refuses a read-only GitLab mint without resolving a credential', async () => {
-    await expect(broker.mint({ jobId: 'j', leaseEpoch: 1, repo: gitlab, readOnly: true }, NOW)).resolves.toEqual({
-      ok: false, error: { jobId: 'j', repoId: 'r', reason: 'provider_error' },
+  it('US-002 AC-3: a read-only GitLab mint resolves a read credential and attributes the repo', async () => {
+    credentials.resolve.mockResolvedValue({ token: 'glpat-read' });
+    await expect(broker.mint({ jobId: 'j', leaseEpoch: 1, repo: gitlab, readOnly: true }, NOW)).resolves.toMatchObject({
+      ok: true, token: { jobId: 'j', repoId: 'r', token: 'glpat-read', username: 'oauth2' },
     });
-    expect(credentials.resolve).not.toHaveBeenCalled();
+    expect(credentials.resolve).toHaveBeenCalledWith(gitlab, 'read');
   });
 
   it('turns failures into fixed reasons and never echoes a token', async () => {
@@ -167,12 +169,13 @@ describe('GitTokenBroker', () => {
       expect(credentials.resolve).not.toHaveBeenCalled();
     });
 
-    it('US-001 AC11: a read-only mint for a GitLab repository fails provider_error without any provider call', async () => {
+    it('US-002 AC-5: read-only GitLab failure retains repo attribution', async () => {
+      credentials.resolve.mockRejectedValue(new RepoCheckException('gitlab_credentials_missing'));
       await expect(broker.mint({ jobId: 'j1', leaseEpoch: 2, repo: gitlab, readOnly: true }, NOW))
-        .resolves.toEqual({ ok: false, error: { jobId: 'j1', repoId: 'r', reason: 'provider_error' } });
+        .resolves.toEqual({ ok: false, error: { jobId: 'j1', repoId: 'r', reason: 'gitlab_credentials_missing' } });
       expect(app.mintReadOnlyToken).not.toHaveBeenCalled();
       expect(app.mintInstallationToken).not.toHaveBeenCalled();
-      expect(credentials.resolve).not.toHaveBeenCalled();
+      expect(credentials.resolve).toHaveBeenCalledWith(gitlab, 'read');
     });
 
     it('US-001 AC12: evict drops the read-only and the write entry of the job', async () => {
