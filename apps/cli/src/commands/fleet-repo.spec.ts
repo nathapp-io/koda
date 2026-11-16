@@ -5,17 +5,20 @@ const mockStore = { get: jest.fn(() => ''), set: jest.fn() };
 jest.mock('conf', () => jest.fn(() => mockStore));
 jest.mock('../generated', () => ({
   fleetReposControllerCreate: jest.fn(),
+  fleetReposControllerRotateGitlabCredentials: jest.fn(),
   fleetReposControllerList: jest.fn(),
   fleetReposControllerRemove: jest.fn(),
   fleetReposControllerCheck: jest.fn(),
   projectFleetReposControllerList: jest.fn(),
 }));
 jest.mock('../config', () => ({ resolveContext: jest.fn() }));
+jest.mock('node:fs/promises', () => ({ readFile: jest.fn() }));
 
 import { Command } from 'commander';
 import { fleetCommand } from './fleet';
 import {
   fleetReposControllerCheck,
+  fleetReposControllerRotateGitlabCredentials,
   fleetReposControllerCreate,
   fleetReposControllerList,
   fleetReposControllerRemove,
@@ -50,9 +53,11 @@ describe('koda fleet repo', () => {
   });
 
   it('add splits a GitLab subgroup path and sends the project slug in the body', async () => {
+    const { readFile } = await import('node:fs/promises');
+    (readFile as jest.Mock).mockResolvedValueOnce('r').mockResolvedValueOnce('w');
     (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
-    await run('add', 'group/sub/svc', '--provider', 'gitlab');
-    expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: { projectSlug: 'web', provider: 'gitlab', owner: 'group/sub', name: 'svc' } });
+    await run('add', 'group/sub/svc', '--provider', 'gitlab', '--read-token-file', 'r', '--write-token-file', 'w');
+    expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: { projectSlug: 'web', provider: 'gitlab', owner: 'group/sub', name: 'svc', readToken: 'r', writeToken: 'w' } });
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
@@ -72,6 +77,69 @@ describe('koda fleet repo', () => {
     (fleetReposControllerCreate as jest.Mock).mockRejectedValue({ ret: 422, message: 'Forge check failed: app_not_installed' });
     await run('add', 'acme/app', '--provider', 'github');
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('AC-10 preserves the exact GitHub registration body', async () => {
+    (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
+    await run('add', 'owner/name', '--provider', 'github');
+    expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: { projectSlug: 'web', provider: 'github', owner: 'owner', name: 'name' } });
+  });
+
+  it('AC-1 registers GitLab tokens and host from files, trimmed of a newline', async () => {
+    const { readFile } = await import('node:fs/promises');
+    (readFile as jest.Mock).mockResolvedValueOnce('read-secret\n').mockResolvedValueOnce('write-secret\n');
+    (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ...repo, gitlab: null } });
+    await run('add', 'group/app', '--provider', 'gitlab', '--host', 'https://gitlab.example.com', '--read-token-file', 'r.txt', '--write-token-file', 'w.txt');
+    expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: { projectSlug: 'web', provider: 'gitlab', owner: 'group', name: 'app', host: 'https://gitlab.example.com', readToken: 'read-secret', writeToken: 'write-secret' } });
+  });
+
+  it('AC-2 reads a token from stdin when the file is -', async () => {
+    const stdin = { async *[Symbol.asyncIterator]() { yield Buffer.from('stdin-token\n'); } };
+    Object.defineProperty(process, 'stdin', { configurable: true, value: stdin });
+    const { readFile } = await import('node:fs/promises');
+    (readFile as jest.Mock).mockResolvedValueOnce('write');
+    (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
+    await run('add', 'group/app', '--provider', 'gitlab', '--read-token-file', '-', '--write-token-file', 'w');
+    expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: expect.objectContaining({ readToken: 'stdin-token', writeToken: 'write' }) });
+  });
+
+  it('AC-5/6 warns to stderr but emits only the safe repo in JSON', async () => {
+    const { readFile } = await import('node:fs/promises');
+    (readFile as jest.Mock).mockResolvedValueOnce('r').mockResolvedValueOnce('w');
+    const safeRepo = { ...repo, gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'person', expiresAt: null, status: 'ok', isBot: false }, warnings: ['write_token_human'] } };
+    (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: safeRepo });
+    await run('add', 'group/app', '--provider', 'gitlab', '--read-token-file', 'r', '--write-token-file', 'w', '--json');
+    expect((console.error as jest.Mock).mock.calls.flat().join(' ')).toContain('person');
+    expect(logSpy.mock.calls.flat().join(' ')).toContain('"gitlab"');
+    expect(logSpy.mock.calls.flat().join(' ')).not.toContain('secret');
+    expect(exitSpy).toHaveBeenLastCalledWith(0);
+  });
+
+  it('AC-3/4 validates missing GitLab credentials and GitHub-only flags before requests', async () => {
+    await run('add', 'group/app', '--provider', 'gitlab');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    await run('add', 'owner/name', '--provider', 'github', '--host', 'https://x');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(fleetReposControllerCreate).not.toHaveBeenCalled();
+  });
+
+  it('AC-7 rotates only the supplied token and needs no project context', async () => {
+    const { readFile } = await import('node:fs/promises');
+    (readFile as jest.Mock).mockResolvedValueOnce('write-secret\n');
+    (fleetReposControllerRotateGitlabCredentials as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
+    await run('credentials', 'fr1', '--write-token-file', 'w.txt');
+    expect(fleetReposControllerRotateGitlabCredentials).toHaveBeenCalledWith({ path: { id: 'fr1' }, body: { writeToken: 'write-secret' } });
+  });
+
+  it('AC-8 refuses empty rotation and AC-9 names a missing token file without calling the API', async () => {
+    const { readFile } = await import('node:fs/promises');
+    await run('credentials', 'fr1');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    (readFile as jest.Mock).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    await run('credentials', 'fr1', '--read-token-file', 'missing-token.txt');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect((console.error as jest.Mock).mock.calls.flat().join(' ')).toContain('missing-token.txt');
+    expect(fleetReposControllerRotateGitlabCredentials).not.toHaveBeenCalled();
   });
 
   it('list shows the project repos by default and the whole registry with --all', async () => {
