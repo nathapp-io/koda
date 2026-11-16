@@ -3,11 +3,23 @@ import { AbstractPrismaRepository, PrismaService, type PrismaModelDelegate } fro
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import type { FleetPrRuling as RulingRow, PrismaClient } from '../../generated/prisma/client';
 import { prNumberFor } from '../sync/pr-attribution.service';
+import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, PendingFixRuling, RulingJobTarget, RulingResultPatch, RulingTargetRepo } from './fleet-pr-ruling.domain';
 
 /** US-014: the job's repo, reduced to what a ruling target needs (the preflight forge read included). */
-const targetRepo = (repo: { provider: string; owner: string; name: string; githubInstallationId: bigint | null }): RulingTargetRepo =>
-  ({ provider: repo.provider, owner: repo.owner, name: repo.name, githubInstallationId: repo.githubInstallationId });
+const targetRepo = (repo: { id: string; provider: string; owner: string; name: string; host: string; githubInstallationId: bigint | null }): RulingTargetRepo =>
+  ({ id: repo.id, provider: repo.provider, owner: repo.owner, name: repo.name, host: repo.host, githubInstallationId: repo.githubInstallationId });
+
+/** The repository row a ruling target is projected off, as far as `prNumberFor` reads it. */
+type PrNumberRepo = Pick<FleetRepoRef, 'provider' | 'owner' | 'name' | 'host'>;
+
+/** US-005: the stored provider column, narrowed to the two forges `prNumberFor` knows. */
+const prNumberRepo = (repo: { provider: string; owner: string; name: string; host: string }): PrNumberRepo =>
+  ({ provider: repo.provider as 'github' | 'gitlab', owner: repo.owner, name: repo.name, host: repo.host });
+
+/** US-005: the URL suffix that narrows a RUN lookup to one merge request, per forge. */
+const prUrlSuffix = (provider: string, prNumber: number): string =>
+  provider === 'gitlab' ? `/merge_requests/${prNumber}` : `/pull/${prNumber}`;
 
 @Injectable()
 export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<FleetPrRuling, RulingRow, string> implements IFleetPrRulingRepository {
@@ -46,7 +58,7 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
     for (const item of items) {
       if (item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && typeof item.kind === 'string') openItems.push({ id: item.id, kind: item.kind });
     }
-    const prNumber = job.repo.provider === 'github' && job.resultPrUrl ? prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl) : null;
+    const prNumber = job.resultPrUrl ? prNumberFor(prNumberRepo(job.repo), job.resultPrUrl) : null;
     return { projectId: job.projectId, repoId: job.repoId, prNumber, openItems, repo: targetRepo(job.repo) };
   }
   async findTarget(projectId: string, jobId: string) {
@@ -58,21 +70,24 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
       if (item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && typeof item.kind === 'string') openItems.push({ id: item.id, kind: item.kind });
     }
     return { projectId, repoId: job.repoId, command: job.command, outcome: typeof workflow.outcome === 'string' ? workflow.outcome : null,
-      prNumber: job.repo.provider === 'github' && job.resultPrUrl ? prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl) : null, openItems,
+      prNumber: job.resultPrUrl ? prNumberFor(prNumberRepo(job.repo), job.resultPrUrl) : null, openItems,
       repo: targetRepo(job.repo) };
   }
 
   async latestRunForPr(repoId: string, prNumber: number): Promise<string | null> {
     const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId } });
-    if (!repo || repo.provider !== 'github') return null;
+    if (!repo || (repo.provider !== 'github' && repo.provider !== 'gitlab')) return null;
+    const ref = prNumberRepo(repo);
+    // US-005: the pre-filter narrows to this forge's URL shape; `prNumberFor` confirms every match.
+    const resultPrUrl = { endsWith: prUrlSuffix(repo.provider, prNumber) };
     const pageSize = 100;
     for (let page = 0; page < 1000; page++) {
       const jobs = await this.prisma.client.fleetJob.findMany({
-        where: { repoId, command: 'RUN', resultPrUrl: { endsWith: `/pull/${prNumber}` } },
+        where: { repoId, command: 'RUN', resultPrUrl },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: pageSize, skip: page * pageSize,
         select: { id: true, resultPrUrl: true },
       });
-      const match = jobs.find((job) => job.resultPrUrl && prNumberFor({ ...repo, provider: 'github' }, job.resultPrUrl) === prNumber);
+      const match = jobs.find((job) => job.resultPrUrl && prNumberFor(ref, job.resultPrUrl) === prNumber);
       if (match) return match.id;
       if (jobs.length < pageSize) return null;
     }
@@ -112,8 +127,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
   /** Called in ingest's transaction. Re-read identity here, without a JobsModule dependency. */
   async replaceOlderRuns(jobId: string): Promise<void> {
     const job = await this.prisma.client.fleetJob.findUnique({ where: { id: jobId }, include: { repo: true } });
-    if (!job || job.command !== 'RUN' || !job.workflow || !job.resultPrUrl || job.repo.provider !== 'github') return;
-    const prNumber = prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl);
+    if (!job || job.command !== 'RUN' || !job.workflow || !job.resultPrUrl) return;
+    const prNumber = prNumberFor(prNumberRepo(job.repo), job.resultPrUrl);
     if (prNumber === null) return;
     await this.prisma.client.fleetPrRuling.updateMany({
       where: { repoId: job.repoId, prNumber, state: 'pending', job: { command: 'RUN', OR: [
@@ -132,7 +147,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
 
   async runsForPr(repoId: string, prNumber: number): Promise<string[]> {
     const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId } });
-    if (!repo || repo.provider !== 'github') return [];
+    if (!repo || (repo.provider !== 'github' && repo.provider !== 'gitlab')) return [];
+    const ref = prNumberRepo(repo);
     const result: string[] = [];
     const pageSize = 100;
     for (let page = 0; page < 1000; page++) {
@@ -141,7 +157,7 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
         where: { repoId, command: 'RUN', resultPrUrl: { not: null } },
         select: { id: true, resultPrUrl: true }, orderBy: { id: 'asc' }, take: pageSize, skip: page * pageSize,
       });
-      for (const row of rows) if (row.resultPrUrl && prNumberFor({ ...repo, provider: 'github' }, row.resultPrUrl) === prNumber) result.push(row.id);
+      for (const row of rows) if (row.resultPrUrl && prNumberFor(ref, row.resultPrUrl) === prNumber) result.push(row.id);
       if (rows.length < pageSize) return result;
     }
     throw new Error('Fleet ruling ready RUN lookup exceeded page limit');

@@ -17,6 +17,8 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
   let principal: AgentPrincipal;
   let projectId: string;
   let repoId: string;
+  /** US-005: the GitLab repo the MR-number tests read, on its own host. */
+  let gitlabRepoId: string;
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
@@ -28,6 +30,8 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
     projectId = project.id;
     const repo = await db.fleetRepo.create({ data: { projectId, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', createdById: agent.id } });
     repoId = repo.id;
+    const gitlabRepo = await db.fleetRepo.create({ data: { projectId, provider: 'gitlab', host: 'https://gitlab.com', owner: 'acme', name: 'gitlab-app', defaultBranch: 'main', createdById: agent.id } });
+    gitlabRepoId = gitlabRepo.id;
   });
   afterAll(async () => { await app?.close(); });
   const newJob = (feature: string) => db.fleetJob.create({ data: {
@@ -36,6 +40,47 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
   } });
   const create = (jobId: string, text = 'confirm: test green') => withTestActor({ type: 'AGENT', id: principal.id }, () =>
     app.get(FleetPrRulingsService).create(principal, 'rulings', jobId, { itemId: 'D-1', text }));
+
+  /** US-005: a RUN job of the GitLab repo whose result URL names the given merge request. */
+  const gitlabJob = (feature: string, mr: number) => db.fleetJob.create({ data: {
+    projectId, repoId: gitlabRepoId, command: 'RUN', feature, ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
+    resultPrUrl: `https://gitlab.com/acme/gitlab-app/-/merge_requests/${mr}`, workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+  } });
+
+  it('AC-1: findTarget reads the merge-request number and the repo id and host of a GitLab job', async () => {
+    const job = await gitlabJob('gitlab-target', 12);
+    const target = await app.get(PrismaFleetPrRulingRepository).findTarget(projectId, job.id);
+    expect(target).toMatchObject({ prNumber: 12, repo: { id: gitlabRepoId, host: 'https://gitlab.com', provider: 'gitlab' } });
+  });
+
+  it('AC-2: latestRunForPr returns the newest RUN of MR 12 and never the same repo\'s MR 112', async () => {
+    const older = await gitlabJob('gitlab-latest-older', 12);
+    const newest = await gitlabJob('gitlab-latest-newest', 12);
+    // The 112 job must not be matched by the `/merge_requests/12` suffix, nor be the newest hit.
+    await gitlabJob('gitlab-latest-112', 112);
+    await db.fleetJob.update({ where: { id: newest.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(gitlabRepoId, 12)).resolves.toBe(newest.id);
+  });
+
+  it('AC-3: runsForPr returns every RUN of MR 12 and no other merge request', async () => {
+    const first = await gitlabJob('gitlab-runs-first', 13);
+    const second = await gitlabJob('gitlab-runs-second', 13);
+    await gitlabJob('gitlab-runs-other', 113);
+    const ids = await app.get(PrismaFleetPrRulingRepository).runsForPr(gitlabRepoId, 13);
+    expect([...ids].sort()).toEqual([first.id, second.id].sort());
+  });
+
+  it('AC-4: replaceOlderRuns replaces an older GitLab RUN\'s pending ruling on the same MR', async () => {
+    const older = await gitlabJob('gitlab-replace-older', 14);
+    const newer = await gitlabJob('gitlab-replace-newer', 14);
+    await db.fleetJob.update({ where: { id: newer.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    const pending = await db.fleetPrRuling.create({ data: {
+      projectId, repoId: gitlabRepoId, prNumber: 14, jobId: older.id, itemId: 'D-1', itemKind: 'review', text: 'verified',
+      disposition: 'verified', actorType: 'AGENT', actorId: principal.id, state: 'pending',
+    } });
+    await withTestActor({ type: 'AGENT', id: principal.id }, () => app.get(PrismaFleetPrRulingRepository).replaceOlderRuns(newer.id));
+    expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: pending.id } })).state).toBe('replaced');
+  });
   it('AC-10: normalizes stored multiline text', async () => {
     const job = await newJob('normalize');
     const ruling = await create(job.id, '\n\nconfirm: ok\nmore evidence');

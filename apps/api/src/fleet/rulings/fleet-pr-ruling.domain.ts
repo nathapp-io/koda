@@ -26,9 +26,12 @@ export interface CreateRulingInput { itemId: string; text: string }
 export type NewFleetPrRuling = Omit<FleetPrRuling, 'id' | 'createdAt' | 'updatedAt'>;
 /** US-014: what the pre-transaction `w-index` forge read needs, projected off the job's repo. */
 export interface RulingTargetRepo {
+  /** US-005: the repo row's id and host, so a GitLab read resolves that repo's own credential. */
+  id: string;
   provider: string;
   owner: string;
   name: string;
+  host?: string;
   githubInstallationId: bigint | null;
 }
 export interface RulingJobTarget {
