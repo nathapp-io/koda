@@ -28,7 +28,7 @@ export class CreateWebhookDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
+  @MinLength(32, { message: 'common.validation.webhookSecretMinLength' })
   secret?: string;
 
   @IsArray()
@@ -44,7 +44,7 @@ export class UpdateWebhookDto {
 
   @ValidateIf(whenProvided)
   @IsString()
-  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
+  @MinLength(32, { message: 'common.validation.webhookSecretMinLength' })
   secret?: string;
 
   @ValidateIf(whenProvided)

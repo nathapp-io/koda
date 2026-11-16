@@ -6,21 +6,21 @@ export const PASSWORD_COMPLEXITY = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z
 
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com' })
-  @IsEmail({}, { message: '$t(common.validation.isEmail)' })
-  @MaxLength(254, { message: '$t(common.validation.maxLength)' })
+  @IsEmail({}, { message: 'common.validation.isEmail' })
+  @MaxLength(254, { message: 'common.validation.maxLength|{"max":254}' })
   declare email: string;
 
   @ApiPropertyOptional({ example: 'John Doe' })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(1, { message: '$t(common.validation.minLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(1, { message: 'common.validation.minLength|{"min":1}' })
   declare name?: string;
 
   @ApiProperty({ example: 'StrongPass123!' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(8, { message: '$t(common.validation.minLength)' })
+  @IsString({ message: 'common.validation.isString' })
+  @MinLength(8, { message: 'common.validation.minLength|{"min":8}' })
   @Matches(PASSWORD_COMPLEXITY, {
-    message: '$t(common.validation.passwordComplexity)',
+    message: 'common.validation.passwordComplexity',
   })
   declare password: string;
 }

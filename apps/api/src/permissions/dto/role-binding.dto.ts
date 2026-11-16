@@ -52,20 +52,20 @@ export class RoleBindingDto {
 /** `POST /role-bindings`: an omitted `projectId` and an explicit null both mean a global binding. */
 export class CreateRoleBindingDto {
   @ApiProperty({ enum: PRINCIPAL_TYPES })
-  @IsIn(PRINCIPAL_TYPES, { message: '$t(common.validation.isEnum)' })
+  @IsIn(PRINCIPAL_TYPES, { message: 'common.validation.isEnum' })
   declare principalType: PrincipalType;
 
   @ApiProperty({ description: 'The user or agent the binding names' })
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   declare principalId: string;
 
   @ApiProperty({ example: 'developer' })
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   declare roleKey: string;
 
   @ApiPropertyOptional({ nullable: true, type: String, description: 'Omit or null for a global binding' })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   projectId?: string | null;
 }
 
@@ -118,17 +118,17 @@ export class ListRoleBindingsQuery extends PageOption {
 
   @ApiPropertyOptional({ enum: PRINCIPAL_TYPES, description: 'Filters by principal type; may be given alone' })
   @ValidateIf(namesPrincipal)
-  @IsIn(PRINCIPAL_TYPES, { message: '$t(common.validation.isEnum)' })
+  @IsIn(PRINCIPAL_TYPES, { message: 'common.validation.isEnum' })
   principalType?: PrincipalType;
 
   @ApiPropertyOptional({ description: 'Narrows the filter to one principal; requires principalType' })
   @ValidateIf((dto: ListRoleBindingsQuery) => dto.principalId !== undefined)
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   principalId?: string;
 
   @ApiPropertyOptional({ description: 'Only bindings of this project; omit to list every project' })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
+  @IsString({ message: 'common.validation.isString' })
   projectId?: string;
 
   @ApiPropertyOptional({
@@ -136,6 +136,6 @@ export class ListRoleBindingsQuery extends PageOption {
     description: 'global: only bindings with no project. Cannot be combined with projectId',
   })
   @IsOptional()
-  @IsIn(BINDING_SCOPES, { message: '$t(common.validation.isEnum)' })
+  @IsIn(BINDING_SCOPES, { message: 'common.validation.isEnum' })
   scope?: BindingScope;
 }

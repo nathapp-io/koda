@@ -7,7 +7,7 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 export class PasswordResetRequestDto {
   @ApiProperty({ example: 'user@example.com' })
-  @IsEmail({}, { message: '$t(common.validation.isEmail)' })
-  @MaxLength(254, { message: '$t(common.validation.maxLength)' })
+  @IsEmail({}, { message: 'common.validation.isEmail' })
+  @MaxLength(254, { message: 'common.validation.maxLength|{"max":254}' })
   declare email: string;
 }

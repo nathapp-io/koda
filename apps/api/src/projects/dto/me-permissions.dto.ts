@@ -19,8 +19,8 @@ export class MePermissionsQuery {
     example: 'koda',
   })
   @IsOptional()
-  @IsString({ message: '$t(common.validation.isString)' })
-  @IsNotEmpty({ message: '$t(common.validation.isNotEmpty)' })
+  @IsString({ message: 'common.validation.isString' })
+  @IsNotEmpty({ message: 'common.validation.isNotEmpty' })
   project?: string;
 }
 

@@ -10,8 +10,8 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 export class CreateAgentDto {
   @ApiProperty({ description: 'Agent name' })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @IsNotEmpty({ message: '$t(common.validation.required)' })
+  @IsString({ message: 'common.validation.isString' })
+  @IsNotEmpty({ message: 'common.validation.required' })
   name!: string;
 
   @ApiProperty({
@@ -19,10 +19,10 @@ export class CreateAgentDto {
     example: 'good-slug-1',
     pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
   })
-  @IsString({ message: '$t(common.validation.isString)' })
-  @IsNotEmpty({ message: '$t(common.validation.required)' })
+  @IsString({ message: 'common.validation.isString' })
+  @IsNotEmpty({ message: 'common.validation.required' })
   @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
-    message: '$t(common.validation.slugInvalid)',
+    message: 'common.validation.slugInvalid',
   })
   slug!: string;
 

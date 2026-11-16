@@ -172,6 +172,32 @@ describeDb('password change (PG)', () => {
     await change(pair.accessToken, TEST_PASSWORD, 'lowercase1!').expect(400);
     expect(await hash()).toBe(before);
   });
+
+  /**
+   * koda #466: a DTO constraint answers the API's own catalog text, in the request's language.
+   *
+   * The message used to be a `$t(...)` wrapper, which is not a key the validation filter can
+   * translate, so the client received the placeholder verbatim. The length messages carry their
+   * bound as an argument, so the answer names the number the rule asks for.
+   */
+  it('AC-16: a refused password answers the translated message, not the i18n placeholder', async () => {
+    const res = await change(pair.accessToken, TEST_PASSWORD, 'aB1!').expect(400);
+    expect(res.body.message).toBe('Must be at least 8 characters long');
+    expect(res.body.errors).toEqual({ newPassword: ['Must be at least 8 characters long'] });
+
+    const complexity = await change(pair.accessToken, TEST_PASSWORD, 'lowercase1!').expect(400);
+    expect(complexity.body.message).toBe('Password must include uppercase, lowercase, number, and symbol');
+
+    // No placeholder reaches the client, in any language.
+    const chinese = await request(server)
+      .post('/api/auth/password')
+      .set('Authorization', `Bearer ${pair.accessToken}`)
+      .set('Accept-Language', 'zh')
+      .send({ currentPassword: TEST_PASSWORD, newPassword: 'lowercase1!' })
+      .expect(400);
+    expect(JSON.stringify(chinese.body)).not.toContain('$t(');
+    expect(chinese.body.message).toBe('密码必须包含大写字母、小写字母、数字和特殊字符');
+  });
   it('AC-15: password change uses the login throttle', async () => {
     for (let i = 0; i < AUTH_LOGIN_LIMIT; i++) await change(pair.accessToken, 'wrong').expect(403);
     await change(pair.accessToken, 'wrong').expect(429);

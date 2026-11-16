@@ -116,6 +116,22 @@ Useful scripts:
 - `bun run type-check`
 - `bun run build`
 
+## Password journeys (e2e)
+
+- The `/forgot-password`, `/reset-password/[token]` and `/settings/account` journeys live in
+  `tests/e2e/{forgot-password,reset-password,account-password}.e2e.spec.ts`; the helpers are in
+  `tests/e2e/fixtures/password-journeys.ts`.
+- The reset tokens and the pre-used refresh token come from the API's e2e seed: it writes them to
+  `$E2E_AUTH_FIXTURE_FILE` (the Playwright config points it at a file under the OS temp directory)
+  and `readAuthFixture()` reads them back. A journey cannot build them for itself — the reset
+  request route writes no token while email is unconfigured, and only the sha256 of a token is stored.
+- One account per token: a confirmation spends its token and discards the account's other
+  outstanding links, so a shared account would let one journey change the answer another one sees.
+- Never change the seeded admin's password in a journey: every spec logs in as `E2E_ADMIN` and the
+  e2e database is reset only at the start of a run.
+- The `zh` assertions set the `koda_locale` cookie: with the `no_prefix` strategy the i18n module
+  reads that cookie while it renders on the server.
+
 ## Fleet analytics (S2b)
 
 - Pure logic lives in `lib/fleet-analytics-{types,format,range,chart}.ts`; composables `useFleetAnalytics`,

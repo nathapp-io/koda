@@ -18,12 +18,12 @@ const trimmed = ({ value }: TransformFnParams): unknown => (typeof value === 'st
 export class CreateInviteDto {
   @ApiProperty({ description: 'Email to add or invite', example: 'dev@example.com' })
   @Transform(trimmed)
-  @IsEmail({}, { message: '$t(common.validation.isEmail)' })
+  @IsEmail({}, { message: 'common.validation.isEmail' })
   @MaxLength(254)
   declare email: string;
 
   @ApiPropertyOptional({ example: 'triager', description: 'kebab-case role key; required by the service' })
   @ValidateIf((dto: CreateInviteDto) => dto.roleKey !== undefined)
-  @Matches(ROLE_KEY_PATTERN, { message: '$t(common.validation.keyFormat)' })
+  @Matches(ROLE_KEY_PATTERN, { message: 'common.validation.keyFormat' })
   declare roleKey?: string;
 }

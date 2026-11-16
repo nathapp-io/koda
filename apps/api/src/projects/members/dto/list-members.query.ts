@@ -20,6 +20,6 @@ export class ListMembersQuery extends KodaPageQuery {
     description: 'users (default): user rows only. all: user rows, then agent rows',
   })
   @IsOptional()
-  @IsIn(MEMBER_PRINCIPAL_FILTERS, { message: '$t(common.validation.isEnum)' })
+  @IsIn(MEMBER_PRINCIPAL_FILTERS, { message: 'common.validation.isEnum' })
   principals?: MemberPrincipalFilter;
 }
