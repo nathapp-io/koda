@@ -311,9 +311,9 @@ describe('ruling target repo projection', () => {
     project: { id: 'project', slug: 'slug', deletedAt: null },
     repo: { id: 'repo', projectId: 'project', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: 77n },
   };
-  const repository = () => {
+  const repository = (row: typeof jobRow = jobRow) => {
     const client = {
-      fleetJob: { findFirst: vi.fn(async () => jobRow), findUnique: vi.fn(async () => jobRow) },
+      fleetJob: { findFirst: vi.fn(async () => row), findUnique: vi.fn(async () => row) },
       $queryRaw: vi.fn(async () => []),
     };
     return new PrismaFleetPrRulingRepository({} as never, { client } as never);
@@ -326,6 +326,14 @@ describe('ruling target repo projection', () => {
 
   it('AC-7: lockTarget returns the job repo', async () => {
     expect(await repository().lockTarget('slug', 'run')).toMatchObject({ repo: expected });
+  });
+
+  // F1: only `provider === 'gitlab'` selects the merge-request parser; any other stored value is a GitHub repo.
+  it('F1: a repo with an unsupported provider takes the GitHub PR path', async () => {
+    const row = { ...jobRow, repo: { ...jobRow.repo, provider: 'bitbucket', host: 'https://bitbucket.org' } };
+    const repo = repository(row);
+    expect(await repo.findTarget('project', 'run')).toMatchObject({ prNumber: 42 });
+    expect(await repo.lockTarget('slug', 'run')).toMatchObject({ prNumber: 42 });
   });
 });
 

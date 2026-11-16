@@ -13,9 +13,12 @@ const targetRepo = (repo: { id: string; provider: string; owner: string; name: s
 /** The repository row a ruling target is projected off, as far as `prNumberFor` reads it. */
 type PrNumberRepo = Pick<FleetRepoRef, 'provider' | 'owner' | 'name' | 'host'>;
 
-/** US-005: the stored provider column, narrowed to the two forges `prNumberFor` knows. */
+/**
+ * US-005: the stored provider column, normalized for `prNumberFor`: only `'gitlab'` selects the
+ * merge-request parser, so a repo row holding anything else reads its URLs as a GitHub pull request.
+ */
 const prNumberRepo = (repo: { provider: string; owner: string; name: string; host: string }): PrNumberRepo =>
-  ({ provider: repo.provider as 'github' | 'gitlab', owner: repo.owner, name: repo.name, host: repo.host });
+  ({ provider: repo.provider === 'gitlab' ? 'gitlab' : 'github', owner: repo.owner, name: repo.name, host: repo.host });
 
 /** US-005: the URL suffix that narrows a RUN lookup to one merge request, per forge. */
 const prUrlSuffix = (provider: string, prNumber: number): string =>
