@@ -3,7 +3,7 @@
   "feature": "gitlab-read-features",
   "branchName": "feat/gitlab-read-features",
   "createdAt": "2026-11-16T15:42:09.312Z",
-  "updatedAt": "2026-11-16T16:16:40.806Z",
+  "updatedAt": "2026-11-16T16:33:05.825Z",
   "userStories": [
     {
       "id": "US-001",
@@ -221,14 +221,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Domain, persistence, polling and leased indexing span multiple modules; fresh credential selection per read, token invalidation and destructive size skips require strict isolated TDD."
+        "reasoning": "Domain, persistence, polling and leased indexing span multiple modules; fresh credential selection per read, token invalidation and destructive size skips require strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts",
@@ -251,7 +254,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e604cc400d65c1e1bfe428beefcad01f3a61b291"
     },
     {
       "id": "US-005",
