@@ -153,9 +153,20 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       where: { projectId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: PROJECT_CODE_LIMITS.maxRepos + PROJECT_CODE_LIMITS.maxUnavailable,
-      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, host: true },
+      select: {
+        id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true,
+        githubInstallationId: true, host: true,
+        gitlabCredential: { select: { writeTokenUserId: true, writeTokenUsername: true } },
+      },
     });
-    return rows.map((r) => ({ ...r, provider: r.provider as FleetRepoRef['provider'] }));
+    return rows.map(({ gitlabCredential, ...row }) => ({
+      ...row,
+      provider: row.provider as FleetRepoRef['provider'],
+      gitlabWriteUser: gitlabCredential == null ? null : {
+        id: gitlabCredential.writeTokenUserId,
+        username: gitlabCredential.writeTokenUsername,
+      },
+    }));
   }
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
