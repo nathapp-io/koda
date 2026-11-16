@@ -6,6 +6,7 @@ import type { GitToken } from '../common/protocol';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { FenceService } from './fence.service';
 import { SyncService } from './sync.service';
 import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain';
@@ -15,19 +16,25 @@ import type { ProviderCredentialsService } from '../provider-credentials/provide
 const base = { protocolVersion: 4, bootId: 'b1', daemonVersion: '1', freeSlots: 0, jobs: [], commandAcks: [] };
 const repo: FleetRepoRef = { id: 'repo-1', projectId: 'project-1', provider: 'github', owner: 'acme', name: 'repo', defaultBranch: 'main', githubInstallationId: 42n };
 
-function harness(command: FleetJobKind) {
+function harness(command: FleetJobKind, provider: 'github' | 'gitlab' = 'github') {
+  const selectedRepo: FleetRepoRef = provider === 'gitlab' ? { ...repo, provider: 'gitlab', githubInstallationId: null } : repo;
   const repository = createMock<IFleetJobRepository>();
-  const job = { id: 'job-1', projectId: 'project-1', repoId: repo.id, runnerId: 'runner-1', leaseEpoch: 7, command, state: FleetJobState.ASSIGNED } as FleetJobRecord;
+  const job = { id: 'job-1', projectId: 'project-1', repoId: selectedRepo.id, runnerId: 'runner-1', leaseEpoch: 7, command, state: FleetJobState.ASSIGNED } as FleetJobRecord;
   repository.lockById.mockResolvedValue(job);
   repository.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1' });
   repository.findPendingCommands.mockResolvedValue([]);
-  repository.findRepo.mockResolvedValue(repo);
+  repository.findRepo.mockResolvedValue(selectedRepo);
   const github = createMock<GitHubAppClient>();
   github.mintReviewToken.mockResolvedValue({ token: 'review-token', expiresAt: new Date('2030-01-01T00:00:00Z') });
   github.mintReadOnlyToken.mockResolvedValue({ token: 'read-token', expiresAt: new Date('2030-01-01T00:00:00Z') });
   github.isBranchProtected.mockResolvedValue(false);
   github.mintInstallationToken.mockResolvedValue({ token: 'write-token', expiresAt: new Date('2030-01-01T00:00:00Z') });
-  const broker = new GitTokenBroker({ gitTokenReuseMarginSec: 30, gitlabTokenTtlSec: 300 } as never, github, createMock<GitLabRepoCredentials>());
+  const credentials = createMock<GitLabRepoCredentials>();
+  credentials.resolve.mockImplementation(async (_repo, kind) => ({ token: kind === 'read' ? 'gitlab-read-token' : 'gitlab-write-token', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 1 } }));
+  credentials.call.mockImplementation(async (_repo, _kind, fn) => fn({ token: 'gitlab-write-token', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 1 } }));
+  const checker = createMock<GitLabAccessChecker>();
+  checker.getBranchPushState.mockResolvedValue({ protected: true, canPush: false });
+  const broker = new GitTokenBroker({ gitTokenReuseMarginSec: 30, gitlabTokenTtlSec: 300 } as never, github, credentials, checker);
   const txManager = createMock<ITransactionManager>({ run: async (fn) => fn() });
   const fence = createMock<FenceService>();
   fence.holds.mockReturnValue(true);
@@ -38,7 +45,7 @@ function harness(command: FleetJobKind) {
     createMock<ProviderCredentialsService>(), createMock<FleetActivityService>(),
   );
   const sync = (fresh = false) => service.sync('runner-1', { ...base, tokenRequests: [{ jobId: job.id, leaseEpoch: job.leaseEpoch, ...(fresh ? { fresh: true } : {}) }] });
-  return { sync, github, job, repo, broker };
+  return { sync, github, job, repo: selectedRepo, broker, credentials, checker };
 }
 
 describe('SyncService repo-less token purpose', () => {
@@ -107,6 +114,21 @@ describe('SyncService repo-less token purpose', () => {
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
     expect(response.gitTokens).toEqual([expect.objectContaining({ jobId: 'job-1', token: 'read-token' })]);
     expect(Object.prototype.hasOwnProperty.call(response.gitTokens[0], 'repoId')).toBe(false);
+  });
+
+  it('US-002 AC-13: sync grants an ASSIGNED GitLab FIX write token after the default-branch gate', async () => {
+    const h = harness(FleetJobKind.FIX, 'gitlab');
+    const response = await h.sync();
+    expect(response.gitTokens).toEqual([expect.objectContaining({ jobId: 'job-1', token: 'gitlab-write-token', username: 'oauth2' })]);
+    expect(h.checker.getBranchPushState).toHaveBeenCalledWith(expect.objectContaining({ token: 'gitlab-write-token' }), 'main');
+  });
+
+  it('US-002 AC-14: sync grants an ASSIGNED GitLab AGENT read token only', async () => {
+    const h = harness(FleetJobKind.AGENT, 'gitlab');
+    const response = await h.sync();
+    expect(response.gitTokens).toEqual([expect.objectContaining({ jobId: 'job-1', token: 'gitlab-read-token', username: 'oauth2' })]);
+    expect(h.credentials.resolve).toHaveBeenCalledExactlyOnceWith(h.repo, 'read');
+    expect(h.credentials.resolve).not.toHaveBeenCalledWith(h.repo, 'write');
   });
 
   it('US-005 AC-11: keeps the RUN default token request purpose-less', async () => {

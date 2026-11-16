@@ -4,6 +4,7 @@ import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { GitHubAppClient } from './github-app-client';
 import { GitLabRepoCredentials } from './gitlab-repo-credentials';
+import { GitLabAccessChecker } from './gitlab-access-checker';
 import { RepoCheckException } from './repo-check.exception';
 
 export type MintResult = { ok: true; token: GitToken } | { ok: false; error: GitTokenError };
@@ -69,6 +70,7 @@ export class GitTokenBroker {
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'gitTokenReuseMarginSec' | 'gitlabTokenTtlSec'>,
     @Inject(forwardRef(() => GitHubAppClient)) private readonly github: GitHubAppClient,
     private readonly gitlab: GitLabRepoCredentials,
+    private readonly gitlabChecker: GitLabAccessChecker,
   ) {}
 
   /**
@@ -83,11 +85,7 @@ export class GitTokenBroker {
   async mint(req: MintRequest, now = new Date()): Promise<MintResult> {
     // FIX always requires a write-capable result; readOnly remains meaningful for purpose-less PROJECT mints.
     // `purpose: 'read'` is repo-less by definition, so it is never treated as a per-repository read-only mint.
-    const readOnly = req.readOnly === true && req.purpose !== 'fix' && req.purpose !== 'read';
-    // Purpose credentials are GitHub-only; reject before cache lookup so a legacy/write entry cannot bypass this.
-    if (req.purpose && req.repo.provider !== 'github') {
-      return { ok: false, error: { jobId: req.jobId, reason: 'provider_error' } };
-    }
+    const readOnly = req.readOnly === true && req.purpose === undefined;
     const key = cacheKey(req, readOnly);
     const cached = this.cache.get(key);
     const reuseMarginMs = this.fleetConfig.gitTokenReuseMarginSec * 1000;
@@ -137,7 +135,7 @@ export class GitTokenBroker {
   private async fresh(req: MintRequest, now: Date): Promise<GitToken> {
     const { repo, purpose } = req;
     // `purpose: 'read'` is not `readOnly`: it names no repository and is answered by its own branch below.
-    const readOnly = req.readOnly === true && purpose !== 'fix' && purpose !== 'read';
+    const readOnly = req.readOnly === true && purpose === undefined;
     if (repo.provider === 'github') {
       if (repo.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
       if (purpose === 'review') {
@@ -162,11 +160,22 @@ export class GitTokenBroker {
         : await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
       return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString(), ...(readOnly ? { repoId: repo.id } : {}) };
     }
-    // Purpose and read-only requests must never fall back to the write-capable stored GitLab token.
-    if (purpose || readOnly) throw new RepoCheckException('provider_error');
-    // US-003: the write mint comes from the repo's own credential record. There is no fallback to
-    // the project's ticket-sync token: a repo without a record is refused as `gitlab_credentials_missing`.
-    const { token } = await this.gitlab.resolve(repo, 'write');
-    return { jobId: req.jobId, token, username: 'oauth2', expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString() };
+    const write = purpose !== 'read' && !readOnly;
+    if (purpose === 'fix' && repo.fixAllowUnprotected !== true) {
+      // GitLab reports whether this token's own user can push, incorporating inherited and wildcard rules.
+      await this.gitlab.call(repo, 'write', (access) => this.gitlabChecker.getBranchPushState(access, repo.defaultBranch).then((state) => {
+        if (!state.protected || state.canPush) throw new RepoCheckException('default_branch_unprotected');
+      }));
+    }
+    // Stored repo credentials are purpose-specific. `call` above checks protection; resolve separately
+    // only after that gate to issue the token to the runner.
+    const { token } = await this.gitlab.resolve(repo, write ? 'write' : 'read');
+    return {
+      jobId: req.jobId,
+      token,
+      username: 'oauth2',
+      expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString(),
+      ...(readOnly ? { repoId: repo.id } : {}),
+    };
   }
 }
