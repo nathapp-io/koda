@@ -17,6 +17,7 @@ import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
+import { assertRotationGiven, UpdateGitlabCredentialsDto } from './dto/update-gitlab-credentials.dto';
 import { validateRuleOverride } from './rule-override';
 
 /**
@@ -174,6 +175,46 @@ export class FleetReposController {
       variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
       projectId: null,
       input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  /**
+   * US-005 (GitLab parity F1): rotate either or both of a repo's stored GitLab tokens.
+   *
+   * The route is one of the two secret-bearing repo writes, so it is approval-gated *and* redeeming:
+   * an approval request never stores a token (`redeem.redact` replaces it), and the requester redeems
+   * the approval by repeating the call with the token it actually wants stored.
+   *
+   * A body that names no token is refused here, before the gate: an approval request for a no-op
+   * rotation could only ever be a mistake, so it is never opened. The same goes for a repo that is
+   * not there and a repo that is not a GitLab repo.
+   */
+  @Patch(':id/gitlab-credentials')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.repo.credentials.update')
+  @ApprovalGated({ redeem: true })
+  @ApiOperation({ summary: 'Rotate the GitLab tokens of a registered repo (fleet.repo.credentials.update, global)' })
+  @ApiResponse({ status: 200, type: FleetRepoDto })
+  @ApiResponse({ status: 400, description: 'The body names no token, or the repo is not a GitLab repo' })
+  @ApiResponse({ status: 403, description: 'fleet.repo.credentials.update is missing globally' })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  @ApiResponse({ status: 422, description: 'The new token was refused: { reason }' })
+  async rotateGitlabCredentials(
+    @Param('id') id: string,
+    @Body() dto: UpdateGitlabCredentialsDto,
+    @ApprovalRedeemHeader() redeem?: string,
+  ) {
+    assertRotationGiven(dto);
+    await this.repos.assertRotatableGitlabRepo(id);
+    const outcome = await this.routeGate.run<FleetRepoDto>({
+      key: 'fleet.repo.credentials.update',
+      variant: FLEET_REPO_ROUTE_VARIANTS.gitlabCredentials,
+      projectId: null,
+      input: { id, patch: dto },
+      ...(redeem === undefined ? {} : { redeem }),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

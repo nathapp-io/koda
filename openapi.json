@@ -9247,6 +9247,91 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/gitlab-credentials": {
+      "patch": {
+        "operationId": "FleetReposController_rotateGitlabCredentials",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGitlabCredentialsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body names no token, or the repo is not a GitLab repo"
+          },
+          "403": {
+            "description": "fleet.repo.credentials.update is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          },
+          "422": {
+            "description": "The new token was refused: { reason }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate the GitLab tokens of a registered repo (fleet.repo.credentials.update, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}/rule-override": {
       "get": {
         "operationId": "FleetReposController_getRuleOverride",
@@ -22064,6 +22149,27 @@
         "required": [
           "allowUnprotected"
         ]
+      },
+      "UpdateGitlabCredentialsDto": {
+        "type": "object",
+        "properties": {
+          "readToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The new GitLab read token; stored encrypted and never returned"
+          },
+          "writeToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The new GitLab write token; stored encrypted and never returned"
+          },
+          "confirmBotAccount": {
+            "type": "boolean",
+            "description": "Confirm the new write token belongs to a bot account"
+          }
+        }
       },
       "RuleOverrideFileDto": {
         "type": "object",

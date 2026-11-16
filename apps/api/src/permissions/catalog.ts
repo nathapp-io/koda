@@ -258,6 +258,9 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'fleet.repo.check': ['global'],
   'fleet.repo.review.configure': ['global'],
   'fleet.repo.delete': ['global'],
+  // US-005 (GitLab parity F1): the rotation of a repo's stored GitLab tokens. Its own key, so a grant
+  // for the other repo writes never reaches the secrets a repo's jobs authenticate with.
+  'fleet.repo.credentials.update': ['global'],
   'fleet.enrollment.create': ['global'],
   'fleet.enrollment.read': ['global'],
   'fleet.runner.read': ['runner', 'project'],

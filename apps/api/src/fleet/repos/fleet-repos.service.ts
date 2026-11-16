@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { Inject, Injectable } from '@nestjs/common';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { PROFILE_NAME_RE } from '../common/capabilities';
 import { RESERVED_PROFILE_PREFIX } from '../jobs/dispatch-input';
@@ -17,10 +17,11 @@ import { remapPage } from '../../common/dto/koda-page.query';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GITLAB_DEVELOPER_ACCESS, GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
-import { GitLabRepoCredentials, type GitLabCredentialInput } from '../git-broker/gitlab-repo-credentials';
+import { GitLabRepoCredentials, type GitLabCredentialInput, type GitLabCredentialTokenInput } from '../git-broker/gitlab-repo-credentials';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { assertGitLabHostAllowed, gitlabApiBase, isClassifiableGitLabHost, parseGitLabHost } from '../git-broker/gitlab-host';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
+import type { RepoCheckReason } from '../git-broker/repo-check.exception';
 import type { GitLabTokenKind } from '../git-broker/prisma-gitlab-credential.repository';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
@@ -31,6 +32,7 @@ import { ruleOverrideSha256, validateRuleOverride } from './rule-override';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import type { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
+import { assertRotationGiven, type UpdateGitlabCredentialsDto } from './dto/update-gitlab-credentials.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 
@@ -289,6 +291,154 @@ export class FleetReposService {
       });
       return FleetRepoDto.from(updated);
     });
+  }
+
+  /**
+   * US-005 (GitLab parity F1): the rotation of a repo's stored GitLab tokens — the way an admin
+   * replaces a token that expired, leaked or belongs to the wrong account, because gitlab.com Free
+   * offers no per-job project tokens to mint.
+   *
+   * Either token may be supplied, and only the supplied ones are verified and replaced: the other
+   * token keeps its value, its metadata and its invalid mark, and the store clears the invalid mark
+   * of the one that changed. The verification order is the registration's, because the refusals have
+   * to mean the same thing:
+   *
+   * 1. the stored connection (a repo without one has no project to verify a token against);
+   * 2. the encryption key (a deployment without one costs no request at all);
+   * 3. the *stored* host (canonical, a GitLab instance, an address outside the deployment);
+   * 4. each supplied token: its scopes, the account behind it, and the stored project id it must
+   *    still reach — the write token with Developer access or above, the read token at all.
+   *
+   * Nothing here holds a transaction across HTTP: the verification runs first, and the write, its
+   * audit and the re-read share one transaction afterwards. The broker cache is dropped only after
+   * that transaction commits — a rotation that rolled back must not evict the tokens the cache still
+   * has to answer with. Concurrent rotations are last-save-wins (out of scope): each of them evicts.
+   */
+  async rotateGitlabCredentials(id: string, patch: UpdateGitlabCredentialsDto): Promise<FleetRepoDto> {
+    const row = await this.repo.findById(id);
+    if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+    // A body that names no token has nothing to rotate: the same 400 the route answers before it
+    // opens an approval request, so an approved request cannot be a no-op either.
+    assertRotationGiven(patch);
+    if (row.provider !== 'gitlab') throw new ValidationAppException({}, 'fleet.repoNotGitlab');
+
+    // A rotation replaces tokens on the connection the repo already has; it never moves the repo to
+    // another project. A repo without a record has no project id to verify against, and koda does not
+    // guess one (the legacy no-record bootstrap stays out of scope).
+    const projectId = row.gitlabCredential?.gitlabProjectId;
+    if (projectId === undefined) throw new RepoCheckException('gitlab_credentials_missing');
+
+    // The key first: without it no token can be stored, so the request costs nothing.
+    this.credentials.assertKeyConfigured();
+    const host = parseGitLabHost(row.host ?? '');
+    if (!isClassifiableGitLabHost(host)) throw new RepoCheckException('gitlab_host_unclassified');
+    await assertGitLabHostAllowed(host);
+    const apiBase = gitlabApiBase(host);
+
+    // Only the supplied kinds are part of the write: an absent token stays absent, so the store keeps
+    // the token it has (and its metadata) untouched.
+    const input: GitLabCredentialInput = { gitlabProjectId: projectId };
+    if (patch.writeToken !== undefined) {
+      input.write = await this.verifyRotatedWriteToken(apiBase, patch.writeToken, projectId, patch.confirmBotAccount === true);
+    }
+    if (patch.readToken !== undefined) {
+      input.read = await this.verifyRotatedReadToken(apiBase, patch.readToken, projectId);
+    }
+    const summary = patch.readToken !== undefined && patch.writeToken !== undefined
+      ? 'read and write tokens replaced'
+      : patch.writeToken !== undefined ? 'write token replaced' : 'read token replaced';
+
+    const updated = await this.txManager.run(async () => {
+      await this.credentials.save(id, input);
+      await this.audit.record({
+        key: 'fleet.repo.credentials.update', resourceType: 'fleet-repo', resourceId: id,
+        projectId: row.projectId, summary,
+      });
+      return this.repo.findById(id);
+    });
+    // After the commit: every token cached for this repo was minted from a credential it no longer
+    // has. `evictRepo` also fences the mints that were in flight, so none of them caches the old one.
+    this.broker.evictRepo(id);
+    return FleetRepoDto.from(updated ?? row);
+  }
+
+  /**
+   * US-005: the write half of a rotation. The token must be able to write (`api` + `write_repository`)
+   * and must still reach the stored project with Developer access or above — a token for another
+   * project is a mismatch, not a silent re-point of the repo.
+   */
+  private async verifyRotatedWriteToken(
+    apiBase: string,
+    token: string,
+    projectId: number,
+    confirmedBot: boolean,
+  ): Promise<GitLabCredentialTokenInput & { isBot: boolean }> {
+    const self = await this.gitlab.getTokenSelf(apiBase, token);
+    if (!self.scopes.includes('api') || !self.scopes.includes('write_repository')) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+    const user = await this.gitlab.getCurrentUser(apiBase, token);
+    const project = await this.findRotatedProject(apiBase, token, projectId, 'gitlab_project_mismatch');
+    if (project.accessLevel < GITLAB_DEVELOPER_ACCESS) throw new RepoCheckException('gitlab_access_insufficient');
+    return {
+      token, userId: user.id, username: user.username, expiresAt: self.expiresAt,
+      isBot: user.bot === true || user.username === this.fleetConfig.gitlabBotName || confirmedBot,
+    };
+  }
+
+  /**
+   * US-005: the read half of a rotation. The token must read (`read_api` + `read_repository`) and must
+   * not write, because the read path would then be a write path; it must also reach the stored project,
+   * which is the access the read paths need.
+   */
+  private async verifyRotatedReadToken(
+    apiBase: string,
+    token: string,
+    projectId: number,
+  ): Promise<GitLabCredentialTokenInput> {
+    const self = await this.gitlab.getTokenSelf(apiBase, token);
+    if (!self.scopes.includes('read_api') || !self.scopes.includes('read_repository')) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+    if (self.scopes.includes('api') || self.scopes.includes('write_repository')) {
+      throw new RepoCheckException('gitlab_read_token_writable');
+    }
+    const user = await this.gitlab.getCurrentUser(apiBase, token);
+    await this.findRotatedProject(apiBase, token, projectId, 'gitlab_read_token_no_access');
+    return { token, userId: user.id, username: user.username, expiresAt: self.expiresAt };
+  }
+
+  /**
+   * US-005: the stored project, seen by a token being rotated in. The caller owns the meaning of its
+   * own 404 — a write token that cannot see the project is a mismatch, a read token that cannot see it
+   * has no access — so only that refusal is translated.
+   */
+  private async findRotatedProject(
+    apiBase: string,
+    token: string,
+    projectId: number,
+    missing: Extract<RepoCheckReason, 'gitlab_project_mismatch' | 'gitlab_read_token_no_access'>,
+  ): Promise<{ accessLevel: number }> {
+    try {
+      return await this.gitlab.findProject(apiBase, token, String(projectId));
+    } catch (error) {
+      if (error instanceof RepoCheckException && error.reason === 'repo_not_found') {
+        throw new RepoCheckException(missing);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * US-005: the pre-gate check a rotation makes before it opens an approval request. A repo that does
+   * not exist is a 404 and a repo that is not a GitLab repo is a 400 — not a request waiting for an
+   * approval whose execution could only fail. The write re-checks both when it runs, so a repo
+   * deleted or changed between this lookup and the execution is still refused there.
+   */
+  async assertRotatableGitlabRepo(id: string): Promise<void> {
+    const row = await this.repo.findById(id);
+    if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+    if (row.provider !== 'gitlab') throw new ValidationAppException({}, 'fleet.repoNotGitlab');
   }
 
   /**

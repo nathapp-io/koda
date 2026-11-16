@@ -12,6 +12,7 @@ import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
+import { UpdateGitlabCredentialsDto } from './dto/update-gitlab-credentials.dto';
 import { validateRuleOverride } from './rule-override';
 
 export const FLEET_REPO_ROUTE_VARIANTS = {
@@ -21,6 +22,7 @@ export const FLEET_REPO_ROUTE_VARIANTS = {
   autoReview: 'rest:fleet-repos.auto-review',
   fixChecks: 'rest:fleet-repos.fix-checks',
   fixUnprotected: 'rest:fleet-repos.fix-unprotected',
+  gitlabCredentials: 'rest:fleet-repos.gitlab-credentials',
   ruleOverrideSet: 'rest:fleet-repos.rule-override.set',
   ruleOverrideClear: 'rest:fleet-repos.rule-override.clear',
 } as const;
@@ -41,6 +43,12 @@ interface FixChecksInput {
 interface FixUnprotectedInput {
   id: string;
   patch: UpdateFixUnprotectedDto;
+}
+
+/** The same `{ id, patch }` shape for the GitLab credential rotation (US-005). */
+interface GitlabCredentialsInput {
+  id: string;
+  patch: UpdateGitlabCredentialsDto;
 }
 
 /**
@@ -130,6 +138,20 @@ export class FleetRepoRouteCommands implements OnModuleInit {
       run: (principal, input) => this.repos.setRuleOverride(principal, input.id, input.body),
       toResult: (result) => result,
     }, this.loader));
+    this.commands.register(routeCommand<GitlabCredentialsInput, FleetRepoDto>({
+      key: 'fleet.repo.credentials.update', variant: FLEET_REPO_ROUTE_VARIANTS.gitlabCredentials,
+      parse: (input) => {
+        const { id } = parseRouteInput(input, ['id']);
+        return { id, patch: parseBody(UpdateGitlabCredentialsDto, (input as { patch?: unknown }).patch) };
+      },
+      // US-005: the body carries tokens, so `redeem.redact` replaces them with the marker: neither the
+      // approval request row nor the hash a redemption compares against ever holds a token. Approving
+      // such a request runs nothing; the requester redeems it by repeating the call with the token it
+      // actually wants stored, and that body is what lands.
+      redeem: { redact: ({ id, patch }) => ({ id, patch: redactGitlabCredentialTokens(patch) }) },
+      run: (_principal, input) => this.repos.rotateGitlabCredentials(input.id, input.patch),
+      toResult: (result) => result,
+    }, this.loader));
     this.commands.register(routeCommand<{ id: string }, FleetRepoDto>({
       key: 'fleet.repo.rules.configure', variant: FLEET_REPO_ROUTE_VARIANTS.ruleOverrideClear,
       parse: (input) => parseRouteInput(input, ['id']),
@@ -146,6 +168,20 @@ export class FleetRepoRouteCommands implements OnModuleInit {
  */
 function redactGitLabTokens(input: CreateFleetRepoDto): Record<string, unknown> {
   const { readToken, writeToken, ...rest } = input;
+  return {
+    ...rest,
+    ...(readToken === undefined ? {} : { readToken: redactSecret(readToken) }),
+    ...(writeToken === undefined ? {} : { writeToken: redactSecret(writeToken) }),
+  };
+}
+
+/**
+ * US-005: the stored form of a rotation body. Each token the body carries becomes the redaction
+ * marker and every other field is unchanged; a token the body does not carry stays absent, because a
+ * partial rotation has nothing to redact for the token it keeps.
+ */
+function redactGitlabCredentialTokens(patch: UpdateGitlabCredentialsDto): Record<string, unknown> {
+  const { readToken, writeToken, ...rest } = patch;
   return {
     ...rest,
     ...(readToken === undefined ? {} : { readToken: redactSecret(readToken) }),

@@ -6,6 +6,8 @@
   "runners": { "404": "Runner not found", "409": "A runner with this name already exists" },
   "repos": { "404": "Fleet repository not found", "409": "This repository is already registered" },
   "repoGitlabFieldsOnGitHub": "A GitHub repository cannot carry GitLab fields: host, readToken, writeToken and confirmBotAccount belong to a GitLab repository",
+  "repoGitlabCredentialsEmpty": { "-2": "A GitLab credential rotation must carry at least one token" },
+  "repoNotGitlab": { "-2": "This repository is not a GitLab repository" },
   "runnerBusy": { "409": "The runner has unfinished or pinned jobs; disable it instead" },
   "repoBusy": { "409": "The repository has unfinished jobs" },
   "repoCheck": { "422": "Repository check failed: {reason}" },
