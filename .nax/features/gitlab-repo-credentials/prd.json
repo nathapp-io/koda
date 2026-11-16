@@ -3,7 +3,7 @@
   "feature": "gitlab-repo-credentials",
   "branchName": "feat/gitlab-repo-credentials",
   "createdAt": "2026-11-16T07:27:23.579Z",
-  "updatedAt": "2026-11-16T08:14:29.061Z",
+  "updatedAt": "2026-11-16T08:37:20.466Z",
   "userStories": [
     {
       "id": "US-001",
@@ -115,14 +115,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Host checks reuse the existing address classifier and HTTP client, but converting the client and three caller modules is cross-module integration; credential and SSRF boundaries still require strict security TDD."
+        "reasoning": "Host checks reuse the existing address classifier and HTTP client, but converting the client and three caller modules is cross-module integration; credential and SSRF boundaries still require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
@@ -162,7 +165,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "509e565c50022565deb31f335543a01ab09deaf9"
     },
     {
       "id": "US-003",
