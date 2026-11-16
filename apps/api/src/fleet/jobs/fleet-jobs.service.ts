@@ -38,17 +38,6 @@ import { FleetJobTicketDto } from '../tickets/dto/ticket-fleet-job.dto';
 import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.service';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
-class ReviewProviderException extends ValidationAppException {
-  constructor(command: 'REVIEW' | 'FIX' | 'AGENT') {
-    const label = command === FleetJobKind.FIX ? 'fix' : command === FleetJobKind.AGENT ? 'agent' : 'review';
-    super({ reason: `${label} is GitHub-only` }, 'fleet.dispatchInput');
-  }
-
-  override get httpStatus(): number {
-    return 422;
-  }
-}
-
 /** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
 export interface BudgetCancelResult {
   /** Ended on the server: QUEUED, or ASSIGNED whose ASSIGN was never acked. */
@@ -97,9 +86,6 @@ export class FleetJobsService {
   async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; flowFeatureId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX || dto.command === FleetJobKind.AGENT) && repo.provider !== 'github') {
-      throw new ReviewProviderException(dto.command);
-    }
     const input = normalizeDispatch(dto, repo.defaultBranch);
     const tickets = await this.fleetTickets.resolveForDispatch(projectId, dto.ticketRefs); // C9 D450
 

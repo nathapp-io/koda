@@ -97,9 +97,6 @@ export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: Knowledg
      */
     async preview(ctx: ToolContext, input: DispatchJobInput): Promise<string> {
       const repo = await resolveRepo(knowledge, ctx, input);
-      if ((input.command === 'REVIEW' || input.command === 'FIX') && repo.provider !== 'github') {
-        throw new ToolInputError(input.command === 'FIX' ? 'fix is GitHub-only' : 'review is GitHub-only');
-      }
       assertDispatchable(input, repo);
       const lines = [
         `Dispatch ${input.command} in ${ctx.projectSlug}:`,

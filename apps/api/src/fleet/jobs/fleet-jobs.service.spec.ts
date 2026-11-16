@@ -211,7 +211,7 @@ describe('review decisions dispatch snapshot', () => {
   const setup = () => {
     const repo = {
       findRepo: vi.fn().mockResolvedValue({ id: 'r', projectId: 'p', provider: 'github', defaultBranch: 'main' }),
-      createJob: vi.fn().mockImplementation(async (input: NewFleetJob) => ({ ...input, id: 'j', queuedAt: new Date() })),
+      createJob: vi.fn().mockImplementation(async (input: NewFleetJob) => ({ ...input, id: 'j', state: 'QUEUED', queuedAt: new Date() })),
       appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(null),
     };
     const selector = { selectForReview: vi.fn().mockResolvedValue(decisions) };
@@ -253,15 +253,15 @@ describe('review decisions dispatch snapshot', () => {
     expect(rulings.snapshotForFix.mock.invocationCallOrder[0]).toBeLessThan(tx.run.mock.invocationCallOrder[0]);
   });
 
-  it('US-002 AC-1/8: FIX and REVIEW retain command-specific GitHub-only rejection', async () => {
-    const { service, repo, selector, tx } = setup();
+  it.each(['REVIEW', 'FIX', 'AGENT'] as const)('US-003 dispatches GitLab %s jobs', async (command) => {
+    const { service, repo } = setup();
     repo.findRepo.mockResolvedValue({ id: 'r', projectId: 'p', provider: 'gitlab', defaultBranch: 'main' });
-    await expect(service.dispatch('u', 'p', { repoId: 'r', command: 'FIX', prNumber: 7, maxCostUsd: 1 } as never))
-      .rejects.toMatchObject({ response: { args: { reason: 'fix is GitHub-only' } } });
-    await expect(service.dispatch('u', 'p', { repoId: 'r', command: 'REVIEW', prNumber: 7, maxCostUsd: 1 } as never))
-      .rejects.toMatchObject({ response: { args: { reason: 'review is GitHub-only' } } });
-    expect(selector.selectForReview).not.toHaveBeenCalled();
-    expect(tx.run).not.toHaveBeenCalled();
+    const dto = command === 'AGENT'
+      ? { repoId: 'r', command, feature: 'agent-task', maxCostUsd: 1, agent: { name: 'test-agent', task: 'go' } }
+      : { repoId: 'r', command, prNumber: 7, maxCostUsd: 1 };
+    const result = await service.dispatch('u', 'p', dto as never);
+    expect(result.job.state).toBe('QUEUED');
+    expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({ command }));
   });
 
   it('AC-9/10 propagates selector failure without opening a transaction or inserting', async () => {

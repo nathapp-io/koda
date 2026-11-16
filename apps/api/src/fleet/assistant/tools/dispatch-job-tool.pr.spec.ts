@@ -21,8 +21,11 @@ describe('dispatch job PR preview and DTO', () => {
     const { tool } = setup();
     expect(await tool.preview?.(ctx, { repo: 'acme/app', command: 'FIX', prNumber: 23, maxCostUsd: 1, profiles: ['native-codex'] })).toBe('Dispatch FIX in web:\nrepo: acme/app @ main\npull request: #23\nmax cost: $1\nprofiles: native-codex');
   });
-  it.each([['FIX', 'fix is GitHub-only'], ['REVIEW', 'review is GitHub-only']] as const)('AC-2: refuses GitLab %s', async (command, reason) => {
-    const { tool } = setup('gitlab'); await refused(tool, { repo: 'acme/app', command, prNumber: 23, maxCostUsd: 1 }, reason);
+  it.each(['FIX', 'REVIEW'] as const)('US-003 previews GitLab %s with its PR number', async (command) => {
+    const { tool } = setup('gitlab');
+    const preview = await tool.preview?.(ctx, { repo: 'acme/app', command, prNumber: 12, maxCostUsd: 1 });
+    expect(preview).toContain(`Dispatch ${command} in web:`);
+    expect(preview).toContain('pull request: #12');
   });
   it.each([
     [{ command: 'REVIEW', feature: 'x' }, 'feature is derived for REVIEW'],
