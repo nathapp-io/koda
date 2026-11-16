@@ -16,15 +16,24 @@ const repo = (id: string): KnowledgeRepoRef => ({
   id, projectId: 'p', provider: 'github', owner: 'o', name: id, defaultBranch: 'main', githubInstallationId: BigInt(7),
 });
 
+/** US-004: a GitLab repo of the poll, connected through its credential row. */
+const gitlabRepo = (id: string): KnowledgeRepoRef => ({
+  id, projectId: 'p', provider: 'gitlab', owner: 'o', name: id, defaultBranch: 'main', githubInstallationId: null,
+  host: 'https://gitlab.example.com', gitlabConnected: true,
+});
+
 interface Harness {
   poller: KnowledgePoller;
-  repos: { findAllGithubRepos: ReturnType<typeof vi.fn> };
+  repos: { findAllGithubRepos: ReturnType<typeof vi.fn>; findAllGitlabRepos: ReturnType<typeof vi.fn> };
   queue: { enqueue: ReturnType<typeof vi.fn> };
   config: Pick<IFleetConfig, 'knowledgeIndexEnabled' | 'knowledgePollMs'>;
 }
 
 function harness(overrides: Partial<IFleetConfig> = {}): Harness {
-  const repos = { findAllGithubRepos: vi.fn(async (): Promise<KnowledgeRepoRef[]> => []) };
+  const repos = {
+    findAllGithubRepos: vi.fn(async (): Promise<KnowledgeRepoRef[]> => []),
+    findAllGitlabRepos: vi.fn(async (): Promise<KnowledgeRepoRef[]> => []),
+  };
   const queue = { enqueue: vi.fn() };
   const config = testFleetConfig({ knowledgeIndexEnabled: true, knowledgePollMs: 1_800_000, ...overrides });
   const poller = new KnowledgePoller(
@@ -90,6 +99,46 @@ describe('KnowledgePoller (1c-c-D11)', () => {
     repos.findAllGithubRepos.mockRejectedValue(new Error('db down'));
 
     await expect(poller.poll()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-3: enqueues every GitHub repository and then every GitLab repository, each with reason poll', async () => {
+    const { poller, repos, queue } = harness();
+    repos.findAllGithubRepos.mockResolvedValue([repo('g1'), repo('g2')]);
+    repos.findAllGitlabRepos.mockResolvedValue([gitlabRepo('l1')]);
+
+    await poller.poll();
+
+    expect(repos.findAllGithubRepos).toHaveBeenCalledTimes(1);
+    expect(repos.findAllGitlabRepos).toHaveBeenCalledTimes(1);
+    expect(queue.enqueue.mock.calls).toEqual([['g1', 'poll'], ['g2', 'poll'], ['l1', 'poll']]);
+    expect(repos.findAllGithubRepos.mock.invocationCallOrder[0])
+      .toBeLessThan(repos.findAllGitlabRepos.mock.invocationCallOrder[0]);
+  });
+
+  it('AC-4: a failing GitHub read still enqueues every GitLab repository and logs one warning', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    const { poller, repos, queue } = harness();
+    repos.findAllGithubRepos.mockRejectedValue(new Error('db down'));
+    repos.findAllGitlabRepos.mockResolvedValue([gitlabRepo('l1'), gitlabRepo('l2')]);
+
+    await expect(poller.poll()).resolves.toBeUndefined();
+
+    expect(queue.enqueue.mock.calls).toEqual([['l1', 'poll'], ['l2', 'poll']]);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-4: a failing GitLab read still enqueues every GitHub repository and logs one warning', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    const { poller, repos, queue } = harness();
+    repos.findAllGithubRepos.mockResolvedValue([repo('g1')]);
+    repos.findAllGitlabRepos.mockRejectedValue(new Error('db down'));
+
+    await expect(poller.poll()).resolves.toBeUndefined();
+
+    expect(queue.enqueue.mock.calls).toEqual([['g1', 'poll']]);
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
