@@ -8,6 +8,7 @@ import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import type { ApprovalCommand } from './approval-command.registry';
 import { approvalInputHash, freezeApprovalInput } from './approval-input';
+import { canonicalJson } from './canonical-json';
 import { ApprovalPolicyResolver, type ApprovalSubject, type ResolvedApproval } from './approval-policy.resolver';
 import {
   APPROVAL_REQUEST_REPOSITORY,
@@ -50,6 +51,24 @@ export function redeemStored(command: Pick<ApprovalCommand, 'key' | 'redeem'>, p
   }
 
   return stored;
+}
+
+/**
+ * US-004: whether the request redeems.
+ *
+ * A command that redeems always does — its stored input holds no secret, so it cannot run on
+ * approval. A command that redeems only when its redaction removed something does so exactly when
+ * the stored form differs from the caller's input: the body without a secret keeps the ordinary
+ * flow, and the body with one waits for the requester to redeem it.
+ */
+function requestRedeems(
+  command: Pick<ApprovalCommand, 'redeem'>,
+  redacted: unknown,
+  parsed: unknown,
+): boolean {
+  if (command.redeem === undefined) return false;
+  if (command.redeem.onlyWhenRedacted !== true) return true;
+  return canonicalJson(redacted) !== canonicalJson(parsed);
 }
 
 @Injectable()
@@ -172,7 +191,8 @@ export class ApprovalGate {
     const { command, key, projectId, variant, resolved, context, actorType } = opened;
     // Freeze once: the snapshot the row stores is exactly the value the hash describes. A redeem
     // command stores and hashes its redacted input, so neither the row nor the hash carries a secret.
-    const input = freezeApprovalInput(redeemStored(command, opened.parsed));
+    const redacted = redeemStored(command, opened.parsed);
+    const input = freezeApprovalInput(redacted);
     const inputHash = approvalInputHash(input);
     const duplicate: PendingApprovalMatch = {
       actorType,
@@ -204,7 +224,10 @@ export class ApprovalGate {
         if (cancelled !== null) await this.events.record(cancelled);
       }
       const created = await this.requests.create(
-        newRequest({ command, key, projectId, variant, resolved, context, actorType, input, inputHash }, now),
+        newRequest({
+          key, projectId, variant, resolved, context, actorType, input, inputHash,
+          redeem: requestRedeems(command, redacted, opened.parsed),
+        }, now),
       );
       await this.events.record(created);
       return created;
@@ -232,7 +255,6 @@ function satisfiesResolution(pending: ApprovalRequestRecord, resolved: ResolvedA
  */
 function newRequest(
   opened: {
-    command: ApprovalCommand;
     key: string;
     projectId: string | null;
     variant: string | undefined;
@@ -241,10 +263,12 @@ function newRequest(
     actorType: ApprovalRequestRecord['actor']['type'];
     input: unknown;
     inputHash: string;
+    /** Whether the request redeems: the command's mode, narrowed by what its redaction removed. */
+    redeem: boolean;
   },
   now: Date,
 ): ApprovalRequestRecord {
-  const { command, key, projectId, variant, resolved, context, actorType, input, inputHash } = opened;
+  const { key, projectId, variant, resolved, context, actorType, input, inputHash, redeem } = opened;
   const { policy } = resolved;
   const timeoutSec = policy?.timeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
 
@@ -253,8 +277,8 @@ function newRequest(
     permissionKey: key,
     // Absent, never `undefined`: the record doubles as the null-variant check its readers rely on.
     ...(variant === undefined ? {} : { variant }),
-    // Absent unless the command redeems: the record doubles as the false check its readers rely on.
-    ...(command.redeem === undefined ? {} : { redeem: true as const }),
+    // Absent unless the request redeems: the record doubles as the false check its readers rely on.
+    ...(redeem ? { redeem: true as const } : {}),
     projectId,
     actor: { type: actorType, id: context.actor.id },
     onBehalfOf: context.onBehalfOf ?? null,

@@ -2,6 +2,7 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import { parseBody } from '../../approvals/route/parse-body';
 import { parseRouteInput } from '../../approvals/route/parse-route-input';
+import { redactSecret } from '../../approvals/route/redact-secret';
 import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import { FleetReposService } from './fleet-repos.service';
@@ -61,9 +62,15 @@ export class FleetRepoRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    // US-004: the create body carries the two tokens when it names a GitLab repo, so `redeem.redact`
+    // replaces them with the marker: neither the approval request row nor the hash a redemption
+    // compares against ever holds a token. The request redeems only when the redaction removed
+    // something, so a GitHub body — which carries no token at all — keeps the ordinary flow: an
+    // approved request registers the repo, as it always did.
     this.commands.register(routeCommand<CreateFleetRepoDto, FleetRepoDto>({
       key: 'fleet.repo.create', variant: FLEET_REPO_ROUTE_VARIANTS.create,
       parse: (input) => parseBody(CreateFleetRepoDto, input),
+      redeem: { redact: (input) => redactGitLabTokens(input), onlyWhenRedacted: true },
       prepare: (principal, input) => this.repos.prepareCreate(principal.id, input),
       run: (principal, input) => this.repos.create(principal.id, input),
       toResult: (result) => result,
@@ -130,4 +137,18 @@ export class FleetRepoRouteCommands implements OnModuleInit {
       toResult: (result) => result,
     }, this.loader));
   }
+}
+
+/**
+ * US-004: the stored form of a create body. The two tokens become the redaction marker and every
+ * other field is unchanged; an absent token stays absent, because a body without a token has
+ * nothing to redact.
+ */
+function redactGitLabTokens(input: CreateFleetRepoDto): Record<string, unknown> {
+  const { readToken, writeToken, ...rest } = input;
+  return {
+    ...rest,
+    ...(readToken === undefined ? {} : { readToken: redactSecret(readToken) }),
+    ...(writeToken === undefined ? {} : { writeToken: redactSecret(writeToken) }),
+  };
 }

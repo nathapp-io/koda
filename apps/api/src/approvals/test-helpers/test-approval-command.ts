@@ -101,6 +101,11 @@ export interface TestRedeemState {
   answer: { value: unknown } | null;
   /** The command declares `redeem` with no `redact`: the input is stored whole and still redeemable. */
   withoutRedact: boolean;
+  /**
+   * US-004: the command redeems only when its redaction removed something. A body without a secret
+   * keeps the ordinary flow, so its request runs when it is approved.
+   */
+  onlyWhenRedacted: boolean;
 }
 
 /**
@@ -213,6 +218,7 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
       if (switchState.withoutRedact) return {};
 
       return {
+        onlyWhenRedacted: switchState.onlyWhenRedacted,
         redact: (input) => {
           switchState.calls.push({ ...input });
           if (switchState.answer !== null) return switchState.answer.value;

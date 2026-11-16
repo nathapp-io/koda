@@ -16,11 +16,13 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
-import { forgeWebBase } from '../git-broker/clone-url';
 import { GITLAB_DEVELOPER_ACCESS, GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
-import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
-import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
+import { GitLabRepoCredentials, type GitLabCredentialInput } from '../git-broker/gitlab-repo-credentials';
+import { GitTokenBroker } from '../git-broker/git-token.broker';
+import { assertGitLabHostAllowed, gitlabApiBase, isClassifiableGitLabHost, parseGitLabHost } from '../git-broker/gitlab-host';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
+import type { GitLabTokenKind } from '../git-broker/prisma-gitlab-credential.repository';
+import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
 import type { FleetRepoRecord } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
@@ -32,19 +34,40 @@ import type { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 
+/**
+ * What the registration check answered: the canonical identity of the repo, the host it lives on,
+ * the credential to store with it and the audit summary of the write.
+ */
+interface VerifiedRepo {
+  provider: 'github' | 'gitlab';
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  installationId: bigint | null;
+  /** The host a GitLab repo lives on; absent for a GitHub repo, whose column default names it. */
+  host?: string;
+  /** The credential to store in the create's own transaction; absent for a GitHub repo. */
+  credential?: GitLabCredentialInput;
+  /** The audit summary of the registration. */
+  summary: string;
+}
+
 @Injectable()
 export class FleetReposService {
   constructor(
     @Inject(FLEET_REPO_REPOSITORY) private readonly repo: IFleetRepoRepository,
     private readonly github: GitHubAppClient,
     private readonly gitlab: GitLabAccessChecker,
-    private readonly gitlabTokens: GitLabTokenSource,
+    /** US-004: the per-repo GitLab credential store (the only reader and writer of the tokens). */
+    private readonly credentials: GitLabRepoCredentials,
+    /** US-005 evicts a repo's cached tokens after a rotation; US-004 only registers a repo. */
+    private readonly broker: GitTokenBroker,
+    /** The GitLab bot account name: a write token of that account is a bot token. */
+    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'gitlabBotName'>,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly permissions: PermissionService,
-    /** The api base of the configured GitLab instance (the legacy, project-wide connection). */
-    @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'gitlabApiUrl'>,
   ) {}
 
   async create(actorId: string, dto: CreateFleetRepoDto): Promise<FleetRepoDto> {
@@ -57,8 +80,8 @@ export class FleetReposService {
 
     // Forge checks run before the transaction: no DB transaction is held across HTTP.
     const verified = dto.provider === 'github'
-      ? await this.github.verifyRepo(dto.owner, dto.name)
-      : { ...(await this.verifyGitLab(project.id, dto.owner, dto.name)), installationId: null };
+      ? await this.verifyGitHub(dto)
+      : await this.verifyGitLab(dto);
 
     return () => this.txManager.run(async () => {
       const current = await this.repo.findProject(dto.projectSlug);
@@ -70,34 +93,125 @@ export class FleetReposService {
         name: verified.name,
         defaultBranch: verified.defaultBranch,
         githubInstallationId: verified.installationId,
-        // US-003: the row names the host the repo lives on. The legacy registration has no host field
-        // yet (US-004 adds it), so a GitLab repo gets the configured instance's web base — the column
-        // default names the GitHub host, which a GitLab repo never lives on.
-        ...(dto.provider === 'gitlab' ? { host: forgeWebBase(this.vcsConfig.gitlabApiUrl) } : {}),
+        ...(verified.host === undefined ? {} : { host: verified.host }),
         createdById: actorId,
       });
+      // US-004: the credential row is written in the same transaction as the repo, right after it:
+      // a repo without its credential is a repo whose jobs cannot read it.
+      if (verified.credential !== undefined) {
+        await this.credentials.save(row.id, verified.credential);
+      }
       await this.activity.record({
         actorType: 'USER', actorId, action: 'repo.created', entityType: 'repo', entityId: row.id,
         payload: { projectId: project.id, provider: row.provider, owner: row.owner, name: row.name },
       });
-      await this.audit.record({ key: 'fleet.repo.create', resourceType: 'fleet-repo', resourceId: row.id, projectId: row.projectId, summary: `registered ${row.provider}` });
-      return FleetRepoDto.from(row);
+      await this.audit.record({
+        key: 'fleet.repo.create', resourceType: 'fleet-repo', resourceId: row.id, projectId: row.projectId,
+        summary: verified.summary,
+      });
+      // The answer is the stored row, so it carries the credential summary (and its warnings).
+      const stored = await this.repo.findById(row.id);
+      return FleetRepoDto.from(stored ?? row);
     });
   }
 
+  /** The GitHub registration check: the App proves it can reach the repo. */
+  private async verifyGitHub(dto: CreateFleetRepoDto): Promise<VerifiedRepo> {
+    const verified = await this.github.verifyRepo(dto.owner, dto.name);
+    return {
+      provider: 'github',
+      owner: verified.owner,
+      name: verified.name,
+      defaultBranch: verified.defaultBranch,
+      installationId: verified.installationId,
+      summary: 'registered github',
+    };
+  }
+
   /**
-   * US-002: the GitLab registration check of the legacy, project-wide connection. The token comes
-   * from the project's VcsConnection and the repo is verified with the access-based client: the
-   * token needs `write_repository`, and the repo needs Developer access.
+   * US-004: the GitLab registration check of a per-repo connection. The two tokens are the body's
+   * own, the host is the body's own, and the checks run in a fixed order, so the first refusal is
+   * the same for every caller:
+   *
+   * 1. the encryption key (a deployment without one costs no request at all);
+   * 2. the host (canonical, a GitLab instance, and an address outside the deployment);
+   * 3. the scopes of both tokens (the write token writes, the read token only reads);
+   * 4. the accounts behind both tokens;
+   * 5. the project, with the write token (Developer access or above);
+   * 6. the project again, with the read token (it must be able to read it).
+   *
+   * Nothing here writes: the credential row is stored in the create's own transaction.
    */
-  private async verifyGitLab(projectId: string, owner: string, name: string) {
-    const token = await this.gitlabTokens.resolve(projectId, owner, name);
-    const apiBase = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
-    const self = await this.gitlab.getTokenSelf(apiBase, token);
-    if (!self.scopes.includes('write_repository')) throw new RepoCheckException('gitlab_scope_missing');
-    const project = await this.gitlab.findProject(apiBase, token, `${owner}/${name}`);
+  private async verifyGitLab(dto: CreateFleetRepoDto): Promise<VerifiedRepo> {
+    // The key first: without it no token can be stored, so the request costs nothing.
+    this.credentials.assertKeyConfigured();
+
+    const host = parseGitLabHost(dto.host ?? '');
+    if (!isClassifiableGitLabHost(host)) throw new RepoCheckException('gitlab_host_unclassified');
+    await assertGitLabHostAllowed(host);
+    const apiBase = gitlabApiBase(host);
+
+    const writeToken = dto.writeToken;
+    const readToken = dto.readToken;
+    // The body of a GitLab repo carries both tokens (the DTO refuses one that does not, with a 400
+    // before any request). The guard is here so a caller that skipped the pipe cannot reach the
+    // forge with half a connection.
+    if (writeToken === undefined || readToken === undefined) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+
+    const writeSelf = await this.gitlab.getTokenSelf(apiBase, writeToken);
+    if (!writeSelf.scopes.includes('api') || !writeSelf.scopes.includes('write_repository')) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+    const readSelf = await this.gitlab.getTokenSelf(apiBase, readToken);
+    if (!readSelf.scopes.includes('read_api') || !readSelf.scopes.includes('read_repository')) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+    // A read token that may also write is refused: the read path would then be a write path.
+    if (readSelf.scopes.includes('api') || readSelf.scopes.includes('write_repository')) {
+      throw new RepoCheckException('gitlab_read_token_writable');
+    }
+
+    const writeUser = await this.gitlab.getCurrentUser(apiBase, writeToken);
+    const readUser = await this.gitlab.getCurrentUser(apiBase, readToken);
+
+    const project = await this.gitlab.findProject(apiBase, writeToken, `${dto.owner}/${dto.name}`);
     if (project.accessLevel < GITLAB_DEVELOPER_ACCESS) throw new RepoCheckException('gitlab_access_insufficient');
-    return { owner: project.owner, name: project.name, defaultBranch: project.defaultBranch };
+
+    // The read token must see the very project the write token named.
+    try {
+      await this.gitlab.findProject(apiBase, readToken, project.id);
+    } catch (error) {
+      if (error instanceof RepoCheckException && error.reason === 'repo_not_found') {
+        throw new RepoCheckException('gitlab_read_token_no_access');
+      }
+      throw error;
+    }
+
+    const writeTokenIsBot = writeUser.bot === true
+      || writeUser.username === this.fleetConfig.gitlabBotName
+      || dto.confirmBotAccount === true;
+    const credential: GitLabCredentialInput = {
+      gitlabProjectId: project.id,
+      read: { token: readToken, userId: readUser.id, username: readUser.username, expiresAt: readSelf.expiresAt },
+      write: {
+        token: writeToken, userId: writeUser.id, username: writeUser.username,
+        expiresAt: writeSelf.expiresAt, isBot: writeTokenIsBot,
+      },
+    };
+    return {
+      provider: 'gitlab',
+      owner: project.owner,
+      name: project.name,
+      defaultBranch: project.defaultBranch,
+      installationId: null,
+      host,
+      credential,
+      summary: writeTokenIsBot
+        ? 'registered gitlab'
+        : `registered gitlab; write token belongs to a person (${writeUser.username})`,
+    };
   }
 
   async configureAutoReview(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateAutoReviewDto): Promise<FleetRepoDto> {
@@ -344,12 +458,15 @@ export class FleetReposService {
     const result = (reachable: boolean, reason: RepoCheckResultDto['reason']) =>
       Object.assign(new RepoCheckResultDto(), { repoId: id, reachable, reason, checkedAt: now.toISOString() });
     let checked: RepoCheckResultDto;
+    // The kind of the token the forge refused, when it refused one: the closure marks it invalid.
+    let invalidToken: GitLabTokenKind | null = null;
     try {
       if (row.provider === 'github') {
         if (row.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
         await this.github.verifyRepo(row.owner, row.name, row.githubInstallationId);
+      } else {
+        await this.checkGitLab(row, (kind) => { invalidToken = kind; });
       }
-      else await this.verifyGitLab(row.projectId, row.owner, row.name);
       checked = result(true, null);
     } catch (error) {
       if (!(error instanceof RepoCheckException)) throw error;
@@ -357,8 +474,80 @@ export class FleetReposService {
     }
     return async () => {
       const current = await this.repo.findById(id);
-      if (!isDeepStrictEqual(current, row)) throw new ConflictAppException({}, 'fleet.repos');
+      // The credential summary is left out of the comparison: a token another caller marked invalid
+      // in between is not a change of the repo, so it must not turn the check into a conflict.
+      if (!isDeepStrictEqual(withoutCredential(current), withoutCredential(row))) {
+        throw new ConflictAppException({}, 'fleet.repos');
+      }
+      // The mark is written after the comparison, so a repo that changed in between is not marked.
+      if (invalidToken !== null) await this.credentials.markInvalid(id, invalidToken);
       return checked;
     };
   }
+
+  /**
+   * US-004: the GitLab reachability check of a registered repo. It re-runs the token, project and
+   * read-access checks of the registration against the *stored* tokens and the stored project id —
+   * never the account behind a token (a check does not change who a token belongs to) and never the
+   * stored metadata (a check does not rewrite the row).
+   *
+   * The credential is read through `resolve` and the client is called directly, so the preparation
+   * writes nothing: a token the forge refuses is marked invalid by the closure, after it has
+   * compared the row.
+   */
+  private async checkGitLab(row: FleetRepoRecord, onInvalidToken: (kind: GitLabTokenKind) => void): Promise<void> {
+    const read = await this.credentials.resolve(row, 'read');
+    const write = await this.credentials.resolve(row, 'write');
+
+    const writeSelf = await this.gitlabCall('write', onInvalidToken, () => this.gitlab.getTokenSelf(write.target.apiBase, write.token));
+    if (!writeSelf.scopes.includes('api') || !writeSelf.scopes.includes('write_repository')) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+    const readSelf = await this.gitlabCall('read', onInvalidToken, () => this.gitlab.getTokenSelf(read.target.apiBase, read.token));
+    if (!readSelf.scopes.includes('read_api') || !readSelf.scopes.includes('read_repository')) {
+      throw new RepoCheckException('gitlab_scope_missing');
+    }
+    if (readSelf.scopes.includes('api') || readSelf.scopes.includes('write_repository')) {
+      throw new RepoCheckException('gitlab_read_token_writable');
+    }
+
+    const project = await this.gitlabCall('write', onInvalidToken, () =>
+      this.gitlab.findProject(write.target.apiBase, write.token, write.target.projectId));
+    if (project.accessLevel < GITLAB_DEVELOPER_ACCESS) throw new RepoCheckException('gitlab_access_insufficient');
+
+    try {
+      await this.gitlabCall('read', onInvalidToken, () =>
+        this.gitlab.findProject(read.target.apiBase, read.token, read.target.projectId));
+    } catch (error) {
+      if (error instanceof RepoCheckException && error.reason === 'repo_not_found') {
+        throw new RepoCheckException('gitlab_read_token_no_access');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * One GitLab call of the check, remembering which token the forge refused. A token the instance
+   * no longer knows is an invalid token — and only that refusal marks the token, so a token that
+   * cannot be decrypted (a changed key) is never marked.
+   */
+  private async gitlabCall<T>(
+    kind: GitLabTokenKind,
+    onInvalidToken: (kind: GitLabTokenKind) => void,
+    call: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof RepoCheckException && error.reason === 'gitlab_token_invalid') {
+        onInvalidToken(kind);
+      }
+      throw error;
+    }
+  }
+}
+
+/** A repo row without its credential summary: the summary is not part of the row's identity. */
+function withoutCredential(row: FleetRepoRecord | null): FleetRepoRecord | null {
+  return row === null ? null : { ...row, gitlabCredential: undefined };
 }

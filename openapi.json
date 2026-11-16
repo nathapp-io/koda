@@ -8894,7 +8894,17 @@
       },
       "post": {
         "operationId": "FleetReposController_create",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -8933,6 +8943,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The body is not valid: a GitHub repo carries no GitLab field, a GitLab repo needs both tokens"
           },
           "403": {
             "description": "fleet.repo.create is missing globally"
@@ -21690,6 +21703,27 @@
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,100}$"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "The GitLab host the repo lives on; gitlab.com when absent"
+          },
+          "readToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The GitLab read token; stored encrypted and never returned"
+          },
+          "writeToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The GitLab write token; stored encrypted and never returned"
+          },
+          "confirmBotAccount": {
+            "type": "boolean",
+            "description": "Confirm the write token belongs to a bot account"
           }
         },
         "required": [

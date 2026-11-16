@@ -14,7 +14,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
-import { encryptToken } from '../../../src/common/utils/encryption.util';
+import { GitLabAccessChecker } from '../../../src/fleet/git-broker/gitlab-access-checker';
+import { RepoCheckException } from '../../../src/fleet/git-broker/repo-check.exception';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -95,20 +96,106 @@ describeIntegration('fleet repos (PG)', () => {
     expect(JSON.stringify(res.body)).not.toContain('provider-internal-detail');
   });
 
-  it('registers the GitLab repo bound to the project VcsConnection only', async () => {
+  it('US-004: registers a GitLab repo with its own two tokens and stores them per repo', async () => {
     const prisma = fixtureDb(app);
-    const ops = await prisma.project.findUniqueOrThrow({ where: { slug: 'ops' } });
-    await prisma.vcsConnection.create({
-      data: { projectId: ops.id, provider: 'gitlab', repoOwner: 'infra', repoName: 'deploy', encryptedToken: encryptToken('glpat-9', ENC_KEY) },
-    });
-    forge.routes.set('GET /api/v4/personal_access_tokens/self', (req) =>
-      req.headers['private-token'] === 'glpat-9' ? { status: 200, body: { scopes: ['write_repository'] } } : { status: 401, body: {} });
-    forge.routes.set(`GET /api/v4/projects/${encodeURIComponent('infra/deploy')}`, () => ({
-      status: 200, body: { id: 42, path_with_namespace: 'infra/deploy', default_branch: 'main', permissions: { project_access: { access_level: 40 }, group_access: null } },
+    // The GitLab client is stubbed: the repo's host is gitlab.com, which the fake forge does not
+    // serve. The verification calls themselves are the ones the registration makes.
+    const checker = app.get(GitLabAccessChecker);
+    const tokenSelf = vi.spyOn(checker, 'getTokenSelf').mockImplementation(async (_apiBase: string, token: string) => ({
+      scopes: token === 'glpat-write' ? ['api', 'write_repository'] : ['read_api', 'read_repository'],
+      expiresAt: token === 'glpat-write' ? new Date('2027-01-01T00:00:00.000Z') : new Date('2026-12-01T00:00:00.000Z'),
     }));
+    const currentUser = vi.spyOn(checker, 'getCurrentUser').mockImplementation(async (_apiBase: string, token: string) =>
+      (token === 'glpat-write'
+        ? { id: 7, username: 'alice', bot: false }
+        : { id: 8, username: 'koda-reader', bot: true }));
+    const findProject = vi.spyOn(checker, 'findProject').mockResolvedValue({
+      id: 42, owner: 'infra', name: 'deploy', defaultBranch: 'main', accessLevel: 30,
+    });
 
-    await request(server).post('/api/fleet/repos').set(auth(admin)).send({ projectSlug: 'ops', provider: 'gitlab', owner: 'infra', name: 'other' }).expect(422);
-    await request(server).post('/api/fleet/repos').set(auth(admin)).send({ projectSlug: 'ops', provider: 'gitlab', owner: 'infra', name: 'deploy' }).expect(201);
+    const created = data<{
+      owner: string; name: string; defaultBranch: string; host: string;
+      gitlab: {
+        projectId: number; warnings: string[];
+        readToken: { username: string; expiresAt: string | null };
+        writeToken: { username: string; isBot: boolean; expiresAt: string | null };
+      };
+    }>(
+      await request(server).post('/api/fleet/repos').set(auth(admin)).send({
+        projectSlug: 'ops', provider: 'gitlab', owner: 'infra', name: 'deploy',
+        readToken: 'glpat-read', writeToken: 'glpat-write',
+      }).expect(201),
+    );
+
+    // AC-9: the row carries the canonical identity and the host the body named.
+    const row = await prisma.fleetRepo.findFirstOrThrow({ where: { provider: 'gitlab', name: 'deploy' } });
+    expect(row).toMatchObject({ owner: 'infra', name: 'deploy', defaultBranch: 'main', host: 'https://gitlab.com' });
+    // AC-9: the credential row carries the identity and the expiry the verification found.
+    const credential = await prisma.fleetRepoGitlabCredential.findFirstOrThrow({ where: { repoId: row.id } });
+    expect(credential).toMatchObject({
+      gitlabProjectId: 42, readTokenUsername: 'koda-reader', writeTokenUsername: 'alice', writeTokenIsBot: false,
+      readTokenExpiresAt: new Date('2026-12-01T00:00:00.000Z'), writeTokenExpiresAt: new Date('2027-01-01T00:00:00.000Z'),
+    });
+    // AC-13: the answer carries the warnings of a human write token and no token itself.
+    expect(created.gitlab).toMatchObject({
+      projectId: 42,
+      warnings: ['write_token_human'],
+      readToken: { username: 'koda-reader', expiresAt: '2026-12-01T00:00:00.000Z' },
+      writeToken: { username: 'alice', isBot: false, expiresAt: '2027-01-01T00:00:00.000Z' },
+    });
+    expect(created).not.toHaveProperty('readToken');
+    expect(created).not.toHaveProperty('writeToken');
+
+    // The tokens are stored encrypted: the row never holds a plaintext token.
+    expect(credential.encryptedReadToken).not.toBe('glpat-read');
+    expect(credential.encryptedWriteToken).not.toBe('glpat-write');
+
+    tokenSelf.mockRestore();
+    currentUser.mockRestore();
+    findProject.mockRestore();
+  });
+
+  it('US-004: refuses a GitLab repo the read token cannot see', async () => {
+    const prisma = fixtureDb(app);
+    const checker = app.get(GitLabAccessChecker);
+    const tokenSelf = vi.spyOn(checker, 'getTokenSelf').mockImplementation(async (_apiBase: string, token: string) => ({
+      scopes: token === 'glpat-write' ? ['api', 'write_repository'] : ['read_api', 'read_repository'],
+      expiresAt: null,
+    }));
+    const currentUser = vi.spyOn(checker, 'getCurrentUser').mockResolvedValue({ id: 7, username: 'alice', bot: false });
+    const findProject = vi.spyOn(checker, 'findProject').mockImplementation(async (_apiBase: string, token: string) => {
+      // The write token sees the project; the read token does not.
+      if (token === 'glpat-read') throw new RepoCheckException('repo_not_found');
+      return { id: 42, owner: 'infra', name: 'hidden', defaultBranch: 'main', accessLevel: 30 };
+    });
+
+    const res = await request(server).post('/api/fleet/repos').set(auth(admin)).send({
+      projectSlug: 'ops', provider: 'gitlab', owner: 'infra', name: 'hidden',
+      readToken: 'glpat-read', writeToken: 'glpat-write',
+    }).expect(422);
+    expect(JSON.stringify(res.body)).toContain('gitlab_read_token_no_access');
+    expect(await prisma.fleetRepo.count({ where: { name: 'hidden' } })).toBe(0);
+
+    tokenSelf.mockRestore();
+    currentUser.mockRestore();
+    findProject.mockRestore();
+  });
+
+  it('US-004 AC-1: refuses a GitHub repo that carries a GitLab field, and stores no row', async () => {
+    const prisma = fixtureDb(app);
+    const res = await request(server).post('/api/fleet/repos').set(auth(admin)).send({
+      projectSlug: 'web', provider: 'github', owner: 'acme', name: 'tokened', readToken: 'glpat-read',
+    }).expect(400);
+    expect(res.body.message).toBe('A GitHub repository cannot carry GitLab fields: host, readToken, writeToken and confirmBotAccount belong to a GitLab repository');
+    expect(await prisma.fleetRepo.count({ where: { name: 'tokened' } })).toBe(0);
+  });
+
+  it('US-004: a GitLab repo without its tokens is refused before any request', async () => {
+    const prisma = fixtureDb(app);
+    await request(server).post('/api/fleet/repos').set(auth(admin)).send({
+      projectSlug: 'ops', provider: 'gitlab', owner: 'infra', name: 'untokened', readToken: 'glpat-read',
+    }).expect(400);
+    expect(await prisma.fleetRepo.count({ where: { name: 'untokened' } })).toBe(0);
   });
 
   it('shows project repos to members only, and admin routes to admins only', async () => {

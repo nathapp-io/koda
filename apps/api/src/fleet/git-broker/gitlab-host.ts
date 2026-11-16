@@ -50,6 +50,14 @@ export function parseGitLabHost(input: string): string {
 }
 
 /**
+ * The api base of a host: the host itself plus the GitLab api path. One place builds it, so the
+ * registration check and the stored credential always address the same instance.
+ */
+export function gitlabApiBase(host: string): string {
+  return `${host.replace(/\/+$/, '')}/api/v4`;
+}
+
+/**
  * True when the host name names a GitLab instance. Until nax #2957 ships, a host without `gitlab`
  * in its name is refused as `gitlab_host_unclassified`.
  */

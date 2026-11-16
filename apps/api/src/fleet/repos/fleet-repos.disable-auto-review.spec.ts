@@ -6,8 +6,9 @@ describe('FleetReposService.disableAutoReview', () => {
   let audit: { record: ReturnType<typeof vi.fn> };
 
   const service = () => new FleetReposService(
-    repo as never, {} as never, {} as never, {} as never, {} as never, tx as never,
-    audit as never, {} as never, { gitlabApiUrl: 'https://gitlab.com/api/v4' } as never,
+    repo as never, {} as never, {} as never, {} as never, {} as never,
+    { gitlabBotName: 'koda-fleet' } as never, { record: vi.fn() } as never, tx as never,
+    audit as never, {} as never,
   );
   const disable = (reason = 'enabler_lost_access') => service().disableAutoReview('r1', reason, 'u1');
 

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { decryptToken, encryptToken } from '../../common/utils/encryption.util';
 import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
 import { RepoCheckException } from './repo-check.exception';
-import { DEFAULT_GITLAB_HOST } from './gitlab-host';
+import { DEFAULT_GITLAB_HOST, gitlabApiBase } from './gitlab-host';
 import {
   GITLAB_CREDENTIAL_REPOSITORY,
   type GitLabTokenKind,
@@ -42,7 +42,7 @@ export { DEFAULT_GITLAB_HOST };
 
 /** The api base of a repo: its own host, or gitlab.com when the row carries none. */
 const apiBaseFor = (host: string | undefined): string =>
-  `${host !== undefined && host.trim() !== '' ? host : DEFAULT_GITLAB_HOST}/api/v4`;
+  gitlabApiBase(host !== undefined && host.trim() !== '' ? host : DEFAULT_GITLAB_HOST);
 
 /** A token that expires within this window is reported as expiring. */
 const TOKEN_EXPIRING_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;

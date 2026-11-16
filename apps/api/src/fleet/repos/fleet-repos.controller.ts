@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags, type Schema
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRedeemHeader } from '../../approvals/route/approval-redeem-header.decorator';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { FLEET_REPO_ROUTE_VARIANTS } from './fleet-repo-route.commands';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
@@ -74,18 +75,22 @@ export class FleetReposController {
   @HttpCode(201)
   @UseGuards(RequiresGuard)
   @Requires('fleet.repo.create')
-  @ApprovalGated()
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Register a repo for fleet dispatch after proving koda can broker git access (fleet.repo.create, global)' })
   @ApiResponse({ status: 201, type: FleetRepoDto })
+  @ApiResponse({ status: 400, description: 'The body is not valid: a GitHub repo carries no GitLab field, a GitLab repo needs both tokens' })
   @ApiResponse({ status: 403, description: 'fleet.repo.create is missing globally' })
   @ApiResponse({ status: 409, description: 'Already registered' })
   @ApiResponse({ status: 422, description: 'Forge check failed: { reason }' })
-  async create(@Body() dto: CreateFleetRepoDto) {
+  async create(@Body() dto: CreateFleetRepoDto, @ApprovalRedeemHeader() redeem?: string) {
     const outcome = await this.routeGate.run<FleetRepoDto>({
       key: 'fleet.repo.create',
       variant: FLEET_REPO_ROUTE_VARIANTS.create,
       projectId: null,
       input: dto,
+      // US-004: a GitLab body carries the tokens, so its approval request is redeemed by the
+      // requester repeating the call with them; a GitHub body has nothing to redeem.
+      ...(redeem === undefined ? {} : { redeem }),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

@@ -1,4 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { REDACTED_SECRET } from '../../approvals/route/redact-secret';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import type { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import type { FleetReposService } from './fleet-repos.service';
@@ -76,6 +77,41 @@ describe('FleetRepoRouteCommands', () => {
     for (const { action, key, variant } of cases) {
       expect(registry.get(key, FLEET_REPO_ROUTE_VARIANTS[action])).toMatchObject({ key, variant });
     }
+  });
+
+  /**
+   * US-004 AC-14: the GitLab create carries the two tokens, so the command redacts them: neither
+   * the approval request row nor the hash a redemption compares against ever holds a token.
+   */
+  it('AC-14: the create command redacts the two tokens and leaves every other field unchanged', () => {
+    const { registry } = build();
+    const command = registry.get('fleet.repo.create', FLEET_REPO_ROUTE_VARIANTS.create);
+    const input = {
+      projectSlug: 'web', provider: 'gitlab', owner: 'acme', name: 'app',
+      host: 'https://gitlab.example.com', readToken: 'glpat-read', writeToken: 'glpat-write', confirmBotAccount: true,
+    };
+    expect(command?.redeem?.redact?.(input)).toEqual({
+      ...input, readToken: REDACTED_SECRET, writeToken: REDACTED_SECRET,
+    });
+  });
+
+  it('AC-14: a body without a token has nothing to redact', () => {
+    const { registry } = build();
+    const command = registry.get('fleet.repo.create', FLEET_REPO_ROUTE_VARIANTS.create);
+    const input = { projectSlug: 'web', provider: 'gitlab', owner: 'acme', name: 'app' };
+    expect(command?.redeem?.redact?.(input)).toEqual(input);
+  });
+
+  /**
+   * US-004: the engine's redeem mode is command-wide, and a redeem command never runs when its
+   * request is approved — it waits for the requester to redeem it. The create body carries a token
+   * only when it names a GitLab repo, so the command redeems only when its redaction removed one:
+   * a GitHub body keeps the ordinary flow, and an approved request registers the repo as before.
+   */
+  it('US-004: the create command redeems only when its redaction removed a token', () => {
+    const { registry } = build();
+    const command = registry.get('fleet.repo.create', FLEET_REPO_ROUTE_VARIANTS.create);
+    expect(command?.redeem?.onlyWhenRedacted).toBe(true);
   });
 
   for (const { action, key, raw, parsed } of cases) {
