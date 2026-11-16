@@ -3,6 +3,9 @@ import type { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../generated/prisma/client';
 import { decryptToken } from '../../common/utils/encryption.util';
 import { GitLabRepoCredentials, gitlabTokenStatus } from './gitlab-repo-credentials';
+import { GitTokenBroker } from './git-token.broker';
+import { GitLabAccessChecker } from './gitlab-access-checker';
+import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { PrismaGitlabCredentialRepository } from './prisma-gitlab-credential.repository';
 import { RepoCheckException } from './repo-check.exception';
 
@@ -148,6 +151,28 @@ describe('GitLabRepoCredentials', () => {
 
     await expect(withoutKey.resolve(REPO, 'read')).rejects.toMatchObject({ reason: 'vcs_encryption_key_missing' });
     expect(() => withoutKey.assertKeyConfigured()).toThrow(RepoCheckException);
+  });
+
+  it('US-002 AC-10: FIX gate uses real credential call and marks the stored write token invalid', async () => {
+    await store.save(REPO.id, fullInput());
+    const repo: FleetRepoRef = {
+      id: REPO.id, projectId: 'project-1', provider: 'gitlab', owner: 'team', name: 'app',
+      defaultBranch: 'main', githubInstallationId: null, host: REPO.host,
+    };
+    const checker = { getBranchPushState: vi.fn().mockRejectedValue(new RepoCheckException('gitlab_token_invalid')) };
+    const broker = new GitTokenBroker(
+      { gitTokenReuseMarginSec: 30, gitlabTokenTtlSec: 3600 },
+      { mintInstallationToken: vi.fn() } as never,
+      store,
+      checker as unknown as GitLabAccessChecker,
+    );
+
+    await expect(broker.mint({ jobId: 'job-fix', leaseEpoch: 3, repo, purpose: 'fix' }))
+      .resolves.toEqual({ ok: false, error: { jobId: 'job-fix', reason: 'gitlab_token_invalid' } });
+
+    expect(checker.getBranchPushState).toHaveBeenCalledWith(expect.objectContaining({ token: 'glpat-write' }), 'main');
+    expect(stored().writeTokenInvalidAt).toBeInstanceOf(Date);
+    expect(stored().readTokenInvalidAt).toBeNull();
   });
 
   it('AC-10: a call whose token is refused marks that token invalid and rethrows', async () => {
