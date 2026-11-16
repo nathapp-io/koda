@@ -24,10 +24,13 @@ export async function seedFleetBase(prisma: PrismaClient): Promise<{ adminId: st
   await grantRole(prisma, { type: 'USER', id: admin.id }, 'admin', null);
   const slug = `web${seq}`;
   const project = await prisma.project.create({ data: { name: slug, slug, key: `W${seq}` } });
-  const repo = await prisma.fleetRepo.create({
-    data: { projectId: project.id, provider: 'github', owner: 'acme', name: `app${seq}`, defaultBranch: 'main', githubInstallationId: BigInt(77), createdById: admin.id },
-  });
-  return { adminId: admin.id, projectId: project.id, projectSlug: slug, repoId: repo.id };
+  // The repo row is written with SQL, naming only the columns the FleetRepo table has carried since
+  // the foundation: the generated client sends every column the current schema declares (including
+  // `host`, which only the later fleet_repo_gitlab_credentials migration adds), so a client write
+  // fails against the older schema a migration spec builds.
+  const repoId = `repo${seq}`;
+  await prisma.$executeRaw`INSERT INTO "FleetRepo" ("id", "projectId", "provider", "owner", "name", "defaultBranch", "githubInstallationId", "createdById") VALUES (${repoId}, ${project.id}, 'github', 'acme', ${`app${seq}`}, 'main', 77, ${admin.id})`;
+  return { adminId: admin.id, projectId: project.id, projectSlug: slug, repoId };
 }
 
 /** A runner row without a usable key (for placement-level tests; HTTP tests enroll instead). */

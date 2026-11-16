@@ -33,6 +33,22 @@ export interface RuleOverrideActor {
   type: 'USER' | 'AGENT';
 }
 
+/**
+ * The health of a repo's GitLab connection, without its secrets: the numeric GitLab project id,
+ * the identity each token belongs to and when each token runs out or was refused. The encrypted
+ * tokens themselves never leave the store.
+ */
+export interface GitLabCredentialView {
+  gitlabProjectId: number;
+  readTokenUsername: string;
+  writeTokenUsername: string;
+  writeTokenIsBot: boolean;
+  readTokenExpiresAt: Date | null;
+  writeTokenExpiresAt: Date | null;
+  readTokenInvalidAt: Date | null;
+  writeTokenInvalidAt: Date | null;
+}
+
 export interface FleetRepoRecord {
   id: string;
   projectId: string;
@@ -40,6 +56,11 @@ export interface FleetRepoRecord {
   owner: string;
   name: string;
   defaultBranch: string;
+  /**
+   * The forge host the repo lives on. Optional so a fixture written before the column stays valid;
+   * absent means `https://github.com` for a GitHub row.
+   */
+  host?: string;
   githubInstallationId: bigint | null;
   createdById: string;
   createdAt: Date;
@@ -65,6 +86,11 @@ export interface FleetRepoRecord {
    * the relation stays valid; absent means none.
    */
   ruleOverride?: RuleOverrideSummary | null;
+  /**
+   * The repo's GitLab connection health, when it has one. Optional so a fixture written before the
+   * relation stays valid; absent means the repo has no credential record.
+   */
+  gitlabCredential?: GitLabCredentialView | null;
 }
 
 export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
@@ -74,7 +100,7 @@ export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
 export interface IFleetRepoRepository {
   findProject(slug: string): Promise<{ id: string; slug: string } | null>;
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
-  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected' | 'ruleOverride'>): Promise<FleetRepoRecord>;
+  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected' | 'ruleOverride' | 'gitlabCredential'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
   /**
    * The nax flow entry resolves a remote URL to its repo: the owner and name compare

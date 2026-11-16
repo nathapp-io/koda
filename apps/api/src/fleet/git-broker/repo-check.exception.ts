@@ -13,6 +13,7 @@ export type RepoCheckReason =
   | 'vcs_connection_mismatch'
   | 'vcs_encryption_key_missing'
   | 'gitlab_token_invalid'
+  | 'gitlab_credentials_missing'
   | 'gitlab_access_insufficient'
   | 'gitlab_scope_missing';
 

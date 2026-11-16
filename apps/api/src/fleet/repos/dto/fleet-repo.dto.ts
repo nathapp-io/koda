@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { FleetRepoRecord, FleetRepoRuleOverrideRecord } from '../domain/fleet-repo.domain';
+import { gitlabTokenStatus } from '../../git-broker/gitlab-repo-credentials';
+import type { FleetRepoRecord, FleetRepoRuleOverrideRecord, GitLabCredentialView } from '../domain/fleet-repo.domain';
 
 /** One rule file of a repo's override: its path under the rules directory and its body. */
 export class RuleOverrideFileDto {
@@ -58,12 +59,69 @@ export class RuleOverrideDto {
   }
 }
 
+/**
+ * One stored GitLab token, without the token: who it belongs to, when it runs out and whether it
+ * still works.
+ */
+export class GitLabTokenSummaryDto {
+  @ApiProperty({ description: 'The GitLab username the token belongs to' })
+  declare username: string;
+  @ApiPropertyOptional({ nullable: true, description: 'When the token expires (ISO 8601)' })
+  declare expiresAt: string | null;
+  @ApiProperty({ enum: ['ok', 'invalid', 'expiring'], description: 'The health of the token' })
+  declare status: 'ok' | 'invalid' | 'expiring';
+}
+
+/** The write token's summary, with the flag that says whether it belongs to a bot account. */
+export class GitLabWriteTokenSummaryDto extends GitLabTokenSummaryDto {
+  @ApiProperty({ description: 'Whether the write token belongs to a bot account' })
+  declare isBot: boolean;
+}
+
+/**
+ * The GitLab connection of a repo: its numeric project id, the health of its two tokens and the
+ * warnings the admin has to see. A GitHub repo, and a GitLab repo without tokens, carry none of it.
+ */
+export class GitLabCredentialDto {
+  @ApiProperty({ description: 'The numeric GitLab project id' })
+  declare projectId: number;
+  @ApiProperty({ type: () => GitLabTokenSummaryDto })
+  declare readToken: GitLabTokenSummaryDto;
+  @ApiProperty({ type: () => GitLabWriteTokenSummaryDto })
+  declare writeToken: GitLabWriteTokenSummaryDto;
+  @ApiProperty({ type: [String], description: 'The warnings about this connection' })
+  declare warnings: string[];
+}
+
+/** The host a repo without one lives on: GitHub's. */
+const DEFAULT_REPO_HOST = 'https://github.com';
+
+/** The GitLab connection of a repo row, projected without its secrets. */
+function toGitLabCredential(credential: GitLabCredentialView, now: Date): GitLabCredentialDto {
+  return Object.assign(new GitLabCredentialDto(), {
+    projectId: credential.gitlabProjectId,
+    readToken: Object.assign(new GitLabTokenSummaryDto(), {
+      username: credential.readTokenUsername,
+      expiresAt: credential.readTokenExpiresAt?.toISOString() ?? null,
+      status: gitlabTokenStatus(credential.readTokenExpiresAt, credential.readTokenInvalidAt, now),
+    }),
+    writeToken: Object.assign(new GitLabWriteTokenSummaryDto(), {
+      username: credential.writeTokenUsername,
+      expiresAt: credential.writeTokenExpiresAt?.toISOString() ?? null,
+      status: gitlabTokenStatus(credential.writeTokenExpiresAt, credential.writeTokenInvalidAt, now),
+      isBot: credential.writeTokenIsBot,
+    }),
+    warnings: credential.writeTokenIsBot ? [] : ['write_token_human'],
+  });
+}
+
 export class FleetRepoDto {
   @ApiProperty() declare id: string;
   @ApiProperty() declare projectId: string;
   @ApiProperty({ enum: ['github', 'gitlab'] }) declare provider: 'github' | 'gitlab';
   @ApiProperty() declare owner: string;
   @ApiProperty() declare name: string;
+  @ApiProperty({ description: 'The forge host the repo lives on' }) declare host: string;
   @ApiProperty() declare defaultBranch: string;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'GitHub App installation id (BigInt as string)' })
   declare githubInstallationId: string | null;
@@ -80,10 +138,13 @@ export class FleetRepoDto {
   declare fixAllowUnprotected: boolean;
   @ApiPropertyOptional({ type: () => RuleOverrideSummaryDto, nullable: true, description: 'The repo rule override summary, when the repo has one' })
   declare ruleOverride: RuleOverrideSummaryDto | null;
+  @ApiPropertyOptional({ type: () => GitLabCredentialDto, nullable: true, description: 'The GitLab connection of the repo, when it has one' })
+  declare gitlab: GitLabCredentialDto | null;
 
-  static from(r: FleetRepoRecord): FleetRepoDto {
+  static from(r: FleetRepoRecord, now = new Date()): FleetRepoDto {
     return Object.assign(new FleetRepoDto(), {
       id: r.id, projectId: r.projectId, provider: r.provider as FleetRepoDto['provider'], owner: r.owner, name: r.name,
+      host: r.host ?? DEFAULT_REPO_HOST,
       defaultBranch: r.defaultBranch, githubInstallationId: r.githubInstallationId === null ? null : r.githubInstallationId.toString(),
       createdAt: r.createdAt.toISOString(), autoReview: r.autoReview, autoReviewProfiles: r.autoReviewProfiles,
       autoReviewMaxCostUsd: Number(r.autoReviewMaxCostUsd).toFixed(4), autoReviewEnabledById: r.autoReviewEnabledById,
@@ -98,6 +159,7 @@ export class FleetRepoDto {
         contextMode: r.ruleOverride.contextMode,
         updatedAt: r.ruleOverride.updatedAt.toISOString(),
       }),
+      gitlab: r.gitlabCredential === undefined || r.gitlabCredential === null ? null : toGitLabCredential(r.gitlabCredential, now),
     });
   }
 }

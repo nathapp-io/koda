@@ -21739,6 +21739,93 @@
           "updatedAt"
         ]
       },
+      "GitLabTokenSummaryDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "The GitLab username the token belongs to"
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "When the token expires (ISO 8601)"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "invalid",
+              "expiring"
+            ],
+            "type": "string",
+            "description": "The health of the token"
+          }
+        },
+        "required": [
+          "username",
+          "status"
+        ]
+      },
+      "GitLabWriteTokenSummaryDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "The GitLab username the token belongs to"
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "When the token expires (ISO 8601)"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "invalid",
+              "expiring"
+            ],
+            "type": "string",
+            "description": "The health of the token"
+          },
+          "isBot": {
+            "type": "boolean",
+            "description": "Whether the write token belongs to a bot account"
+          }
+        },
+        "required": [
+          "username",
+          "status",
+          "isBot"
+        ]
+      },
+      "GitLabCredentialDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "number",
+            "description": "The numeric GitLab project id"
+          },
+          "readToken": {
+            "$ref": "#/components/schemas/GitLabTokenSummaryDto"
+          },
+          "writeToken": {
+            "$ref": "#/components/schemas/GitLabWriteTokenSummaryDto"
+          },
+          "warnings": {
+            "description": "The warnings about this connection",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "readToken",
+          "writeToken",
+          "warnings"
+        ]
+      },
       "FleetRepoDto": {
         "type": "object",
         "properties": {
@@ -21760,6 +21847,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "host": {
+            "type": "string",
+            "description": "The forge host the repo lives on"
           },
           "defaultBranch": {
             "type": "string"
@@ -21817,6 +21908,16 @@
                 "$ref": "#/components/schemas/RuleOverrideSummaryDto"
               }
             ]
+          },
+          "gitlab": {
+            "nullable": true,
+            "description": "The GitLab connection of the repo, when it has one",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GitLabCredentialDto"
+              }
+            ]
           }
         },
         "required": [
@@ -21825,6 +21926,7 @@
           "provider",
           "owner",
           "name",
+          "host",
           "defaultBranch",
           "createdAt",
           "autoReview",
@@ -21857,6 +21959,7 @@
               "vcs_connection_mismatch",
               "vcs_encryption_key_missing",
               "gitlab_token_invalid",
+              "gitlab_credentials_missing",
               "gitlab_access_insufficient",
               "gitlab_scope_missing"
             ],
