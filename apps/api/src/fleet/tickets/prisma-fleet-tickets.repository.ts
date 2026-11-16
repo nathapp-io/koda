@@ -29,6 +29,8 @@ export interface TicketJobRow {
 }
 export interface RefreshRepo {
   id: string; projectId: string; provider: 'github' | 'gitlab'; owner: string; name: string; githubInstallationId: bigint | null;
+  /** US-002: the host of the repo; the GitLab credential is read on it. */
+  host?: string;
 }
 /** A fleet PR link to refresh; structurally a vcs TicketLinkData plus the job's repo. */
 export interface RefreshableLink {
@@ -234,7 +236,7 @@ export class PrismaFleetTicketsRepository {
       select: {
         id: true, ticketId: true, url: true, prNumber: true, prState: true, externalRef: true, source: true,
         ticket: { select: { id: true, status: true, projectId: true, number: true, externalVcsId: true } },
-        job: { select: { repo: { select: { id: true, projectId: true, provider: true, owner: true, name: true, githubInstallationId: true } } } },
+        job: { select: { repo: { select: { id: true, projectId: true, provider: true, owner: true, name: true, githubInstallationId: true, host: true } } } },
       },
       orderBy: { prUpdatedAt: 'asc' },
       take: limit,

@@ -7,7 +7,7 @@ describe('FleetReposService.disableAutoReview', () => {
 
   const service = () => new FleetReposService(
     repo as never, {} as never, {} as never, {} as never, {} as never, tx as never,
-    audit as never, {} as never,
+    audit as never, {} as never, { gitlabApiUrl: 'https://gitlab.com/api/v4' } as never,
   );
   const disable = (reason = 'enabler_lost_access') => service().disableAutoReview('r1', reason, 'u1');
 

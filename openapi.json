@@ -21961,7 +21961,13 @@
               "gitlab_token_invalid",
               "gitlab_credentials_missing",
               "gitlab_access_insufficient",
-              "gitlab_scope_missing"
+              "gitlab_scope_missing",
+              "gitlab_host_invalid",
+              "gitlab_host_blocked",
+              "gitlab_host_unclassified",
+              "gitlab_read_token_writable",
+              "gitlab_read_token_no_access",
+              "gitlab_project_mismatch"
             ],
             "type": "string"
           },

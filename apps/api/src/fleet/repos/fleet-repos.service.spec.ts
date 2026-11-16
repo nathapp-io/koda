@@ -7,11 +7,14 @@ import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module
 describe('FleetReposService', () => {
   const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), findAutoReviewPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
   const github = { verifyRepo: vi.fn() };
-  const gitlab = { verifyRepo: vi.fn() };
+  const gitlab = { getTokenSelf: vi.fn(), findProject: vi.fn() };
   const gitlabTokens = { resolve: vi.fn() };
   const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never, mockAuditRecorder, { canHoldKey: vi.fn().mockResolvedValue(true) } as never);
+  const make = () => new FleetReposService(
+    repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never,
+    mockAuditRecorder, { canHoldKey: vi.fn().mockResolvedValue(true) } as never, { gitlabApiUrl: 'https://gitlab.com/api/v4' } as never,
+  );
 
   const created = (over = {}) => ({
     id: 'fr1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk',
@@ -85,11 +88,27 @@ describe('FleetReposService', () => {
 
   it('resolves the GitLab token from the project connection and verifies the repo with it', async () => {
     gitlabTokens.resolve.mockResolvedValue('glpat-1');
-    gitlab.verifyRepo.mockResolvedValue({ owner: 'group', name: 'app', defaultBranch: 'main' });
+    gitlab.getTokenSelf.mockResolvedValue({ scopes: ['write_repository'], expiresAt: null });
+    gitlab.findProject.mockResolvedValue({ id: 42, owner: 'group', name: 'app', defaultBranch: 'main', accessLevel: 30 });
     repo.create.mockResolvedValue(created({ provider: 'gitlab', owner: 'group', githubInstallationId: null }));
     await make().create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' });
     expect(gitlabTokens.resolve).toHaveBeenCalledWith('p1', 'group', 'app');
-    expect(gitlab.verifyRepo).toHaveBeenCalledWith('group', 'app', 'glpat-1');
+    expect(gitlab.getTokenSelf).toHaveBeenCalledWith('https://gitlab.com/api/v4', 'glpat-1');
+    expect(gitlab.findProject).toHaveBeenCalledWith('https://gitlab.com/api/v4', 'glpat-1', 'group/app');
+  });
+
+  it('refuses a GitLab token without write_repository', async () => {
+    gitlabTokens.resolve.mockResolvedValue('glpat-1');
+    gitlab.getTokenSelf.mockResolvedValue({ scopes: ['read_api'], expiresAt: null });
+    await expect(make().create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' })).rejects.toMatchObject({ reason: 'gitlab_scope_missing' });
+    expect(gitlab.findProject).not.toHaveBeenCalled();
+  });
+
+  it('refuses a GitLab repo the token cannot develop', async () => {
+    gitlabTokens.resolve.mockResolvedValue('glpat-1');
+    gitlab.getTokenSelf.mockResolvedValue({ scopes: ['write_repository'], expiresAt: null });
+    gitlab.findProject.mockResolvedValue({ id: 42, owner: 'group', name: 'app', defaultBranch: 'main', accessLevel: 20 });
+    await expect(make().create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' })).rejects.toMatchObject({ reason: 'gitlab_access_insufficient' });
   });
 
   it('deletes and records', async () => {
@@ -147,7 +166,7 @@ describe('FleetReposService', () => {
       const result = await make().check('fr1', now);
       expect(gitlabTokens.resolve).toHaveBeenCalledWith('p1', 'group/sub', 'app');
       expect(result.reason).toBe('vcs_connection_missing');
-      expect(gitlab.verifyRepo).not.toHaveBeenCalled();
+      expect(gitlab.getTokenSelf).not.toHaveBeenCalled();
     });
 
     it('rethrows anything that is not a forge verdict', async () => {

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { decryptToken, encryptToken } from '../../common/utils/encryption.util';
 import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
 import { RepoCheckException } from './repo-check.exception';
+import { DEFAULT_GITLAB_HOST } from './gitlab-host';
 import {
   GITLAB_CREDENTIAL_REPOSITORY,
   type GitLabTokenKind,
@@ -37,7 +38,7 @@ export interface GitLabCredentialInput {
 }
 
 /** The host a repo without one is addressed at. */
-export const DEFAULT_GITLAB_HOST = 'https://gitlab.com';
+export { DEFAULT_GITLAB_HOST };
 
 /** The api base of a repo: its own host, or gitlab.com when the row carries none. */
 const apiBaseFor = (host: string | undefined): string =>

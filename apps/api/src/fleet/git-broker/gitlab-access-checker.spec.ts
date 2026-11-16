@@ -1,67 +1,71 @@
+import type { Mock } from 'vitest';
 import { GitLabAccessChecker } from './gitlab-access-checker';
-import { FleetHttpClient } from './fleet-http-client';
+import type { GitLabAccess } from './gitlab-repo-credentials';
 import { RepoCheckException } from './repo-check.exception';
-import { FakeForge, startFakeForge } from '../../../test/helpers/fake-forge';
+
+/**
+ * US-002 (GitLab parity F1): the access-based GitLab client.
+ *
+ * The transport is stubbed and the resolver is stubbed, so the test targets are production-like
+ * https hosts while the host checks stay strict: a blocked address still refuses the call.
+ */
+const { lookupMock } = vi.hoisted(() => ({ lookupMock: vi.fn() }));
+
+vi.mock('node:dns', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:dns')>();
+  return { ...original, promises: { ...original.promises, lookup: lookupMock } };
+});
+
+const API_BASE = 'https://gitlab.example.com/api/v4';
+const PROJECT_ID = 42;
+const access: GitLabAccess = { token: 'glpat', target: { apiBase: API_BASE, projectId: PROJECT_ID } };
+
+interface Sent {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: unknown;
+}
 
 describe('GitLabAccessChecker', () => {
-  let forge: FakeForge;
+  let sent: Sent[];
+  let respond: (request: Sent) => { status: number; body?: unknown };
+  let http: { request: Mock };
   let checker: GitLabAccessChecker;
-  const project = (access: number | null, group: number | null = null) => ({
-    status: 200,
-    body: {
-      path_with_namespace: 'group/sub/app', default_branch: 'main',
-      permissions: { project_access: access === null ? null : { access_level: access }, group_access: group === null ? null : { access_level: group } },
-    },
+
+  beforeEach(() => {
+    sent = [];
+    respond = () => ({ status: 200, body: {} });
+    http = {
+      request: vi.fn(async (method: string, url: string, headers: Record<string, string>, body?: unknown) => {
+        const request = { method, url, headers, body };
+        sent.push(request);
+        return respond(request);
+      }),
+    };
+    checker = new GitLabAccessChecker(http as never);
+    lookupMock.mockReset();
+    lookupMock.mockResolvedValue([{ address: '192.168.1.20', family: 4 }]);
   });
 
-  beforeAll(async () => {
-    forge = await startFakeForge();
-    checker = new GitLabAccessChecker({ gitlabApiUrl: `${forge.url}/api/v4` } as never, new FleetHttpClient({ httpTimeoutMs: 2000 } as never));
-  });
-  afterAll(() => forge.close());
-  beforeEach(() => forge.routes.clear());
-
-  const scopes = (s: string[]) => forge.routes.set('GET /api/v4/personal_access_tokens/self', () => ({ status: 200, body: { scopes: s } }));
-  const PROJECT = `GET /api/v4/projects/${encodeURIComponent('Group/Sub/App')}`;
-
-  it('accepts Developer access with write_repository and returns the canonical path', async () => {
-    scopes(['read_api', 'write_repository']);
-    forge.routes.set(PROJECT, () => project(30));
-    await expect(checker.verifyRepo('Group/Sub', 'App', 'glpat')).resolves.toEqual({ owner: 'group/sub', name: 'app', defaultBranch: 'main' });
-  });
-
-  it('uses group access when it is the higher level', async () => {
-    scopes(['write_repository']);
-    forge.routes.set(PROJECT, () => project(10, 40));
-    await expect(checker.verifyRepo('Group/Sub', 'App', 'glpat')).resolves.toEqual(expect.objectContaining({ name: 'app' }));
-  });
-
-  it.each([
-    ['a token without write_repository', () => { scopes(['read_api']); forge.routes.set(PROJECT, () => project(40)); }, 'gitlab_scope_missing'],
-    ['Reporter access', () => { scopes(['write_repository']); forge.routes.set(PROJECT, () => project(20)); }, 'gitlab_access_insufficient'],
-    ['an invalid token', () => { forge.routes.set('GET /api/v4/personal_access_tokens/self', () => ({ status: 401, body: {} })); }, 'gitlab_token_invalid'],
-    ['a missing project', () => { scopes(['write_repository']); }, 'repo_not_found'],
-  ])('rejects %s', async (_label, arrange, reason) => {
-    arrange();
-    await expect(checker.verifyRepo('Group/Sub', 'App', 'glpat')).rejects.toMatchObject({ reason: reason });
-  });
+  const lastRequest = (): Sent => sent[sent.length - 1];
 
   describe('getMergeRequest (C9 §3.4)', () => {
-    const MR = `GET /api/v4/projects/${encodeURIComponent('grp/sub/app')}/merge_requests/4`;
-
-    it('maps a merged MR and sends the token', async () => {
-      forge.routes.set(MR, () => ({
+    it('AC-7: asks the project by its numeric id and sends the access token', async () => {
+      respond = () => ({
         status: 200,
         body: {
           state: 'merged', draft: false, merged_at: '2026-10-06T01:00:00Z', merged_by: { username: 'dev' },
-          merge_commit_sha: null, squash_commit_sha: 'sq1', web_url: 'https://gitlab.com/grp/sub/app/-/merge_requests/4', title: 'Fix',
+          merge_commit_sha: null, squash_commit_sha: 'sq1', web_url: 'https://gitlab.example.com/grp/sub/app/-/merge_requests/7', title: 'Fix',
         },
-      }));
-      await expect(checker.getMergeRequest('glpat', 'grp/sub', 'app', 4)).resolves.toEqual({
-        number: 4, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T01:00:00Z'), mergedBy: 'dev',
-        mergeSha: 'sq1', url: 'https://gitlab.com/grp/sub/app/-/merge_requests/4', title: 'Fix',
       });
-      expect(forge.requests.at(-1)?.headers['private-token']).toBe('glpat');
+
+      await expect(checker.getMergeRequest(access, 7)).resolves.toEqual({
+        number: 7, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T01:00:00Z'), mergedBy: 'dev',
+        mergeSha: 'sq1', url: 'https://gitlab.example.com/grp/sub/app/-/merge_requests/7', title: 'Fix',
+      });
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/merge_requests/7`);
+      expect(lastRequest().headers['private-token']).toBe('glpat');
     });
 
     it.each([
@@ -70,48 +74,200 @@ describe('GitLabAccessChecker', () => {
       [{ state: 'closed' }, { state: 'closed', draft: false, merged: false }],
       [{ state: 'locked' }, { state: 'open', draft: false, merged: false }],
     ])('maps %j', async (body, expected) => {
-      forge.routes.set(MR, () => ({ status: 200, body: { web_url: 'u', title: 't', ...body } }));
-      await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).resolves.toEqual(expect.objectContaining(expected));
+      respond = () => ({ status: 200, body: { web_url: 'u', title: 't', ...body } });
+      await expect(checker.getMergeRequest(access, 4)).resolves.toEqual(expect.objectContaining(expected));
     });
 
     it('returns null for 404 and throws provider_error for 502', async () => {
-      await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).resolves.toBeNull();
-      forge.routes.set(MR, () => ({ status: 502, body: {} }));
-      await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).rejects.toMatchObject({ reason: 'provider_error' });
+      respond = () => ({ status: 404, body: { message: '404 Not Found' } });
+      await expect(checker.getMergeRequest(access, 4)).resolves.toBeNull();
+      respond = () => ({ status: 502, body: {} });
+      await expect(checker.getMergeRequest(access, 4)).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+  });
+
+  describe('the shared status mapping', () => {
+    it('AC-9: a 401 is an invalid token', async () => {
+      respond = () => ({ status: 401, body: { message: '401 Unauthorized' } });
+      await expect(checker.getMergeRequest(access, 4)).rejects.toMatchObject({ reason: 'gitlab_token_invalid' });
+    });
+
+    it('AC-9: a 403 is not enough permission', async () => {
+      respond = () => ({ status: 403, body: { message: '403 Forbidden' } });
+      await expect(checker.getMergeRequest(access, 4)).rejects.toMatchObject({ reason: 'app_permissions_insufficient' });
+    });
+
+    it('AC-15: a 500 with a body is a provider_error and carries no GitLab body', async () => {
+      respond = () => ({ status: 500, body: { message: 'gitlab-internal-detail', trace: 'x' } });
+
+      const error = await checker.getMergeRequest(access, 4).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(RepoCheckException);
+      const failure = error as RepoCheckException;
+      expect(failure.reason).toBe('provider_error');
+      expect(failure.args).toEqual({ reason: 'provider_error' });
+      expect(JSON.stringify(failure.getResponse())).not.toContain('gitlab-internal-detail');
+    });
+  });
+
+  describe('the host check', () => {
+    it('AC-8: a blocked host sends no request at all', async () => {
+      lookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+
+      const calls: Array<Promise<unknown>> = [
+        checker.getMergeRequest(access, 4),
+        checker.commentOnMergeRequest(access, 4, 'body'),
+        checker.getBranchHead(access, 'main'),
+        checker.listTree(access, '.nax', 'c1'),
+        checker.getFile(access, '.nax/context.md', 'c1'),
+        checker.getTokenSelf(API_BASE, 'glpat'),
+        checker.getCurrentUser(API_BASE, 'glpat'),
+        checker.findProject(API_BASE, 'glpat', 'grp/sub/app'),
+      ];
+
+      for (const call of calls) await expect(call).rejects.toMatchObject({ reason: 'gitlab_host_blocked' });
+      expect(sent).toEqual([]);
+    });
+
+    it('AC-8: checks the host again before the next page of a tree', async () => {
+      const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, path: `.nax/r${i}.md`, type: 'blob' }));
+      respond = () => ({ status: 200, body: fullPage });
+      // The host resolves to a blocked address after the first page was answered.
+      http.request.mockImplementationOnce(async (method: string, url: string, headers: Record<string, string>, body?: unknown) => {
+        const request = { method, url, headers, body };
+        sent.push(request);
+        lookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+        return { status: 200, body: fullPage };
+      });
+
+      await expect(checker.listTree(access, '.nax', 'c1')).rejects.toMatchObject({ reason: 'gitlab_host_blocked' });
+      expect(sent).toHaveLength(1);
     });
   });
 
   describe('.nax reads (fleet S3 §4.1)', () => {
-    const P = `/api/v4/projects/${encodeURIComponent('grp/sub/app')}`;
-
     it('reads the branch head', async () => {
-      forge.routes.set(`GET ${P}/repository/branches/main`, () => ({ status: 200, body: { commit: { id: 'c1' } } }));
-      await expect(checker.getBranchHead('glpat', 'grp/sub', 'app', 'main')).resolves.toBe('c1');
-      expect(forge.requests.at(-1)?.headers['private-token']).toBe('glpat');
+      respond = () => ({ status: 200, body: { commit: { id: 'c1' } } });
+      await expect(checker.getBranchHead(access, 'main')).resolves.toBe('c1');
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/repository/branches/main`);
+      expect(lastRequest().headers['private-token']).toBe('glpat');
+    });
+
+    it('refuses a missing branch as repo_not_found', async () => {
+      respond = () => ({ status: 404, body: {} });
+      await expect(checker.getBranchHead(access, 'main')).rejects.toMatchObject({ reason: 'repo_not_found' });
     });
 
     it('pages the recursive tree until a short page, and returns [] when the path is missing', async () => {
       const page = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `s${n}-${i}`, path: `.nax/rules/r${n}-${i}.md`, type: 'blob' }));
       let calls = 0;
-      forge.routes.set(`GET ${P}/repository/tree`, () => ({ status: 200, body: page(++calls, calls === 1 ? 100 : 3) }));
-      const entries = await checker.listTree('t', 'grp/sub', 'app', '.nax', 'c1');
+      respond = () => {
+        calls += 1;
+        return { status: 200, body: page(calls, calls === 1 ? 100 : 3) };
+      };
+      const entries = await checker.listTree(access, '.nax', 'c1');
       expect(entries).toHaveLength(103);
       expect(entries[0]).toEqual({ path: '.nax/rules/r1-0.md', type: 'blob', sha: 's1-0', size: null });
-      forge.routes.set(`GET ${P}/repository/tree`, () => ({ status: 404, body: { message: '404 Tree Not Found' } }));
-      await expect(checker.listTree('t', 'grp/sub', 'app', '.nax', 'c1')).resolves.toEqual([]);
+      expect(sent).toHaveLength(2);
+      expect(sent[0].url).toContain(`${API_BASE}/projects/${PROJECT_ID}/repository/tree?`);
+      respond = () => ({ status: 404, body: { message: '404 Tree Not Found' } });
+      await expect(checker.listTree(access, '.nax', 'c1')).resolves.toEqual([]);
     });
 
     it('stops after 10 full pages', async () => {
-      forge.routes.set(`GET ${P}/repository/tree`, () => ({ status: 200, body: Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, path: `.nax/r${i}.md`, type: 'blob' })) }));
-      await expect(checker.listTree('t', 'grp/sub', 'app', '.nax', 'c1')).rejects.toMatchObject({ reason: 'provider_error' });
+      respond = () => ({ status: 200, body: Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, path: `.nax/r${i}.md`, type: 'blob' })) });
+      await expect(checker.listTree(access, '.nax', 'c1')).rejects.toMatchObject({ reason: 'provider_error' });
+      expect(sent).toHaveLength(10);
     });
 
     it('reads a file with its blob id; null on 404', async () => {
-      const FILE = `GET ${P}/repository/files/${encodeURIComponent('.nax/context.md')}`;
-      forge.routes.set(FILE, () => ({ status: 200, body: { blob_id: 'b9', size: 2, encoding: 'base64', content: Buffer.from('hi').toString('base64') } }));
-      await expect(checker.getFile('t', 'grp/sub', 'app', '.nax/context.md', 'c1')).resolves.toEqual({ sha: 'b9', size: 2, content: Buffer.from('hi') });
-      forge.routes.delete(FILE);
-      await expect(checker.getFile('t', 'grp/sub', 'app', '.nax/context.md', 'c1')).resolves.toBeNull();
+      respond = () => ({ status: 200, body: { blob_id: 'b9', size: 2, encoding: 'base64', content: Buffer.from('hi').toString('base64') } });
+      await expect(checker.getFile(access, '.nax/context.md', 'c1')).resolves.toEqual({ sha: 'b9', size: 2, content: Buffer.from('hi') });
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/repository/files/${encodeURIComponent('.nax/context.md')}?ref=c1`);
+      respond = () => ({ status: 404, body: {} });
+      await expect(checker.getFile(access, '.nax/context.md', 'c1')).resolves.toBeNull();
+    });
+  });
+
+  describe('the token and the project', () => {
+    it('AC-10: reads the scopes and the expiry of a token', async () => {
+      respond = () => ({ status: 200, body: { scopes: ['read_api', 'write_repository'], expires_at: '2027-01-02T03:04:05Z' } });
+
+      await expect(checker.getTokenSelf(API_BASE, 'glpat')).resolves.toEqual({
+        scopes: ['read_api', 'write_repository'],
+        expiresAt: new Date('2027-01-02T03:04:05Z'),
+      });
+      expect(lastRequest().url).toBe(`${API_BASE}/personal_access_tokens/self`);
+      expect(lastRequest().headers['private-token']).toBe('glpat');
+    });
+
+    it('AC-10: a token without an expiry has none', async () => {
+      respond = () => ({ status: 200, body: { scopes: ['read_api'], expires_at: null } });
+      await expect(checker.getTokenSelf(API_BASE, 'glpat')).resolves.toEqual({ scopes: ['read_api'], expiresAt: null });
+    });
+
+    it('AC-10: a 404 on the token is an invalid token', async () => {
+      respond = () => ({ status: 404, body: {} });
+      await expect(checker.getTokenSelf(API_BASE, 'glpat')).rejects.toMatchObject({ reason: 'gitlab_token_invalid' });
+    });
+
+    it('AC-11: reads the user behind a token', async () => {
+      respond = () => ({ status: 200, body: { id: 7, username: 'koda-bot', bot: true } });
+      await expect(checker.getCurrentUser(API_BASE, 'glpat')).resolves.toEqual({ id: 7, username: 'koda-bot', bot: true });
+      expect(lastRequest().url).toBe(`${API_BASE}/user`);
+    });
+
+    it('AC-11: a user without a bot flag is not a bot', async () => {
+      respond = () => ({ status: 200, body: { id: 8, username: 'dev' } });
+      await expect(checker.getCurrentUser(API_BASE, 'glpat')).resolves.toEqual({ id: 8, username: 'dev', bot: false });
+    });
+
+    it('reads a project by its path and by its id', async () => {
+      respond = () => ({
+        status: 200,
+        body: {
+          id: 42, path_with_namespace: 'group/sub/app', default_branch: 'main',
+          permissions: { project_access: { access_level: 30 }, group_access: null },
+        },
+      });
+
+      await expect(checker.findProject(API_BASE, 'glpat', 'group/sub/app')).resolves.toEqual({
+        id: 42, owner: 'group/sub', name: 'app', defaultBranch: 'main', accessLevel: 30,
+      });
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${encodeURIComponent('group/sub/app')}`);
+    });
+
+    it('uses the higher of the project and the group access', async () => {
+      respond = () => ({
+        status: 200,
+        body: {
+          id: 42, path_with_namespace: 'group/sub/app', default_branch: 'main',
+          permissions: { project_access: { access_level: 10 }, group_access: { access_level: 40 } },
+        },
+      });
+      await expect(checker.findProject(API_BASE, 'glpat', 42)).resolves.toEqual(expect.objectContaining({ accessLevel: 40 }));
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/42`);
+    });
+
+    it('refuses a missing project as repo_not_found', async () => {
+      respond = () => ({ status: 404, body: {} });
+      await expect(checker.findProject(API_BASE, 'glpat', 'group/sub/app')).rejects.toMatchObject({ reason: 'repo_not_found' });
+    });
+  });
+
+  describe('commentOnMergeRequest', () => {
+    it('posts the note on the merge request of the project', async () => {
+      respond = () => ({ status: 201, body: { id: 1 } });
+      await expect(checker.commentOnMergeRequest(access, 7, 'hello')).resolves.toBe(true);
+      expect(lastRequest().method).toBe('POST');
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/merge_requests/7/notes`);
+      expect(lastRequest().headers['private-token']).toBe('glpat');
+      expect(lastRequest().body).toEqual({ body: 'hello' });
+    });
+
+    it('answers false when the merge request is gone', async () => {
+      respond = () => ({ status: 404, body: {} });
+      await expect(checker.commentOnMergeRequest(access, 7, 'hello')).resolves.toBe(false);
     });
   });
 });

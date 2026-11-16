@@ -8,6 +8,15 @@
   "runnerBusy": { "409": "该执行器仍有未完成或已指定的任务，请改为停用" },
   "repoBusy": { "409": "该仓库仍有未完成的任务" },
   "repoCheck": { "422": "仓库检查失败：{reason}" },
+  "repoCheckReason": {
+    "gitlab_credentials_missing": "该 GitLab 仓库没有保存的凭证",
+    "gitlab_host_invalid": "该 GitLab 主机不是有效的 https 地址",
+    "gitlab_host_blocked": "该 GitLab 主机解析到本部署内部的地址",
+    "gitlab_host_unclassified": "该 GitLab 主机未被识别为 GitLab 实例",
+    "gitlab_read_token_writable": "该 GitLab 读取令牌也可能拥有写权限；请保存只读令牌",
+    "gitlab_read_token_no_access": "该 GitLab 读取令牌无法读取此仓库",
+    "gitlab_project_mismatch": "该 GitLab 令牌属于另一个项目"
+  },
   "autoReview": { "422": "无法配置自动审查：{reason}。" },
   "fixChecks": { "422": "无法信任检测到的检查：{reason}。" },
   "fixUnprotected": { "422": "无法允许在未受保护的默认分支上运行 FIX：{reason}。" },

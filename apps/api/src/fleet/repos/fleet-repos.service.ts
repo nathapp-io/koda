@@ -16,8 +16,9 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
-import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
+import { GITLAB_DEVELOPER_ACCESS, GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
+import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
 import type { FleetRepoRecord } from './domain/fleet-repo.domain';
@@ -41,6 +42,8 @@ export class FleetReposService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly permissions: PermissionService,
+    /** The api base of the configured GitLab instance (the legacy, project-wide connection). */
+    @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'gitlabApiUrl'>,
   ) {}
 
   async create(actorId: string, dto: CreateFleetRepoDto): Promise<FleetRepoDto> {
@@ -77,8 +80,19 @@ export class FleetReposService {
     });
   }
 
+  /**
+   * US-002: the GitLab registration check of the legacy, project-wide connection. The token comes
+   * from the project's VcsConnection and the repo is verified with the access-based client: the
+   * token needs `write_repository`, and the repo needs Developer access.
+   */
   private async verifyGitLab(projectId: string, owner: string, name: string) {
-    return this.gitlab.verifyRepo(owner, name, await this.gitlabTokens.resolve(projectId, owner, name));
+    const token = await this.gitlabTokens.resolve(projectId, owner, name);
+    const apiBase = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
+    const self = await this.gitlab.getTokenSelf(apiBase, token);
+    if (!self.scopes.includes('write_repository')) throw new RepoCheckException('gitlab_scope_missing');
+    const project = await this.gitlab.findProject(apiBase, token, `${owner}/${name}`);
+    if (project.accessLevel < GITLAB_DEVELOPER_ACCESS) throw new RepoCheckException('gitlab_access_insufficient');
+    return { owner: project.owner, name: project.name, defaultBranch: project.defaultBranch };
   }
 
   async configureAutoReview(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateAutoReviewDto): Promise<FleetRepoDto> {

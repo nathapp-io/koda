@@ -51,6 +51,50 @@ describe('PrAttributionService on a config job PR (fleet S3 §5 step 8: attribut
   });
 });
 
+describe('PrAttributionService on a GitLab merge request (US-002: the repo credential carries the token)', () => {
+  /** The access the credential store answers a GitLab call with. */
+  const access = { token: 'glpat', target: { apiBase: 'https://gitlab.example.com/api/v4', projectId: 42 } };
+
+  const gitlabRepo = {
+    id: 'repo-2', projectId: 'p1', provider: 'gitlab', owner: 'acme/platform', name: 'api',
+    defaultBranch: 'main', githubInstallationId: null, host: 'https://gitlab.example.com',
+  };
+
+  const job = (over: Record<string, unknown> = {}) => ({
+    id: 'job-9', state: 'COMPLETED', command: 'RUN', resultPrUrl: 'https://gitlab.example.com/acme/platform/api/-/merge_requests/12',
+    repoId: 'repo-2', leaseEpoch: 1, requestedById: 'u1', requestedByType: 'USER', ...over,
+  });
+
+  const repoOf = () => ({
+    findById: vi.fn(async () => job()),
+    findRepo: vi.fn(async () => gitlabRepo),
+    claimAttribution: vi.fn(async () => true),
+    findUserDisplayName: vi.fn(async () => 'Dev One'),
+    findAgentDisplayName: vi.fn(async () => 'Builder'),
+  });
+
+  it('AC-13: posts the attribution through the write credential of the repo', async () => {
+    const repo = repoOf();
+    const gitlab = { commentOnMergeRequest: vi.fn(async () => true) };
+    const credentials = { call: vi.fn(async (_repo: unknown, _kind: unknown, fn: (a: unknown) => Promise<unknown>) => fn(access)) };
+    const svc = new PrAttributionService(repo as never, {} as never, gitlab as never, credentials as never);
+
+    await expect(svc.attribute('job-9')).resolves.toBe('posted');
+
+    expect(credentials.call).toHaveBeenCalledWith(expect.objectContaining({ id: 'repo-2' }), 'write', expect.any(Function));
+    expect(gitlab.commentOnMergeRequest).toHaveBeenCalledWith(access, 12, 'Dispatched by Dev One via koda job job-9');
+  });
+
+  it('AC-13: a refused comment is a failed attribution', async () => {
+    const repo = repoOf();
+    const gitlab = { commentOnMergeRequest: vi.fn(async () => false) };
+    const credentials = { call: vi.fn(async (_repo: unknown, _kind: unknown, fn: (a: unknown) => Promise<unknown>) => fn(access)) };
+    const svc = new PrAttributionService(repo as never, {} as never, gitlab as never, credentials as never);
+
+    await expect(svc.attribute('job-9')).resolves.toBe('failed');
+  });
+});
+
 describe('PrAttributionService audit coverage (permissions P2 US-006)', () => {
   it('AC-1/AC-2: claims attribution in its detached scope under the claim bookkeeping reason', async () => {
     let observedReason: ReturnType<typeof currentBookkeepingReason>;

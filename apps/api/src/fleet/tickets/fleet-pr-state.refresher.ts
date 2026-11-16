@@ -11,7 +11,7 @@ import type { VcsPrStatus } from '../../vcs/types';
 import { VcsPrSyncService } from '../../vcs/vcs-pr-sync.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
-import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
 import type { RefreshableLink, RefreshRepo } from './prisma-fleet-tickets.repository';
@@ -47,7 +47,7 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     private readonly repo: PrismaFleetTicketsRepository,
     private readonly github: GitHubAppClient,
     private readonly gitlab: GitLabAccessChecker,
-    private readonly gitlabTokens: GitLabTokenSource,
+    private readonly credentials: GitLabRepoCredentials,
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: Pick<IVcsRepository, 'updateTicketLinkWithPrState'>,
     private readonly prSync: VcsPrSyncService,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'sweepEnabled' | 'prRefreshMs'>,
@@ -126,8 +126,8 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
       const { token } = await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
       return (number) => this.github.getPullRequest(token, repo.owner, repo.name, number);
     }
-    const token = await this.gitlabTokens.resolve(repo.projectId, repo.owner, repo.name);
-    return (number) => this.gitlab.getMergeRequest(token, repo.owner, repo.name, number);
+    // US-002: the MR is read with the repo's own read credential, on the repo's own host.
+    return (number) => this.credentials.call(repo, 'read', (access) => this.gitlab.getMergeRequest(access, number));
   }
 
   /**

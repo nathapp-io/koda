@@ -22,7 +22,7 @@ describe('FleetReposService.configureFixUnprotected', () => {
 
   const service = () => new FleetReposService(
     repo as never, {} as never, {} as never, {} as never, {} as never, tx as never,
-    audit as never, permissions as never,
+    audit as never, permissions as never, { gitlabApiUrl: 'https://gitlab.com/api/v4' } as never,
   );
   const principal = (actorType: 'user' | 'agent' = 'user') =>
     ({ actorType, id: actorType === 'user' ? 'u1' : 'a1' }) as never;

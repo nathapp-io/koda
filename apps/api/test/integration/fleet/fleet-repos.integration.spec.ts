@@ -4,6 +4,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-repos.integration.spec.ts
  */
 import request from 'supertest';
+import { promises as dns } from 'node:dns';
 import { generateKeyPairSync } from 'crypto';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -27,10 +28,15 @@ describeIntegration('fleet repos (PG)', () => {
   let forge: FakeForge;
   let admin: string;
   let member: string;
+  let dnsLookup: ReturnType<typeof vi.spyOn>;
   const saved: Record<string, string | undefined> = {};
   const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 
   beforeAll(async () => {
+    // US-002: the GitLab client checks the host before every call, and the fake forge answers on
+    // loopback — an address the check refuses. The resolver is stubbed (the check itself is not
+    // relaxed): the fake forge still serves the calls.
+    dnsLookup = vi.spyOn(dns, 'lookup').mockResolvedValue([{ address: '192.168.1.20', family: 4 }] as never);
     forge = await startFakeForge();
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const keyFile = join(mkdtempSync(join(tmpdir(), 'gh-app-')), 'app.pem');
@@ -61,6 +67,7 @@ describeIntegration('fleet repos (PG)', () => {
   });
 
   afterAll(async () => {
+    dnsLookup.mockRestore();
     await app.close();
     await forge.close();
     for (const k of ENV_KEYS) {
@@ -97,7 +104,7 @@ describeIntegration('fleet repos (PG)', () => {
     forge.routes.set('GET /api/v4/personal_access_tokens/self', (req) =>
       req.headers['private-token'] === 'glpat-9' ? { status: 200, body: { scopes: ['write_repository'] } } : { status: 401, body: {} });
     forge.routes.set(`GET /api/v4/projects/${encodeURIComponent('infra/deploy')}`, () => ({
-      status: 200, body: { path_with_namespace: 'infra/deploy', default_branch: 'main', permissions: { project_access: { access_level: 40 }, group_access: null } },
+      status: 200, body: { id: 42, path_with_namespace: 'infra/deploy', default_branch: 'main', permissions: { project_access: { access_level: 40 }, group_access: null } },
     }));
 
     await request(server).post('/api/fleet/repos').set(auth(admin)).send({ projectSlug: 'ops', provider: 'gitlab', owner: 'infra', name: 'other' }).expect(422);
