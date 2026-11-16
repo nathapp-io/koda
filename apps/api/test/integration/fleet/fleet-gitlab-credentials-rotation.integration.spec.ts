@@ -39,6 +39,8 @@ describeIntegration('the fleet repo GitLab credential rotation (PG)', () => {
   let projectId: string;
   let rootId: string;
   let dnsLookup: ReturnType<typeof vi.spyOn>;
+  /** The stubbed verification call the F1 case asserts was never made. */
+  let tokenSelf: ReturnType<typeof vi.spyOn>;
   let seq = 0;
   const saved: Record<string, string | undefined> = {};
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -98,7 +100,7 @@ describeIntegration('the fleet repo GitLab credential rotation (PG)', () => {
 
     // The verification calls the rotation makes; the forge itself is not served locally.
     const checker = app.get(GitLabAccessChecker);
-    vi.spyOn(checker, 'getTokenSelf').mockImplementation(async (_apiBase: string, token: string) => ({
+    tokenSelf = vi.spyOn(checker, 'getTokenSelf').mockImplementation(async (_apiBase: string, token: string) => ({
       scopes: token.startsWith('glpat-write') ? ['api', 'write_repository'] : ['read_api', 'read_repository'],
       expiresAt: null,
     }));
@@ -121,6 +123,7 @@ describeIntegration('the fleet repo GitLab credential rotation (PG)', () => {
 
   beforeEach(async () => {
     resetThrottle(app);
+    tokenSelf.mockClear();
     await db.approvalRequest.deleteMany();
     await db.auditEntry.deleteMany({ where: { key: 'fleet.repo.credentials.update' } });
   });
@@ -132,6 +135,21 @@ describeIntegration('the fleet repo GitLab credential rotation (PG)', () => {
 
     expect(res.body.message).toBe('A GitLab credential rotation must carry at least one token');
     expect(await db.approvalRequest.count()).toBe(0);
+  });
+
+  it('AC-1 (fix round 1, F1): a null token is a 400 and reaches no GitLab call', async () => {
+    const repoId = await gitlabRepo();
+
+    const res = await rotate(repoId, { writeToken: null }).expect(400);
+
+    // `null` is a malformed token, not an absent one: the body is refused before anything else runs.
+    // Which constraint reports it is class-validator's business (`stopAtFirstError`); what matters is
+    // that the refusal is a translated 400 and nothing else happened.
+    expect(res.body.message).toEqual(expect.any(String));
+    expect(res.body.message).not.toContain('common.validation');
+    expect(tokenSelf).not.toHaveBeenCalled();
+    expect(await db.approvalRequest.count()).toBe(0);
+    expect(await storedTokens(repoId)).toEqual({ write: 'glpat-write', read: 'glpat-read' });
   });
 
   it('AC-2: a GitHub repo cannot rotate GitLab credentials', async () => {
