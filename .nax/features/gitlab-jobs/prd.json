@@ -1,0 +1,315 @@
+{
+  "project": "koda",
+  "feature": "gitlab-jobs",
+  "branchName": "feat/gitlab-jobs",
+  "createdAt": "2026-11-16T13:09:46.352Z",
+  "updatedAt": "2026-11-16T13:09:46.352Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Expose GitLab branch push state and stored write-user identity",
+      "description": "**Goal** — Add the access-based branch push-state query and the secret-free GitLab write-user projection needed by broker and assignment consumers.\n\n**Motivation** — After feature 1, a GitLab repo has a read token and a write token, but only RUN uses them.\n\n**Approach** — Branch-query design, verbatim: Through `GitLabRepoCredentials.call(repo, 'write', fn)`, `fn` calls `GitLabAccessChecker.getBranchPushState(access, repo.defaultBranch)`, which sends `GET /projects/:id/repository/branches/:branch` (branch URL-encoded) and returns the body's `protected` and `can_push` booleans as `{ protected, canPush }`. `can_push` is GitLab's answer for the token's own user, so it already accounts for wildcard rules, per-user, per-group and deploy-key entries, force-push settings and inherited group roles. This story implements the checker; US-002 owns the call/gate integration. Mirror getBranchHead's access-based request shape and reuse projectUrl, guard and fail. Reject malformed booleans as provider_error; preserve guard-before-request, private-token headers, per-repo host/project addressing and shared status mapping.\n\nBot-identity projection design, verbatim:\n`FleetRepoRef` gains `gitlabWriteUser?: { id: number; username: string } | null`, read from the repo's `FleetRepoGitlabCredential` row (`writeTokenUserId`, `writeTokenUsername`) by `PrismaFleetJobRepository.findRepo`. It is null for a GitHub repo and for a GitLab repo without a credential record. No token column is selected. `findProjectRepos` is unchanged.\n\n**Scope** — In: checker method, FleetRepoRef field, findRepo nested identity-only select/projection, checker unit tests and existing repository DB integration tests. Out: broker purpose selection/FIX gate execution (US-002), gitIdentityFor/dispatch/override (US-003), runner validation (US-004), web (US-005), adding identity to findProjectRepos or opening project-code fetches (feature 3). Reuse the existing integration file rather than creating a test-only story.\n- Out: Threads with project code, the project brief, the knowledge index, PR rulings and review events on GitLab (feature 3 of GitLab parity), including opening `fetchableProjectRepos` to GitLab repos and adding `gitlabWriteUser` to `findProjectRepos`.\n\n**Interface** — `getBranchPushState(access, branch): Promise<{ protected: boolean; canPush: boolean }>`; `GitLabAccess = { token, target: { apiBase, projectId } }`; `gitlabWriteUser?: { id: number; username: string } | null`.\n\n**Verification approach** — Write failing Vitest request/error/encoding/DNS-guard tests using the existing injected transport and DNS stub. Extend fleet-job-repository.integration.spec.ts with real credential relations and assert the returned repo identity projection contains no encrypted-token keys. Use the shared DB gate and run those integration assertions outside the sandbox; no DB is needed for checker tests.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: GitLabAccessChecker.getBranchPushState(access, 'main') sends GET <apiBase>/projects/<projectId>/repository/branches/main with the access token and, for a 200 body with protected: true and can_push: false, returns { protected: true, canPush: false }.",
+        "AC-2 [unit]: getBranchPushState(access, 'release/1.0') URL-encodes the branch as release%2F1.0 in the request path.",
+        "AC-3 [unit]: getBranchPushState throws RepoCheckException with reason repo_not_found when GitLab answers 404.",
+        "AC-4 [unit]: getBranchPushState throws RepoCheckException with reason gitlab_token_invalid when GitLab answers 401.",
+        "AC-5 [unit]: getBranchPushState throws RepoCheckException with reason app_permissions_insufficient when GitLab answers 403.",
+        "AC-6 [unit]: getBranchPushState throws RepoCheckException with reason provider_error when GitLab answers 500.",
+        "AC-7 [unit]: getBranchPushState throws RepoCheckException with reason provider_error for a 200 body whose can_push is missing, and for one whose protected is the string \"true\".",
+        "AC-8 [unit]: getBranchPushState for an access whose api base host resolves to a loopback address throws RepoCheckException with reason gitlab_host_blocked and sends no request.",
+        "AC-9 [integration]: PrismaFleetJobRepository.findRepo for a GitLab repo with a credential record returns gitlabWriteUser { id: <writeTokenUserId>, username: <writeTokenUsername> } and no encryptedReadToken or encryptedWriteToken key.",
+        "AC-10 [integration]: findRepo returns gitlabWriteUser null for a GitHub repo.",
+        "AC-11 [integration]: findRepo returns gitlabWriteUser null for a GitLab repo without a credential record."
+      ],
+      "tags": [
+        "gitlab-jobs",
+        "api",
+        "security",
+        "credentials",
+        "prisma"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Additive checker and repository projection using existing patterns; token-authenticated HTTP, SSRF guarding and secret-free credential selection require the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Mint purpose-correct GitLab credentials with a bot-safe FIX gate",
+      "description": "**Goal** — Replace GitLab broker refusals with purpose-correct stored-token grants and a default-branch gate that refuses FIX when the bot can push.\n\n**Motivation** — REVIEW, FIX and AGENT are refused at dispatch (`fleet-jobs.service.ts` `ReviewProviderException`, \"review is GitHub-only\"), the broker refuses every GitLab purpose and read-only mint with `provider_error`, and the runner's assign parser rejects any review login that does not end in `[bot]`, which a GitLab username never does.\n\n**Approach** — Token per job kind (design section 6.2), verbatim:\n| Mint | Token | `repoId` on the result |\n|:--|:--|:--|\n| no purpose, no `readOnly` (RUN, PLAN) | write | no (unchanged) |\n| `purpose: 'review'` (REVIEW) | write | no |\n| `purpose: 'read'` (AGENT) | read | no |\n| `readOnly: true`, no purpose (project/thread sessions) | read | yes |\n| `purpose: 'fix'` (FIX) | write, after the protection check | no |\n\nEvery GitLab mint answers `username: 'oauth2'` and `expiresAt = now + gitlabTokenTtlSec`, as the RUN mint does today. The cache keys do not change, so a `read` or `readOnly` entry can never answer a write request and the other way round. REVIEW uses the write token because GitLab has no comment-only scope; nax bot review never pushes, and the runner's review profile is unchanged.\n\nThe GitLab `readOnly` mint has no production caller in this feature: `fetchableProjectRepos` (`jobs/project-repos-assign.ts`) still keeps only GitHub repos, so `SyncService` never requests one for a GitLab repo. Feature 3 opens that path; this feature makes the broker answer it correctly when it does.\n\nFIX protected-branch gate, verbatim:\nWhen `fixAllowUnprotected` is not true, the broker checks the default branch before it resolves the write token. The question the gate answers is \"can the bot push to the default branch?\", so it asks GitLab as the bot:\n\n1. Through `GitLabRepoCredentials.call(repo, 'write', fn)`, `fn` calls `GitLabAccessChecker.getBranchPushState(access, repo.defaultBranch)`, which sends `GET /projects/:id/repository/branches/:branch` (branch URL-encoded) and returns the body's `protected` and `can_push` booleans as `{ protected, canPush }`. `can_push` is GitLab's answer for the token's own user, so it already accounts for wildcard rules, per-user, per-group and deploy-key entries, force-push settings and inherited group roles.\n2. The branch counts as protected only when `protected` is true and `canPush` is false. Otherwise the mint answers `default_branch_unprotected` and the write token is never resolved. The reason is deliberately the same for \"no protection\" and \"protected, but the bot can push\" (common when the bot holds Maintainer): in both cases the bot could push to the default branch. The web hint for a GitLab repo says so (US-005).\n3. A failure of the check answers its reason (`repo_not_found` for 404, `gitlab_token_invalid` for 401, which also marks the write token invalid through `call`, `app_permissions_insufficient` for 403, `provider_error` otherwise) and the write token is never resolved.\n\nThis is a deliberate refinement of the design's section 5 row, which proposed reading `protected_branches` and `members/all` with the read token. That approach needs a read-token role that may not see protected-branch settings, misses wildcard rules, and must re-implement GitLab's push rules. The branch call is a read, and the write token is used only by koda's own process here, never handed to a read job.\n\nIntegration target, verbatim: GitLab mints follow the token table above; the early purpose refusal and the GitLab `provider_error` branch are gone. The broker gains a `GitLabAccessChecker` constructor dependency for the gate, appended as the fourth constructor parameter, after `GitLabRepoCredentials`: `(fleetConfig, github, gitlab, gitlabChecker)`.\n\nOperational clarification: call internally resolves the token for the server's own branch query. Failed-gate assertions forbid the broker's separate issuance resolve and any grant, not that internal prerequisite. Keep the call wrapper intact so a 401 marks the write token invalid. Missing credentials fail before any GitLab request. Keep GitHub mint calls and return values, cache key construction, TTL/reuse behavior, fresh semantics, repo eviction and in-flight rotation generation handling unchanged.\n\n**Scope** — In: GitTokenBroker, existing module wiring if needed, constructor doubles, broker specs and real-broker SyncService purpose tests. Out: implementing checker/repo fields (US-001), dispatch and override configuration/assignment identity (US-003), runner (US-004), web hint (US-005), opening fetchableProjectRepos (feature 3), per-job token minting, gitlab_read_token_missing, branch-check retries and new token-value-in-log assertions.\n- Out: A `gitlab_read_token_missing` reason; feature 1 stores both tokens at registration, so a credential record always has a read token.\n- Out: Minting short-lived GitLab tokens per job; deferred by the owner because gitlab.com Free does not offer them.\n- Out: US-002 only: retrying the branch check; a transient failure answers its reason and the job fails its mint as a GitHub one does.\n- Out: US-002 only: no test asserts token values are absent from log lines; the broker already logs only the job id and the error name, never a message or token.\n\n**Interface** — `(fleetConfig, github, gitlab, gitlabChecker)`; `getBranchPushState(access, branch): Promise<{ protected: boolean; canPush: boolean }>`; `GitLabAccess = { token, target: { apiBase, projectId } }`. Existing MintRequest/MintResult and protocol shapes stay unchanged; repoId belongs only to the purpose-less readOnly result/error.\n\n**Verification approach** — Replace obsolete provider_error GitLab expectations in git-token.broker.spec.ts and git-token.broker.purpose.spec.ts with token-table/cache-isolation assertions while retaining GitLab write-mint, eviction, failure-mapping and every GitHub assertion. Append a checker double to every direct constructor, including sync.service.token-purpose.spec.ts. Exercise SyncService with a real broker, runner-held ASSIGNED GitLab FIX/AGENT jobs and stubbed credentials/checker. Test failed gates without issuance resolve; use real credentials.call over injected storage for the invalid-mark seam. DI/module tests, if needed, remain unit-level and DB-free.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: A GitLab mint with purpose: 'review' calls GitLabRepoCredentials.resolve(repo, 'write') and answers { token: <write token>, username: 'oauth2', expiresAt: now + gitlabTokenTtlSec } with no repoId key.",
+        "AC-2 [unit]: A GitLab mint with purpose: 'read' calls resolve(repo, 'read'), never resolve(repo, 'write'), and answers the read token with no repoId key.",
+        "AC-3 [unit]: A GitLab mint with readOnly: true and no purpose calls resolve(repo, 'read') and answers the read token with repoId equal to the repo id.",
+        "AC-4 [unit]: After a GitLab write mint (no purpose) for job j1 epoch 1 is cached, a purpose: 'read' mint for the same job and epoch calls resolve(repo, 'read') and answers the read token, not the cached write token.",
+        "AC-5 [unit]: A GitLab mint with purpose: 'review', with purpose: 'read', or with readOnly: true and no purpose, whose resolve rejects with RepoCheckException('gitlab_credentials_missing') answers { ok: false, error: { jobId, reason: 'gitlab_credentials_missing' } } and issues no token; repoId is present only for the readOnly mint.",
+        "AC-6 [unit]: A GitLab purpose: 'fix' mint with fixAllowUnprotected false calls GitLabRepoCredentials.call(repo, 'write', fn), whose fn calls getBranchPushState(access, repo.defaultBranch), and for { protected: true, canPush: false } answers the token from resolve(repo, 'write').",
+        "AC-7 [unit]: A GitLab purpose: 'fix' mint whose branch check answers { protected: false, canPush: true } answers default_branch_unprotected and never calls resolve(repo, 'write') for token issuance.",
+        "AC-8 [unit]: A GitLab purpose: 'fix' mint whose branch check answers { protected: true, canPush: true } answers default_branch_unprotected and never calls resolve(repo, 'write') for token issuance.",
+        "AC-9 [unit]: A GitLab purpose: 'fix' mint with fixAllowUnprotected true makes no getBranchPushState call and answers the write token.",
+        "AC-10 [unit]: A GitLab purpose: 'fix' mint whose call rejects with RepoCheckException('gitlab_token_invalid') answers gitlab_token_invalid and never calls resolve(repo, 'write') for token issuance. With the real GitLabRepoCredentials.call over injected storage, the write token is marked invalid.",
+        "AC-11 [unit]: A GitLab purpose: 'fix' mint whose getBranchPushState rejects with RepoCheckException('provider_error') answers provider_error and never calls resolve(repo, 'write') for token issuance.",
+        "AC-12 [unit]: A GitHub purpose: 'review' mint still calls GitHubAppClient.mintReviewToken and never calls GitLabRepoCredentials.resolve.",
+        "AC-13 [unit]: A SyncService sync whose runner requests the git token of its runner-held (ASSIGNED) GitLab FIX job, with a real GitTokenBroker over a stubbed GitLabAccessChecker answering { protected: true, canPush: false } and a stubbed GitLabRepoCredentials, returns that job's write token in gitTokens and calls getBranchPushState with the repo's default branch.",
+        "AC-14 [unit]: The same SyncService sync for a runner-held (ASSIGNED) GitLab AGENT job returns the read token in gitTokens and never resolves the write token.",
+        "AC-15 [unit]: A GitLab FIX mint for a repo without a credential record answers gitlab_credentials_missing from GitLabRepoCredentials.call, with no GitLab request and no issued token."
+      ],
+      "tags": [
+        "gitlab-jobs",
+        "api",
+        "security",
+        "tokens",
+        "fix",
+        "sync"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing broker, registered checker and credentials.call wrapper support a bounded purpose-selection/gate extension without a new abstraction; credential issuance and read/write isolation still require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/git-token.broker.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts",
+        "apps/api/src/fleet/git-broker/git-broker.module.ts",
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.spec.ts",
+          "reason": "the cases \"US-003 AC-10: refuses a read-only GitLab mint without resolving a credential\" and \"US-001 AC11: a read-only mint for a GitLab repository fails provider_error without any provider call\" pinned `provider_error`; a GitLab `readOnly` mint now resolves the read token and answers it with `repoId`. The broker gains a `GitLabAccessChecker` constructor argument. The GitLab write-mint, eviction and failure-mapping assertions stay."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.purpose.spec.ts",
+          "reason": "the cases \"AC-11, AC-12: rejects GitLab %s purpose\", \"US-003 AC-2: rejects a GitLab read purpose\" and \"AC-9: never falls back to a stored GitLab credential already cached by a write mint\" pinned `provider_error` for GitLab purposes; they now pin the token table (review and fix answer the write token, read the read token, and a cached write entry never answers a read request). The broker gains a `GitLabAccessChecker` constructor argument. Every GitHub assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts",
+          "reason": "the `GitTokenBroker` it builds gains a `GitLabAccessChecker` mock as its new constructor argument; every existing token-purpose assertion stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Open GitLab dispatch, carry write-user identity and permit the FIX override",
+      "description": "**Goal** — Admit GitLab REVIEW/FIX/AGENT jobs through existing dispatch flows, derive bot identity from the write account and enable the audited FIX override for credential-connected GitLab repos.\n\n**Motivation** — So koda cannot review or fix a GitLab merge request, and an AGENT job cannot read a GitLab repo.\n\n**Approach** — Bot identity (design section 6.5), verbatim:\n`FleetRepoRef` gains `gitlabWriteUser?: { id: number; username: string } | null`, read from the repo's `FleetRepoGitlabCredential` row (`writeTokenUserId`, `writeTokenUsername`) by `PrismaFleetJobRepository.findRepo`. It is null for a GitHub repo and for a GitLab repo without a credential record. No token column is selected. `findProjectRepos` is unchanged. US-001 supplies this projection; consume it here.\n\n`gitIdentityFor` takes the repo instead of only its provider:\n- GitHub: unchanged, `<githubAppSlug ?? 'koda-fleet'>[bot]` and its noreply email;\n- GitLab with `gitlabWriteUser`: name = `gitlabWriteUser.username`, email = `gitlabBotEmail`;\n- GitLab without it: name = `gitlabBotName`, email = `gitlabBotEmail` (today's value).\n\n`buildAssignPayload` already sets `review.botLogin` and `gitIdentity` from that identity, so a GitLab REVIEW or FIX carries the write token's username as its bot login, and a GitLab RUN carries it as `gitIdentity.name`.\n\nIntegration targets, verbatim:\n- `gitIdentityFor` (`jobs/assign-payload.ts`): `gitIdentityFor(repo: Pick<FleetRepoRef, 'provider' | 'gitlabWriteUser'>, cfg)`; `placement.service.ts` passes the repo it already holds.\n- `FleetJobsService.dispatch` (`jobs/fleet-jobs.service.ts`): no provider refusal; `ReviewProviderException` is deleted.\n- `dispatch_job` tool `preview` (`assistant/tools/dispatch-job-tool.ts`): no provider refusal.\n- `FleetReposService.configureFixUnprotected` (`repos/fleet-repos.service.ts`): a GitHub repo keeps that rule; a GitLab repo may enable it when `gitlabCredential` is present and not null, and is refused with `FixUnprotectedException('gitlab credentials required')` otherwise. Disabling is always allowed. The exception's doc comment names both reasons.\n\nThe retained GitHub enabling rule is GitHub with an installation, otherwise FixUnprotectedException('github app required'). Keep the flag update and fleet.repo.fix.unprotected audit in the existing transaction and retain route/approval authorization. Remove only provider refusals: dispatch normalization still requires prNumber for REVIEW/FIX, still derives review-pr-<n>/fix-pr-<n>, and AGENT retains its existing input constraints. The assistant tool has no AGENT path and must not gain one. Keep snapshots, budgets, live publishing, state transitions, CAS placement and actor context unchanged.\n\n**Scope** — In: service/tool provider admission, repo-aware identity helper and its placement call, provider-specific override eligibility/doc comments, and updates to affected unit/integration/e2e behavior. Out: checker/repo projection (US-001), credential minting/protection gate (US-002), runner login/env changes (US-004), UI (US-005), auto-review/fix-checks, GitLab rulings, changing gitlabBotEmail or adding write-user projection to findProjectRepos. GitLab FIX continues to dispatch with notSent: 'head-unreadable' from snapshotForFix until feature 3.\n- Out: PR rulings on a GitLab FIX: `FleetPrRulingsService.snapshotForFix` answers `notSent: 'head-unreadable'` for a GitLab repo (no installation), so a GitLab FIX dispatches without rulings until feature 3.\n- Out: US-003 only: changing the git commit email of GitLab jobs; it stays `gitlabBotEmail`.\n- Out: Auto-review, fix-checks (`trustDetectedChecks`), CI pipeline status and flows on GitLab (feature 4 of GitLab parity); their GitHub-only guards stay.\n\n**Interface** — `gitIdentityFor(repo: Pick<FleetRepoRef, 'provider' | 'gitlabWriteUser'>, cfg)`; `gitlabWriteUser?: { id: number; username: string } | null`; `FixUnprotectedException('gitlab credentials required')`; existing GitHub `FixUnprotectedException('github app required')` remains. No public DTO or ASSIGN wire field is added.\n\n**Verification approach** — Create assign-payload.git-identity.spec.ts for both forges and placement.service.git-identity.spec.ts for the findRepo -> identity -> ASSIGN seam (AC-9). Replace GitHub-only GitLab expectations in fleet-jobs.service.spec.ts, dispatch-job-tool.pr.spec.ts and fleet-repos.fix-unprotected.spec.ts. Update fleet-review-dispatch.integration.spec.ts so valid GitLab REVIEW/FIX requests return 201/features review-pr-7 and fix-pr-7, but a REVIEW missing prNumber now gets normalization's 422 as on GitHub. Update assistant-dispatch-job-tool-pr.integration.spec.ts to store pending actions and endpoint.e2e.spec.ts to persist GitLab AGENT/REVIEW/FIX jobs. Update fleet-repo-fix-unprotected-route.integration.spec.ts to return 422/gitlab credentials required for an unconnected GitLab repo. Execute real-DB assertions through the shared gate outside the sandbox, not skipped, and preserve all unaffected GitHub assertions.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: FleetJobsService.dispatch with command REVIEW on a GitLab repo of the project creates a QUEUED job and throws no exception.",
+        "AC-2 [unit]: dispatch with command FIX on a GitLab repo creates a QUEUED job.",
+        "AC-3 [unit]: dispatch with command AGENT on a GitLab repo creates a QUEUED job.",
+        "AC-4 [unit]: The dispatch_job tool's preview for REVIEW with prNumber 12 on a GitLab repo returns text containing the line pull request: #12 and throws no ToolInputError.",
+        "AC-5 [unit]: The dispatch_job tool's preview for FIX with prNumber 12 on a GitLab repo returns text containing 'Dispatch FIX in <projectSlug>:' and the line 'pull request: #12' and throws no ToolInputError.",
+        "AC-6 [unit]: gitIdentityFor({ provider: 'gitlab', gitlabWriteUser: { id: 77, username: 'koda-bot' } }, cfg) returns { name: 'koda-bot', email: cfg.gitlabBotEmail }.",
+        "AC-7 [unit]: gitIdentityFor({ provider: 'gitlab', gitlabWriteUser: null }, cfg) returns { name: cfg.gitlabBotName, email: cfg.gitlabBotEmail }.",
+        "AC-8 [unit]: gitIdentityFor({ provider: 'github', gitlabWriteUser: null }, cfg) with cfg.githubAppSlug koda-fleet returns name koda-fleet[bot] and email koda-fleet[bot]@users.noreply.github.com.",
+        "AC-9 [unit]: PlacementService placing a GitLab REVIEW job whose repo from findRepo has gitlabWriteUser.username koda-bot sends an ASSIGN payload with gitIdentity.name koda-bot and review.botLogin koda-bot.",
+        "AC-10 [unit]: FleetReposService.configureFixUnprotected with allowUnprotected: true on a GitLab repo whose gitlabCredential is present and not null saves the flag and records the fleet.repo.fix.unprotected audit entry.",
+        "AC-11 [unit]: configureFixUnprotected with allowUnprotected: true on a GitLab repo whose gitlabCredential is null throws FixUnprotectedException with reason gitlab credentials required and saves nothing, and so does a GitLab repo whose gitlabCredential is absent.",
+        "AC-12 [unit]: configureFixUnprotected with allowUnprotected: true on a GitHub repo with githubInstallationId null still throws FixUnprotectedException with reason github app required."
+      ],
+      "tags": [
+        "gitlab-jobs",
+        "api",
+        "security",
+        "dispatch",
+        "identity",
+        "assistant",
+        "fix"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Provider-guard removal, a repo-aware identity helper and override eligibility reuse existing normalization, approval, audit and placement flows; these are bounded edits, while credential-derived identity and safety-override authorization mandate security isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
+        "apps/api/src/fleet/jobs/assign-payload.ts",
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/assign-payload.git-identity.spec.ts",
+        "apps/api/src/fleet/jobs/placement.service.git-identity.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+          "reason": "\"US-002 AC-1/8: FIX and REVIEW retain command-specific GitHub-only rejection\" (and any AGENT twin asserting `agent is GitHub-only`) pinned the refusal for a GitLab repo; a GitLab REVIEW, FIX or AGENT dispatch now creates the job."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/dispatch-job-tool.pr.spec.ts",
+          "reason": "\"AC-2: refuses GitLab %s\" pinned `ToolInputError`; a GitLab REVIEW or FIX preview now returns the preview text."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-review-dispatch.integration.spec.ts",
+          "reason": "\"US-002 AC-1/8: rejects FIX and keeps the existing REVIEW GitLab rejection reason\" pinned the 422 `is GitHub-only`; a GitLab REVIEW or FIX with a `prNumber` now answers 201 with features `review-pr-7` and `fix-pr-7`. Also \"US-003 AC-3/4: rejects a REVIEW for a GitLab repo before dispatch normalization\" pinned `review is GitHub-only` for a REVIEW without a `prNumber`; it now asserts that request is refused 422 by dispatch normalization, the same answer a GitHub repo gets."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-dispatch-job-tool-pr.integration.spec.ts",
+          "reason": "\"AC-12: REVIEW and FIX on GitLab store no action\" pinned the `is GitHub-only` refusal; a GitLab REVIEW or FIX now stores the pending action like a GitHub one."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the case asserting `agent is GitHub-only`, `review is GitHub-only` and `fix is GitHub-only` with no `fleetJob` row for a GitLab repo pinned the refusal; GitLab AGENT, REVIEW and FIX dispatches now create jobs."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.fix-unprotected.spec.ts",
+          "reason": "the `github app required` refusal now applies to GitHub rows only; a GitLab row with `gitlabCredential` may enable the override, and one without it (absent or null) is refused `gitlab credentials required`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-repo-fix-unprotected-route.integration.spec.ts",
+          "reason": "\"enabling on a GitLab repo answers 422 with the github app reason\" pinned `github app required` for a GitLab repo without a credential record; it now answers 422 with `gitlab credentials required`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Accept GitLab bot logins and inject GitLab RUN login-only identity",
+      "description": "**Goal** — Make runner review/fix validation provider-aware and give GitLab RUN jobs the same shim-backed login-only forge identity as GitHub.\n\n**Motivation** — REVIEW, FIX and AGENT are refused at dispatch (`fleet-jobs.service.ts` `ReviewProviderException`, \"review is GitHub-only\"), the broker refuses every GitLab purpose and read-only mint with `provider_error`, and the runner's assign parser rejects any review login that does not end in `[bot]`, which a GitLab username never does.\n\n**Approach** — Runner (design section 8), verbatim:\n- A review login is valid when it matches its provider's pattern. GitHub keeps `^[A-Za-z0-9][A-Za-z0-9-]*\\[bot\\]$`. GitLab uses the GitLab username pattern `^[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_-])?$`. Both keep the 1 to 100 length bound. One exported function `isValidBotLogin(provider, login)` in `executor/nax-process.ts` holds both patterns, and both the assign parser and `reviewPrNumber` call it.\n- `runIdentityEnv` gives a GitLab RUN the same login-only identity as a GitHub RUN (`NAX_FORGE_IDENTITY=login-only`, `NAX_FORGE_LOGIN=gitIdentity.name`) when the job's shims are on PATH, and the same warning and no identity when they are not. nax's login-only mode supports glab; no user id is sent.\n- `reviewEnv` and `spawnFixStep` are already provider-neutral (token file plus `NAX_FORGE_LOGIN`).\n\nIntegration target, verbatim: Runner `isValidBotLogin` is new; `parseAssign` (`supervisor/assign-parser.ts`) and `reviewPrNumber` (`executor/nax-process.ts`) replace their inline `[bot]` pattern with it. `HostExecutor.runIdentityEnv` (baseline: returns `{}` for any non-GitHub job) serves GitLab RUN jobs too.\n\nUse repo.provider when validating the stored write-user login delivered by US-003; preserve strict GitHub suffix validation. Preserve parser refusal category review (the existing detail is 'invalid review') and argv failure PathError('invalid review'). Keep RUN-only identity injection, inherited credential-variable stripping, shims-first PATH and warn-level 'RUN starts without a forge identity' when binDir is absent. REVIEW/FIX continue using the existing 0600 forge-token path plus login, existing cleanup and review profile; do not place token values in env or argv. The shared reviewPrNumber validator must cover buildNaxArgv and buildFixArgv.\n\n**Scope** — In: shared login validator, parser/argv consumers, RUN identity provider admission and focused runner tests of REVIEW/FIX token-file env. Out: API dispatch/identity assignment (US-003), broker token selection/gate (US-002), web override (US-005), bot-review ingest parser LOGIN (feature 3), NAX_FORGE_USER_ID and changes to provider-neutral review/fix execution or review-profile privileges.\n- Out: The GitLab username pattern of the bot-review ingest parser (`ingest/parsers/bot-review.parser.ts` `LOGIN`), which belongs to review events (feature 3).\n- Out: Sending the bot's numeric user id to nax (`NAX_FORGE_USER_ID`); nax compares GitLab authors by username, which is unique on a host.\n\n**Interface** — `isValidBotLogin(provider, login)`; exact provider patterns and 1..100 bound above. No protocol change: consume existing assign.repo.provider, assign.review.botLogin and assign.gitIdentity.name.\n\n**Verification approach** — Extend existing src/supervisor/assign-parser.spec.ts, src/executor/nax-process.spec.ts and test/unit/host-executor.spec.ts with GitLab and retained GitHub cases. Replace 'US-008 AC-5: GitLab RUN gets no injected identity' with login-only expectations while preserving the GitHub no-shim warning case. Use injected credentials/spawn and temp files to inspect the child env for RUN, REVIEW and the second FIX step without a live forge or installed nax. Assert errors outside swallowed callbacks; keep existing sandbox gates for genuinely host-dependent tests.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: parseAssign accepts a REVIEW assign whose repo.provider is gitlab and whose review.botLogin is koda-bot, and the parsed job carries review.botLogin koda-bot.",
+        "AC-2 [unit]: parseAssign returns { ok: false, detail: 'invalid review' } (the existing review refusal) for a GitLab REVIEW assign whose review.botLogin is koda bot (contains a space).",
+        "AC-3 [unit]: parseAssign returns { ok: false, detail: 'invalid review' } (the existing review refusal) for a GitHub REVIEW assign whose review.botLogin is koda-fleet (no [bot] suffix).",
+        "AC-4 [unit]: isValidBotLogin('gitlab', 'koda_fleet.bot-1') returns true, and isValidBotLogin('gitlab', 'koda-fleet[bot]') and isValidBotLogin('gitlab', 'bot.') return false.",
+        "AC-5 [unit]: buildNaxArgv for a GitLab REVIEW assign with review.botLogin koda-bot returns the review argv containing the consecutive elements 'bot', 'review', String(assign.review.prNumber) and throws no PathError, and for a GitHub REVIEW assign with koda-fleet throws PathError('invalid review').",
+        "AC-6 [unit]: HostExecutor.spawn for a GitLab RUN whose credentials give a binDir starts nax with NAX_FORGE_IDENTITY login-only and NAX_FORGE_LOGIN equal to assign.gitIdentity.name.",
+        "AC-7 [unit]: HostExecutor.spawn for a GitLab RUN without a binDir starts nax with no NAX_FORGE_IDENTITY or NAX_FORGE_LOGIN and logs the warning RUN starts without a forge identity.",
+        "AC-8 [unit]: HostExecutor.spawn for a GitLab REVIEW with review.botLogin koda-bot starts nax with NAX_FORGE_LOGIN koda-bot and a NAX_FORGE_TOKEN_FILE path.",
+        "AC-9 [unit]: HostExecutor.spawnFixStep for a GitLab FIX with review.botLogin koda-bot starts nax with NAX_FORGE_LOGIN koda-bot and a NAX_FORGE_TOKEN_FILE path.",
+        "AC-10 [unit]: buildFixArgv for a GitLab FIX assign with review.botLogin koda-bot returns the fix argv containing the consecutive elements 'bot', 'fix', String(assign.review.prNumber), '--no-rereview' and throws no PathError."
+      ],
+      "tags": [
+        "gitlab-jobs",
+        "runner",
+        "security",
+        "identity",
+        "review",
+        "fix"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three existing runtime files share a validator and standard execution seams; untrusted identity validation and credential-backed child environments require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/executor/nax-process.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/executor/nax-process.spec.ts",
+        "apps/runner/test/unit/host-executor.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "\"US-008 AC-5: GitLab RUN gets no injected identity\" pinned no identity for a GitLab RUN with shims; it now gets `NAX_FORGE_IDENTITY=login-only` and `NAX_FORGE_LOGIN` equal to `gitIdentity.name`. The no-shim warning case stays."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Expose the GitLab FIX override with provider-specific safety copy",
+      "description": "**Goal** — Show the existing admin FIX unprotected-branch switch for credential-connected GitLab repos and explain the bot-can-push safety condition in both locales.\n\n**Motivation** — After feature 1, a GitLab repo has a read token and a write token, but only RUN uses them.\n\n**Approach** — Web integration targets, verbatim:\n- Web `apps/web/pages/admin/fleet/repos.vue`: it also mounts for a GitLab repo whose `gitlab` field is not null. Auto-review and fix-checks stay GitHub-only (feature 4).\n- Web `apps/web/components/fleet/RepoFixUnprotected.vue`: a GitLab repo shows the new key `fleet.repos.fixUnprotected.hintGitlab` instead. English: \"Override: FIX jobs may push even when the bot account can push to the default branch (it has no protection rule, or the rule lets the bot push). Leave off unless the repository cannot be protected.\" Chinese: \"覆盖：即使机器人账号可以推送到默认分支（默认分支没有保护规则，或保护规则允许机器人推送），FIX 任务也可以推送。除非仓库无法设置保护，否则请保持关闭。\" A GitHub repo keeps `hint`.\n\nExtend only FleetRepoFixUnprotected's existing page predicate: installed GitHub OR GitLab with a non-null credential view. Keep the existing switch label 'Allow fixes on an unprotected default branch', permission key fleet.repo.fix.unprotected, saving disable state, approval-pending notice, saved event and API error path. Derive the hint from provider, keep locale keys in both JSON files and retain the existing composable instead of duplicating backend rules or checking token scopes/status in UI.\n\n**Scope** — In: admin page mount condition, component hint selection, exact en/zh text, existing page/component Jest tests. Out: API eligibility/auditing (US-003), bot protection/token gate (US-002), runner changes (US-004), auto-review/fix-check controls for GitLab (feature 4), new layout/navigation/tokens or generated web clients.\n- Out: Auto-review, fix-checks (`trustDetectedChecks`), CI pipeline status and flows on GitLab (feature 4 of GitLab parity); their GitHub-only guards stay.\n\n**Interface** — Existing `FleetRepo.gitlab` is `FleetRepoGitlab | null`; use existing repo.provider and component repo prop. New translation key: `fleet.repos.fixUnprotected.hintGitlab`. No API or DTO change.\n\n**Verification approach** — Update tests/pages/admin-fleet-repos.spec.ts's GitHub-only switch fixture to include both connected and null GitLab rows, with no GitLab auto-review/fix-check mounts. Extend tests/components/repo-fix-unprotected.spec.ts to assert provider-specific copy and exact locale strings using existing mountSfc/uiStubs and locale imports; retain permission, pending/saved/error behavior assertions.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: The admin fleet repos page mounts FleetRepoFixUnprotected with the switch labelled Allow fixes on an unprotected default branch in the row for a GitLab repo whose gitlab field is not null.",
+        "AC-2 [unit]: The admin fleet repos page mounts no FleetRepoFixUnprotected switch in the row for a GitLab repo whose gitlab field is null.",
+        "AC-3 [unit]: For a GitLab repo whose gitlab field is not null, the page mounts neither the Enable automatic reviews switch nor the Trust detected checks for fixes switch.",
+        "AC-4 [unit]: RepoFixUnprotected for a GitLab repo renders the fleet.repos.fixUnprotected.hintGitlab text, and for a GitHub repo renders the fleet.repos.fixUnprotected.hint text.",
+        "AC-5 [unit]: The en and zh locale files both define fleet.repos.fixUnprotected.hintGitlab with English 'Override: FIX jobs may push even when the bot account can push to the default branch (it has no protection rule, or the rule lets the bot push). Leave off unless the repository cannot be protected.' and Chinese '覆盖：即使机器人账号可以推送到默认分支（默认分支没有保护规则，或保护规则允许机器人推送），FIX 任务也可以推送。除非仓库无法设置保护，否则请保持关闭。' respectively."
+      ],
+      "tags": [
+        "gitlab-jobs",
+        "web",
+        "security",
+        "admin",
+        "fix",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small conditional-rendering and localization change across existing files; it exposes a permission/approval-controlled branch-safety override, so security-critical access-control regression isolation applies."
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/fleet/repos.vue",
+        "apps/web/components/fleet/RepoFixUnprotected.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json",
+        "apps/web/lib/fleet-types.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/admin-fleet-repos.spec.ts",
+          "reason": "\"mounts fix-checks and fix-unprotected switches only for GitHub repos with installations (AC-8)\" now also expects the unprotected-branch switch for a GitLab repo whose `gitlab` field is not null; a GitLab repo with `gitlab` null still gets no switch, and auto-review and fix-checks stay GitHub-only."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Goal and completion: implement GitLab parity F2 over the existing F1 per-repo credential foundation, enabling route dispatch of REVIEW/FIX/AGENT, assistant REVIEW/FIX previews/actions, purpose-correct broker grants, bot-safe FIX protection, stored write-user identity, runner acceptance/execution and the admin FIX override UI. Exactly five binding stories retain their specified workdirs/dependencies. No production source is changed by this PRD. Navigation used direct reads/searches because codebase-memory MCP is unavailable in this session; citations below describe inspected code, not just the baseline in the supplied spec.\n\nArchitecture and guidance: apps/api is NestJS/Fastify with Prisma 7 and Vitest; apps/runner is Bun-only ESM with bun:test; apps/web is Nuxt 4/Vue SSR with Jest, NOT Next.js as the supplied stack detector suggests (.nax/mono/apps/web/context.md:20). Read matching .nax/mono/apps/{api,runner,web}/context.md before implementation. API platform conventions require the Nathapp capability catalog and docs lookup before NestJS changes; the docs MCP is not exposed during this planning session. Follow existing services rather than adding generic HTTP/credential abstractions. API owns dispatch, authorization, persistence and protection decisions; runner consumes ASSIGN/sync and web uses existing Nuxt composables. GitHub call/return behavior must remain unchanged throughout. The broad arc design at docs/superpowers/specs/2026-11-16-gitlab-parity-design.md:102,187 contains an older read-token/protected_branches gate and a proposed gitlab_read_token_missing reason. The supplied F2 spec explicitly supersedes both: use the WRITE account's branch can_push via repository/branches, and keep gitlab_credentials_missing; do not implement the broader arc in this feature.\n\nUS-001 impact: GitLabAccessChecker already centralizes access-target URLs, per-request DNS/host guarding and status mapping (apps/api/src/fleet/git-broker/gitlab-access-checker.ts:29-49). getBranchHead is the precise branch URL/encoding/header/404 template (:85-93). Add getBranchPushState without changing existing callers; validate both booleans strictly rather than coercing them. Use FleetHttpClient, keeping its timeout/no-redirect policy, exact per-repo host/project target and guard-before-request invariant. Existing checker tests stub DNS through vi.hoisted and node:dns and inject an HTTP transport (gitlab-access-checker.spec.ts:12-46); extend their request and failure/blocked-host cases (:112-158). FleetRepoRef is currently provider/host/defaultBranch/installation/flags only (apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:351-367). PrismaFleetJobRepository.findRepo selects scalar fields but no credential relation (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:98-104). Select ONLY writeTokenUserId/writeTokenUsername from gitlabCredential, project them to gitlabWriteUser and return null for GitHub or absent records; do not spread a credential relation into the return value. findProjectRepos (:150-160) must remain unchanged. F1 already provides FleetRepoGitlabCredential and both identity columns (apps/api/prisma/schema.prisma:895-913), so no schema migration/backfill is needed. Reuse apps/api/test/integration/fleet/fleet-job-repository.integration.spec.ts:17-43 for real Prisma projection checks; it already binds the repository to a test Prisma client and uses the shared DB gate. This story supplies both upstream seams: branch state to US-002 and write-user identity to US-003.\n\nUS-002 impact: broker mint has the early non-GitHub purpose refusal (apps/api/src/fleet/git-broker/git-token.broker.ts:82-90) and fresh rejects GitLab purpose/readOnly before the existing write resolve (:139-170). Remove just those blockers and implement the token table; preserve GitHub branches (:143-162), oauth2/TTL, result/error repoId rules, fresh behavior, reuse margin and cache keys (:31-35). In particular review/read use distinct purpose keys; FIX intentionally shares the existing default write key, and per-repo readOnly uses :ro:<repoId>. Do not redesign keys or widen read grants. Preserve repo-generation eviction and in-flight rotation protection (:59-66,97-105,127-137); every existing GitLab write/eviction/error and GitHub assertion remains a regression anchor. Credentials.resolve already decrypts the requested kind and throws gitlab_credentials_missing for an absent record (apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts:118-134). Credentials.call uses resolve internally and marks the requested kind invalid on gitlab_token_invalid before rethrowing (:142-155). Therefore the FIX gate runs through call(repo, 'write', access => checker.getBranchPushState(...)); only after successful protected=true/canPush=false does the broker perform its separate issuance resolve(repo, 'write'). 'Never resolves the write token' after a failed gate means no broker issuance-resolution call, not forbidding the internal resolution needed for GitLab to answer as the bot. Unit doubles must model this distinction; a real call is necessary to verify the invalid mark. Missing credentials must prevent HTTP even for FIX. Append GitLabAccessChecker as fourth constructor parameter; GitBrokerModule already registers/exports it (apps/api/src/fleet/git-broker/git-broker.module.ts:11-21), so no new module/import architecture is needed. Direct constructor sites identified by search are git-token.broker.spec.ts:16, git-token.broker.purpose.spec.ts:22 and sync.service.token-purpose.spec.ts:30; update each. Existing tests explicitly pin obsolete GitLab refusal behavior (git-token.broker.spec.ts:110,170; git-token.broker.purpose.spec.ts:93,192,201); replace those assertions with correct read/write grants, not deleted regression protection. SyncService already fences token requests and maps AGENT/REVIEW/FIX to read/review/fix then mints outside the request transaction (apps/api/src/fleet/sync/sync.service.ts:150-186). No production sync redesign is needed. Extend the real-broker sync harness (sync.service.token-purpose.spec.ts:18-41) for ASSIGNED GitLab FIX/AGENT while retaining every existing purpose assertion. The new readOnly branch has no GitLab production caller yet: fetchableProjectRepos remains GitHub-only.\n\nUS-003 impact: FleetJobsService defines ReviewProviderException and rejects these three GitLab commands before normalizeDispatch (apps/api/src/fleet/jobs/fleet-jobs.service.ts:41-50,107-113). Delete the exception/provider refusal, not normal dispatch validation, membership checks, budget handling, snapshots, transactional creation/audit or placement (:131-199). The assistant tool accepts only RUN/PLAN/REVIEW/FIX (apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts:23-24); remove its preview-only GitHub rejection (:103-107), keeping project repo resolution, normalization, masking, approval workflow and execute-as-requester behavior (:108-146). Do not add AGENT to the tool. gitIdentityFor currently accepts only provider and uses configured GitLab identity (apps/api/src/fleet/jobs/assign-payload.ts:32-39); accept a repo projection and prefer stored write username for GitLab while preserving email and GitHub fallback. buildAssignPayload already sets review.botLogin from gitIdentity.name (:69-72), so changing it separately would duplicate logic. PlacementService passes repo.provider at its sole gitIdentityFor call while already holding the full repo (apps/api/src/fleet/jobs/placement.service.ts:304-324); pass repo, preserving CAS assignment, override bookkeeping and transaction boundaries. Create exactly the two identity/seam specs named in the feature spec; neither exists today. configureFixUnprotected currently rejects any non-installed-GitHub row (apps/api/src/fleet/repos/fleet-repos.service.ts:300-312); branch by provider and credential-summary presence only for enabling, leaving disable, update/audit atomicity and approval engine signature unchanged. Update the stale GitHub-only doc comments in the service and fix-unprotected.exception.ts:3-6. Do not change configureAutoReview or configureFixChecks. In addition to service/tool/override unit specs, existing DB tests deliberately pin refusals: fleet-review-dispatch.integration.spec.ts:57-72, assistant-dispatch-job-tool-pr.integration.spec.ts:149-156, fleet-repo-fix-unprotected-route.integration.spec.ts (named by the spec), and endpoint.e2e.spec.ts:6672-6676. Update dispatches with prNumber to return 201/review-pr-7 or fix-pr-7, missing-prNumber REVIEW to normal 422 normalization, assistant previews to pending actions, and GitLab credential-missing override reason. GitLab FIX rulings remain head-unreadable rather than opening the feature-3 path.\n\nUS-004 impact: two duplicated GitHub-only login regex checks currently stop GitLab: runner nax-process.ts:12-14 and supervisor/assign-parser.ts:285. Export one isValidBotLogin from apps/runner/src/executor/nax-process.ts, retaining 1..100 bounds and provider-specific regexes, and call it both at ASSIGN parsing and argv revalidation. buildNaxArgv and buildFixArgv both use reviewPrNumber (nax-process.ts:27-29,56-64), so this seam must admit valid GitLab usernames for both review and fix without accepting a suffixless GitHub login. The current parser's bad('review') returns detail 'invalid review' (assign-parser.ts:17), so the spec's refusal 'as review' means preserve that existing error category/string, not switch it to a new plain 'review' detail. HostExecutor.spawn already puts acquired shims first on PATH before invoking reviewEnv/runIdentityEnv (apps/runner/src/executor/host-executor.ts:191-204). runIdentityEnv currently excludes non-GitHub RUN (:288-295); remove provider exclusion, retain RUN-only and missing-binDir warning/no-identity behavior. reviewEnv (:280-285) and spawnFixStep (:216-252) already use neutral token-file/login paths; avoid unnecessary rewrites. Forge tokens remain 0600 files for review/fix, never argv or token-valued environment variables; login-only RUN uses the glab shim and no numeric id. Environment stripping, failure cleanup and profile restrictions stay intact. Extend apps/runner/src/executor/nax-process.spec.ts, src/supervisor/assign-parser.spec.ts and test/unit/host-executor.spec.ts; the latter has injected execution seams and explicitly pins no GitLab RUN identity at :932. Keep the GitHub no-shim warning test at :923. Use injected spawn/credentials/files rather than relying on an installed nax or live forge.\n\nUS-005 impact: admin fleet repos page independently guards auto-review/fix-checks/fix-unprotected by installed GitHub today (apps/web/pages/admin/fleet/repos.vue:149-151). Extend ONLY the fix-unprotected condition with connected GitLab; existing fleet-types.ts:164-185 already has provider and gitlab: FleetRepoGitlab | null. No DTO, generated client or web networking redesign is needed. RepoFixUnprotected currently always uses hint (apps/web/components/fleet/RepoFixUnprotected.vue:9), with existing permission/saving guards and approval-aware setFixUnprotected flow (:23-43). Select hintGitlab by provider, not token validity; retain the same permission key and pending/saved/error semantics. Add exact English/Chinese copy next to the existing hint (apps/web/i18n/locales/{en,zh}.json:2009-2013). Reuse tests/pages/admin-fleet-repos.spec.ts:154 (currently installed-GitHub-only) and tests/components/repo-fix-unprotected.spec.ts:37-81 (render, permission, saved/pending/error and locale harnesses). Explicitly fixture both connected and null GitLab records while keeping auto-review/fix-checks off. This is a conditional control/copy change, not a navigation, layout, design-token or ticket-board redesign.\n\nRisks, compatibility and rollout: the highest risks are read/write cache contamination, releasing a FIX write credential before confirming the bot cannot push, dropping host checks, leaking selected encrypted fields, failing invalid-token health marking, and relaxing GitHub login/dispatch protections accidentally. All API/runner stories are security-sensitive; use strict three-session-tdd. The web story also controls a safety override with permission/approval behavior and uses the same isolation strategy. Preserve GitHub assertions; only replace tests that deliberately pinned superseded GitLab behavior. The spec's failure table requires additional explicit broker criteria for missing credentials, 404/401/403/malformed bodies and blocked hosts beyond the numbered AC list. Do not add unrelated hardening criteria to acceptanceCriteria. No new database schema, wire field, CLI client or dependency is required; the identity is an optional internal repo projection and existing ASSIGN fields carry it. No OpenAPI/controller DTO change is planned; if implementation unexpectedly changes a public contract, follow root generation rules rather than editing generated files. F1 credentials/migration must already be deployed. Respect story order US-001 -> US-002 and US-003 -> US-004/US-005; US-003 depends only on US-001, not US-002. A coordinated release should ensure broker support and upgraded runners are available before operators dispatch newly admitted GitLab jobs; older runners still reject the new valid GitLab bot login. No automatic live dispatch to freqtrade/quant-crypto-trader is part of implementation tests.\n\nVerification approach: API unit specs use vi.*, injected collaborators and no DB for DI/module checks. Use existing shared canRunDbTests gate and test Prisma helper for repository, route, assistant pending-action and endpoint persistence behavior. Run API DB specs with bun run test:scoped <paths> outside NAX_SANDBOXED=1 through the host-scoped runner when available; a skip is not verification, and serialize DB-mode runs because they reset the test DB. Runner uses bun test with injected credentials/spawn and real temporary files where appropriate; retain shared sandbox skips only for genuinely host-dependent blocks. Web uses Jest mountSfc/uiStubs and existing locale imports. Generated .nax acceptance tests must never be edited/copied into source; API feature acceptance uses vitest.nax.config.ts and KODA_DB_TESTS=1 outside the sandbox, runner/web feature acceptance uses bun test with story AC filters. No quality gate is an acceptance criterion.\n\nRefine-pass audit: all 52 numbered spec criteria remain in their original stories: US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-004 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10; US-005 AC-1, AC-2, AC-3, AC-4, AC-5. Regression qualifiers are preserved, including no repoId for AGENT/review, not the cached write token, runner-held (ASSIGNED), same SyncService sync, the retained GitHub review mint, GitHub override refusal, missing [bot] suffix, and provider-specific existing hints. No deprecated file-content tags occur. Compound spec criteria remain intact rather than dropping any constituent assertion. Failure table row mapping: missing REVIEW/AGENT/readOnly credentials -> US-002 AC-5/15/16; missing FIX credentials -> US-002 AC-17; unsafe default branch -> US-002 AC-7/8; 404 -> US-002 AC-18; 401 plus invalid mark -> US-002 AC-10/19; 403/other/malformed body -> US-002 AC-11/20/21; blocked host -> US-002 AC-22 and US-001 AC-8; enabling override without credentials -> US-003 AC-11; invalid GitLab review login -> US-004 AC-2/4; RUN without shims -> US-004 AC-7. Every story already has a negative-path criterion, so no speculative acceptance requirements were added: US-001 AC-3..8/11, US-002 AC-5/7/8/10/11/15..22, US-003 AC-11/12, US-004 AC-2/3/4/5/7, US-005 AC-2/3. Existing-behavior/newly-opened-path anchors are US-001 AC-9..11, US-002 AC-1..4/12, US-003 AC-1..5/7/8/12, US-004 AC-1/3/5/6 and US-005 AC-1/2/3/4. All eleven feature-level exclusions are retained verbatim in outOfScope; the broad historical arc design does not expand this feature. Context paths retain every critical spec-recommended source (all five recommended paths for US-001/002/003/005 and all three for US-004); the only new files remain US-003's two specified identity tests. Binding IDs, workdirs and dependencies are unchanged. Complexity for US-002 and US-003 is medium: the existing wrappers, DI providers, dispatch normalization and assignment fields make these bounded extensions, not new architectures. Strict three-session-tdd remains required by credential issuance, identity validation and safety-override access-control paths, independently of complexity. Rechecked source confirms credentials.call internally resolves the access used by the bot-side branch query; the failed-gate prohibition refers specifically to the broker's separate grant-resolution operation. Parser rejection ACs now name the actual observable ParsedAssign error object, and FIX preview/argv and switch criteria name concrete outputs rather than an unspecified refusal or mount.",
+  "outOfScope": [
+    "Auto-review, fix-checks (`trustDetectedChecks`), CI pipeline status and flows on GitLab (feature 4 of GitLab parity); their GitHub-only guards stay.",
+    "Threads with project code, the project brief, the knowledge index, PR rulings and review events on GitLab (feature 3 of GitLab parity), including opening `fetchableProjectRepos` to GitLab repos and adding `gitlabWriteUser` to `findProjectRepos`.",
+    "PR rulings on a GitLab FIX: `FleetPrRulingsService.snapshotForFix` answers `notSent: 'head-unreadable'` for a GitLab repo (no installation), so a GitLab FIX dispatches without rulings until feature 3.",
+    "The GitLab username pattern of the bot-review ingest parser (`ingest/parsers/bot-review.parser.ts` `LOGIN`), which belongs to review events (feature 3).",
+    "Sending the bot's numeric user id to nax (`NAX_FORGE_USER_ID`); nax compares GitLab authors by username, which is unique on a host.",
+    "A `gitlab_read_token_missing` reason; feature 1 stores both tokens at registration, so a credential record always has a read token.",
+    "Minting short-lived GitLab tokens per job; deferred by the owner because gitlab.com Free does not offer them.",
+    "The GitLab setup guide in the docs (bot account, token scopes, Developer role, protecting the default branch); written when feature 4 closes the arc.",
+    "US-002 only: retrying the branch check; a transient failure answers its reason and the job fails its mint as a GitHub one does.",
+    "US-002 only: no test asserts token values are absent from log lines; the broker already logs only the job id and the error name, never a message or token.",
+    "US-003 only: changing the git commit email of GitLab jobs; it stays `gitlabBotEmail`."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}
