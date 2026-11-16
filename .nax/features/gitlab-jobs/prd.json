@@ -3,7 +3,7 @@
   "feature": "gitlab-jobs",
   "branchName": "feat/gitlab-jobs",
   "createdAt": "2026-11-16T13:09:46.352Z",
-  "updatedAt": "2026-11-16T13:20:54.252Z",
+  "updatedAt": "2026-11-16T13:34:22.674Z",
   "userStories": [
     {
       "id": "US-001",
@@ -88,14 +88,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The existing broker, registered checker and credentials.call wrapper support a bounded purpose-selection/gate extension without a new abstraction; credential issuance and read/write isolation still require strict security TDD."
+        "reasoning": "The existing broker, registered checker and credentials.call wrapper support a bounded purpose-selection/gate extension without a new abstraction; credential issuance and read/write isolation still require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/git-token.broker.ts",
@@ -122,7 +125,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3ae7708c51f644f47e4198195ff14b64a9104ae6"
     },
     {
       "id": "US-003",
