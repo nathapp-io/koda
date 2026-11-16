@@ -3,7 +3,7 @@
   "feature": "gitlab-read-features",
   "branchName": "feat/gitlab-read-features",
   "createdAt": "2026-11-16T15:42:09.312Z",
-  "updatedAt": "2026-11-16T16:33:05.825Z",
+  "updatedAt": "2026-11-16T17:13:21.236Z",
   "userStories": [
     {
       "id": "US-001",
@@ -289,14 +289,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Repository attribution and eligibility integrate with transactions, REST/approval gates and FIX snapshots; permission and credential behavior mandate strict isolated TDD."
+        "reasoning": "Repository attribution and eligibility integrate with transactions, REST/approval gates and FIX snapshots; permission and credential behavior mandate strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
@@ -327,7 +330,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c4ef224a8239f21de10c589ebd32477b2dfafda6"
     },
     {
       "id": "US-006",
