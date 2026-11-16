@@ -35,6 +35,7 @@ describe('FleetReposService', () => {
 
   const created = (over = {}) => ({
     id: 'fr1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk',
+    host: 'https://github.com',
     githubInstallationId: BigInt(77), createdById: 'u1', createdAt: new Date(0), autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000', autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null, ...over,
   });
 
@@ -85,8 +86,19 @@ describe('FleetReposService', () => {
   it('findReviewRepo exposes only the review projection, preserving bigint and null', async () => {
     for (const installation of [77n, null]) {
       repo.findById.mockResolvedValue(created({ githubInstallationId: installation }));
-      expect(await make().findReviewRepo('fr1')).toEqual({ id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: installation, defaultBranch: 'trunk' });
+      expect(await make().findReviewRepo('fr1')).toEqual({
+        id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: installation,
+        defaultBranch: 'trunk', provider: 'github', host: 'https://github.com',
+      });
     }
+  });
+
+  it('US-006 AC-2: the review projection carries a GitLab repo provider and its own host', async () => {
+    repo.findById.mockResolvedValue(created({ provider: 'gitlab', host: 'https://gitlab.example.com', githubInstallationId: null }));
+    expect(await make().findReviewRepo('fr1')).toEqual({
+      id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: null,
+      defaultBranch: 'trunk', provider: 'gitlab', host: 'https://gitlab.example.com',
+    });
   });
 
   it('delegates the auto-review repo limit to the repository', async () => {

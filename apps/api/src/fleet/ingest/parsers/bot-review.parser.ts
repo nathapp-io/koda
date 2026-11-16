@@ -39,7 +39,12 @@ export type BotReviewParse =
   | { outcome: 'done'; trusted: boolean; events: WithdrawnEvent[]; callerRulings?: CallerRulings };
 
 const KEY = /^f-[0-9a-f]{8,64}$/;
-const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
+/** A GitHub login, unchanged: the pattern every review event has always been held to. */
+export const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
+/** US-006: a GitLab username keeps `.` and `_`, which the GitHub pattern refuses. */
+const GITLAB_USERNAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$/;
+/** Either forge's login: the artifact does not say which forge produced it, so both are accepted. */
+const isLogin = (login: string): boolean => GITHUB_LOGIN.test(login) || GITLAB_USERNAME.test(login);
 const ARTIFACT = /bot\/pr-[1-9]\d*\/[^/]+\/bot-review\.json$/;
 const clean = (value: string) => value.replace(/\p{Cc}/gu, ' ').slice(0, 1000);
 
@@ -49,7 +54,7 @@ function parseEvent(value: unknown): WithdrawnEvent | null {
     || typeof event.threadId !== 'string' || event.threadId.length < 1 || event.threadId.length > 200
     || typeof event.finding !== 'string' || typeof event.reason !== 'string' || !Array.isArray(event.disagreedBy)
     || !event.disagreedBy.every((login) => typeof login === 'string')) return null;
-  const disagreedBy = (event.disagreedBy as string[]).filter((login) => LOGIN.test(login)).slice(0, 10);
+  const disagreedBy = (event.disagreedBy as string[]).filter(isLogin).slice(0, 10);
   const parsed: WithdrawnEvent = {
     key: event.key,
     threadId: event.threadId,

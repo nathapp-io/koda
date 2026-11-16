@@ -600,11 +600,16 @@ export class FleetReposService {
     return row ? { provider: row.provider, owner: row.owner, name: row.name } : null;
   }
 
-  async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId' | 'defaultBranch'> | null> {
+  /**
+   * US-006: the projection a review event's mint needs — the repo's identity, its installation (null
+   * for a repo with no GitHub App) and, since a review event can be a GitLab merge request's, the
+   * forge it lives on: `provider` picks the mint path and `host` addresses its api.
+   */
+  async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId' | 'defaultBranch' | 'provider' | 'host'> | null> {
     const row = await this.repo.findById(id);
     if (!row) return null;
-    const { projectId, owner, name, githubInstallationId, defaultBranch } = row;
-    return { id: row.id, projectId, owner, name, githubInstallationId, defaultBranch };
+    const { projectId, owner, name, githubInstallationId, defaultBranch, provider, host } = row;
+    return { id: row.id, projectId, owner, name, githubInstallationId, defaultBranch, provider, host };
   }
 
   async listAutoReviewRepos(limit: number): Promise<FleetRepoRecord[]> {
