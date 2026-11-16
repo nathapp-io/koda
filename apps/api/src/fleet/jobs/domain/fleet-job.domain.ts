@@ -362,6 +362,8 @@ export interface FleetRepoRef {
    */
   host?: string;
   fixTrustDetectedChecks?: boolean;
+  /** GitLab write-token identity, projected without either encrypted token. */
+  gitlabWriteUser?: { id: number; username: string } | null;
   /** FIX override: skip the default-branch protection check before minting FIX write credentials. */
   fixAllowUnprotected?: boolean;
 }

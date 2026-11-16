@@ -20,11 +20,17 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
   const repo = bind(prisma);
   let base: Omit<NewFleetJob, 'feature'>;
   let runnerId: string;
+  let userId: string;
+  let projectId: string;
+  let gitlabRepoWithCredentialId: string;
+  let gitlabRepoWithoutCredentialId: string;
 
   beforeAll(async () => {
     await resetDb();
     const user = await prisma.user.create({ data: { email: 'u@koda.test', passwordHash: 'x' } });
+    userId = user.id;
     const project = await prisma.project.create({ data: { name: 'P', slug: 'p', key: 'P' } });
+    projectId = project.id;
     const fleetRepo = await prisma.fleetRepo.create({
       data: { projectId: project.id, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: BigInt(7), createdById: user.id },
     });
@@ -35,6 +41,20 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
       },
     });
     runnerId = runner.id;
+    const gitlabWithCredential = await prisma.fleetRepo.create({
+      data: { projectId, provider: 'gitlab', owner: 'group', name: 'with-credential', host: 'https://gitlab.example.com', defaultBranch: 'main', createdById: userId },
+    });
+    gitlabRepoWithCredentialId = gitlabWithCredential.id;
+    await prisma.fleetRepoGitlabCredential.create({
+      data: {
+        repoId: gitlabWithCredential.id, gitlabProjectId: 42, encryptedReadToken: 'encrypted-read', encryptedWriteToken: 'encrypted-write',
+        readTokenUserId: 10, readTokenUsername: 'read-bot', writeTokenUserId: 77, writeTokenUsername: 'koda-bot', writeTokenIsBot: true,
+      },
+    });
+    const gitlabWithoutCredential = await prisma.fleetRepo.create({
+      data: { projectId, provider: 'gitlab', owner: 'group', name: 'without-credential', host: 'https://gitlab.example.com', defaultBranch: 'main', createdById: userId },
+    });
+    gitlabRepoWithoutCredentialId = gitlabWithoutCredential.id;
     base = {
       projectId: project.id, repoId: fleetRepo.id, ref: 'main', command: 'RUN', planFrom: null, profiles: ['fast'],
       maxCostUsd: '5.25', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, requestedById: user.id,
@@ -42,6 +62,21 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
   });
   afterAll(async () => {
     await prisma.$disconnect();
+  });
+
+  it('AC-9: findRepo projects only the GitLab write-user identity, never encrypted tokens', async () => {
+    const found = await repo.findRepo(gitlabRepoWithCredentialId);
+    expect(found?.gitlabWriteUser).toEqual({ id: 77, username: 'koda-bot' });
+    expect(found).not.toHaveProperty('encryptedReadToken');
+    expect(found).not.toHaveProperty('encryptedWriteToken');
+  });
+
+  it('AC-10: findRepo returns a null GitLab write user for GitHub', async () => {
+    await expect(repo.findRepo(base.repoId)).resolves.toEqual(expect.objectContaining({ gitlabWriteUser: null }));
+  });
+
+  it('AC-11: findRepo returns a null GitLab write user without credentials', async () => {
+    await expect(repo.findRepo(gitlabRepoWithoutCredentialId)).resolves.toEqual(expect.objectContaining({ gitlabWriteUser: null }));
   });
 
   it('creates a job with decimal strings and refuses an active duplicate', async () => {
