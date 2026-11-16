@@ -4,7 +4,6 @@ import { FleetHttpClient } from './fleet-http-client';
 import { GitHubAppClient } from './github-app-client';
 import { GitLabAccessChecker } from './gitlab-access-checker';
 import { GitLabRepoCredentials } from './gitlab-repo-credentials';
-import { GitLabTokenSource } from './gitlab-token.source';
 import { GitTokenBroker } from './git-token.broker';
 import { GITLAB_CREDENTIAL_REPOSITORY, PrismaGitlabCredentialRepository } from './prisma-gitlab-credential.repository';
 
@@ -12,13 +11,13 @@ import { GITLAB_CREDENTIAL_REPOSITORY, PrismaGitlabCredentialRepository } from '
 @Module({
   imports: [VcsModule],
   providers: [
-    FleetHttpClient, GitHubAppClient, GitLabAccessChecker, GitLabTokenSource, GitTokenBroker,
+    FleetHttpClient, GitHubAppClient, GitLabAccessChecker, GitTokenBroker,
     // The credential store and the module-private repository behind it. The repository stays
     // inside this module; the store is what the rest of koda uses.
     PrismaGitlabCredentialRepository,
     { provide: GITLAB_CREDENTIAL_REPOSITORY, useExisting: PrismaGitlabCredentialRepository },
     GitLabRepoCredentials,
   ],
-  exports: [FleetHttpClient, GitHubAppClient, GitLabAccessChecker, GitLabTokenSource, GitTokenBroker, GitLabRepoCredentials],
+  exports: [FleetHttpClient, GitHubAppClient, GitLabAccessChecker, GitTokenBroker, GitLabRepoCredentials],
 })
 export class GitBrokerModule {}
