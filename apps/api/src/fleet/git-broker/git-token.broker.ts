@@ -55,6 +55,15 @@ interface CachedToken {
 export class GitTokenBroker {
   private readonly logger = new Logger(GitTokenBroker.name);
   private cache: ReadonlyMap<string, CachedToken> = new Map();
+  /**
+   * The generation of one repo's cached tokens. `evictRepo` moves the generation, so a mint that was
+   * already awaiting the credential when the eviction happened cannot write its token back into the
+   * cache: the rotation that evicted it may have replaced the very credential the mint read.
+   *
+   * One small number per repo that was ever evicted — the fleet's repos are admin-created, so this
+   * map holds as many entries as the deployment has repos.
+   */
+  private readonly generations = new Map<string, number>();
 
   constructor(
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'gitTokenReuseMarginSec' | 'gitlabTokenTtlSec'>,
@@ -83,9 +92,16 @@ export class GitTokenBroker {
     const cached = this.cache.get(key);
     const reuseMarginMs = this.fleetConfig.gitTokenReuseMarginSec * 1000;
     if (!req.fresh && cached && Date.parse(cached.token.expiresAt) - now.getTime() > reuseMarginMs) return { ok: true, token: cached.token };
+    // The repo's generation is read before the mint awaits the credential: an eviction that happens
+    // meanwhile moves it, and the token this mint reads is then never cached.
+    const generation = this.generationOf(req.repo.id);
     try {
       const token = await this.fresh(req, now);
-      this.cache = new Map([...[...this.cache].filter(([, entry]) => Date.parse(entry.token.expiresAt) > now.getTime()), [key, { token, repoId: req.repo.id }]]);
+      // A rotation evicted the repo while this mint was in flight: the token may be the credential
+      // the rotation replaced, so it is answered to its caller but never kept for the next mint.
+      if (this.generationOf(req.repo.id) === generation) {
+        this.cache = new Map([...[...this.cache].filter(([, entry]) => Date.parse(entry.token.expiresAt) > now.getTime()), [key, { token, repoId: req.repo.id }]]);
+      }
       return { ok: true, token };
     } catch (error) {
       // Only a read-only mint is per repository, so only it names one on the error.
@@ -104,9 +120,18 @@ export class GitTokenBroker {
   /**
    * US-003: drops every cached token minted for one repo, whatever job holds it. A rotated
    * credential is answered by the next mint, never by a token cached under the old one.
+   *
+   * The repo's generation moves with it, so a mint that is already awaiting the credential cannot
+   * write that credential back into the cache after the eviction.
    */
   evictRepo(repoId: string): void {
+    this.generations.set(repoId, this.generationOf(repoId) + 1);
     this.cache = new Map([...this.cache].filter(([, entry]) => entry.repoId !== repoId));
+  }
+
+  /** The generation a repo's cached tokens belong to. */
+  private generationOf(repoId: string): number {
+    return this.generations.get(repoId) ?? 0;
   }
 
   private async fresh(req: MintRequest, now: Date): Promise<GitToken> {

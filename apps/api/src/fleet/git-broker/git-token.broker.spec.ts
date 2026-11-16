@@ -79,6 +79,34 @@ describe('GitTokenBroker', () => {
     expect(credentials.resolve).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * Fix round 1 (F1): a mint that was already awaiting the credential when the rotation evicted the
+   * repo must not put its token back into the cache — the token may be the one the rotation replaced.
+   */
+  it('US-003 AC-4: a mint in flight when the repo is evicted is answered but never cached', async () => {
+    let release: (() => void) | null = null;
+    credentials.resolve.mockImplementation(() => new Promise((resolve) => {
+      release = () => resolve({ token: 'glpat-old', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 4711 } });
+    }));
+
+    const pending = broker.mint({ jobId: 'j', leaseEpoch: 1, repo: gitlab }, NOW);
+    await Promise.resolve();
+    expect(credentials.resolve).toHaveBeenCalledTimes(1);
+
+    // The rotation saves a new credential and evicts the repo while the mint is still awaiting.
+    broker.evictRepo(gitlab.id);
+    release?.();
+    const raced = await pending;
+    expect(raced).toMatchObject({ ok: true, token: { token: 'glpat-old' } });
+
+    // The next mint resolves the stored credential again instead of reusing the evicted one.
+    credentials.resolve.mockResolvedValue({ token: 'glpat-new', target: { apiBase: 'https://gitlab.com/api/v4', projectId: 4711 } });
+    await expect(broker.mint({ jobId: 'j', leaseEpoch: 1, repo: gitlab }, NOW)).resolves.toMatchObject({
+      ok: true, token: { token: 'glpat-new' },
+    });
+    expect(credentials.resolve).toHaveBeenCalledTimes(2);
+  });
+
   it('US-003 AC-10: refuses a read-only GitLab mint without resolving a credential', async () => {
     await expect(broker.mint({ jobId: 'j', leaseEpoch: 1, repo: gitlab, readOnly: true }, NOW)).resolves.toEqual({
       ok: false, error: { jobId: 'j', repoId: 'r', reason: 'provider_error' },
