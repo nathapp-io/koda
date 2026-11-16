@@ -3,7 +3,7 @@
   "feature": "api-i18n-zh-completion",
   "branchName": "feat/api-i18n-zh-completion",
   "createdAt": "2026-11-16T02:35:25.687Z",
-  "updatedAt": "2026-11-16T03:02:49.067Z",
+  "updatedAt": "2026-11-16T03:11:30.863Z",
   "userStories": [
     {
       "id": "US-001",
@@ -91,14 +91,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Two new files implement small, deterministic recursive flattening and catalog-comparison functions using filesystem fixtures and ordinary Vitest assertions; no database, runtime integration or security logic. The spec explicitly binds the parity guard as its own story."
+        "reasoning": "Two new files implement small, deterministic recursive flattening and catalog-comparison functions using filesystem fixtures and ordinary Vitest assertions; no database, runtime integration or security logic. The spec explicitly binds the parity guard as its own story.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/i18n/en/common.json",
@@ -123,7 +126,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "972e62637ea13aca24306522627a7c29568eb277"
     },
     {
       "id": "US-003",
