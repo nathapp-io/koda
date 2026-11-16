@@ -347,10 +347,16 @@ describeDb('password reset request (PG)', () => {
     expect(await unusedRows(userId)).toEqual([]);
   });
 
-  it('AC-15: a body that is not an email address answers 400 and writes nothing', async () => {
-    const response = await requestReset('not-an-address').expect(400);
+  it('AC-15: a body that is not an email address answers localized 400 and writes nothing', async () => {
+    const english = await requestReset('not-an-address').expect(400);
+    expect(english.body.message).toBe('Must be a valid email address');
 
-    expect(JSON.stringify(response.body)).not.toBe('{}');
+    const chinese = await requestReset('not-an-address', 'zh-CN').expect(400);
+    expect(chinese.body.message).toBe('必须是有效的邮箱地址');
+    expect(chinese.body.errors.email).toEqual(['必须是有效的邮箱地址']);
+    expect(JSON.stringify(chinese.body)).not.toContain('$t(');
+
+    expect(JSON.stringify(english.body)).not.toBe('{}');
     expect(await tokenRows(userId)).toEqual([]);
     expect(await scheduleRows('not-an-address')).toEqual([]);
     expect(send).not.toHaveBeenCalled();
