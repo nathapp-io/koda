@@ -1,6 +1,6 @@
 import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type RuleOverrideAssign, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
-import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
+import { COST_RE, isValidBotLogin, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
 import { cleanAgentAssign } from './agent-assign';
 
@@ -282,7 +282,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   let reviewDecisions: ReviewDecision[] | undefined;
   let reviewRulings: NonNullable<AssignPayload['review']>['rulings'];
   if (isReview) {
-    if (!isObj(rawReview) || !Number.isSafeInteger(rawReview['prNumber']) || (rawReview['prNumber'] as number) <= 0 || typeof rawReview['botLogin'] !== 'string' || rawReview['botLogin'].length < 1 || rawReview['botLogin'].length > 100 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(rawReview['botLogin'])) return bad('review');
+    if (!isObj(rawReview) || !Number.isSafeInteger(rawReview['prNumber']) || (rawReview['prNumber'] as number) <= 0 || typeof rawReview['botLogin'] !== 'string' || !isValidBotLogin(repo['provider'], rawReview['botLogin'])) return bad('review');
     if (Object.hasOwn(rawReview, 'rulings')) {
       if (kind !== 'FIX') return bad('review');
       const cleaned = cleanReviewRulings(rawReview['rulings']);

@@ -59,6 +59,19 @@ describe('parseAssign (D30)', () => {
   });
 });
 
+describe('REVIEW assignment (US-004 GitLab logins)', () => {
+  const reviewPayload = (provider: 'github' | 'gitlab', botLogin: string) => ({ ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', repo: { ...assignFor('RUN').repo, provider }, review: { prNumber: 42, botLogin } });
+  test('AC-1 accepts a GitLab username and preserves it', () => {
+    expect(parseAssign(cmd(reviewPayload('gitlab', 'koda-bot')))).toMatchObject({ ok: true, assign: { review: { botLogin: 'koda-bot' } } });
+  });
+  test('AC-2 rejects a GitLab username containing a space as invalid review', () => {
+    expect(parseAssign(cmd(reviewPayload('gitlab', 'koda bot')))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test('AC-3 retains GitHub bot suffix validation', () => {
+    expect(parseAssign(cmd(reviewPayload('github', 'koda-fleet')))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+});
+
 describe('REVIEW assignment (US-005)', () => {
   const review = (over: Record<string, unknown> = {}) => ({ ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]' }, ...over });
   test('AC-1 accepts and cleans a review assignment', () => {

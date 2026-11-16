@@ -9,8 +9,15 @@ export const RESERVED_PREFIX = 'koda-job-';
 /** fleet-agent-job US-008: `nax agents run` has no cost cap, so every AGENT run is bounded by a timeout instead. */
 export const AGENT_DEFAULT_TIMEOUT_SEC = 3_600;
 
+export function isValidBotLogin(provider: 'github' | 'gitlab', login: string): boolean {
+  if (login.length < 1 || login.length > 100) return false;
+  return provider === 'github'
+    ? /^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(login)
+    : /^[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_-])?$/.test(login);
+}
+
 function reviewPrNumber(assign: AssignPayload): number {
-  if (!assign.review || !Number.isSafeInteger(assign.review.prNumber) || assign.review.prNumber <= 0 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(assign.review.botLogin)) throw new PathError('invalid review');
+  if (!assign.review || !Number.isSafeInteger(assign.review.prNumber) || assign.review.prNumber <= 0 || !isValidBotLogin(assign.repo.provider, assign.review.botLogin)) throw new PathError('invalid review');
   return assign.review.prNumber;
 }
 

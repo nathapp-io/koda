@@ -5,13 +5,23 @@ import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { PathError } from '../paths/safe-segment';
 import { waitFor } from '../../test/helpers/wait';
-import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
+import { buildFixArgv, buildNaxArgv, isProcessAlive, isValidBotLogin, signalGroup, spawnNax } from './nax-process';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
 const assign = (over: Partial<AssignPayload> = {}): AssignPayload => ({
   jobId: 'cj1', command: 'RUN', repo: { provider: 'github', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'x' },
   ref: 'main', feature: 'feat', planFrom: null, profiles: ['fast', 'strict'], maxCostUsd: '5.25', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'n', email: 'e' }, ...over,
+});
+
+describe('isValidBotLogin (US-004 AC-4)', () => {
+  test('uses bounded provider-specific login patterns', () => {
+    expect(isValidBotLogin('gitlab', 'koda_fleet.bot-1')).toBe(true);
+    expect(isValidBotLogin('gitlab', 'koda-fleet[bot]')).toBe(false);
+    expect(isValidBotLogin('gitlab', 'bot.')).toBe(false);
+    expect(isValidBotLogin('github', 'koda-fleet[bot]')).toBe(true);
+    expect(isValidBotLogin('github', 'koda-fleet')).toBe(false);
+  });
 });
 
 describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {
@@ -58,6 +68,19 @@ describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {
     ['a job id with a slash', { jobId: 'a/b' }],
   ])('rejects %s', (_label, over) => {
     expect(() => buildNaxArgv(['nax'], assign(over as Partial<AssignPayload>))).toThrow();
+  });
+});
+
+describe('GitLab review and fix argv (US-004)', () => {
+  test('AC-5 builds GitLab review argv but rejects a malformed GitHub login', () => {
+    const gitlabReview = assign({ command: 'REVIEW', repo: { provider: 'gitlab', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'https://gitlab.com/a/b.git' }, review: { prNumber: 42, botLogin: 'koda-bot' } });
+    expect(buildNaxArgv(['nax'], gitlabReview).slice(1, 4)).toEqual(['bot', 'review', '42']);
+    const githubReview = assign({ command: 'REVIEW', review: { prNumber: 42, botLogin: 'koda-fleet' } });
+    expect(() => buildNaxArgv(['nax'], githubReview)).toThrow(new PathError('invalid review'));
+  });
+  test('AC-10 builds GitLab FIX argv', () => {
+    const gitlabFix = assign({ command: 'FIX', repo: { provider: 'gitlab', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'https://gitlab.com/a/b.git' }, review: { prNumber: 42, botLogin: 'koda-bot' } });
+    expect(buildFixArgv(['nax'], gitlabFix).slice(1, 5)).toEqual(['bot', 'fix', '42', '--no-rereview']);
   });
 });
 
