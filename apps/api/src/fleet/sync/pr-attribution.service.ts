@@ -9,13 +9,31 @@ import { FLEET_JOB_REPOSITORY, FleetRepoRef, IFleetJobRepository } from '../jobs
 const GITHUB_PR = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/;
 const GITLAB_MR = /^\/(.+)\/([^/]+)\/-\/merge_requests\/(\d+)\/?$/;
 
-/** The PR/MR number, only when the URL path names this job's own repo (plan D19). */
-export function prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'name'>, url: string): number | null {
+/** The path prefix of a GitLab host served below a path (`https://gitlab.example.com/gl` -> `/gl`), else ''. */
+function hostPathPrefix(host: string | undefined): string {
+  if (host === undefined) return '';
+  try {
+    return new URL(host).pathname.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The PR/MR number, only when the URL path names this job's own repo (plan D19). A GitLab repo on a
+ * host with a path prefix carries that prefix in every web url, so it is removed before the repo path
+ * is matched; GitHub urls never carry one.
+ */
+export function prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'name' | 'host'>, url: string): number | null {
   let path: string;
   try {
     path = new URL(url).pathname;
   } catch {
     return null;
+  }
+  if (repo.provider === 'gitlab') {
+    const prefix = hostPathPrefix(repo.host);
+    if (prefix !== '' && path.startsWith(`${prefix}/`)) path = path.slice(prefix.length);
   }
   const match = (repo.provider === 'github' ? GITHUB_PR : GITLAB_MR).exec(path);
   if (!match) return null;

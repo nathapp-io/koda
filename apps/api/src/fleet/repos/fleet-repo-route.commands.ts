@@ -149,6 +149,9 @@ export class FleetRepoRouteCommands implements OnModuleInit {
       // such a request runs nothing; the requester redeems it by repeating the call with the token it
       // actually wants stored, and that body is what lands.
       redeem: { redact: ({ id, patch }) => ({ id, patch: redactGitlabCredentialTokens(patch) }) },
+      // The forge verification runs in `prepare`, outside the approval execution's transaction; the write
+      // and the deferred cache eviction run in the transaction the engine owns.
+      prepare: (_principal, input) => this.repos.prepareRotateGitlabCredentials(input.id, input.patch),
       run: (_principal, input) => this.repos.rotateGitlabCredentials(input.id, input.patch),
       toResult: (result) => result,
     }, this.loader));

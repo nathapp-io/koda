@@ -17,7 +17,7 @@ export interface EffectJob {
 }
 export interface PrLinkJob {
   id: string; projectId: string; requestedById: string; requestedByType?: 'USER' | 'AGENT'; resultPrUrl: string | null;
-  repo: { provider: 'github' | 'gitlab'; owner: string; name: string };
+  repo: { provider: 'github' | 'gitlab'; owner: string; name: string; host?: string };
 }
 export interface FleetPrLinkInput {
   ticketId: string; jobId: string; url: string; provider: string; prNumber: number; externalRef: string; now: Date;
@@ -149,7 +149,7 @@ export class PrismaFleetTicketsRepository {
     const row = await this.db.fleetJob.findUnique({
       where: { id: jobId },
       select: { id: true, projectId: true, feature: true, resultPrUrl: true,
-        project: { select: { slug: true } }, repo: { select: { provider: true, owner: true, name: true } } },
+        project: { select: { slug: true } }, repo: { select: { provider: true, owner: true, name: true, host: true } } },
     });
     return row ? { ...row, projectSlug: row.project.slug, repo: { ...row.repo, provider: row.repo.provider as 'github' | 'gitlab' } } : null;
   }
@@ -177,7 +177,7 @@ export class PrismaFleetTicketsRepository {
       where: { id: jobId },
       select: {
         id: true, projectId: true, requestedById: true, requestedByType: true, resultPrUrl: true,
-        repo: { select: { provider: true, owner: true, name: true } },
+        repo: { select: { provider: true, owner: true, name: true, host: true } },
       },
     });
     return r

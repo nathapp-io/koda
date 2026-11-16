@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from './fleet-repos.service';
+import { withCommittedEffects } from '../../common/committed-effects';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 /**
@@ -255,13 +256,82 @@ describe('FleetReposService — the GitLab credential rotation', () => {
     expect(gitlab.getTokenSelf).not.toHaveBeenCalled();
   });
 
-  it('a repo without a credential record has no project to verify a token against', async () => {
+  it('a repo without a credential record and one token has no project to verify it against', async () => {
     repo.findById.mockResolvedValue(gitlabRow({ gitlabCredential: null }));
 
     await expect(make().rotateGitlabCredentials('fr1', { writeToken: 'glpat-write-2' }))
       .rejects.toMatchObject({ reason: 'gitlab_credentials_missing' });
 
     expect(credentials.save).not.toHaveBeenCalled();
+  });
+
+  it('a repo without a record is set up when both tokens are supplied, from the stored repo identity', async () => {
+    repo.findById.mockResolvedValue(gitlabRow({ gitlabCredential: null }));
+
+    await make().rotateGitlabCredentials('fr1', { writeToken: 'glpat-write-1', readToken: 'glpat-read-1' });
+
+    expect(gitlab.findProject).toHaveBeenCalledWith('https://gitlab.com/api/v4', 'glpat-write-1', 'group/app');
+    expect(credentials.save).toHaveBeenCalledWith('fr1', {
+      gitlabProjectId: 42,
+      read: { token: 'glpat-read-1', userId: 8, username: 'koda-reader', expiresAt: null },
+      write: { token: 'glpat-write-1', userId: 7, username: 'koda-fleet', expiresAt: null, isBot: true },
+    });
+    expect(broker.evictRepo).toHaveBeenCalledWith('fr1');
+  });
+
+  it('the initial setup refuses a read token that may write', async () => {
+    repo.findById.mockResolvedValue(gitlabRow({ gitlabCredential: null }));
+    gitlab.getTokenSelf.mockImplementation(scopes(['api', 'write_repository'], ['read_api', 'read_repository', 'api']));
+
+    await expect(make().rotateGitlabCredentials('fr1', { writeToken: 'glpat-write-1', readToken: 'glpat-read-1' }))
+      .rejects.toMatchObject({ reason: 'gitlab_read_token_writable' });
+
+    expect(credentials.save).not.toHaveBeenCalled();
+  });
+
+  it('a connection made between the verification and the write is a conflict, not an overwrite', async () => {
+    repo.findById.mockResolvedValueOnce(gitlabRow({ gitlabCredential: null })).mockResolvedValue(gitlabRow());
+    const write = await make().prepareRotateGitlabCredentials('fr1', { writeToken: 'glpat-write-1', readToken: 'glpat-read-1' });
+
+    await expect(write()).rejects.toMatchObject({ status: 409 });
+
+    expect(credentials.save).not.toHaveBeenCalled();
+    expect(broker.evictRepo).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: inside a transaction owner the eviction waits for the commit, so a mint cannot cache the old credential', async () => {
+    const order: string[] = [];
+    credentials.save.mockImplementation(async () => { order.push('save'); });
+    broker.evictRepo.mockImplementation(() => { order.push('evict'); });
+    const write = await make().prepareRotateGitlabCredentials('fr1', { writeToken: 'glpat-write-2' });
+
+    await withCommittedEffects(async () => {
+      await write();
+      // The window between the write and the owner's commit: a mint here still reads the old row.
+      order.push('mint-before-commit');
+    });
+    order.push('committed');
+
+    expect(order).toEqual(['save', 'mint-before-commit', 'evict', 'committed']);
+  });
+
+  it('AC-6: an owner whose transaction rolls back never evicts', async () => {
+    const write = await make().prepareRotateGitlabCredentials('fr1', { writeToken: 'glpat-write-2' });
+
+    await expect(withCommittedEffects(async () => {
+      await write();
+      throw new Error('commit failed');
+    })).rejects.toThrow('commit failed');
+
+    expect(broker.evictRepo).not.toHaveBeenCalled();
+  });
+
+  it('the preparation makes every forge call and writes nothing', async () => {
+    await make().prepareRotateGitlabCredentials('fr1', { writeToken: 'glpat-write-2' });
+
+    expect(gitlab.getTokenSelf).toHaveBeenCalled();
+    expect(credentials.save).not.toHaveBeenCalled();
+    expect(tx.run).not.toHaveBeenCalled();
   });
 
   it('an unknown repo is a 404 before any GitLab call', async () => {

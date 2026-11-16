@@ -95,12 +95,17 @@ describe('koda fleet repo', () => {
 
   it('AC-2 reads a token from stdin when the file is -', async () => {
     const stdin = { async *[Symbol.asyncIterator]() { yield Buffer.from('stdin-token\n'); } };
+    const original = Object.getOwnPropertyDescriptor(process, 'stdin');
     Object.defineProperty(process, 'stdin', { configurable: true, value: stdin });
-    const { readFile } = await import('node:fs/promises');
-    (readFile as jest.Mock).mockResolvedValueOnce('write');
-    (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
-    await run('add', 'group/app', '--provider', 'gitlab', '--read-token-file', '-', '--write-token-file', 'w');
-    expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: expect.objectContaining({ readToken: 'stdin-token', writeToken: 'write' }) });
+    try {
+      const { readFile } = await import('node:fs/promises');
+      (readFile as jest.Mock).mockResolvedValueOnce('write');
+      (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
+      await run('add', 'group/app', '--provider', 'gitlab', '--read-token-file', '-', '--write-token-file', 'w');
+      expect(fleetReposControllerCreate).toHaveBeenCalledWith({ body: expect.objectContaining({ readToken: 'stdin-token', writeToken: 'write' }) });
+    } finally {
+      if (original) Object.defineProperty(process, 'stdin', original);
+    }
   });
 
   it('AC-5/6 warns to stderr but emits only the safe repo in JSON', async () => {

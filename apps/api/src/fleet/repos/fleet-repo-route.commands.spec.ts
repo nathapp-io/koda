@@ -30,6 +30,7 @@ describe('FleetRepoRouteCommands', () => {
       setRuleOverride: vi.fn().mockResolvedValue(result),
       clearRuleOverride: vi.fn().mockResolvedValue(result),
       rotateGitlabCredentials: vi.fn().mockResolvedValue(result),
+      prepareRotateGitlabCredentials: vi.fn().mockResolvedValue(async () => result),
     };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new FleetRepoRouteCommands(registry, repos as unknown as FleetReposService, loader as unknown as ActorPrincipalLoader).onModuleInit();
@@ -137,6 +138,17 @@ describe('FleetRepoRouteCommands', () => {
     const writeOnly = command?.redeem?.redact?.({ id: 'r1', patch: { writeToken: 'glpat-write' } });
     expect(writeOnly).toStrictEqual({ id: 'r1', patch: { writeToken: REDACTED_SECRET } });
     expect(Object.keys((writeOnly as { patch: Record<string, unknown> }).patch)).toEqual(['writeToken']);
+  });
+
+  it('AC-6: the rotation verifies in prepare and writes in the returned callback', async () => {
+    const { registry, repos, result } = build();
+    const command = registry.get('fleet.repo.credentials.update', FLEET_REPO_ROUTE_VARIANTS.gitlabCredentials);
+
+    const mutate = await command?.prepare?.({ id: 'r1', patch: credentialsPatch });
+
+    expect(repos.prepareRotateGitlabCredentials).toHaveBeenCalledExactlyOnceWith('r1', credentialsPatch);
+    expect(repos.rotateGitlabCredentials).not.toHaveBeenCalled();
+    await expect(mutate?.()).resolves.toBe(result);
   });
 
   it('AC-10: the rotation command keeps the fields that are not tokens', () => {

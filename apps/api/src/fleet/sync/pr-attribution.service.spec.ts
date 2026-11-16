@@ -24,6 +24,24 @@ describe('prNumberFor (plan D19)', () => {
   });
 });
 
+describe('prNumberFor on a GitLab host with a path prefix (AC-13)', () => {
+  const repo = { provider: 'gitlab' as const, owner: 'g/sub', name: 'app', host: 'https://gitlab.example.com/gl' };
+
+  it('removes the host prefix before it matches the repo path', () => {
+    expect(prNumberFor(repo, 'https://gitlab.example.com/gl/g/sub/app/-/merge_requests/7')).toBe(7);
+  });
+
+  it('still matches a url without the prefix and refuses another repo under the prefix', () => {
+    expect(prNumberFor(repo, 'https://gitlab.example.com/g/sub/app/-/merge_requests/7')).toBe(7);
+    expect(prNumberFor(repo, 'https://gitlab.example.com/gl/g/other/app/-/merge_requests/7')).toBeNull();
+  });
+
+  it('leaves a host without a prefix and a GitHub repo as they were', () => {
+    expect(prNumberFor({ ...repo, host: 'https://gitlab.example.com' }, 'https://gitlab.example.com/g/sub/app/-/merge_requests/7')).toBe(7);
+    expect(prNumberFor({ provider: 'github', owner: 'acme', name: 'app', host: 'https://github.com/x' }, 'https://github.com/acme/app/pull/3')).toBe(3);
+  });
+});
+
 describe('prNumberFor hostile input', () => {
   it('returns null when a URL path segment is undecodable (%E0%A4%A) instead of throwing', () => {
     expect(prNumberFor({ provider: 'github', owner: 'acme', name: 'app' }, 'https://github.com/%E0%A4%A/app/pull/12')).toBeNull();
@@ -92,6 +110,22 @@ describe('PrAttributionService on a GitLab merge request (US-002: the repo crede
     const svc = new PrAttributionService(repo as never, {} as never, gitlab as never, credentials as never);
 
     await expect(svc.attribute('job-9')).resolves.toBe('failed');
+  });
+});
+
+describe('PrAttributionService on a GitLab host with a path prefix (AC-13)', () => {
+  it('posts the attribution for a merge request below the host prefix', async () => {
+    const repo = {
+      findById: vi.fn(async () => ({ id: 'job-9', state: 'COMPLETED', command: 'RUN', resultPrUrl: 'https://gitlab.example.com/gl/g/sub/app/-/merge_requests/7', repoId: 'repo-3', leaseEpoch: 1, requestedById: 'u1', requestedByType: 'USER' })),
+      findRepo: vi.fn(async () => ({ id: 'repo-3', projectId: 'p1', provider: 'gitlab', owner: 'g/sub', name: 'app', defaultBranch: 'main', githubInstallationId: null, host: 'https://gitlab.example.com/gl' })),
+      claimAttribution: vi.fn(async () => true),
+      findUserDisplayName: vi.fn(async () => 'Dev One'),
+    };
+    const gitlab = { commentOnMergeRequest: vi.fn(async () => true) };
+    const credentials = { call: vi.fn(async (_r: unknown, _k: unknown, fn: (a: unknown) => Promise<unknown>) => fn({})) };
+    const svc = new PrAttributionService(repo as never, {} as never, gitlab as never, credentials as never);
+    await expect(svc.attribute('job-9')).resolves.toBe('posted');
+    expect(gitlab.commentOnMergeRequest).toHaveBeenCalledWith({}, 7, 'Dispatched by Dev One via koda job job-9');
   });
 });
 

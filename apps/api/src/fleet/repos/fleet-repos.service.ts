@@ -14,6 +14,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
+import { committedEffect, withCommittedEffects } from '../../common/committed-effects';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GITLAB_DEVELOPER_ACCESS, GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
@@ -162,6 +163,36 @@ export class FleetReposService {
       throw new RepoCheckException('gitlab_scope_missing');
     }
 
+    const connection = await this.verifyGitLabConnection(
+      apiBase, `${dto.owner}/${dto.name}`, writeToken, readToken, dto.confirmBotAccount === true,
+    );
+    return {
+      provider: 'gitlab',
+      owner: connection.project.owner,
+      name: connection.project.name,
+      defaultBranch: connection.project.defaultBranch,
+      installationId: null,
+      host,
+      credential: connection.credential,
+      summary: connection.writeTokenIsBot
+        ? 'registered gitlab'
+        : `registered gitlab; write token belongs to a person (${connection.writeUsername})`,
+    };
+  }
+
+  /**
+   * The token, account and project checks both a registration and an initial connection setup make,
+   * in the order the refusals have to mean the same thing: the scopes of both tokens (the write token
+   * writes, the read token only reads), the accounts behind them, the project (found by `projectRef`
+   * with the write token, Developer access or above), and the same project again with the read token.
+   */
+  private async verifyGitLabConnection(
+    apiBase: string,
+    projectRef: string,
+    writeToken: string,
+    readToken: string,
+    confirmBotAccount: boolean,
+  ) {
     const writeSelf = await this.gitlab.getTokenSelf(apiBase, writeToken);
     if (!writeSelf.scopes.includes('api') || !writeSelf.scopes.includes('write_repository')) {
       throw new RepoCheckException('gitlab_scope_missing');
@@ -178,7 +209,7 @@ export class FleetReposService {
     const writeUser = await this.gitlab.getCurrentUser(apiBase, writeToken);
     const readUser = await this.gitlab.getCurrentUser(apiBase, readToken);
 
-    const project = await this.gitlab.findProject(apiBase, writeToken, `${dto.owner}/${dto.name}`);
+    const project = await this.gitlab.findProject(apiBase, writeToken, projectRef);
     if (project.accessLevel < GITLAB_DEVELOPER_ACCESS) throw new RepoCheckException('gitlab_access_insufficient');
 
     // The read token must see the very project the write token named.
@@ -193,7 +224,7 @@ export class FleetReposService {
 
     const writeTokenIsBot = writeUser.bot === true
       || writeUser.username === this.fleetConfig.gitlabBotName
-      || dto.confirmBotAccount === true;
+      || confirmBotAccount;
     const credential: GitLabCredentialInput = {
       gitlabProjectId: project.id,
       read: { token: readToken, userId: readUser.id, username: readUser.username, expiresAt: readSelf.expiresAt },
@@ -202,18 +233,7 @@ export class FleetReposService {
         expiresAt: writeSelf.expiresAt, isBot: writeTokenIsBot,
       },
     };
-    return {
-      provider: 'gitlab',
-      owner: project.owner,
-      name: project.name,
-      defaultBranch: project.defaultBranch,
-      installationId: null,
-      host,
-      credential,
-      summary: writeTokenIsBot
-        ? 'registered gitlab'
-        : `registered gitlab; write token belongs to a person (${writeUser.username})`,
-    };
+    return { project, credential, writeTokenIsBot, writeUsername: writeUser.username };
   }
 
   async configureAutoReview(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateAutoReviewDto): Promise<FleetRepoDto> {
@@ -315,6 +335,20 @@ export class FleetReposService {
    * has to answer with. Concurrent rotations are last-save-wins (out of scope): each of them evicts.
    */
   async rotateGitlabCredentials(id: string, patch: UpdateGitlabCredentialsDto): Promise<FleetRepoDto> {
+    return (await this.prepareRotateGitlabCredentials(id, patch))();
+  }
+
+  /**
+   * The verification half of a rotation: every forge call runs here, outside any transaction, and the
+   * returned closure is the write. An approval execution calls the closure inside the transaction it
+   * owns, so the forge is never called while that transaction is open.
+   *
+   * A repo without a credential record (every repo migrated from the single VcsConnection) is set up
+   * by the same call when it carries both tokens: the project is found from the stored repo identity
+   * and both tokens are verified as at registration. A repo with a record stays pinned to its stored
+   * project id. There is no fallback to a VcsConnection either way.
+   */
+  async prepareRotateGitlabCredentials(id: string, patch: UpdateGitlabCredentialsDto): Promise<() => Promise<FleetRepoDto>> {
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundAppException({}, 'fleet.repos');
     // A body that names no token has nothing to rotate: the same 400 the route answers before it
@@ -322,11 +356,11 @@ export class FleetReposService {
     assertRotationGiven(patch);
     if (row.provider !== 'gitlab') throw new ValidationAppException({}, 'fleet.repoNotGitlab');
 
-    // A rotation replaces tokens on the connection the repo already has; it never moves the repo to
-    // another project. A repo without a record has no project id to verify against, and koda does not
-    // guess one (the legacy no-record bootstrap stays out of scope).
-    const projectId = row.gitlabCredential?.gitlabProjectId;
-    if (projectId === undefined) throw new RepoCheckException('gitlab_credentials_missing');
+    const storedProjectId = row.gitlabCredential?.gitlabProjectId;
+    // Without a record there is no project to verify a single token against: the initial setup needs both.
+    if (storedProjectId === undefined && (patch.writeToken === undefined || patch.readToken === undefined)) {
+      throw new RepoCheckException('gitlab_credentials_missing');
+    }
 
     // The key first: without it no token can be stored, so the request costs nothing.
     this.credentials.assertKeyConfigured();
@@ -335,31 +369,52 @@ export class FleetReposService {
     await assertGitLabHostAllowed(host);
     const apiBase = gitlabApiBase(host);
 
-    // Only the supplied kinds are part of the write: an absent token stays absent, so the store keeps
-    // the token it has (and its metadata) untouched.
-    const input: GitLabCredentialInput = { gitlabProjectId: projectId };
-    if (patch.writeToken !== undefined) {
-      input.write = await this.verifyRotatedWriteToken(apiBase, patch.writeToken, projectId, patch.confirmBotAccount === true);
+    let input: GitLabCredentialInput;
+    let summary: string;
+    if (storedProjectId === undefined) {
+      // Initial setup: the project is the one the stored repo identity names, found with the write token.
+      const connection = await this.verifyGitLabConnection(
+        apiBase, `${row.owner}/${row.name}`, patch.writeToken as string, patch.readToken as string,
+        patch.confirmBotAccount === true,
+      );
+      input = connection.credential;
+      summary = 'connection set up';
+    } else {
+      // Only the supplied kinds are part of the write: an absent token stays absent, so the store keeps
+      // the token it has (and its metadata) untouched.
+      input = { gitlabProjectId: storedProjectId };
+      if (patch.writeToken !== undefined) {
+        input.write = await this.verifyRotatedWriteToken(apiBase, patch.writeToken, storedProjectId, patch.confirmBotAccount === true);
+      }
+      if (patch.readToken !== undefined) {
+        input.read = await this.verifyRotatedReadToken(apiBase, patch.readToken, storedProjectId);
+      }
+      summary = patch.readToken !== undefined && patch.writeToken !== undefined
+        ? 'read and write tokens replaced'
+        : patch.writeToken !== undefined ? 'write token replaced' : 'read token replaced';
     }
-    if (patch.readToken !== undefined) {
-      input.read = await this.verifyRotatedReadToken(apiBase, patch.readToken, projectId);
-    }
-    const summary = patch.readToken !== undefined && patch.writeToken !== undefined
-      ? 'read and write tokens replaced'
-      : patch.writeToken !== undefined ? 'write token replaced' : 'read token replaced';
 
-    const updated = await this.txManager.run(async () => {
-      await this.credentials.save(id, input);
-      await this.audit.record({
-        key: 'fleet.repo.credentials.update', resourceType: 'fleet-repo', resourceId: id,
-        projectId: row.projectId, summary,
-      });
-      return this.repo.findById(id);
-    });
-    // After the commit: every token cached for this repo was minted from a credential it no longer
-    // has. `evictRepo` also fences the mints that were in flight, so none of them caches the old one.
-    this.broker.evictRepo(id);
-    return FleetRepoDto.from(updated ?? row);
+    return async () => {
+      // The broker cache is dropped only once the transaction that owns this write has committed: an
+      // eviction before the commit lets a concurrent mint read the old credential after the eviction and
+      // cache it under the new generation. `evictRepo` also fences the mints in flight at that point.
+      // A rotation that rolled back never evicts the tokens the cache still has to answer with.
+      const updated = await withCommittedEffects(() => this.txManager.run(async () => {
+        const current = await this.repo.findById(id);
+        if (!current) throw new NotFoundAppException({}, 'fleet.repos');
+        // The verification was made against this stored project (or its absence); a repo that was
+        // re-pointed or connected in between is not the one the tokens were verified for.
+        if (current.gitlabCredential?.gitlabProjectId !== storedProjectId) throw new ConflictAppException({}, 'fleet.repos');
+        await this.credentials.save(id, input);
+        await this.audit.record({
+          key: 'fleet.repo.credentials.update', resourceType: 'fleet-repo', resourceId: id,
+          projectId: row.projectId, summary,
+        });
+        committedEffect(() => this.broker.evictRepo(id));
+        return this.repo.findById(id);
+      }));
+      return FleetRepoDto.from(updated ?? row);
+    };
   }
 
   /**
