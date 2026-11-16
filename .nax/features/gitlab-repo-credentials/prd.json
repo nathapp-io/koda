@@ -3,7 +3,7 @@
   "feature": "gitlab-repo-credentials",
   "branchName": "feat/gitlab-repo-credentials",
   "createdAt": "2026-11-16T07:27:23.579Z",
-  "updatedAt": "2026-11-16T08:37:20.466Z",
+  "updatedAt": "2026-11-16T09:11:52.883Z",
   "userStories": [
     {
       "id": "US-001",
@@ -196,14 +196,17 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Credential cache isolation and invalidation span minting, repo projections and assignment; strict TDD protects read/write refusal and GitHub compatibility."
+        "reasoning": "Credential cache isolation and invalidation span minting, repo projections and assignment; strict TDD protects read/write refusal and GitHub compatibility.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/git-token.broker.ts",
@@ -237,7 +240,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "05c7d76ab06ff51b2bd5d8f61dad4b9424c91f69"
     },
     {
       "id": "US-004",
