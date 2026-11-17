@@ -1,0 +1,74 @@
+import { ValidationAppException } from '@nathapp/nestjs-common';
+import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
+import { parseFlowCommonInput } from './flow-input';
+
+export const HANDOFF_MAX_RUNS = 20;
+export const HANDOFF_RECORD_MAX_BYTES = 524288;
+export const HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+export const HANDOFF_RECORD_FILES = ['result.json', 'ledger.md'] as const;
+
+export interface HandoffRecordEntry {
+  runId: string;
+  file: (typeof HANDOFF_RECORD_FILES)[number];
+  mtimeMs: number;
+  content: string;
+}
+export interface NormalizedHandoffFlowInput {
+  remoteUrl: string;
+  branch: string;
+  roles: { reviewer: string; supervisor: string };
+  costCapUsd: string;
+  handoff: { feature: string; headSha: string; record: HandoffRecordEntry[] };
+}
+
+const HEAD_SHA_RE = /^[a-f0-9]{40}$/;
+const MAX_MTIME_MS = 8640000000000000;
+
+function fail(reason: string): never {
+  throw new ValidationAppException({ reason }, 'fleet.flowInput');
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Parse and bound the handoff create body into a stable JSON-safe shape. */
+export function parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput {
+  if (!isRecord(body) || Object.hasOwn(body, 'features') || !isRecord(body.handoff)) fail('handoff');
+  const input = body.handoff;
+  if (typeof input.feature !== 'string' || !FEATURE_RE.test(input.feature)) fail('handoff.feature');
+  if (typeof input.headSha !== 'string' || !HEAD_SHA_RE.test(input.headSha)) fail('handoff.headSha');
+  if (!Array.isArray(input.record) || input.record.length === 0) fail('handoff.record');
+
+  const runSpellings = new Map<string, string>();
+  const seenFiles = new Set<string>();
+  let totalBytes = 0;
+  const record = input.record.map((candidate, index): HandoffRecordEntry => {
+    const prefix = `handoff.record.${index}`;
+    if (!isRecord(candidate)) fail(prefix);
+    if (typeof candidate.runId !== 'string' || !HANDOFF_RUN_ID_RE.test(candidate.runId)) fail(`${prefix}.runId`);
+    const foldedRunId = candidate.runId.toLowerCase();
+    const existingSpelling = runSpellings.get(foldedRunId);
+    if (existingSpelling !== undefined && existingSpelling !== candidate.runId) fail('handoff.record');
+    runSpellings.set(foldedRunId, candidate.runId);
+    if (typeof candidate.file !== 'string' || !(HANDOFF_RECORD_FILES as readonly string[]).includes(candidate.file)) fail(`${prefix}.file`);
+    const identity = `${foldedRunId}/${candidate.file}`;
+    if (seenFiles.has(identity)) fail('handoff.record');
+    seenFiles.add(identity);
+    if (typeof candidate.mtimeMs !== 'number' || !Number.isInteger(candidate.mtimeMs) || candidate.mtimeMs < 0 || candidate.mtimeMs > MAX_MTIME_MS) fail(`${prefix}.mtimeMs`);
+    if (typeof candidate.content !== 'string') fail(`${prefix}.content`);
+    totalBytes += Buffer.byteLength(candidate.content, 'utf8');
+    return { runId: candidate.runId, file: candidate.file as HandoffRecordEntry['file'], mtimeMs: candidate.mtimeMs, content: candidate.content };
+  });
+  if (runSpellings.size > HANDOFF_MAX_RUNS || totalBytes > HANDOFF_RECORD_MAX_BYTES) fail('handoff.record');
+
+  if (!isRecord(body)) fail('handoff');
+  const common = parseFlowCommonInput(body, true);
+  if (typeof common.remoteUrl !== 'string' || typeof common.branch !== 'string' || !GIT_REF_RE.test(common.branch)) fail('branch');
+  return {
+    remoteUrl: common.remoteUrl,
+    branch: common.branch,
+    roles: common.roles,
+    costCapUsd: common.costCapUsd,
+    handoff: { feature: input.feature, headSha: input.headSha, record },
+  };
+}
