@@ -188,23 +188,38 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
    * The identity is the row's whole identity — host, namespace and name — so the filter is the
    * lookup's answer and not a page of candidates the caller has to match afterwards: a name that
    * repeats on other hosts or namespaces cannot push the registered repo out of the bounded page.
+   *
+   * The comparison is literal case-insensitive equality (`LOWER(a) = LOWER(b)`) and never Prisma's
+   * `mode: 'insensitive'`, which compiles to `ILIKE`: there a `_` in a namespace such as `grp_one`
+   * is a wildcard that also matches `grpXone`, so the noncanonical rows it admits would consume the
+   * bound and the lookup's first row could be the wrong repository.
    */
   async findGitLabByRemote(identities: readonly GitLabRemoteIdentity[]): Promise<FleetRepoRecord[]> {
     if (identities.length === 0) return [];
+    const branches = identities.flatMap(({ host, owner, name }) => [
+      Prisma.sql`(LOWER("host") = LOWER(${host}::text) AND LOWER("owner") = LOWER(${owner}::text) AND LOWER("name") = LOWER(${name}::text))`,
+      // A stored host is canonical (no trailing slash); a row written by hand may still carry one,
+      // and it names the same host.
+      Prisma.sql`(LOWER("host") = LOWER(${`${host}/`}::text) AND LOWER("owner") = LOWER(${owner}::text) AND LOWER("name") = LOWER(${name}::text))`,
+    ]);
+    const ids = await this.db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "FleetRepo"
+      WHERE "provider" = 'gitlab' AND (${Prisma.join(branches, ' OR ')})
+      ORDER BY "createdAt" ASC, "id" ASC
+      LIMIT ${MAX_GITLAB_REMOTE_CANDIDATES}
+    `);
+    if (ids.length === 0) return [];
     const rows = await this.db.fleetRepo.findMany({
-      where: {
-        provider: 'gitlab',
-        OR: identities.flatMap(({ host, owner, name }) => [
-          { host: { equals: host, mode: 'insensitive' }, owner: { equals: owner, mode: 'insensitive' }, name: { equals: name, mode: 'insensitive' } },
-          // A stored host is canonical (no trailing slash); a row written by hand may still carry
-          // one, and it names the same host.
-          { host: { equals: `${host}/`, mode: 'insensitive' }, owner: { equals: owner, mode: 'insensitive' }, name: { equals: name, mode: 'insensitive' } },
-        ]),
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      where: { id: { in: ids.map((row) => row.id) } },
       take: MAX_GITLAB_REMOTE_CANDIDATES,
     });
-    return rows.map((row) => this.toDomain(row));
+    // The filter's order is the answer's order (registration order, id as the tiebreak), so the
+    // rows are replayed from it rather than in whatever order the hydration read returned them.
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.flatMap(({ id }) => {
+      const row = byId.get(id);
+      return row === undefined ? [] : [this.toDomain(row)];
+    });
   }
 
   /** SELECT ... FOR UPDATE on the repo row (the nax flow entry's creation lock). */

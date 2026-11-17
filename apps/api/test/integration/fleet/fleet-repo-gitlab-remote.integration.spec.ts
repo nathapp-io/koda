@@ -1,5 +1,6 @@
 import type { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { MAX_GITLAB_REMOTE_CANDIDATES } from '../../../src/fleet/repos/prisma-fleet-repo.repository';
 import { FleetReposService } from '../../../src/fleet/repos/fleet-repos.service';
 import { afterEach } from 'vitest';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -26,7 +27,29 @@ describeDb('GitLab remote repo lookup (PG)', () => {
     if (createdRepoIds.length > 0) await db.fleetRepo.deleteMany({ where: { id: { in: createdRepoIds } } });
     createdRepoIds = [];
     await db.fleetRepo.deleteMany({ where: { owner: { startsWith: 'flood-' } } });
+    await db.fleetRepo.deleteMany({ where: { defaultBranch: 'false-match' } });
   });
+
+  /**
+   * Rows registered before any exact identity, whose owner an ILIKE reading of `grp_one` accepts —
+   * `_` matches any single character — but the canonical identity does not. `defaultBranch` marks
+   * them so `afterEach` can drop them.
+   */
+  const seedWildcardOnlyRows = async (count: number) => {
+    await db.fleetRepo.createMany({
+      data: Array.from({ length: count }, (_, index) => ({
+        projectId: base.projectId,
+        provider: 'gitlab',
+        owner: `grp${String.fromCharCode(0x4e00 + index)}one`,
+        name: 'app',
+        defaultBranch: 'false-match',
+        githubInstallationId: null,
+        host: 'https://gitlab.example.com',
+        createdById: base.adminId,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      })),
+    });
+  };
 
   const createRepo = async (provider: 'github' | 'gitlab', owner: string, name: string, host?: string) => {
     const repo = await db.fleetRepo.create({
@@ -66,6 +89,35 @@ describeDb('GitLab remote repo lookup (PG)', () => {
   it('AC-12 does not resolve a GitHub repo as a GitLab remote', async () => {
     await createRepo('github', 'grp', 'app', 'https://github.example.com');
     expect(await app.get(FleetReposService).findGitLabByRemoteUrl('https://github.example.com/grp/app')).toBeNull();
+  });
+
+  it('does not read the underscore of a namespace as a LIKE wildcard', async () => {
+    await createRepo('gitlab', 'grpXone', 'app', 'https://gitlab.example.com');
+
+    expect(await app.get(FleetReposService).findGitLabByRemoteUrl('https://gitlab.example.com/grp_one/app')).toBeNull();
+  });
+
+  it('answers with the exact underscore identity, not a wildcard-only row registered earlier', async () => {
+    await seedWildcardOnlyRows(1);
+    const exact = await createRepo('gitlab', 'grp_one', 'app', 'https://gitlab.example.com');
+
+    const resolved = await app.get(FleetReposService).findGitLabByRemoteUrl('https://gitlab.example.com/grp_one/app');
+
+    expect(resolved?.id).toBe(exact.id);
+  });
+
+  it('answers with the exact identity when wildcard-only rows alone fill the lookup bound', async () => {
+    await seedWildcardOnlyRows(MAX_GITLAB_REMOTE_CANDIDATES + 1);
+    // The premise: the ILIKE reading accepts more rows than the lookup may read, so a filter that
+    // only post-filters a bounded page can never reach the registered repo.
+    const wildcardOnly = await db.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS count FROM "FleetRepo" WHERE "provider" = 'gitlab' AND "owner" ILIKE ${'grp_one'}`;
+    expect(Number(wildcardOnly[0].count)).toBeGreaterThan(MAX_GITLAB_REMOTE_CANDIDATES);
+    const exact = await createRepo('gitlab', 'grp_one', 'app', 'https://gitlab.example.com');
+
+    const resolved = await app.get(FleetReposService).findGitLabByRemoteUrl('https://gitlab.example.com/grp_one/app');
+
+    expect(resolved?.id).toBe(exact.id);
   });
 
   it('resolves a registered repo that follows more than 500 same-named rows', async () => {
