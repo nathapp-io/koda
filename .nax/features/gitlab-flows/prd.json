@@ -3,7 +3,7 @@
   "feature": "gitlab-flows",
   "branchName": "feat/gitlab-flows",
   "createdAt": "2026-11-17T04:40:08.048Z",
-  "updatedAt": "2026-11-17T05:36:37.286Z",
+  "updatedAt": "2026-11-17T05:51:18.615Z",
   "userStories": [
     {
       "id": "US-001",
@@ -360,14 +360,17 @@
         "US-002",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Exact-byte idempotency, replay ancestry and file-level optimistic concurrency have substantial risk; read/write credential separation mandates strict security TDD."
+        "reasoning": "Exact-byte idempotency, replay ancestry and file-level optimistic concurrency have substantial risk; read/write credential separation mandates strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
@@ -383,7 +386,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "39c7e09715e4f62d0ca3c3a629d55ed8e2e07f99"
     },
     {
       "id": "US-007",
