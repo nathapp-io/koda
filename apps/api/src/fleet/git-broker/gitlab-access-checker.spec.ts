@@ -197,6 +197,9 @@ describe('GitLabAccessChecker', () => {
       ['getMergeRequestDiscussion', () => checker.getMergeRequestDiscussion(access, 4, 'd')],
       ['getMemberAccessLevel', () => checker.getMemberAccessLevel(access, 'alice')],
       ['listOpenMergeRequests', () => checker.listOpenMergeRequests(access, 'grp/app')],
+      ['createBranch', () => checker.createBranch(access, 'feat/a', 'abc')],
+      ['getFileForUpdate', () => checker.getFileForUpdate(access, 'docs/a.md', 'c1')],
+      ['commitFile', () => checker.commitFile(access, 'docs/a.md', { branch: 'feat/a', content: Buffer.from('hi'), lastCommitId: 'lc1', message: 'm' })],
     ])('AC-11: %s maps HTTP failures', async (_name, invoke) => {
       for (const [status, reason] of [[401, 'gitlab_token_invalid'], [403, 'app_permissions_insufficient'], [500, 'provider_error']] as const) {
         respond = () => ({ status, body: {} });
@@ -210,6 +213,9 @@ describe('GitLabAccessChecker', () => {
       ['getMergeRequestDiscussion', () => checker.getMergeRequestDiscussion(access, 4, 'd')],
       ['getMemberAccessLevel', () => checker.getMemberAccessLevel(access, 'alice')],
       ['listOpenMergeRequests', () => checker.listOpenMergeRequests(access, 'grp/app')],
+      ['createBranch', () => checker.createBranch(access, 'feat/a', 'abc')],
+      ['getFileForUpdate', () => checker.getFileForUpdate(access, 'docs/a.md', 'c1')],
+      ['commitFile', () => checker.commitFile(access, 'docs/a.md', { branch: 'feat/a', content: Buffer.from('hi'), lastCommitId: 'lc1', message: 'm' })],
     ])('AC-12: %s blocks loopback hosts before requesting', async (_name, invoke) => {
       lookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
       await expect(invoke()).rejects.toMatchObject({ reason: 'gitlab_host_blocked' });

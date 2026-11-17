@@ -4,7 +4,7 @@ import type { GitLabAccess } from './gitlab-repo-credentials';
 import { assertGitLabHostAllowed } from './gitlab-host';
 import { RepoCheckException } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
-import type { OpenPullRequest } from './github-app-client';
+import type { OpenPullRequest, PutFileResult } from './github-app-client';
 import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
 /** The GitLab access level a fleet job needs: Developer or above. */
@@ -220,6 +220,54 @@ export class GitLabAccessChecker {
       return typeof found === 'string' && found.toLowerCase() === username.toLowerCase();
     });
     return level(match);
+  }
+
+  /** Creates a branch; after a 400, distinguishes an existing branch from an invalid ref. */
+  async createBranch(access: GitLabAccess, branch: string, sha: string): Promise<{ kind: 'created' } | { kind: 'exists'; sha: string } | { kind: 'refused' }> {
+    await this.guard(access.target.apiBase);
+    const query = `branch=${encodeURIComponent(branch)}&ref=${encodeURIComponent(sha)}`;
+    const res = await this.http.request('POST', `${this.projectUrl(access)}/repository/branches?${query}`, { 'private-token': access.token });
+    if (res.status === 201) return { kind: 'created' };
+    if (res.status === 400) {
+      try {
+        const head = await this.getBranchHead(access, branch);
+        return { kind: 'exists', sha: head };
+      } catch (error) {
+        if (error instanceof RepoCheckException && error.reason === 'repo_not_found') return { kind: 'refused' };
+        throw error;
+      }
+    }
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    this.fail(res.status);
+  }
+
+  /** Reads one file and the commit id required to safely update it. */
+  async getFileForUpdate(access: GitLabAccess, path: string, ref: string): Promise<(ForgeFile & { lastCommitId: string }) | null> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`, { 'private-token': access.token });
+    if (res.status === 404) return null;
+    if (res.status !== 200) this.fail(res.status);
+    const b = obj(res.body);
+    if (typeof b.blob_id !== 'string' || typeof b.size !== 'number' || b.encoding !== 'base64' || typeof b.content !== 'string' || typeof b.last_commit_id !== 'string') {
+      throw new RepoCheckException('provider_error');
+    }
+    return { sha: b.blob_id, size: b.size, content: Buffer.from(b.content, 'base64'), lastCommitId: b.last_commit_id };
+  }
+
+  /** Commits a single guarded file update using GitLab's commits API. */
+  async commitFile(access: GitLabAccess, path: string, input: { branch: string; content: Buffer; lastCommitId: string; message: string }): Promise<PutFileResult> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('POST', `${this.projectUrl(access)}/repository/commits`, { 'private-token': access.token }, {
+      branch: input.branch,
+      commit_message: input.message,
+      actions: [{ action: 'update', file_path: path, content: input.content.toString('base64'), encoding: 'base64', last_commit_id: input.lastCommitId }],
+    });
+    if (res.status === 400 || res.status === 409) return { kind: 'conflict' };
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 201) this.fail(res.status);
+    const commitSha = obj(res.body).id;
+    if (typeof commitSha !== 'string') throw new RepoCheckException('provider_error');
+    return { kind: 'committed', commitSha };
   }
 
   /** Fleet S3 §4.1: one file at a ref (files API, base64). Null when absent. */
