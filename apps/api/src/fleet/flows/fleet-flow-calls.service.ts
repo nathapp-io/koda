@@ -70,7 +70,9 @@ export class FleetFlowCallsService {
     if (!flow.features[0]) return { kind: 'failed', detail: 'feature missing' };
 
     const repo = await this.repos.findReviewRepo(flow.repoId);
-    if (!repo || repo.githubInstallationId === null) return { kind: 'failed', detail: 'repo not connected' };
+    if (!repo) return { kind: 'failed', detail: 'repo not connected' };
+    if (repo.provider === 'gitlab') return this.applyPrdEditsGitLab(repo, action, expectedHead, target);
+    if (repo.githubInstallationId === null) return { kind: 'failed', detail: 'repo not connected' };
 
     const path = `.nax/features/${target.feature}/prd.json`;
     try {
@@ -106,6 +108,60 @@ export class FleetFlowCallsService {
       if (written.kind === 'refused') return { kind: 'failed', detail: 'prd.json write refused' };
       const reread = await this.github.getFile(token, repo.owner, repo.name, path, target.branch);
       if (reread && reread.sha === file.sha) return { kind: 'failed', detail: 'prd.json write refused' };
+      return { kind: 'retry' };
+    } catch (error) {
+      if (!(error instanceof RepoCheckException)) throw error;
+      return callsOutcomeForForgeError(error.reason) === 'failed'
+        ? { kind: 'failed', detail: error.reason }
+        : { kind: 'retry' };
+    }
+  }
+
+  /** The GitLab PRD edit pass: pin bytes to the head and guard writes with last_commit_id. */
+  private async applyPrdEditsGitLab(
+    repo: ReviewRepo, action: ApplyPrdEditsAction, expectedHead: string, target: FleetFlowCallsTarget,
+  ): Promise<PrdEditsOutcome> {
+    const path = `.nax/features/${target.feature}/prd.json`;
+    try {
+      const head = await this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getBranchHead(access, target.branch));
+      const file = await this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getFileForUpdate(access, path, head));
+
+      if (head !== expectedHead) {
+        if (!file) return { kind: 'stale', head };
+        const base = await this.gitlabCredentials.call(repo, 'read', (access) =>
+          this.gitlab.getFile(access, path, expectedHead));
+        const expected = base && applyPrdEditsToText(base.content.toString('utf8'), action.edits);
+        if (!expected || expected.kind !== 'ok'
+          || !file.content.equals(Buffer.from(expected.text, 'utf8'))
+          || !(await this.gitlabCredentials.call(repo, 'read', (access) =>
+            this.gitlab.isSingleFileCommit(access, expectedHead, head, path)))) {
+          return { kind: 'stale', head };
+        }
+        return { kind: 'committed', sha: head, applied: expected.applied, refused: expected.refused };
+      }
+
+      if (!file) return { kind: 'failed', detail: `prd.json missing on ${target.branch}` };
+      const result = applyPrdEditsToText(file.content.toString('utf8'), action.edits);
+      if (result.kind === 'unreadable') return { kind: 'failed', detail: 'prd.json unreadable' };
+      if (result.applied === 0) return { kind: 'unchanged', refused: result.refused };
+
+      const written = await this.gitlabCredentials.call(repo, 'write', (access) =>
+        this.gitlab.commitFile(access, path, {
+          branch: target.branch,
+          content: Buffer.from(result.text, 'utf8'),
+          lastCommitId: file.lastCommitId,
+          message: `chore(${target.feature}): flow PRD edits from PRD_REVIEW job ${action.jobId}`,
+        }));
+      if (written.kind === 'committed') {
+        return { kind: 'committed', sha: written.commitSha, applied: result.applied, refused: result.refused };
+      }
+      if (written.kind === 'refused') return { kind: 'failed', detail: 'prd.json write refused' };
+
+      const reread = await this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getFileForUpdate(access, path, target.branch));
+      if (reread && reread.lastCommitId === file.lastCommitId) return { kind: 'failed', detail: 'prd.json write refused' };
       return { kind: 'retry' };
     } catch (error) {
       if (!(error instanceof RepoCheckException)) throw error;
