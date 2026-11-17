@@ -310,13 +310,15 @@ Workdir: `apps/api`. Depends on US-002, US-003.
 
 `FleetFlowsController.create` branches on the `handoff` key with the extracted forge-error mapping and runs the
 GitHub handoff checks; `CreateFlowInput.handoff`; `lockNaxEntry`'s `fleet.flows.branchBusy`; the six new i18n keys
-in `en` and `zh`.
+in `en` and `zh`; registers `NAX_HANDOFF_FLOW_CREATE_VARIANT` in `FlowRouteCommands` so the endpoint ACs run through
+the real registered command.
 
 ### US-005: GitLab handoff checks, approval command and OpenAPI
 
 Workdir: `apps/api`. Depends on US-004.
 
-The GitLab branch of the handoff checks; `NAX_HANDOFF_FLOW_CREATE_VARIANT` in `FlowRouteCommands`; the OpenAPI
+The GitLab branch of the handoff checks; acceptance criteria pinning the `NAX_HANDOFF_FLOW_CREATE_VARIANT` command
+US-004 registered; the OpenAPI
 body schema documents the handoff form, and `openapi.json` plus the CLI client are regenerated with
 `bun run generate`.
 
@@ -358,6 +360,7 @@ Workdir: `apps/runner`. Depends on US-003.
 - `apps/api/src/fleet/flows/fleet-flows.service.ts` - `create`, `lockNaxEntry`
 - `apps/api/src/fleet/git-broker/github-app-client.ts` - `mintThreadReadToken`, `listOpenPullRequests`, `getBranchHead`, `getFile`
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` - endpoint coverage this story extends
+- `apps/api/src/fleet/flows/flow-route.commands.ts` - `NAX_FLOW_CREATE_VARIANT` registration this story mirrors
 
 **US-005**
 - `apps/api/src/fleet/flows/flow-route.commands.ts` - `NAX_FLOW_CREATE_VARIANT` registration
