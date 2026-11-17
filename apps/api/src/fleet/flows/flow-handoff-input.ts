@@ -1,18 +1,20 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
 import { parseFlowCommonInput } from './flow-input';
 
+/**
+ * US-003: the handoff limits live in `@nathapp/fleet-protocol`, because the runner enforces them
+ * too. The API image does not ship that package, so the API keeps its own copies; a spec pins them
+ * equal to the package's (`src/fleet/common/protocol.spec.ts`).
+ */
 export const HANDOFF_MAX_RUNS = 20;
 export const HANDOFF_RECORD_MAX_BYTES = 524288;
 export const HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const HANDOFF_RECORD_FILES = ['result.json', 'ledger.md'] as const;
 
-export interface HandoffRecordEntry {
-  runId: string;
-  file: (typeof HANDOFF_RECORD_FILES)[number];
-  mtimeMs: number;
-  content: string;
-}
+/** US-003: the record's file shape is the protocol's; only the limits above are copied. */
+export type HandoffRecordEntry = HandoffRecordFile;
 export interface NormalizedHandoffFlowInput {
   remoteUrl: string;
   branch: string;

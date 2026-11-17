@@ -1,10 +1,24 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { AGENT_RESULT_LIMITS, APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES, FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
+import {
+  AGENT_RESULT_LIMITS,
+  APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES,
+  FLEET_PROTOCOL_VERSION,
+  HANDOFF_MAX_RUNS as PACKAGE_HANDOFF_MAX_RUNS,
+  HANDOFF_RECORD_FILES as PACKAGE_HANDOFF_RECORD_FILES,
+  HANDOFF_RECORD_MAX_BYTES as PACKAGE_HANDOFF_RECORD_MAX_BYTES,
+  HANDOFF_RUN_ID_RE as PACKAGE_HANDOFF_RUN_ID_RE,
+} from '@nathapp/fleet-protocol';
 import type { FleetCommandTypeName, FleetJobKindName, FleetJobStateName } from '@nathapp/fleet-protocol';
 import { APPROVAL_TEXT_MAX_BYTES, DEFAULT_APPROVAL_TIMEOUT_SEC, SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
 import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
 import { AGENT_RESULT_LIMITS as API_AGENT_RESULT_LIMITS } from './agent-jobs';
+import {
+  HANDOFF_MAX_RUNS,
+  HANDOFF_RECORD_FILES,
+  HANDOFF_RECORD_MAX_BYTES,
+  HANDOFF_RUN_ID_RE,
+} from '../flows/flow-handoff-input';
 
 const SRC = join(__dirname, '..', '..');
 
@@ -36,6 +50,16 @@ describe('fleet protocol', () => {
   it('keeps the local approval text cap equal to the package (the API image does not ship the package)', () => {
     expect(APPROVAL_TEXT_MAX_BYTES).toBe(PACKAGE_APPROVAL_TEXT_MAX_BYTES);
     expect(DEFAULT_APPROVAL_TIMEOUT_SEC).toBe(600);
+  });
+
+  // US-003 (AC-1): the handoff limits live in the package, because the runner enforces them too.
+  // The API image does not ship the package, so the API keeps its own copies: they must not drift.
+  it('pins the API handoff limits to the protocol package', () => {
+    expect(HANDOFF_MAX_RUNS).toBe(PACKAGE_HANDOFF_MAX_RUNS);
+    expect(HANDOFF_RECORD_MAX_BYTES).toBe(PACKAGE_HANDOFF_RECORD_MAX_BYTES);
+    expect(HANDOFF_RUN_ID_RE.source).toBe(PACKAGE_HANDOFF_RUN_ID_RE.source);
+    expect(HANDOFF_RUN_ID_RE.flags).toBe(PACKAGE_HANDOFF_RUN_ID_RE.flags);
+    expect([...HANDOFF_RECORD_FILES]).toEqual([...PACKAGE_HANDOFF_RECORD_FILES]);
   });
 
   // The production image never ships packages/ (apps/api/Dockerfile final stage),

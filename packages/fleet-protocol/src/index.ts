@@ -286,6 +286,30 @@ export interface RuleOverrideAssign {
   context?: { content: string; mode: 'append' | 'replace' };
 }
 
+// ---- Flow handoff (#477): the record a chat run hands to a flow ----
+
+/** At most this many distinct run ids in one handoff record. */
+export const HANDOFF_MAX_RUNS = 20;
+/** The sum of the UTF-8 byte lengths of every record file's content is at most this many bytes. */
+export const HANDOFF_RECORD_MAX_BYTES = 524288;
+/** A run id is one path segment: nax run ids are UUIDs. */
+export const HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** The files of a run's record a handoff carries. */
+export const HANDOFF_RECORD_FILES = ['result.json', 'ledger.md'] as const;
+
+/** One file of one run's record: the file's name, its modification time and its content. */
+export interface HandoffRecordFile {
+  runId: string;
+  file: (typeof HANDOFF_RECORD_FILES)[number];
+  mtimeMs: number;
+  content: string;
+}
+
+/** The record an ASSIGN carries for a handoff RUN: the runner restores it before nax starts. */
+export interface HandoffAssign {
+  record: HandoffRecordFile[];
+}
+
 export interface AssignPayload {
   jobId: string;
   command: FleetJobKindName;
@@ -320,6 +344,11 @@ export interface AssignPayload {
    * commands (RUN, PLAN, REVIEW, FIX, AGENT); a THREAD turn and a config job never carry one.
    */
   ruleOverride?: RuleOverrideAssign;
+  /**
+   * Fleet #477: the record of the chat run a handoff flow took over. Present only on a handoff RUN:
+   * the runner restores the record into its checkout before nax starts.
+   */
+  handoff?: HandoffAssign;
 }
 export interface ReadoptPayload { naxRunId: string | null }
 export interface AbandonPayload { reason: 'stale_lease' | 'job_terminal' }

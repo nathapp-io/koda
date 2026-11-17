@@ -6,6 +6,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { DuplicateActiveJobError, NewFleetJob } from '../../../src/fleet/jobs/domain/fleet-job.domain';
@@ -14,6 +15,12 @@ import { createTestPrismaClient } from '../../helpers/test-prisma';
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const bind = (client: unknown) => new PrismaFleetJobRepository({ client } as unknown as PrismaService<PrismaClient>);
+
+/** US-003: the record a handoff RUN carries. */
+const handoffRecord: HandoffRecordFile[] = [
+  { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1}' },
+  { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger' },
+];
 
 describeIntegration('PrismaFleetJobRepository (PG)', () => {
   const prisma = createTestPrismaClient();
@@ -104,6 +111,16 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     const workflow = { runId: 'run-1', outcome: 'draft' as const, workflowPassed: true, reasons: ['reason'], openItems: [] };
     expect((await repo.update(job.id, { workflow })).workflow).toEqual(workflow);
     expect((await repo.update(job.id, { workflow: null })).workflow).toBeNull();
+  });
+
+  it('US-003 AC-9: stores the handoff record on a job and reads it back', async () => {
+    const job = await repo.createJob({ ...base, feature: 'handoff-job', handoff: handoffRecord });
+    expect((await repo.findById(job.id))?.handoff).toEqual(handoffRecord);
+  });
+
+  it('US-003 AC-10: leaves the handoff record empty for a job without one', async () => {
+    const job = await repo.createJob({ ...base, feature: 'no-handoff-job' });
+    expect((await repo.findById(job.id))?.handoff).toBeNull();
   });
 
   it('assigns with compare-and-set: two racing assignments, one winner, epoch moves once', async () => {

@@ -5,7 +5,8 @@ import { FleetFlowStartCommand } from './fleet-flow-start.command';
 const sha = 'a'.repeat(40);
 const flow = {
   id: 'f1', projectId: 'p1', state: 'PENDING', approvalRequestId: 'request-1', specSha: sha,
-  branch: 'feat/example', costCapUsd: '5.0000', features: [{ feature: 'one' }],
+  branch: 'feat/example', costCapUsd: '5.0000',
+  features: [{ feature: 'one', specPath: 'one/spec.md', dependsOn: [] }],
 };
 
 function setup() {
@@ -66,9 +67,44 @@ describe('FleetFlowStartCommand', () => {
     const { command, flows } = setup();
     await expect(command.details({ id: 'request-1', input: { flowId: 'f1', specSha: sha } } as never)).resolves.toEqual({
       kind: 'flow', flowId: 'f1', state: 'PENDING', branch: 'feat/example', specSha: sha,
-      costCapUsd: '5.0000', features: [{ feature: 'one' }],
+      costCapUsd: '5.0000', features: [{ feature: 'one', specPath: 'one/spec.md', dependsOn: [], handoff: false }],
     });
     flows.findById.mockResolvedValueOnce(null);
     await expect(command.details({ id: 'request-1', input: { flowId: 'gone', specSha: sha } } as never)).resolves.toBeNull();
+  });
+
+  // US-003 (AC-11): the details name the feature's own fields, so a handoff feature is visible
+  // in the approval card without the record it carries. The repository's feature carries more
+  // (its id, its state), and none of that belongs to the card.
+  it('maps the features of a handoff flow for the approval details', async () => {
+    const { command, flows } = setup();
+    flows.findById.mockResolvedValueOnce({
+      ...flow,
+      features: [{
+        id: 'feature-1', flowId: 'f1', position: 0, feature: 'one', specPath: 'one/spec.md', dependsOn: [],
+        state: 'PENDING', currentStep: null, prNumber: null, handoff: true,
+      }],
+    });
+    const details = await command.details({ id: 'request-1', input: { flowId: 'f1', specSha: sha } } as never) as {
+      features: Array<Record<string, unknown>>;
+    } | null;
+    expect(details?.features).toEqual([{ feature: 'one', specPath: 'one/spec.md', dependsOn: [], handoff: true }]);
+  });
+
+  // US-003: the handoff record never reaches the approval details: the details map the feature
+  // field by field, so a stored record cannot leak into a card.
+  it('never puts the handoff record in the approval details', async () => {
+    const { command, flows } = setup();
+    flows.findById.mockResolvedValueOnce({
+      ...flow,
+      features: [{
+        feature: 'one', specPath: 'one/spec.md', dependsOn: [], handoff: true,
+        handoffRecord: [{ runId: 'run-1', file: 'result.json', mtimeMs: 1, content: '{}' }],
+      }],
+    });
+    const details = await command.details({ id: 'request-1', input: { flowId: 'f1', specSha: sha } } as never) as {
+      features: Array<Record<string, unknown>>;
+    } | null;
+    expect(details?.features[0]).not.toHaveProperty('handoffRecord');
   });
 });

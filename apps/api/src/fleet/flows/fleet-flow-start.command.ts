@@ -34,7 +34,15 @@ export class FleetFlowStartCommand implements ApprovalCommand<FlowStartInput, Fl
     if (!flow) return null;
     return {
       kind: 'flow', flowId: flow.id, state: flow.state, branch: flow.branch, specSha: flow.specSha,
-      costCapUsd: flow.costCapUsd, features: flow.features,
+      costCapUsd: flow.costCapUsd,
+      // US-003: the features are mapped field by field, so nothing the flow row carries beyond the
+      // feature's own fields (a stored handoff record) can reach the approval card.
+      features: flow.features.map((feature) => ({
+        feature: feature.feature,
+        specPath: feature.specPath,
+        dependsOn: feature.dependsOn,
+        handoff: feature.handoff === true,
+      })),
     };
   }
 

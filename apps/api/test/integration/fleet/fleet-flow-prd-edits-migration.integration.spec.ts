@@ -35,6 +35,9 @@ describeDb('fleet flow PRD edits migration (PG)', () => {
     await applyMigration(scratch.db, MIGRATION);
     // The generated client selects the later feature scalars (`branch`) too, so apply their migration.
     await applyMigration(scratch.db, '20261203090000_fleet_flow_features');
+    // The generated client selects the later handoff scalars (`handoff`, `handoffRecord`) too, so apply
+    // their migration before the client read; the assertions remain scoped to the PRD-edits migration.
+    await applyMigration(scratch.db, '20261217090000_fleet_flow_handoff');
 
     const columns = await scratch.db.$queryRaw<Array<{ column_name: string; is_nullable: string; data_type: string }>>`
       SELECT column_name, is_nullable, data_type FROM information_schema.columns
