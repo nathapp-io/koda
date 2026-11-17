@@ -7,14 +7,15 @@ import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
  * git-excluded, so it travels with the request and is stored in a JSON column. A JSON column is
  * unconstrained, so a stored value is read through this shape guard: an entry this app did not
  * write is absent (null), never an unchecked assertion.
- *
+ */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
  * The file names are the protocol's; the API image does not ship `@nathapp/fleet-protocol`, so they
  * are spelled out here and pinned equal to the package's by `src/fleet/common/protocol.spec.ts`.
  */
-const RECORD_FILES = ['result.json', 'ledger.md'] as const;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+const RECORD_FILES: readonly HandoffRecordFile['file'][] = ['result.json', 'ledger.md'];
 
 /** The stored handoff record, or null when the column holds nothing this app wrote. */
 export function handoffRecordOf(value: unknown): HandoffRecordFile[] | null {
@@ -25,10 +26,10 @@ export function handoffRecordOf(value: unknown): HandoffRecordFile[] | null {
     if (!isRecord(entry)) return null;
     const { runId, file, mtimeMs, content } = entry;
     if (typeof runId !== 'string' || runId.length === 0) return null;
-    if (file !== 'result.json' && file !== 'ledger.md') return null;
+    if (typeof file !== 'string' || !RECORD_FILES.includes(file as HandoffRecordFile['file'])) return null;
     if (typeof mtimeMs !== 'number' || !Number.isInteger(mtimeMs) || mtimeMs < 0) return null;
     if (typeof content !== 'string') return null;
-    record.push({ runId, file, mtimeMs, content });
+    record.push({ runId, file: file as HandoffRecordFile['file'], mtimeMs, content });
   }
   return record;
 }
