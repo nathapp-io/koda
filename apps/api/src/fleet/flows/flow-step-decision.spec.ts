@@ -553,3 +553,34 @@ describe('decideFlowStep', () => {
       .toMatchObject({ kind: 'stop', reason: 'verdict_unreadable' });
   });
 });
+
+/**
+ * US-006 (#477): a handoff flow takes over a chat run that already planned and built the feature.
+ * It skips SPEC_REVIEW, PLAN and PRD_REVIEW: it starts at RUN, and every decision after the RUN is
+ * the ordinary one (REVIEW, then RULE/FIX/complete per #413).
+ */
+describe('handoff flow steps (US-006)', () => {
+  it('AC-1: an APPROVED handoff flow with no job dispatches RUN', () => {
+    expect(decideFlowStep(input({ handoff: true, state: 'APPROVED' }))).toEqual({ kind: 'dispatch', step: 'RUN' });
+  });
+
+  it('AC-2: a RUNNING handoff flow with no job dispatches RUN', () => {
+    expect(decideFlowStep(input({ handoff: true, state: 'RUNNING' }))).toEqual({ kind: 'dispatch', step: 'RUN' });
+  });
+
+  it('AC-3: a flow without the handoff flag still dispatches SPEC_REVIEW', () => {
+    expect(decideFlowStep(input({ state: 'APPROVED', firstFeature: true }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
+    // An absent flag and an explicit false are the same flow.
+    expect(decideFlowStep(input({ state: 'APPROVED', firstFeature: true, handoff: false }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
+  });
+
+  it('AC-15: a failed handoff RUN stops the flow with step_failed', () => {
+    expect(decideFlowStep(input({ handoff: true, state: 'RUNNING',
+      latestJob: job({ step: 'RUN', state: 'FAILED', stateReason: 'nax refused to publish' }) })))
+      .toMatchObject({ kind: 'stop', reason: 'step_failed' });
+    // A handoff flow never falls back to the SPEC_REVIEW dispatch of an ordinary flow.
+    expect(decideFlowStep(input({ handoff: true, state: 'APPROVED',
+      latestJob: job({ step: 'RUN', state: 'FAILED' }) })))
+      .toMatchObject({ kind: 'stop', reason: 'step_failed' });
+  });
+});

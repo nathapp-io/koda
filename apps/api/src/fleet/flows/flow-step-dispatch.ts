@@ -31,6 +31,11 @@ export interface BuildStepDispatchInput {
   plan?: { resultSha: string | null; resultBranch: string | null };
   pr?: { number: number };
   rule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null };
+  /**
+   * US-006 (#477): the feature was handed over from a chat run that already planned and built it.
+   * Its RUN takes the flow's own head — the sha the handoff was approved with — and needs no PLAN.
+   */
+  handoff?: boolean;
 }
 
 export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJobDto {
@@ -70,7 +75,9 @@ export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJ
         planFrom: feature.specPath, profiles: [],
       };
     case 'RUN': {
-      const ref = requirePlan(input, step).resultBranch;
+      // US-006: a handoff RUN builds on the chat run's head: there is no PLAN job to take a branch
+      // from, and the flow's own sha is the head the handoff was approved with.
+      const ref = input.handoff === true ? flow.specSha : requirePlan(input, step).resultBranch;
       if (!ref) throw new Error('RUN requires a PLAN result branch');
       return {
         ...common, command: 'RUN', ref,

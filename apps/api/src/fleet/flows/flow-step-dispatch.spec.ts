@@ -120,3 +120,20 @@ describe('buildStepDispatch', () => {
     expect(buildStepDispatch(pinnedPrdReview)).toHaveProperty('pinnedRunnerId', 'r1');
   });
 });
+
+/**
+ * US-006 (#477): a handoff flow starts at RUN. The chat run already planned and built the feature,
+ * so the RUN takes its ref from the flow's own head (the sha the handoff was approved with) and
+ * needs no PLAN job.
+ */
+describe('buildStepDispatch for a handoff RUN (US-006)', () => {
+  it('AC-4: a handoff RUN uses the flow spec sha and needs no PLAN', () => {
+    const dispatched = buildStepDispatch({ ...baseInput('RUN'), handoff: true });
+    expect(dispatched).toMatchObject({ command: 'RUN', ref: 's1', feature: 'f' });
+    expect(dispatched).not.toHaveProperty('planFrom');
+  });
+
+  it('AC-5: a RUN without a handoff and without a PLAN is refused', () => {
+    expect(() => buildStepDispatch(baseInput('RUN'))).toThrowError('RUN requires the missing PLAN job');
+  });
+});
