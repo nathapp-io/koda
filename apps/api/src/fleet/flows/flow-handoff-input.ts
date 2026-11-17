@@ -61,6 +61,18 @@ export function parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput
   });
   if (runSpellings.size > HANDOFF_MAX_RUNS || totalBytes > HANDOFF_RECORD_MAX_BYTES) fail('handoff.record');
 
+  const resultEntries = record.filter((entry) => entry.file === 'result.json');
+  const resultRunIds = new Set(resultEntries.map((entry) => entry.runId.toLowerCase()));
+  if (record.some((entry) => entry.file === 'ledger.md' && !resultRunIds.has(entry.runId.toLowerCase())) || resultEntries.length === 0) fail('handoff.record');
+  const newestMtime = Math.max(...resultEntries.map((entry) => entry.mtimeMs));
+  const newestEntries = resultEntries.filter((entry) => entry.mtimeMs === newestMtime);
+  if (newestEntries.length !== 1) fail('handoff.record');
+  let newestResult: unknown;
+  try { newestResult = JSON.parse(newestEntries[0].content); } catch { fail('handoff.record'); }
+  if (!isRecord(newestResult) || newestResult.schemaVersion !== 1 || !isRecord(newestResult.featureWorkflow)) fail('handoff.record');
+  const workflow = newestResult.featureWorkflow;
+  if (workflow.step !== 'done' || (workflow.outcome !== 'pushed' && workflow.outcome !== 'local-only') || workflow.head !== input.headSha) fail('handoff.record');
+
   if (!isRecord(body)) fail('handoff');
   const common = parseFlowCommonInput(body, true);
   if (typeof common.remoteUrl !== 'string' || typeof common.branch !== 'string' || !GIT_REF_RE.test(common.branch)) fail('branch');
@@ -71,4 +83,19 @@ export function parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput
     costCapUsd: common.costCapUsd,
     handoff: { feature: input.feature, headSha: input.headSha, record },
   };
+}
+
+const TERMINAL_STORY_STATUSES = new Set(['passed', 'failed', 'skipped', 'blocked', 'paused', 'regression-failed', 'decomposed']);
+
+/** Read nax PRD branch and story readiness fields. */
+export function readHandoffPrd(text: string): { branchName: string | null; pendingStoryIds: string[] } | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  if (!isRecord(parsed) || !Array.isArray(parsed.userStories)) return null;
+  const pendingStoryIds: string[] = [];
+  for (const story of parsed.userStories) {
+    if (!isRecord(story) || story.passes === true || (typeof story.status === 'string' && TERMINAL_STORY_STATUSES.has(story.status))) continue;
+    if (typeof story.id === 'string') pendingStoryIds.push(story.id);
+  }
+  return { branchName: typeof parsed.branchName === 'string' ? parsed.branchName : null, pendingStoryIds };
 }
