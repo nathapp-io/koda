@@ -133,7 +133,9 @@ Changed. The baseline is listed only to find the code; implement the target.
 - Self-hosted GitLab hosts whose name lacks `gitlab`; they wait for nax #2957.
 - Any change to nax's GitLab check reading; nax already reads merge-request pipelines and jobs.
 - US-001 only: no test asserts token values are absent from log lines; the pass logs only the repo id and the error reason, never a message or token.
-- US-001 only: 403 and other non-200 statuses of the listing are not tested separately; they go through the shared `fail` mapping that feature 1 pinned for every `GitLabAccessChecker` method.
+- US-001 only: 403 and 500 answers of the listing are not separate acceptance criteria; they go through the shared `fail` mapping, and the listing is added to the client spec's shared failure-mapping table.
+- US-002 only: disabling auto-review or trusted checks is unchanged and never refused, for either provider; the existing "disabling" cases already pin it.
+- US-002 only: `buildAssignPayload` already passes `trustDetectedChecks` for a FIX on any provider; no change and no new criterion.
 
 ## Stories
 
@@ -163,7 +165,6 @@ credentials (`repo.gitlab !== null`), as it already does `FleetRepoFixUnprotecte
 - `apps/api/src/fleet/repos/auto-review.exception.ts` — `AutoReviewException`
 - `apps/api/src/fleet/repos/fix-checks.exception.ts` — `FixChecksException`
 - `apps/api/test/integration/fleet/fleet-repo-fix-unprotected-route.integration.spec.ts` — how a GitLab repo with a credential row is seeded for a route test
-- `apps/api/src/fleet/jobs/assign-payload.ts` — `buildAssignPayload`, the `trustDetectedChecks` field
 
 **US-003**
 - `apps/web/pages/admin/fleet/repos.vue` — the switch mounts
@@ -174,24 +175,23 @@ credentials (`repo.gitlab !== null`), as it already does `FleetRepoFixUnprotecte
 ### Creates
 
 **US-001**
-- `apps/api/src/fleet/reviews/fleet-pr-review.pass.gitlab.spec.ts` — the pass's GitLab branch (AC-12 to AC-14)
+- `apps/api/src/fleet/reviews/fleet-pr-review.pass.gitlab.spec.ts` — the pass's GitLab branch (US-001 AC-12 to AC-14)
 
 ### Modifies
 
 **US-001**
 - `apps/api/src/fleet/reviews/fleet-pr-review.pass.spec.ts` — `build()` constructs `FleetPrReviewPass` with five arguments; it now passes `GitLabRepoCredentials` and `GitLabAccessChecker` mocks as the sixth and seventh. Every existing GitHub assertion stays.
-- `apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts` — gains the `listOpenMergeRequests` cases (AC-1 to AC-9); every existing case stays.
+- `apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts` — gains the `listOpenMergeRequests` cases; `listOpenMergeRequests` is also added as a row to the shared tables "AC-11: %s maps HTTP failures" (401, 403, 500) and "AC-12: %s blocks loopback hosts before requesting". The new cases are titled from `MR-1` on, so they do not reuse that file's `AC-n` titles. Every existing case and row stays.
 - `apps/api/test/integration/fleet/fleet-repo-auto-review.integration.spec.ts` — gains the GitLab listing cases (AC-10, AC-11); "AC-9: excludes enabled repos without a GitHub installation" stays and still holds for a GitHub row.
 
 **US-002**
-- `apps/api/src/fleet/repos/fleet-repos.auto-review.spec.ts` — "AC-9/AC-10 requires installed GitHub app" asserts `github app required` for `{ provider: 'gitlab' }`; a GitLab row now gets `gitlab credentials required` without a `gitlabCredential`, and is allowed with one. The `{ githubInstallationId: null }` GitHub case stays `github app required`.
-- `apps/api/src/fleet/repos/fleet-repos.fix-checks.spec.ts` — "refuses to enable on a repo without a GitHub App installation" asserts `github app required` for `{ provider: 'gitlab' }`; a GitLab row now gets `gitlab credentials required` without a `gitlabCredential`, and is allowed with one. The `{ githubInstallationId: null }` GitHub case stays `github app required`.
+- `apps/api/src/fleet/repos/fleet-repos.auto-review.spec.ts` — the shared table "AC-9/AC-10 requires installed GitHub app: %o" runs `{ provider: 'gitlab' }` and `{ githubInstallationId: null }` and asserts `github app required` for both; the `{ provider: 'gitlab' }` row is removed from that table (the `{ githubInstallationId: null }` row stays `github app required`), and separate GitLab cases are added: without a `gitlabCredential` (null, and absent) it is refused `gitlab credentials required`, with one it is enabled.
+- `apps/api/src/fleet/repos/fleet-repos.fix-checks.spec.ts` — the shared table "refuses to enable on a repo without a GitHub App installation: %o" runs `{ provider: 'gitlab' }` and `{ githubInstallationId: null }` and asserts `github app required` for both; the `{ provider: 'gitlab' }` row is removed from that table (the `{ githubInstallationId: null }` row stays `github app required`), and separate GitLab cases are added: without a `gitlabCredential` it is refused `gitlab credentials required`, with one it is enabled.
 - `apps/api/test/integration/fleet/fleet-repo-auto-review-route.integration.spec.ts` — "AC-5: enabling auto-review on a GitLab repo is 422 with the github app reason" pinned `github app required` for a GitLab repo without credentials; it now pins `gitlab credentials required`, and a GitLab repo with a credential row is enabled (200).
 - `apps/api/test/integration/fleet/fleet-repo-fix-checks-route.integration.spec.ts` — "AC-3: enabling on a GitLab repo answers 422 with the github app reason and stores nothing" pinned `Detected checks cannot be trusted: github app required`; it now pins `Detected checks cannot be trusted: gitlab credentials required` for a GitLab repo without credentials, and a GitLab repo with a credential row is enabled (200). "AC-4" for a GitHub repo without an installation stays.
-- `apps/api/src/fleet/jobs/assign-payload.spec.ts` — gains the GitLab FIX `trustDetectedChecks` case (AC-13); every existing case stays.
 
 **US-003**
-- `apps/web/tests/pages/admin-fleet-repos.spec.ts` — "GitLab FIX override mounts only for connected repos and keeps other controls GitHub-only (US-005 AC-1/2/3)" expects the connected GitLab row to hold one switch (`Allow fixes on an unprotected default branch`); it now holds three (`Enable automatic reviews`, `Trust detected checks for fixes`, `Allow fixes on an unprotected default branch`), the unconnected GitLab row still holds none, and the GitHub row without an installation still holds none.
+- `apps/web/tests/pages/admin-fleet-repos.spec.ts` — "GitLab FIX override mounts only for connected repos and keeps other controls GitHub-only (US-005 AC-1/2/3)" expects the connected GitLab row to hold one switch (`Allow fixes on an unprotected default branch`); it now holds three (`Enable automatic reviews`, `Trust detected checks for fixes`, `Allow fixes on an unprotected default branch`), so the whole-page `labels` list grows from four entries to six (three for the GitHub row, three for the connected GitLab row). The unconnected GitLab row still holds none, and the GitHub row without an installation still holds none.
 
 ### Seams
 
@@ -210,10 +210,10 @@ credentials (`repo.gitlab !== null`), as it already does `FleetRepoFixUnprotecte
 - AC-6 [unit] An item whose `sha` is not a string makes `listOpenMergeRequests` throw `RepoCheckException` with reason `provider_error`.
 - AC-7 [unit] A 401 answer makes `listOpenMergeRequests` throw `RepoCheckException` with reason `gitlab_token_invalid`.
 - AC-8 [unit] A 404 answer makes `listOpenMergeRequests` throw `RepoCheckException` with reason `repo_not_found`.
-- AC-9 [unit] When the host check refuses the api base with `gitlab_host_blocked`, `listOpenMergeRequests` throws that refusal and sends no HTTP request.
+- AC-9 [unit] When the api base host resolves to `127.0.0.1`, `listOpenMergeRequests` throws `RepoCheckException` with reason `gitlab_host_blocked` and sends no HTTP request.
 - AC-10 [integration] `PrismaFleetRepoRepository.findAutoReviewPage(50)` returns a GitLab repo with `autoReview: true` and a `FleetRepoGitlabCredential` row.
 - AC-11 [integration] `PrismaFleetRepoRepository.findAutoReviewPage(50)` does not return a GitLab repo with `autoReview: true` and no `FleetRepoGitlabCredential` row.
-- AC-12 [unit] With one enabled GitLab repo `{ provider: 'gitlab', owner: 'grp', name: 'app' }` on the page, `FleetPrReviewPass.run(now)` calls `GitLabRepoCredentials.call` with that repo and `'read'`, calls `GitLabAccessChecker.listOpenMergeRequests` with the access `call` resolved and `'grp/app'`, and calls `ReviewHeadDispatcher.dispatchRepo` with the repo and the list it returned.
+- AC-12 [unit] With one enabled GitLab repo `{ provider: 'gitlab', owner: 'grp', name: 'app' }` on the page, `FleetPrReviewPass.run(now)` calls `GitLabRepoCredentials.call` with the repo record itself (the page's row, carrying its `host`) and `'read'`, calls `GitLabAccessChecker.listOpenMergeRequests` with the access `call` resolved and `'grp/app'`, and calls `ReviewHeadDispatcher.dispatchRepo` with the repo and the list it returned.
 - AC-13 [unit] For an enabled GitLab repo, `FleetPrReviewPass.run(now)` never calls `GitHubAppClient.mintInstallationToken` or `GitHubAppClient.listOpenPullRequests`.
 - AC-14 [unit] When `GitLabRepoCredentials.call` rejects with `RepoCheckException('gitlab_token_invalid')` for the first of two enabled repos, `FleetPrReviewPass.run(now)` logs a warning containing the first repo's id and `gitlab_token_invalid`, and still calls `ReviewHeadDispatcher.dispatchRepo` for the second repo.
 
@@ -223,15 +223,13 @@ credentials (`repo.gitlab !== null`), as it already does `FleetRepoFixUnprotecte
 - AC-2 [unit] `configureAutoReview(principal, id, { enabled: true })` for a GitLab row whose `gitlabCredential` is null throws `AutoReviewException` with reason `gitlab credentials required` and status 422, and calls neither `updateAutoReview` nor `audit.record`.
 - AC-3 [unit] `configureAutoReview(principal, id, { enabled: true })` for a GitLab row with no `gitlabCredential` field throws `AutoReviewException` with reason `gitlab credentials required`.
 - AC-4 [unit] `configureAutoReview(principal, id, { enabled: true })` for a GitHub row whose `githubInstallationId` is null still throws `AutoReviewException` with reason `github app required`.
-- AC-5 [unit] `configureAutoReview(principal, id, { enabled: false })` for a GitLab row whose `gitlabCredential` is null calls `updateAutoReview` with `autoReview: false`.
-- AC-6 [unit] `FleetReposService.configureFixChecks(principal, id, { trustDetectedChecks: true })` for a GitLab row with a non-null `gitlabCredential` calls `updateFixChecks(id, true)` and records the audit summary `fix detected checks enabled`.
-- AC-7 [unit] `configureFixChecks(principal, id, { trustDetectedChecks: true })` for a GitLab row whose `gitlabCredential` is null throws `FixChecksException` with reason `gitlab credentials required` and status 422, and calls neither `updateFixChecks` nor `audit.record`.
-- AC-8 [unit] `configureFixChecks(principal, id, { trustDetectedChecks: true })` for a GitHub row whose `githubInstallationId` is null still throws `FixChecksException` with reason `github app required`.
-- AC-9 [integration] `PATCH /api/fleet/repos/:id/auto-review` with `{ enabled: true }` as the global admin, for a GitLab repo with a `FleetRepoGitlabCredential` row, answers 200 with `autoReview: true`, and the stored row has `autoReview: true`.
-- AC-10 [integration] `PATCH /api/fleet/repos/:id/auto-review` with `{ enabled: true }` for a GitLab repo without a credential row answers 422 whose body contains `gitlab credentials required`, and the stored row keeps `autoReview: false`.
-- AC-11 [integration] `PATCH /api/fleet/repos/:id/fix-checks` with `{ trustDetectedChecks: true }` as the global admin, for a GitLab repo with a `FleetRepoGitlabCredential` row, answers 200 with `fixTrustDetectedChecks: true`.
-- AC-12 [integration] `PATCH /api/fleet/repos/:id/fix-checks` with `{ trustDetectedChecks: true }` for a GitLab repo without a credential row answers 422 whose `message` is `Detected checks cannot be trusted: gitlab credentials required.`, and the stored row keeps `fixTrustDetectedChecks: false`.
-- AC-13 [unit] `buildAssignPayload` for a FIX job with feature `fix-pr-7` whose repo is `{ provider: 'gitlab', fixTrustDetectedChecks: true }` returns a payload whose `review` block carries `prNumber: 7` and `trustDetectedChecks: true`.
+- AC-5 [unit] `FleetReposService.configureFixChecks(principal, id, { trustDetectedChecks: true })` for a GitLab row with a non-null `gitlabCredential` calls `updateFixChecks(id, true)` and records the audit summary `fix detected checks enabled`.
+- AC-6 [unit] `configureFixChecks(principal, id, { trustDetectedChecks: true })` for a GitLab row whose `gitlabCredential` is null throws `FixChecksException` with reason `gitlab credentials required` and status 422, and calls neither `updateFixChecks` nor `audit.record`.
+- AC-7 [unit] `configureFixChecks(principal, id, { trustDetectedChecks: true })` for a GitHub row whose `githubInstallationId` is null still throws `FixChecksException` with reason `github app required`.
+- AC-8 [integration] `PATCH /api/fleet/repos/:id/auto-review` with `{ enabled: true }` as the global admin, for a GitLab repo with a `FleetRepoGitlabCredential` row, answers 200 with `autoReview: true`, and the stored row has `autoReview: true`.
+- AC-9 [integration] `PATCH /api/fleet/repos/:id/auto-review` with `{ enabled: true }` for a GitLab repo without a credential row answers 422 whose body contains `gitlab credentials required`, and the stored row keeps `autoReview: false`.
+- AC-10 [integration] `PATCH /api/fleet/repos/:id/fix-checks` with `{ trustDetectedChecks: true }` as the global admin, for a GitLab repo with a `FleetRepoGitlabCredential` row, answers 200 with `fixTrustDetectedChecks: true`.
+- AC-11 [integration] `PATCH /api/fleet/repos/:id/fix-checks` with `{ trustDetectedChecks: true }` for a GitLab repo without a credential row answers 422 whose `message` is `Detected checks cannot be trusted: gitlab credentials required.`, and the stored row keeps `fixTrustDetectedChecks: false`.
 
 ### US-003: Web switches for GitLab repos
 
