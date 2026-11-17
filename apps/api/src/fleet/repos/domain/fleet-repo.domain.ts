@@ -93,6 +93,17 @@ export interface FleetRepoRecord {
   gitlabCredential?: GitLabCredentialView | null;
 }
 
+/**
+ * The identity of a GitLab repo, as a registered row stores it: the host it lives on (the origin
+ * plus an optional path prefix), its namespace and its name. The whole identity is what a remote
+ * URL names, so a lookup matches on all of it and not on the name alone.
+ */
+export interface GitLabRemoteIdentity {
+  host: string;
+  owner: string;
+  name: string;
+}
+
 export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
   'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'
 >>;
@@ -107,6 +118,13 @@ export interface IFleetRepoRepository {
    * case-insensitively, because a forge's URLs and a registered row do not agree on case.
    */
   findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null>;
+  /**
+   * GitLab rows carrying one of the given canonical identities (host, namespace and name), matched
+   * case-insensitively, in stable registration order. The read is bounded (the repository's
+   * `MAX_GITLAB_REMOTE_CANDIDATES` rows), and the bound applies to the rows that already carry the
+   * identity: a name that repeats on other hosts or namespaces cannot hide the registered repo.
+   */
+  findGitLabByRemote(identities: readonly GitLabRemoteIdentity[]): Promise<FleetRepoRecord[]>;
   /**
    * SELECT ... FOR UPDATE on the repo row, returning the locked record. The nax flow entry
    * serialises creation on it, so two concurrent calls cannot both pass the duplicate check.

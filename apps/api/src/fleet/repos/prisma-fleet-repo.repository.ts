@@ -11,6 +11,7 @@ import type {
   FleetRepoRecord,
   FleetRepoRuleOverrideRecord,
   GitLabCredentialView,
+  GitLabRemoteIdentity,
   IFleetRepoRepository,
   RuleOverrideActor,
   RuleOverrideSummary,
@@ -51,6 +52,13 @@ const REPO_WRITE_INCLUDE = {
   ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT },
   gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT },
 } as const;
+
+/**
+ * The bound of a GitLab remote lookup (US-003): the read never takes more rows than this, so it never
+ * scans the whole table (the API data rule). The bound applies to the rows that already carry the
+ * identity the lookup asked for, so it can never hide a registered repo behind same-named rows.
+ */
+export const MAX_GITLAB_REMOTE_CANDIDATES = 500;
 
 /** The rule-override summary columns as a repo row carries them. */
 interface RuleOverrideSummaryRow {
@@ -172,6 +180,46 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     return row ? this.toDomain(row) : null;
+  }
+
+  /**
+   * GitLab repos carrying one of the given canonical identities, in deterministic registration order.
+   *
+   * The identity is the row's whole identity — host, namespace and name — so the filter is the
+   * lookup's answer and not a page of candidates the caller has to match afterwards: a name that
+   * repeats on other hosts or namespaces cannot push the registered repo out of the bounded page.
+   *
+   * The comparison is literal case-insensitive equality (`LOWER(a) = LOWER(b)`) and never Prisma's
+   * `mode: 'insensitive'`, which compiles to `ILIKE`: there a `_` in a namespace such as `grp_one`
+   * is a wildcard that also matches `grpXone`, so the noncanonical rows it admits would consume the
+   * bound and the lookup's first row could be the wrong repository.
+   */
+  async findGitLabByRemote(identities: readonly GitLabRemoteIdentity[]): Promise<FleetRepoRecord[]> {
+    if (identities.length === 0) return [];
+    const branches = identities.flatMap(({ host, owner, name }) => [
+      Prisma.sql`(LOWER("host") = LOWER(${host}::text) AND LOWER("owner") = LOWER(${owner}::text) AND LOWER("name") = LOWER(${name}::text))`,
+      // A stored host is canonical (no trailing slash); a row written by hand may still carry one,
+      // and it names the same host.
+      Prisma.sql`(LOWER("host") = LOWER(${`${host}/`}::text) AND LOWER("owner") = LOWER(${owner}::text) AND LOWER("name") = LOWER(${name}::text))`,
+    ]);
+    const ids = await this.db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "FleetRepo"
+      WHERE "provider" = 'gitlab' AND (${Prisma.join(branches, ' OR ')})
+      ORDER BY "createdAt" ASC, "id" ASC
+      LIMIT ${MAX_GITLAB_REMOTE_CANDIDATES}
+    `);
+    if (ids.length === 0) return [];
+    const rows = await this.db.fleetRepo.findMany({
+      where: { id: { in: ids.map((row) => row.id) } },
+      take: MAX_GITLAB_REMOTE_CANDIDATES,
+    });
+    // The filter's order is the answer's order (registration order, id as the tiebreak), so the
+    // rows are replayed from it rather than in whatever order the hydration read returned them.
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.flatMap(({ id }) => {
+      const row = byId.get(id);
+      return row === undefined ? [] : [this.toDomain(row)];
+    });
   }
 
   /** SELECT ... FOR UPDATE on the repo row (the nax flow entry's creation lock). */

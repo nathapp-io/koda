@@ -4,7 +4,7 @@ import type { GitLabAccess } from './gitlab-repo-credentials';
 import { assertGitLabHostAllowed } from './gitlab-host';
 import { RepoCheckException } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
-import type { OpenPullRequest } from './github-app-client';
+import type { OpenPullRequest, PutFileResult } from './github-app-client';
 import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
 /** The GitLab access level a fleet job needs: Developer or above. */
@@ -134,6 +134,83 @@ export class GitLabAccessChecker {
     return id;
   }
 
+  static readonly OWN_RUN_MAX_COMMITS = 50;
+
+  /** Proves that head is exactly one direct-child commit changing only the requested existing file. */
+  async isSingleFileCommit(access: GitLabAccess, base: string, head: string, path: string): Promise<boolean> {
+    const comparison = await this.compare(access, base, head);
+    if (!comparison || comparison.commits.length !== 1 || comparison.diffs.length !== 1) return false;
+    const commitId = obj(comparison.commits[0]).id;
+    if (commitId !== head) return false;
+    const details = await this.readCommit(access, commitId);
+    if (!details) return false;
+    if (!Array.isArray(details.parent_ids) || details.parent_ids.length !== 1 || details.parent_ids[0] !== base) return false;
+    return isExistingPathDiff(comparison.diffs[0], path);
+  }
+
+  /** Proves a bounded, linear run of only marked calls commits on the allowlisted paths. */
+  async isOwnCallsRun(
+    access: GitLabAccess,
+    base: string,
+    head: string,
+    own: { paths: readonly string[]; marker: string },
+  ): Promise<boolean> {
+    const comparison = await this.compare(access, base, head);
+    if (!comparison || comparison.commits.length === 0 || comparison.diffs.length === 0
+      || comparison.commits.length > GitLabAccessChecker.OWN_RUN_MAX_COMMITS) return false;
+
+    const detailsById = new Map<string, Obj>();
+    for (const raw of comparison.commits) {
+      const id = obj(raw).id;
+      if (typeof id !== 'string' || id === '' || detailsById.has(id)) return false;
+      const details = await this.readCommit(access, id);
+      if (!details) return false;
+      detailsById.set(id, details);
+    }
+
+    const listed = new Set(detailsById.keys());
+    const visited = new Set<string>();
+    let current = head;
+    while (current !== base) {
+      if (visited.has(current) || !listed.has(current)) return false;
+      visited.add(current);
+      const details = detailsById.get(current);
+      const parents = details?.parent_ids;
+      if (!Array.isArray(parents) || parents.length !== 1 || typeof parents[0] !== 'string') return false;
+      const message = details?.message;
+      if (typeof message !== 'string' || !message.includes(own.marker)) return false;
+      current = parents[0];
+    }
+    if (visited.size !== listed.size) return false;
+    return comparison.diffs.every((raw) => {
+      const diff = obj(raw);
+      return typeof diff.old_path === 'string' && diff.old_path === diff.new_path
+        && own.paths.includes(diff.old_path) && isExistingPathDiff(raw, diff.old_path);
+    });
+  }
+
+  /** Fetches compare details once; GitLab's compare response may explicitly signal an incomplete compare. */
+  private async compare(access: GitLabAccess, base: string, head: string): Promise<{ commits: unknown[]; diffs: unknown[] } | null> {
+    await this.guard(access.target.apiBase);
+    const query = `from=${encodeURIComponent(base)}&to=${encodeURIComponent(head)}&straight=false`;
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/compare?${query}`, { 'private-token': access.token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) this.fail(res.status);
+    const body = obj(res.body);
+    if (body.compare_timeout === true) return null;
+    if (!Array.isArray(body.commits) || !Array.isArray(body.diffs)) throw new RepoCheckException('provider_error');
+    return { commits: body.commits, diffs: body.diffs };
+  }
+
+  /** Reads one commit's full message and parent ids. A missing commit cannot prove ownership. */
+  private async readCommit(access: GitLabAccess, id: string): Promise<Obj | null> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/commits/${encodeURIComponent(id)}`, { 'private-token': access.token });
+    if (res.status === 404) return null;
+    if (res.status !== 200) this.fail(res.status);
+    return obj(res.body);
+  }
+
   static readonly TREE_PAGE = 100;
   static readonly TREE_MAX_PAGES = 10;
   static readonly TREE_FULL_MAX_PAGES = 100;
@@ -222,6 +299,54 @@ export class GitLabAccessChecker {
     return level(match);
   }
 
+  /** Creates a branch; after a 400, distinguishes an existing branch from an invalid ref. */
+  async createBranch(access: GitLabAccess, branch: string, sha: string): Promise<{ kind: 'created' } | { kind: 'exists'; sha: string } | { kind: 'refused' }> {
+    await this.guard(access.target.apiBase);
+    const query = `branch=${encodeURIComponent(branch)}&ref=${encodeURIComponent(sha)}`;
+    const res = await this.http.request('POST', `${this.projectUrl(access)}/repository/branches?${query}`, { 'private-token': access.token });
+    if (res.status === 201) return { kind: 'created' };
+    if (res.status === 400) {
+      try {
+        const head = await this.getBranchHead(access, branch);
+        return { kind: 'exists', sha: head };
+      } catch (error) {
+        if (error instanceof RepoCheckException && error.reason === 'repo_not_found') return { kind: 'refused' };
+        throw error;
+      }
+    }
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    this.fail(res.status);
+  }
+
+  /** Reads one file and the commit id required to safely update it. */
+  async getFileForUpdate(access: GitLabAccess, path: string, ref: string): Promise<(ForgeFile & { lastCommitId: string }) | null> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`, { 'private-token': access.token });
+    if (res.status === 404) return null;
+    if (res.status !== 200) this.fail(res.status);
+    const b = obj(res.body);
+    if (typeof b.blob_id !== 'string' || typeof b.size !== 'number' || b.encoding !== 'base64' || typeof b.content !== 'string' || typeof b.last_commit_id !== 'string') {
+      throw new RepoCheckException('provider_error');
+    }
+    return { sha: b.blob_id, size: b.size, content: Buffer.from(b.content, 'base64'), lastCommitId: b.last_commit_id };
+  }
+
+  /** Commits a single guarded file update using GitLab's commits API. */
+  async commitFile(access: GitLabAccess, path: string, input: { branch: string; content: Buffer; lastCommitId: string; message: string }): Promise<PutFileResult> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('POST', `${this.projectUrl(access)}/repository/commits`, { 'private-token': access.token }, {
+      branch: input.branch,
+      commit_message: input.message,
+      actions: [{ action: 'update', file_path: path, content: input.content.toString('base64'), encoding: 'base64', last_commit_id: input.lastCommitId }],
+    });
+    if (res.status === 400 || res.status === 409) return { kind: 'conflict' };
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 201) this.fail(res.status);
+    const commitSha = obj(res.body).id;
+    if (typeof commitSha !== 'string') throw new RepoCheckException('provider_error');
+    return { kind: 'committed', commitSha };
+  }
+
   /** Fleet S3 §4.1: one file at a ref (files API, base64). Null when absent. */
   async getFile(access: GitLabAccess, path: string, ref: string): Promise<ForgeFile | null> {
     await this.guard(access.target.apiBase);
@@ -291,6 +416,13 @@ export class GitLabAccessChecker {
     };
   }
 }
+
+/** GitLab diff entries must describe an existing, unchanged-path modification, not add/delete/rename. */
+const isExistingPathDiff = (raw: unknown, path: string): boolean => {
+  const diff = obj(raw);
+  return diff.old_path === path && diff.new_path === path
+    && diff.new_file === false && diff.deleted_file === false && diff.renamed_file === false;
+};
 
 /** The api base without its trailing slashes, so a url is built the same way every time. */
 const trimSlashes = (apiBase: string): string => apiBase.replace(/\/+$/, '');

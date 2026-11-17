@@ -2,6 +2,8 @@ import type { ITransactionManager } from '@nathapp/nestjs-data';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import type { FleetActivityService } from '../activity/fleet-activity.service';
 import type { GitHubAppClient } from '../git-broker/github-app-client';
+import type { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import type { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { RepoCheckException, type RepoCheckReason } from '../git-broker/repo-check.exception';
 import type { FleetReposService } from '../repos/fleet-repos.service';
 import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
@@ -18,6 +20,8 @@ export interface FeaturePassDeps {
   steps: IFleetFlowStepRepository;
   repos: FleetReposService;
   github: GitHubAppClient;
+  gitlabCredentials: GitLabRepoCredentials;
+  gitlab: GitLabAccessChecker;
   activity: FleetActivityService;
   audit: AuditRecorder;
   txManager: ITransactionManager;
@@ -84,7 +88,17 @@ export async function runFeatureStart(
     return { kind: 'stop', reason: 'dispatch_refused', detail: 'thread entry runs one feature' };
   }
   const repo = await deps.repos.findReviewRepo(flow.repoId);
-  if (!repo || repo.githubInstallationId === null) {
+  if (!repo) {
+    return { kind: 'stop', reason: 'dispatch_refused', detail: 'repo not connected' };
+  }
+  if (repo.provider === 'gitlab') {
+    const branch = `feat/${feature.feature}`;
+    const created = await createGitLabFeatureBranch(deps, repo, feature, branch, base, flow.setSha);
+    if (created.kind !== 'created') return created;
+    await recordFeatureStart(deps, flow, feature, { base, sha: created.sha, branch });
+    return { kind: 'started', branch, sha: created.sha };
+  }
+  if (repo.githubInstallationId === null) {
     return { kind: 'stop', reason: 'dispatch_refused', detail: 'repo not connected' };
   }
   const branch = `feat/${feature.feature}`;
@@ -92,6 +106,55 @@ export async function runFeatureStart(
   if (created.kind !== 'created') return created;
   await recordFeatureStart(deps, flow, feature, { base, sha: created.sha, branch });
   return { kind: 'started', branch, sha: created.sha };
+}
+
+/** The GitLab forge calls are scoped to one token per client method, never a whole pass. */
+async function createGitLabFeatureBranch(
+  deps: FeaturePassDeps,
+  repo: { id: string; host?: string; defaultBranch: string },
+  feature: FleetFlowFeatureRecord,
+  branch: string,
+  base: FeatureStartBase,
+  setSha: string,
+): Promise<FeatureBranch> {
+  try {
+    const baseSha = base === 'default'
+      ? await deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getBranchHead(access, repo.defaultBranch))
+      : setSha;
+    const approved = await specMatchesApprovedGitLab(deps, repo, feature.specPath, baseSha, setSha);
+    if (!approved) {
+      return { kind: 'stop', reason: 'spec_changed', detail: `${feature.specPath} differs from the approved spec` };
+    }
+    const result = await deps.gitlabCredentials.call(repo, 'write', (access) => deps.gitlab.createBranch(access, branch, baseSha));
+    if (result.kind === 'refused') {
+      return { kind: 'stop', reason: 'dispatch_refused', detail: `branch ${branch} not created` };
+    }
+    if (result.kind === 'exists' && result.sha !== baseSha) {
+      return { kind: 'stop', reason: 'dispatch_refused', detail: `branch ${branch} already exists` };
+    }
+    return { kind: 'created', sha: baseSha };
+  } catch (error) {
+    if (!(error instanceof RepoCheckException)) throw error;
+    return callsOutcomeForForgeError(error.reason) === 'failed'
+      ? { kind: 'stop', reason: 'dispatch_refused', detail: error.reason }
+      : { kind: 'retry' };
+  }
+}
+
+/** Compare the approved GitLab spec using a separate read-token call for each file request. */
+async function specMatchesApprovedGitLab(
+  deps: FeaturePassDeps,
+  repo: { id: string; host?: string },
+  specPath: string,
+  baseSha: string,
+  setSha: string,
+): Promise<boolean> {
+  const atBase = await deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getFile(access, specPath, baseSha));
+  if (!atBase) return false;
+  const atSet = baseSha === setSha
+    ? atBase
+    : await deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getFile(access, specPath, setSha));
+  return atSet !== null && atSet.sha === atBase.sha;
 }
 
 /** The forge half of the start: the branch of the feature exists at the base sha. */
@@ -231,11 +294,12 @@ interface AwaitedPr {
 /**
  * US-012: the merge watch of a flow that waits for a merge.
  *
- * The pass runs outside any transaction: it mints one read token and polls the PR of every awaited
- * feature. A merged PR marks its feature MERGED, a PR that was closed without a merge (or that is
- * gone) stops the flow, and an open PR changes nothing. The merges and the stop are written under
- * the flow locks, and only while the flow still waits for the same approval. The pass never
- * dispatches: a flow that resumes waits for the next pass to start the next feature.
+ * The pass runs outside any transaction: GitHub mints one read token for every awaited PR, while
+ * GitLab obtains credentials per merge-request call. A merged PR marks its feature MERGED, a PR
+ * that was closed without a merge (or that is gone) stops the flow, and an open PR changes nothing.
+ * The merges and the stop are written under the flow locks, and only while the flow still waits for
+ * the same approval. The pass never dispatches: a flow that resumes waits for the next pass to start
+ * the next feature.
  */
 export async function runMergeWatch(
   deps: FeaturePassDeps,
@@ -248,7 +312,14 @@ export async function runMergeWatch(
 
   // A repo that is not connected to a forge cannot be watched at all.
   const repo = await deps.repos.findReviewRepo(flow.repoId);
-  if (!repo || repo.githubInstallationId === null) {
+  if (!repo) {
+    await recordMergeWatch(deps, flow, {
+      merged: [],
+      stop: { reason: 'dispatch_refused', detail: 'repo not connected', feature: first },
+    }, now);
+    return { kind: 'watched', merged: [] };
+  }
+  if (repo.provider !== 'gitlab' && repo.githubInstallationId === null) {
     await recordMergeWatch(deps, flow, {
       merged: [],
       stop: { reason: 'dispatch_refused', detail: 'repo not connected', feature: first },
@@ -310,18 +381,51 @@ export function failureStopFeature(flow: FleetFlowRecord): FleetFlowFeatureRecor
  */
 async function pollAwaited(
   deps: FeaturePassDeps,
-  repo: { owner: string; name: string; githubInstallationId: bigint },
+  repo: { id: string; provider?: string; host?: string; owner: string; name: string; githubInstallationId: bigint | null },
   targets: AwaitedPr[],
 ): Promise<{ kind: 'observed'; observation: MergeWatchObservation } | { kind: 'retry' }> {
-  const [first] = targets;
-  if (first === undefined) return { kind: 'observed', observation: { merged: [], stop: null } };
+  const [firstTarget] = targets;
+  if (firstTarget === undefined) return { kind: 'observed', observation: { merged: [], stop: null } };
+  const first = firstTarget.feature;
+
+  if (repo.provider === 'gitlab') {
+    const settled = await Promise.allSettled(targets.map((target) =>
+      deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getMergeRequest(access, target.prNumber))));
+    const merged: FleetFlowFeatureRecord[] = [];
+    let stop: MergeWatchStop | null = null;
+    for (const [index, outcome] of settled.entries()) {
+      const target = targets[index];
+      if (target === undefined) continue;
+      if (outcome.status === 'rejected') {
+        const error = outcome.reason;
+        if (!(error instanceof RepoCheckException)) throw error;
+        if (callsOutcomeForForgeError(error.reason) === 'retry') return { kind: 'retry' };
+        stop ??= { reason: 'dispatch_refused', detail: error.reason, feature: target.feature };
+        continue;
+      }
+      const mr = outcome.value;
+      if (mr === null) {
+        stop ??= { reason: 'pr_closed', detail: `PR #${target.prNumber} not found`, feature: target.feature };
+      } else if (mr.merged) {
+        merged.push(target.feature);
+      } else if (mr.state === 'closed') {
+        stop ??= { reason: 'pr_closed', detail: `PR #${target.prNumber} closed without merge`, feature: target.feature };
+      }
+    }
+    return { kind: 'observed', observation: { merged, stop } };
+  }
+  if (repo.githubInstallationId === null) {
+    return { kind: 'observed', observation: { merged: [], stop: {
+      reason: 'dispatch_refused', detail: 'repo not connected', feature: first,
+    } } };
+  }
 
   let token: string;
   try {
     ({ token } = await deps.github.mintThreadReadToken(repo.githubInstallationId, repo.name));
   } catch (error) {
     if (!(error instanceof RepoCheckException)) throw error;
-    const stop = stopForForgeError(error.reason, first.feature);
+    const stop = stopForForgeError(error.reason, first);
     return stop === null
       ? { kind: 'retry' }
       : { kind: 'observed', observation: { merged: [], stop } };

@@ -35,6 +35,8 @@ import { PermissionService } from '../../permissions/permission.service';
 import type { PrincipalRef } from '../../permissions/permissions.types';
 import { FleetFlowsService } from './fleet-flows.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { isTerminal } from '../jobs/job-state';
 import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
@@ -80,6 +82,8 @@ export class FleetFlowAdvanceService {
     private readonly calls: FleetFlowCallsService,
     private readonly outbox: OutboxService,
     private readonly rulings: FleetPrRulingsService,
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlab: GitLabAccessChecker,
   ) {}
 
   async stopFailedFlow(flowId: string, detail: string, now: Date): Promise<boolean> {
@@ -176,6 +180,7 @@ export class FleetFlowAdvanceService {
   private featurePassDeps(): FeaturePassDeps {
     return {
       steps: this.steps, repos: this.repos, github: this.github,
+      gitlabCredentials: this.gitlabCredentials, gitlab: this.gitlab,
       activity: this.activity, audit: this.audit, txManager: this.txManager,
       lockLive: (previous) => this.lockLive(previous),
       lockWaitingMerge: (previous) => this.lockWaitingMerge(previous),
@@ -806,7 +811,12 @@ export class FleetFlowAdvanceService {
       && !(isTerminal(latest.state) && (latest.flowStep === 'SPEC_REVIEW'
         || (latest.flowStep === 'PRD_REVIEW' && latest.id === first.callsJobId)))) return;
     const repo = await this.repos.findReviewRepo(flow.repoId);
-    if (!repo || repo.githubInstallationId === null) return null;
+    if (!repo) return null;
+    if (repo.provider === 'gitlab') {
+      return this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getBranchHead(access, flow.branch));
+    }
+    if (repo.githubInstallationId === null) return null;
     const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
     return this.github.getBranchHead(token, repo.owner, repo.name, flow.branch);
   }
@@ -902,7 +912,10 @@ export class FleetFlowAdvanceService {
     const repo = await this.repos.findReviewRepo(flow.repoId);
     return repo === null
       ? null
-      : prNumberFor({ provider: 'github', owner: repo.owner, name: repo.name }, job.resultPrUrl);
+      : prNumberFor({
+        provider: repo.provider === 'gitlab' ? 'gitlab' : 'github',
+        owner: repo.owner, name: repo.name, host: repo.host,
+      }, job.resultPrUrl);
   }
 
   /**

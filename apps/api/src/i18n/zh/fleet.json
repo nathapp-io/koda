@@ -53,6 +53,7 @@
     "duplicate": { "409": "已有进行中的流程覆盖此分支与规格提交：{flowId}" },
     "repoNotFound": { "404": "在你可访问的项目中找不到与此远程 URL 匹配的仓库" },
     "repoNotConnected": { "409": "Koda 尚无法读取此仓库：请为该仓库连接 GitHub App" },
+    "gitlabNotConnected": { "409": "Koda 无法读取此 GitLab 仓库：其令牌缺失或无效；请使用 koda fleet repo credentials 轮换令牌" },
     "forgeUnavailable": { "503": "代码托管服务当前不可用；流程未创建" },
     "branchNotFound": { "409": "此仓库中不存在该分支" },
     "specShaNotHead": { "409": "该规格提交不是该分支的最新提交" },

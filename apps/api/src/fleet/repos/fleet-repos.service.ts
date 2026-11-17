@@ -26,6 +26,7 @@ import type { RepoCheckReason } from '../git-broker/repo-check.exception';
 import type { GitLabTokenKind } from '../git-broker/prisma-gitlab-credential.repository';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
+import { gitLabRemoteIdentities } from './gitlab-remote-identity';
 import type { FleetRepoRecord } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto, RuleOverrideDto } from './dto/fleet-repo.dto';
@@ -591,6 +592,21 @@ export class FleetReposService {
    */
   findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null> {
     return this.repo.findByIdentity(provider, owner, name);
+  }
+
+  /**
+   * Resolve a canonical GitLab remote against the registered host, namespace and repo name.
+   *
+   * The row is matched on that whole identity, and the repository filters on it before it reads a
+   * bounded page: a name that repeats on other hosts or namespaces can no longer hide the
+   * registered repo behind a page of same-named rows (and the flow entry stops answering 404 for a
+   * repo that is registered).
+   */
+  async findGitLabByRemoteUrl(url: string): Promise<FleetRepoRecord | null> {
+    const identities = gitLabRemoteIdentities(url);
+    if (identities.length === 0) return null;
+    const rows = await this.repo.findGitLabByRemote(identities);
+    return rows[0] ?? null;
   }
 
   /**

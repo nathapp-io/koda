@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 import { ValidationAppException } from '@nathapp/nestjs-common';
-import { parseGitHubUrl } from '../../skills/github-url';
+import { parseFlowRemoteUrl } from './flow-remote-url';
 import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
 
 export type FlowEntry = 'THREAD' | 'NAX';
@@ -62,7 +62,7 @@ export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowI
   };
   if (entry === 'NAX') {
     if (typeof body.remoteUrl !== 'string') fail('remoteUrl');
-    try { parseGitHubUrl(body.remoteUrl); } catch { fail('remoteUrl'); }
+    try { parseFlowRemoteUrl(body.remoteUrl); } catch { fail('remoteUrl'); }
     if (typeof body.branch !== 'string' || !GIT_REF_RE.test(body.branch)) fail('branch');
     const collisionIndex = features.findIndex((feature, index) => index > 0 && body.branch === `feat/${feature.feature}`);
     if (collisionIndex !== -1) fail(`features.${collisionIndex}.feature`);
