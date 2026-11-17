@@ -39,7 +39,8 @@ import { FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../he
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
-import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
+import { GitHubAppClient, type OpenPullRequest } from '../../../src/fleet/git-broker/github-app-client';
+import { RepoCheckException } from '../../../src/fleet/git-broker/repo-check.exception';
 import { ProjectBriefService } from '../../../src/fleet/threads/project-brief.service';
 import { ThreadsService } from '../../../src/fleet/threads/threads.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
@@ -5324,6 +5325,242 @@ describeIntegration('API Integration Tests', () => {
         refusal(response, 'fleet.flows.repoNotFound.404');
         expect(await db().fleetFlow.count()).toBe(before.flows);
         expect(await db().approvalRequest.count()).toBe(before.requests);
+      });
+    });
+
+    describe('US-004 nax handoff flow entry route', () => {
+      const headSha = 'd'.repeat(40);
+      const handoffFeature = 'handoff-e2e';
+      const prdPath = `.nax/features/${handoffFeature}/prd.json`;
+      const repoFullName = 'acme/threads-app';
+      /** The chat run's record: its newest run is publishable at the head it hands over. */
+      const handoffRecord = [{ runId: 'run-handoff-e2e', file: 'result.json', mtimeMs: 1763370000000,
+        content: JSON.stringify({ schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: headSha } }) }];
+      /** One handoff body per branch, so every case owns the branch it refuses or creates. */
+      const handoffBody = (branch: string) => ({
+        remoteUrl: 'https://github.com/acme/threads-app.git', branch,
+        roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25,
+        handoff: { feature: handoffFeature, headSha, record: handoffRecord },
+      });
+      const post = (body: unknown) => request(httpServer).post('/api/fleet/flows')
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send(body);
+      const flowsOn = (branch: string) => db().fleetFlow.count({ where: { repoId: world.repoId, branch } });
+
+      /**
+       * The forge reads a handoff create makes: the branch head, the PRD at that head and the open
+       * pull requests. `mintThreadReadToken` is the credential the handoff form uses; the
+       * read-only one cannot list pull requests, so it must never be minted here.
+       */
+      const withForge = (options: {
+        branch?: string;
+        head?: string;
+        prd?: string | null;
+        prs?: OpenPullRequest[];
+        listError?: Error;
+      } = {}) => {
+        const github = app.get(GitHubAppClient);
+        // These two methods are already spied by the parent thread lifecycle. Preserve its defaults.
+        const head = vi.mocked(github.getBranchHead);
+        const file = vi.mocked(github.getFile);
+        const previousHead = head.getMockImplementation();
+        const previousFile = file.getMockImplementation();
+        const mintThread = vi.spyOn(github, 'mintThreadReadToken').mockResolvedValue({ token: 'handoff-read-token', expiresAt: new Date() });
+        const mintReadOnly = vi.spyOn(github, 'mintReadOnlyToken').mockResolvedValue({ token: 'read-only-token', expiresAt: new Date() });
+        const list = vi.spyOn(github, 'listOpenPullRequests');
+        head.mockResolvedValue(options.head ?? headSha);
+        file.mockResolvedValue(options.prd === null ? null : { sha: 'prd-sha', size: 8, content: Buffer.from(options.prd ?? JSON.stringify({ branchName: options.branch, userStories: [] })) });
+        if (options.listError) list.mockRejectedValue(options.listError);
+        else list.mockResolvedValue(options.prs ?? []);
+        return {
+          mintThread, mintReadOnly, list,
+          restore: () => {
+            mintThread.mockRestore();
+            mintReadOnly.mockRestore();
+            list.mockRestore();
+            head.mockReset();
+            file.mockReset();
+            if (previousHead) head.mockImplementation(previousHead);
+            if (previousFile) file.mockImplementation(previousFile);
+          },
+        };
+      };
+
+      it('US-004 AC-1/2/3/4: stores a PENDING NAX flow with one handoff feature and no record in the response', async () => {
+        const branch = 'feat/handoff-e2e-happy';
+        const forge = withForge({ branch });
+        try {
+          const response = await post(handoffBody(branch)).expect(201);
+          const flow = body<{ id: string; state: string; entry: string; specSha: string; approval: { approvalRequestId: string | null }; features: Record<string, unknown>[] }>(response);
+          const row = await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } });
+          expect(row).toMatchObject({ state: 'PENDING', entry: 'NAX', specSha: headSha, branch });
+          expect(flow).toMatchObject({ state: 'PENDING', entry: 'NAX', specSha: headSha });
+          // The flow waits on the `fleet.flow.start` ask, as every nax-entry flow does.
+          expect(flow.approval.approvalRequestId).toBeTruthy();
+          expect(await db().approvalRequest.findUniqueOrThrow({ where: { id: flow.approval.approvalRequestId as string } }))
+            .toMatchObject({ permissionKey: 'fleet.flow.start', status: 'pending' });
+
+          // AC-2: the one feature of the flow, with the handoff flag on it.
+          const features = await db().fleetFlowFeature.findMany({ where: { flowId: flow.id } });
+          expect(features).toHaveLength(1);
+          expect(features[0]).toMatchObject({ feature: handoffFeature, specPath: `.nax/features/${handoffFeature}/spec.md`, dependsOn: [], handoff: true });
+
+          // AC-3: the handoff form mints the thread read token, never the read-only one.
+          expect(forge.mintThread).toHaveBeenCalledWith(BigInt(77), 'threads-app');
+          expect(forge.mintReadOnly).not.toHaveBeenCalled();
+
+          // AC-4: the stored record never reaches the response body.
+          for (const feature of flow.features) expect(feature).not.toHaveProperty('handoffRecord');
+          // ... and it is really stored, so the assertion above is not vacuous.
+          expect(features[0]?.handoffRecord).not.toBeNull();
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-5: refuses a handoff on the default branch with 400 fleet.flowInput', async () => {
+        const forge = withForge({ branch: 'trunk' });
+        try {
+          const response = await post(handoffBody('trunk')).expect(400);
+          refusal(response, 'fleet.flowInput.-2', { reason: 'branch' });
+          expect(await flowsOn('trunk')).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-6: refuses a handoff whose branch head moved with 409', async () => {
+        const branch = 'feat/handoff-e2e-moved';
+        const forge = withForge({ branch, head: 'e'.repeat(40) });
+        try {
+          const response = await post(handoffBody(branch)).expect(409);
+          refusal(response, 'fleet.flows.handoffHeadMoved.409');
+          expect(await flowsOn(branch)).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-7: refuses a handoff without a PRD at the head with 422', async () => {
+        const branch = 'feat/handoff-e2e-no-prd';
+        const forge = withForge({ branch, prd: null });
+        try {
+          const response = await post(handoffBody(branch)).expect(422);
+          refusal(response, 'fleet.flows.prdMissing.422', { path: prdPath });
+          expect(await flowsOn(branch)).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-8: refuses a handoff whose PRD names another branch with 422', async () => {
+        const branch = 'feat/handoff-e2e-other-branch';
+        const forge = withForge({ branch, prd: JSON.stringify({ branchName: 'feat/other', userStories: [] }) });
+        try {
+          const response = await post(handoffBody(branch)).expect(422);
+          refusal(response, 'fleet.flows.handoffBranchMismatch.422');
+          expect(await flowsOn(branch)).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-9: refuses a handoff with a pending PRD story with 422', async () => {
+        const branch = 'feat/handoff-e2e-pending-story';
+        const prd = JSON.stringify({ branchName: branch, userStories: [{ id: 'US-002', status: 'pending', passes: false }] });
+        const forge = withForge({ branch, prd });
+        try {
+          const response = await post(handoffBody(branch)).expect(422);
+          refusal(response, 'fleet.flows.handoffStoriesPending.422', { storyIds: ['US-002'] });
+          expect(await flowsOn(branch)).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-10: refuses a handoff whose head already has an open pull request with 409', async () => {
+        const branch = 'feat/handoff-e2e-open-pr';
+        const prs: OpenPullRequest[] = [{ number: 42, headSha, draft: false, headRepoFullName: repoFullName, updatedAt: new Date() }];
+        const forge = withForge({ branch, prs });
+        try {
+          const response = await post(handoffBody(branch)).expect(409);
+          refusal(response, 'fleet.flows.handoffPrOpen.409', { prNumber: 42 });
+          expect(await flowsOn(branch)).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-11: refuses a handoff when the forge fails with 503', async () => {
+        const branch = 'feat/handoff-e2e-forge-down';
+        const forge = withForge({ branch, listError: new RepoCheckException('provider_error') });
+        try {
+          const response = await post(handoffBody(branch)).expect(503);
+          refusal(response, 'fleet.flows.forgeUnavailable.503');
+          expect(await flowsOn(branch)).toBe(0);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-12: leaves no flow behind after the refused handoff creates', async () => {
+        const branch = 'feat/handoff-e2e-refused';
+        // 400: the handoff names the default branch.
+        const onDefault = withForge({ branch: 'trunk' });
+        try {
+          const response = await post(handoffBody('trunk')).expect(400);
+          refusal(response, 'fleet.flowInput.-2', { reason: 'branch' });
+        } finally { onDefault.restore(); }
+        // 409: the branch head moved since the chain pushed.
+        const moved = withForge({ branch, head: 'e'.repeat(40) });
+        try {
+          const response = await post(handoffBody(branch)).expect(409);
+          refusal(response, 'fleet.flows.handoffHeadMoved.409');
+        } finally { moved.restore(); }
+        // 422: the PRD is missing at the head.
+        const missing = withForge({ branch, prd: null });
+        try {
+          const response = await post(handoffBody(branch)).expect(422);
+          refusal(response, 'fleet.flows.prdMissing.422', { path: prdPath });
+        } finally { missing.restore(); }
+        // 503: the forge failed.
+        const broken = withForge({ branch, listError: new RepoCheckException('provider_error') });
+        try {
+          const response = await post(handoffBody(branch)).expect(503);
+          refusal(response, 'fleet.flows.forgeUnavailable.503');
+        } finally { broken.restore(); }
+        expect(await flowsOn(branch)).toBe(0);
+        expect(await flowsOn('trunk')).toBe(0);
+      });
+
+      it('US-004 AC-13: refuses a handoff while a live flow owns the branch', async () => {
+        const branch = 'feat/handoff-e2e-busy';
+        const running = await db().fleetFlow.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
+          branch, specSha: 'e'.repeat(40), setSha: 'e'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor',
+          costCapUsd: '25', state: 'RUNNING',
+          features: { create: [{ position: 0, feature: 'busy', specPath: 'docs/busy.md', dependsOn: [], state: 'RUNNING' }] },
+        } });
+        const forge = withForge({ branch });
+        try {
+          const response = await post(handoffBody(branch)).expect(409);
+          refusal(response, 'fleet.flows.branchBusy.409', { flowId: running.id });
+          expect(await flowsOn(branch)).toBe(1);
+        } finally { forge.restore(); }
+      });
+
+      it('US-004 AC-14: the spec form still stores a PENDING flow whose feature is not a handoff', async () => {
+        const branch = 'feat/handoff-e2e-spec-form';
+        const sha = 'f'.repeat(40);
+        const github = app.get(GitHubAppClient);
+        const mint = vi.spyOn(github, 'mintReadOnlyToken').mockResolvedValue({ token: 'nax-read-token', expiresAt: new Date() });
+        // These two methods are already spied by the parent thread lifecycle. Preserve its defaults.
+        const head = vi.mocked(github.getBranchHead);
+        const file = vi.mocked(github.getFile);
+        const previousHead = head.getMockImplementation();
+        const previousFile = file.getMockImplementation();
+        head.mockResolvedValue(sha);
+        file.mockResolvedValue({ sha, size: 4, content: Buffer.from('spec') });
+        try {
+          const response = await post({ remoteUrl: 'https://github.com/acme/threads-app.git', branch, specSha: sha,
+            features: [{ feature: 'handoff-spec-form', specPath: 'docs/handoff-spec-form.md' }],
+            roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25 }).expect(201);
+          const flow = body<{ id: string; state: string; entry: string; specSha: string }>(response);
+          expect(flow).toMatchObject({ state: 'PENDING', entry: 'NAX', specSha: sha });
+          const features = await db().fleetFlowFeature.findMany({ where: { flowId: flow.id } });
+          expect(features).toHaveLength(1);
+          expect(features[0]).toMatchObject({ feature: 'handoff-spec-form', handoff: false });
+          expect(features[0]?.handoffRecord).toBeNull();
+        } finally {
+          mint.mockRestore();
+          head.mockReset();
+          file.mockReset();
+          if (previousHead) head.mockImplementation(previousHead);
+          if (previousFile) file.mockImplementation(previousFile);
+        }
       });
     });
 

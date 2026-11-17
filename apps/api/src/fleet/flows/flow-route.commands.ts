@@ -9,10 +9,12 @@ import type { ThreadPreApproval } from '../threads/domain/chat-thread.domain';
 import { FleetFlowsService, type FlowCreator } from './fleet-flows.service';
 import { parseFlowAnswers, type FlowAnswersInput } from './flow-answers';
 import { parseFlowInput, type NormalizedFlowInput, type NormalizedNaxFlowInput } from './flow-input';
+import { parseFlowHandoffInput, type NormalizedHandoffFlowInput } from './flow-handoff-input';
 import { ThreadsService } from '../threads/threads.service';
 
 export const THREAD_FLOW_CREATE_VARIANT = 'rest:fleet-thread-flow.create';
 export const NAX_FLOW_CREATE_VARIANT = 'rest:fleet-nax-flow.create';
+export const NAX_HANDOFF_FLOW_CREATE_VARIANT = 'rest:fleet-nax-handoff-flow.create';
 export const FLOW_STOP_VARIANT = 'rest:fleet-flow.stop';
 export const FLOW_ANSWER_VARIANT = 'rest:fleet-flow.answer';
 
@@ -23,6 +25,7 @@ export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
 
 interface ThreadFlowCreateInput { projectId: string; threadId: string; body: NormalizedFlowInput }
 interface NaxFlowCreateInput { projectId: string; repoId: string; body: NormalizedNaxFlowInput }
+interface NaxHandoffFlowCreateInput { projectId: string; repoId: string; body: NormalizedHandoffFlowInput }
 interface SetPreApprovalInput { projectId: string; threadId: string; costCapUsd: string }
 interface ClearPreApprovalInput { projectId: string; threadId: string }
 interface FlowAnswerInput { projectId: string; flowId: string; body: FlowAnswersInput }
@@ -57,6 +60,27 @@ export class FlowRouteCommands implements OnModuleInit {
           : { type: 'AGENT', id: principal.id };
         const { features, roles, costCapUsd, branch, specSha } = input.body;
         return this.flows.create({ entry: 'NAX', repoId: input.repoId, branch, specSha, features, roles, costCapUsd }, creator, { projectId: input.projectId });
+      },
+    }, this.loader));
+    this.registry.register(routeCommand<NaxHandoffFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({
+      key: 'fleet.flow.create', variant: NAX_HANDOFF_FLOW_CREATE_VARIANT,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['projectId', 'repoId']);
+        const body = (input as Record<string, unknown>).body;
+        return { projectId: route.projectId, repoId: route.repoId, body: parseFlowHandoffInput(body) };
+      },
+      run: async (principal, input) => {
+        const creator: FlowCreator = principal.actorType === 'user'
+          ? { type: 'USER', id: principal.id }
+          : { type: 'AGENT', id: principal.id };
+        const { roles, costCapUsd, branch, handoff } = input.body;
+        // US-004: the handoff flow pins the chat run's head as its spec sha and takes over one
+        // feature, the one the record belongs to.
+        return this.flows.create({
+          entry: 'NAX', repoId: input.repoId, branch, specSha: handoff.headSha,
+          features: [{ feature: handoff.feature, specPath: `.nax/features/${handoff.feature}/spec.md`, dependsOn: [] }],
+          roles, costCapUsd, handoff: { record: handoff.record },
+        }, creator, { projectId: input.projectId });
       },
     }, this.loader));
     this.registry.register(routeCommand<ThreadFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({

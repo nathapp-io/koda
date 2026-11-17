@@ -4,6 +4,7 @@ import { parseFlowAnswers } from './flow-answers';
 import {
   FLOW_ANSWER_VARIANT,
   FlowRouteCommands,
+  NAX_HANDOFF_FLOW_CREATE_VARIANT,
   THREAD_FLOW_CREATE_VARIANT,
   THREAD_PREAPPROVAL_ROUTE_VARIANTS,
 } from './flow-route.commands';
@@ -47,6 +48,28 @@ describe('FlowRouteCommands', () => {
       features: [{ ...body.features[0], dependsOn: [] }], roles: body.roles, costCapUsd: '25' },
     { type: 'AGENT', id: 'agent-1' }, { projectId: 'project-1' });
   });
+  it('US-004 AC-1: the handoff command reparses its stored body and creates the flow with the record', async () => {
+    const { command: getCommand, commands, loader, flows } = setup();
+    loader.forContext.mockResolvedValue({ actorType: 'user', id: 'user-1' });
+    const command = getCommand(NAX_HANDOFF_FLOW_CREATE_VARIANT);
+    expect(commands.has(NAX_HANDOFF_FLOW_CREATE_VARIANT)).toBe(true);
+    expect(NAX_HANDOFF_FLOW_CREATE_VARIANT).toBe('rest:fleet-nax-handoff-flow.create');
+    const headSha = 'a'.repeat(40);
+    const record = [{ runId: 'run-1', file: 'result.json', mtimeMs: 1, content: JSON.stringify({ schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: headSha } }) }];
+    const body = { remoteUrl: 'https://github.com/acme/app.git', branch: 'feat/x', roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: '5', handoff: { feature: 'x', headSha, record } };
+    const parsed = command.parse({ projectId: 'project-1', repoId: 'repo-1', body });
+    const persisted: unknown = JSON.parse(JSON.stringify(parsed));
+    expect(command.parse(persisted)).toEqual(parsed);
+    await command.execute(command.parse(persisted));
+    expect(flows.create).toHaveBeenCalledOnce();
+    expect(flows.create).toHaveBeenCalledWith({
+      entry: 'NAX', repoId: 'repo-1', branch: 'feat/x', specSha: headSha,
+      features: [{ feature: 'x', specPath: '.nax/features/x/spec.md', dependsOn: [] }],
+      roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: '5',
+      handoff: { record },
+    }, { type: 'USER', id: 'user-1' }, { projectId: 'project-1' });
+  });
+
   it('F4: JSON-persisted parser output reparses and deferred execution creates the flow', async () => {
     const { command: registeredCommand, flows } = setup();
     const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
