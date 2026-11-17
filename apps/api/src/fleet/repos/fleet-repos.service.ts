@@ -593,6 +593,17 @@ export class FleetReposService {
     return this.repo.findByIdentity(provider, owner, name);
   }
 
+  /** Resolve a canonical GitLab remote against registered host, namespace and repo name. */
+  async findGitLabByRemoteUrl(url: string): Promise<FleetRepoRecord | null> {
+    const name = url.slice(url.lastIndexOf('/') + 1);
+    const candidates = await this.repo.findGitLabByName(name);
+    const remote = url.toLowerCase();
+    return candidates.find((repo) => {
+      const host = (repo.host ?? '').replace(/\/$/, '');
+      return `${host}/${repo.owner}/${repo.name}`.toLowerCase() === remote;
+    }) ?? null;
+  }
+
   /**
    * The repo row lock the nax entry's flow creation takes (flow lock order: repo, then flow). Must run
    * inside the caller's transaction, which is what makes the duplicate check and the insert atomic.

@@ -107,6 +107,8 @@ export interface IFleetRepoRepository {
    * case-insensitively, because a forge's URLs and a registered row do not agree on case.
    */
   findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null>;
+  /** GitLab rows matching a repository name case-insensitively, in stable registration order. */
+  findGitLabByName(name: string): Promise<FleetRepoRecord[]>;
   /**
    * SELECT ... FOR UPDATE on the repo row, returning the locked record. The nax flow entry
    * serialises creation on it, so two concurrent calls cannot both pass the duplicate check.

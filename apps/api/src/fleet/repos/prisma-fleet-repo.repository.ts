@@ -174,6 +174,15 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     return row ? this.toDomain(row) : null;
   }
 
+  /** GitLab repos with this name, case-insensitively, in deterministic registration order. */
+  async findGitLabByName(name: string): Promise<FleetRepoRecord[]> {
+    const rows = await this.db.fleetRepo.findMany({
+      where: { provider: 'gitlab', name: { equals: name, mode: 'insensitive' } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map((row) => this.toDomain(row));
+  }
+
   /** SELECT ... FOR UPDATE on the repo row (the nax flow entry's creation lock). */
   async lockById(id: string): Promise<FleetRepoRecord | null> {
     const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "FleetRepo" WHERE "id" = ${id} FOR UPDATE`;
