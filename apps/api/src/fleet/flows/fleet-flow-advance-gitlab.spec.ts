@@ -1,5 +1,6 @@
 import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import { runMergeWatch } from './fleet-flow-feature-passes';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { callsOutcomeForForgeError } from './flow-calls';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
@@ -18,7 +19,7 @@ const flow = (over: Partial<FleetFlowRecord> = {}): FleetFlowRecord => ({
   createdAt: NOW, updatedAt: NOW, features: [feature(), feature({ id: 'feature-2', position: 1, feature: 'next', state: 'PENDING', prNumber: null, dependsOn: ['app'] })], ...over,
 });
 
-function build(options: { state?: FleetFlowRecord['state']; merged?: boolean; status?: string; nullPr?: boolean; error?: string; provider?: string; latestJob?: Record<string, unknown>; features?: FleetFlowFeatureRecord[] } = {}) {
+function build(options: { state?: FleetFlowRecord['state']; merged?: boolean; status?: string; nullPr?: boolean; error?: string; provider?: string; credentialsReject?: boolean; latestJob?: Record<string, unknown>; features?: FleetFlowFeatureRecord[] } = {}) {
   const row = flow({ state: options.state ?? 'WAITING_MERGE', ...(options.features ? { features: options.features } : {}) });
   let inTransaction = false;
   const flows = {
@@ -43,7 +44,9 @@ function build(options: { state?: FleetFlowRecord['state']; merged?: boolean; st
     }),
   };
   const gitlabCredentials = { call: vi.fn(async (_repo: unknown, _kind: string, fn: (a: { token: string }) => Promise<unknown>) => {
-    if (options.error === 'gitlab_credentials_missing' || options.error === 'gitlab_token_invalid') throw new RepoCheckException(options.error);
+    if (options.credentialsReject && (options.error === 'gitlab_credentials_missing' || options.error === 'gitlab_token_invalid')) {
+      throw new RepoCheckException(options.error);
+    }
     return fn({ token: 'access-token' });
   }) };
   const github = {
@@ -84,6 +87,7 @@ describe('GitLab flow advance', () => {
     const h = build({ state: 'APPROVED', features: [feature({ state: 'PENDING' })], error: 'gitlab_token_invalid' });
     h.gitlab.getBranchHead.mockRejectedValue(new RepoCheckException('gitlab_token_invalid'));
     await h.service.advance('flow-1', NOW);
+    expect(h.gitlab.getBranchHead).toHaveBeenCalledWith({ token: 'access-token' }, 'feat/app');
     expect(h.flows.stop).not.toHaveBeenCalled();
     expect(h.steps.markFeatureState).not.toHaveBeenCalled();
     expect(h.steps.setFlowState).not.toHaveBeenCalled();
@@ -113,7 +117,7 @@ describe('GitLab flow advance', () => {
   });
 
   it.each(['gitlab_token_invalid', 'gitlab_credentials_missing'] as const)('AC-7/13: stops on %s', async (reason) => {
-    const h = build({ error: reason });
+    const h = build({ error: reason, credentialsReject: true });
     await h.service.advance('flow-1', NOW);
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'dispatch_refused', NOW, reason);
   });
@@ -128,6 +132,21 @@ describe('GitLab flow advance', () => {
       expect(h.activity.record).not.toHaveBeenCalled();
       expect(h.audit.record).not.toHaveBeenCalled();
       expect(h.outbox.record).not.toHaveBeenCalled();
+      expect(h.gitlab.getMergeRequest).toHaveBeenCalled();
+    },
+  );
+
+  it.each(['gitlab_host_invalid', 'gitlab_host_unclassified'] as const)(
+    'AC-14 outcome: runMergeWatch returns retry for %s', async (reason) => {
+      const h = build({ error: reason });
+      const deps = {
+        steps: h.steps, repos: h.repos, github: h.github,
+        gitlabCredentials: h.gitlabCredentials, gitlab: h.gitlab,
+        activity: h.activity, audit: h.audit,
+        txManager: { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) },
+        lockLive: vi.fn(), lockWaitingMerge: vi.fn(), stopLocked: vi.fn(),
+      };
+      await expect(runMergeWatch(deps as never, { flow: flow(), now: NOW })).resolves.toEqual({ kind: 'retry' });
       expect(h.gitlab.getMergeRequest).toHaveBeenCalled();
     },
   );
