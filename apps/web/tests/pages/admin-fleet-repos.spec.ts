@@ -151,6 +151,30 @@ describe('Fleet admin Repos page (behaviour)', () => {
     delete (globalThis as Record<string, unknown>).useApi
   })
 
+  test('AC-1: connected GitLab row renders the automatic reviews switch', async () => {
+    const connected = repo('connected', {
+      provider: 'gitlab', githubInstallationId: null,
+      gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] },
+    })
+    const { app, settle, rowOf, unmount } = mountRepos({ repos: [connected] })
+    await settle()
+    expect(app.find('[data-stub="switch"]', rowOf('connected')).map((node) => node.props['aria-label']))
+      .toContain('Enable automatic reviews')
+    unmount()
+  })
+
+  test('AC-2: connected GitLab row renders the trusted detected checks switch', async () => {
+    const connected = repo('connected', {
+      provider: 'gitlab', githubInstallationId: null,
+      gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] },
+    })
+    const { app, settle, rowOf, unmount } = mountRepos({ repos: [connected] })
+    await settle()
+    expect(app.find('[data-stub="switch"]', rowOf('connected')).map((node) => node.props['aria-label']))
+      .toContain('Trust detected checks for fixes')
+    unmount()
+  })
+
   test('GitLab FIX override mounts only for connected repos and keeps other controls GitHub-only (US-005 AC-1/2/3)', async () => {
     const connected = repo('connected', {
       provider: 'gitlab', githubInstallationId: null,
@@ -162,13 +186,15 @@ describe('Fleet admin Repos page (behaviour)', () => {
     const labels = app.find('[data-stub="switch"]').map((node) => node.props['aria-label'])
     expect(labels).toEqual([
       'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
-      'Allow fixes on an unprotected default branch',
+      'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
     ])
     const connectedRow = app.find('[data-testid="fleet-repo-acme-connected"]')[0]
     const unconnectedRow = app.find('[data-testid="fleet-repo-acme-unconnected"]')[0]
-    expect(app.find('[data-stub="switch"]', connectedRow)).toHaveLength(1)
+    expect(app.find('[data-stub="switch"]', connectedRow)).toHaveLength(3)
     expect(app.find('[data-stub="switch"]', unconnectedRow)).toHaveLength(0)
-    expect(app.find('[data-stub="switch"]', connectedRow).map((node) => node.props['aria-label'])).toEqual(['Allow fixes on an unprotected default branch'])
+    expect(app.find('[data-stub="switch"]', connectedRow).map((node) => node.props['aria-label'])).toEqual([
+      'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
+    ])
     unmount()
   })
 
