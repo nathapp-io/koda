@@ -52,6 +52,13 @@ const REPO_WRITE_INCLUDE = {
   gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT },
 } as const;
 
+/**
+ * The bound of a GitLab name lookup (US-003): a repository name repeats across hosts and namespaces,
+ * so the scan reads the oldest registrations of that name and stops there — the lookup never reads the
+ * whole table. A repo registered after this many same-named rows is not found by its name alone.
+ */
+export const MAX_GITLAB_NAME_CANDIDATES = 500;
+
 /** The rule-override summary columns as a repo row carries them. */
 interface RuleOverrideSummaryRow {
   sha256: string;
@@ -179,6 +186,7 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     const rows = await this.db.fleetRepo.findMany({
       where: { provider: 'gitlab', name: { equals: name, mode: 'insensitive' } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_GITLAB_NAME_CANDIDATES,
     });
     return rows.map((row) => this.toDomain(row));
   }

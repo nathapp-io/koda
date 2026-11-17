@@ -1,6 +1,8 @@
 import { AppException } from '@nathapp/nestjs-common';
 import { FleetFlowsController } from './fleet-flows.controller';
 import { RepoCheckException, type RepoCheckReason } from '../git-broker/repo-check.exception';
+import { FleetReposService } from '../repos/fleet-repos.service';
+import { mockAuditRecorder, mockTransactionManager } from '../../common/test-helpers/global-stubs.module';
 
 const sha = 'a'.repeat(40);
 const body = {
@@ -9,10 +11,13 @@ const body = {
   roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25,
 };
 
-function setup(options: { installationId?: bigint | null; repo?: boolean } = {}) {
+function setup(options: { installationId?: bigint | null; repo?: boolean; repos?: unknown } = {}) {
   const repo = { id: 'repo-1', projectId: 'project-1', owner: 'grp', name: 'app', host: 'https://gitlab.com',
     provider: 'gitlab', githubInstallationId: options.installationId ?? null };
-  const repos = { findGitLabByRemoteUrl: vi.fn().mockResolvedValue(options.repo === false ? null : repo), findByIdentity: vi.fn() };
+  const repos = (options.repos ?? { findGitLabByRemoteUrl: vi.fn().mockResolvedValue(options.repo === false ? null : repo), findByIdentity: vi.fn() }) as {
+    findGitLabByRemoteUrl: ReturnType<typeof vi.fn>;
+    findByIdentity: ReturnType<typeof vi.fn>;
+  };
   const projects = { findAllForPrincipal: vi.fn().mockResolvedValue([{ id: 'project-1', slug: 'web' }]) };
   const permissions = { can: vi.fn().mockResolvedValue({ allowed: true }) };
   const credentials = { call: vi.fn(async (_repo: unknown, _kind: string, fn: (access: { token: string }) => Promise<unknown>) => fn({ token: 'read-secret' })) };
@@ -115,5 +120,57 @@ describe('FleetFlowsController GitLab preflight', () => {
     const error = new RepoCheckException('gitlab_host_blocked');
     credentials.call.mockRejectedValue(error);
     await expect(send()).rejects.toBe(error);
+  });
+});
+
+describe('the GitLab remote URL reaches the repo lookup', () => {
+  /** The registered row a GitLab remote resolves to. */
+  const registered = {
+    id: 'repo-1', projectId: 'project-1', owner: 'grp', name: 'app', host: 'https://gitlab.com',
+    provider: 'gitlab', githubInstallationId: null, defaultBranch: 'main', createdById: 'u1',
+    createdAt: new Date(0), autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000',
+    autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null,
+  };
+
+  /**
+   * The service's own lookup, wired to a repository stub that answers with the one registered GitLab
+   * row: the controller has to hand it the canonical URL, or the row is never found.
+   */
+  const reposService = () => {
+    const repository = {
+      findGitLabByName: vi.fn(async (name: string) => (name.toLowerCase() === 'app' ? [registered] : [])),
+    };
+    return { repository, service: new FleetReposService(repository as never, {} as never, {} as never, {} as never,
+      {} as never, { gitlabBotName: 'koda-fleet' } as never, {} as never, mockTransactionManager,
+      mockAuditRecorder, {} as never) };
+  };
+
+  it('hands the lookup the canonical URL, not the submitted clone URL', async () => {
+    const { send, repos, gate } = setup();
+    await expect(send({ ...body, remoteUrl: 'https://gitlab.com/grp/app.git' })).rejects.toMatchObject({ request: { id: 'create-ask' } });
+    expect(repos.findGitLabByRemoteUrl).toHaveBeenCalledWith('https://gitlab.com/grp/app');
+    // The submitted URL stays in the approval payload: it is what the caller asked for.
+    expect(gate.run).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({
+      body: expect.objectContaining({ remoteUrl: 'https://gitlab.com/grp/app.git' }) }) }));
+  });
+
+  it.each([
+    'https://gitlab.com/grp/app.git',
+    'https://gitlab.com/grp/app.git/',
+    'https://gitlab.com/grp/app/',
+  ])('resolves the registered repo for %s', async (remoteUrl) => {
+    const { repository, service } = reposService();
+    const { send, gate } = setup({ repos: service });
+    await expect(send({ ...body, remoteUrl })).rejects.toMatchObject({ request: { id: 'create-ask' } });
+    expect(repository.findGitLabByName).toHaveBeenCalledWith('app');
+    expect(gate.run).toHaveBeenCalled();
+  });
+
+  it('refuses a remote no registered repo answers for', async () => {
+    const { repository, service } = reposService();
+    repository.findGitLabByName.mockResolvedValue([]);
+    const { send, gate } = setup({ repos: service });
+    await refusal(send({ ...body, remoteUrl: 'https://gitlab.com/grp/other.git' }), 404, 'fleet.flows.repoNotFound');
+    expect(gate.run).not.toHaveBeenCalled();
   });
 });

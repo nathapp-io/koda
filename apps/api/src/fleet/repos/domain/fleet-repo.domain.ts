@@ -107,7 +107,10 @@ export interface IFleetRepoRepository {
    * case-insensitively, because a forge's URLs and a registered row do not agree on case.
    */
   findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null>;
-  /** GitLab rows matching a repository name case-insensitively, in stable registration order. */
+  /**
+   * GitLab rows matching a repository name case-insensitively, in stable registration order. The read
+   * is bounded (the repository's `MAX_GITLAB_NAME_CANDIDATES` rows), so it never scans the whole table.
+   */
   findGitLabByName(name: string): Promise<FleetRepoRecord[]>;
   /**
    * SELECT ... FOR UPDATE on the repo row, returning the locked record. The nax flow entry

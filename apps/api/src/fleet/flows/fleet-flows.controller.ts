@@ -79,8 +79,11 @@ export class FleetFlowsController {
     // NAX parsing validates these three required fields, including the supported remote URL shape.
     const remote = parseFlowRemoteUrl(parsed.remoteUrl);
     const { branch, specSha } = parsed;
+    // The lookup key is the canonical URL the parser produced, not the submitted string: a registered
+    // GitLab repo is stored under its canonical host, namespace and name, so a clone URL that still
+    // carries a `.git` suffix or a trailing slash has to be canonicalised before it is matched.
     const repo = remote.provider === 'gitlab'
-      ? await this.repos.findGitLabByRemoteUrl(parsed.remoteUrl)
+      ? await this.repos.findGitLabByRemoteUrl(remote.url)
       : await this.repos.findByIdentity('github', remote.owner, remote.name);
     if (!repo) throw new NotFoundAppException({}, 'fleet.flows.repoNotFound');
     const project = (await this.projects.findAllForPrincipal(principal)).find((candidate) => candidate.id === repo.projectId);
