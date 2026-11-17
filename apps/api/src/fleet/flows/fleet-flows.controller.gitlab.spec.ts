@@ -138,7 +138,8 @@ describe('the GitLab remote URL reaches the repo lookup', () => {
    */
   const reposService = () => {
     const repository = {
-      findGitLabByName: vi.fn(async (name: string) => (name.toLowerCase() === 'app' ? [registered] : [])),
+      findGitLabByRemote: vi.fn(async (identities: Array<{ host: string; owner: string; name: string }>) =>
+        (identities.some((identity) => identity.name.toLowerCase() === 'app') ? [registered] : [])),
     };
     return { repository, service: new FleetReposService(repository as never, {} as never, {} as never, {} as never,
       {} as never, { gitlabBotName: 'koda-fleet' } as never, {} as never, mockTransactionManager,
@@ -162,13 +163,13 @@ describe('the GitLab remote URL reaches the repo lookup', () => {
     const { repository, service } = reposService();
     const { send, gate } = setup({ repos: service });
     await expect(send({ ...body, remoteUrl })).rejects.toMatchObject({ request: { id: 'create-ask' } });
-    expect(repository.findGitLabByName).toHaveBeenCalledWith('app');
+    expect(repository.findGitLabByRemote).toHaveBeenCalledWith([{ host: 'https://gitlab.com', owner: 'grp', name: 'app' }]);
     expect(gate.run).toHaveBeenCalled();
   });
 
   it('refuses a remote no registered repo answers for', async () => {
     const { repository, service } = reposService();
-    repository.findGitLabByName.mockResolvedValue([]);
+    repository.findGitLabByRemote.mockResolvedValue([]);
     const { send, gate } = setup({ repos: service });
     await refusal(send({ ...body, remoteUrl: 'https://gitlab.com/grp/other.git' }), 404, 'fleet.flows.repoNotFound');
     expect(gate.run).not.toHaveBeenCalled();

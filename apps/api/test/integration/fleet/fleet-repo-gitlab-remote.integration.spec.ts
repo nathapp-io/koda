@@ -25,6 +25,7 @@ describeDb('GitLab remote repo lookup (PG)', () => {
   afterEach(async () => {
     if (createdRepoIds.length > 0) await db.fleetRepo.deleteMany({ where: { id: { in: createdRepoIds } } });
     createdRepoIds = [];
+    await db.fleetRepo.deleteMany({ where: { owner: { startsWith: 'flood-' } } });
   });
 
   const createRepo = async (provider: 'github' | 'gitlab', owner: string, name: string, host?: string) => {
@@ -65,5 +66,30 @@ describeDb('GitLab remote repo lookup (PG)', () => {
   it('AC-12 does not resolve a GitHub repo as a GitLab remote', async () => {
     await createRepo('github', 'grp', 'app', 'https://github.example.com');
     expect(await app.get(FleetReposService).findGitLabByRemoteUrl('https://github.example.com/grp/app')).toBeNull();
+  });
+
+  it('resolves a registered repo that follows more than 500 same-named rows', async () => {
+    // 501 rows carry the same name on the same host, registered before the repo the remote names:
+    // a lookup that reads a bounded page of same-named rows and matches the URL afterwards never
+    // reaches the registered row, and the flow entry answers 404 for a repo that is registered.
+    const registeredAt = new Date('2026-01-01T00:00:00.000Z');
+    await db.fleetRepo.createMany({
+      data: Array.from({ length: 501 }, (_, index) => ({
+        projectId: base.projectId,
+        provider: 'gitlab',
+        owner: `flood-${index}`,
+        name: 'app',
+        defaultBranch: 'main',
+        githubInstallationId: null,
+        host: 'https://gitlab.example.com',
+        createdById: base.adminId,
+        createdAt: registeredAt,
+      })),
+    });
+    const target = await createRepo('gitlab', 'grp', 'app', 'https://gitlab.example.com');
+
+    const resolved = await app.get(FleetReposService).findGitLabByRemoteUrl('https://gitlab.example.com/grp/app');
+
+    expect(resolved?.id).toBe(target.id);
   });
 });

@@ -18,7 +18,7 @@ vi.mock('node:dns', async (importOriginal) => {
 });
 
 describe('FleetReposService', () => {
-  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), findAutoReviewPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), findAutoReviewPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn(), findGitLabByRemote: vi.fn() };
   const github = { verifyRepo: vi.fn() };
   const gitlab = { getTokenSelf: vi.fn(), getCurrentUser: vi.fn(), findProject: vi.fn() };
   /** US-004: the per-repo credential store replaces the old project-wide token source. */
@@ -308,6 +308,30 @@ describe('FleetReposService', () => {
       expect(gitlab.findProject).toHaveBeenCalledWith('https://gitlab.com/api/v4', 'glpat-write', 42);
       expect(gitlab.findProject).toHaveBeenCalledWith('https://gitlab.com/api/v4', 'glpat-read', 42);
       expect(gitlab.getCurrentUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the GitLab remote lookup', () => {
+    const gitlabRow = created({ provider: 'gitlab', owner: 'grp', name: 'app', githubInstallationId: null, host: 'https://gitlab.com' });
+
+    it('asks the repository for the complete identity, not for the name alone', async () => {
+      repo.findGitLabByRemote.mockResolvedValue([gitlabRow]);
+
+      await expect(make().findGitLabByRemoteUrl('https://gitlab.com/grp/app')).resolves.toBe(gitlabRow);
+
+      // The identity is the whole identity of the row: the repository filters on it before it reads
+      // a bounded page, so same-named rows on other hosts cannot hide the registered repo.
+      expect(repo.findGitLabByRemote).toHaveBeenCalledWith([{ host: 'https://gitlab.com', owner: 'grp', name: 'app' }]);
+    });
+
+    it('answers null when no registered row carries the identity', async () => {
+      repo.findGitLabByRemote.mockResolvedValue([]);
+      await expect(make().findGitLabByRemoteUrl('https://gitlab.com/grp/app')).resolves.toBeNull();
+    });
+
+    it('reads nothing for a remote that names no identity', async () => {
+      await expect(make().findGitLabByRemoteUrl('not a url')).resolves.toBeNull();
+      expect(repo.findGitLabByRemote).not.toHaveBeenCalled();
     });
   });
 

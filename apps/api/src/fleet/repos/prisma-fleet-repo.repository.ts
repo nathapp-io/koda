@@ -11,6 +11,7 @@ import type {
   FleetRepoRecord,
   FleetRepoRuleOverrideRecord,
   GitLabCredentialView,
+  GitLabRemoteIdentity,
   IFleetRepoRepository,
   RuleOverrideActor,
   RuleOverrideSummary,
@@ -53,11 +54,11 @@ const REPO_WRITE_INCLUDE = {
 } as const;
 
 /**
- * The bound of a GitLab name lookup (US-003): a repository name repeats across hosts and namespaces,
- * so the scan reads the oldest registrations of that name and stops there — the lookup never reads the
- * whole table. A repo registered after this many same-named rows is not found by its name alone.
+ * The bound of a GitLab remote lookup (US-003): the read never takes more rows than this, so it never
+ * scans the whole table (the API data rule). The bound applies to the rows that already carry the
+ * identity the lookup asked for, so it can never hide a registered repo behind same-named rows.
  */
-export const MAX_GITLAB_NAME_CANDIDATES = 500;
+export const MAX_GITLAB_REMOTE_CANDIDATES = 500;
 
 /** The rule-override summary columns as a repo row carries them. */
 interface RuleOverrideSummaryRow {
@@ -181,12 +182,27 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     return row ? this.toDomain(row) : null;
   }
 
-  /** GitLab repos with this name, case-insensitively, in deterministic registration order. */
-  async findGitLabByName(name: string): Promise<FleetRepoRecord[]> {
+  /**
+   * GitLab repos carrying one of the given canonical identities, in deterministic registration order.
+   *
+   * The identity is the row's whole identity — host, namespace and name — so the filter is the
+   * lookup's answer and not a page of candidates the caller has to match afterwards: a name that
+   * repeats on other hosts or namespaces cannot push the registered repo out of the bounded page.
+   */
+  async findGitLabByRemote(identities: readonly GitLabRemoteIdentity[]): Promise<FleetRepoRecord[]> {
+    if (identities.length === 0) return [];
     const rows = await this.db.fleetRepo.findMany({
-      where: { provider: 'gitlab', name: { equals: name, mode: 'insensitive' } },
+      where: {
+        provider: 'gitlab',
+        OR: identities.flatMap(({ host, owner, name }) => [
+          { host: { equals: host, mode: 'insensitive' }, owner: { equals: owner, mode: 'insensitive' }, name: { equals: name, mode: 'insensitive' } },
+          // A stored host is canonical (no trailing slash); a row written by hand may still carry
+          // one, and it names the same host.
+          { host: { equals: `${host}/`, mode: 'insensitive' }, owner: { equals: owner, mode: 'insensitive' }, name: { equals: name, mode: 'insensitive' } },
+        ]),
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      take: MAX_GITLAB_NAME_CANDIDATES,
+      take: MAX_GITLAB_REMOTE_CANDIDATES,
     });
     return rows.map((row) => this.toDomain(row));
   }
