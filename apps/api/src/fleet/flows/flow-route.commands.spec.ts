@@ -1,9 +1,11 @@
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { describe, expect, it, vi } from 'vitest';
 import { parseFlowAnswers } from './flow-answers';
+import { parseFlowHandoffInput } from './flow-handoff-input';
 import {
   FLOW_ANSWER_VARIANT,
   FlowRouteCommands,
+  NAX_FLOW_CREATE_VARIANT,
   NAX_HANDOFF_FLOW_CREATE_VARIANT,
   THREAD_FLOW_CREATE_VARIANT,
   THREAD_PREAPPROVAL_ROUTE_VARIANTS,
@@ -68,6 +70,61 @@ describe('FlowRouteCommands', () => {
       roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: '5',
       handoff: { record },
     }, { type: 'USER', id: 'user-1' }, { projectId: 'project-1' });
+  });
+
+  it('US-005 AC-4: the handoff approval command creates the flow once with the record and the head as its spec sha', async () => {
+    const { command: getCommand, loader, flows } = setup();
+    loader.forContext.mockResolvedValue({ actorType: 'user', id: 'user-1' });
+    const command = getCommand(NAX_HANDOFF_FLOW_CREATE_VARIANT);
+    const headSha = 'a'.repeat(40);
+    const record = [{ runId: 'run-1', file: 'result.json', mtimeMs: 1, content: JSON.stringify({ schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: headSha } }) }];
+    // The stored body is the parser's own result, exactly as the route stores it.
+    const body = parseFlowHandoffInput({
+      remoteUrl: 'https://gitlab.com/grp/app.git', branch: 'feat/x',
+      roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: '5',
+      handoff: { feature: 'x', headSha, record },
+    });
+    const parsed = command.parse({ projectId: 'project-1', repoId: 'repo-1', body });
+    await command.execute(parsed);
+    expect(flows.create).toHaveBeenCalledOnce();
+    expect(flows.create).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: 'NAX', specSha: body.handoff.headSha, handoff: { record: body.handoff.record } }),
+      { type: 'USER', id: 'user-1' }, { projectId: 'project-1' },
+    );
+  });
+
+  it('US-005 AC-5: a stored handoff body with an empty record is refused before the service is called', () => {
+    const { command: getCommand, flows } = setup();
+    const command = getCommand(NAX_HANDOFF_FLOW_CREATE_VARIANT);
+    const headSha = 'a'.repeat(40);
+    const body = {
+      remoteUrl: 'https://gitlab.com/grp/app.git', branch: 'feat/x',
+      roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: '5',
+      handoff: { feature: 'x', headSha, record: [] },
+    };
+    const error: unknown = (() => {
+      try { command.parse({ projectId: 'project-1', repoId: 'repo-1', body }); return null; }
+      catch (thrown: unknown) { return thrown; }
+    })();
+    expect(error).toBeInstanceOf(ValidationAppException);
+    expect((error as ValidationAppException).args).toEqual({ reason: 'handoff.record' });
+    expect((error as ValidationAppException).prefix).toBe('fleet.flowInput');
+    expect(flows.create).not.toHaveBeenCalled();
+  });
+
+  it('US-005 AC-6: the spec-form approval command still creates the flow without a handoff key', async () => {
+    const { command: getCommand, loader, flows } = setup();
+    loader.forContext.mockResolvedValue({ actorType: 'user', id: 'user-1' });
+    const command = getCommand(NAX_FLOW_CREATE_VARIANT);
+    const body = { remoteUrl: 'https://github.com/Org/Repo.git', branch: 'feat/flow-x', specSha: 'a'.repeat(40),
+      features: [{ feature: 'flow-x', specPath: 'docs/spec.md' }], roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: 25 };
+    const parsed = command.parse({ projectId: 'project-1', repoId: 'repo-1', body });
+    await command.execute(parsed);
+    expect(flows.create).toHaveBeenCalledOnce();
+    const input = flows.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(input).not.toHaveProperty('handoff');
+    expect(input).toMatchObject({ entry: 'NAX', repoId: 'repo-1', branch: body.branch, specSha: body.specSha,
+      features: [{ feature: 'flow-x', specPath: 'docs/spec.md', dependsOn: [] }], roles: body.roles, costCapUsd: '25' });
   });
 
   it('F4: JSON-persisted parser output reparses and deferred execution creates the flow', async () => {

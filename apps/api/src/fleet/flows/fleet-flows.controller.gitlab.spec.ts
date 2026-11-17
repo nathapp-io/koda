@@ -13,7 +13,7 @@ const body = {
 
 function setup(options: { installationId?: bigint | null; repo?: boolean; repos?: unknown } = {}) {
   const repo = { id: 'repo-1', projectId: 'project-1', owner: 'grp', name: 'app', host: 'https://gitlab.com',
-    provider: 'gitlab', githubInstallationId: options.installationId ?? null };
+    provider: 'gitlab', githubInstallationId: options.installationId ?? null, defaultBranch: 'main' };
   const repos = (options.repos ?? { findGitLabByRemoteUrl: vi.fn().mockResolvedValue(options.repo === false ? null : repo), findByIdentity: vi.fn() }) as {
     findGitLabByRemoteUrl: ReturnType<typeof vi.fn>;
     findByIdentity: ReturnType<typeof vi.fn>;
@@ -21,8 +21,9 @@ function setup(options: { installationId?: bigint | null; repo?: boolean; repos?
   const projects = { findAllForPrincipal: vi.fn().mockResolvedValue([{ id: 'project-1', slug: 'web' }]) };
   const permissions = { can: vi.fn().mockResolvedValue({ allowed: true }) };
   const credentials = { call: vi.fn(async (_repo: unknown, _kind: string, fn: (access: { token: string }) => Promise<unknown>) => fn({ token: 'read-secret' })) };
-  const gitlab = { getBranchHead: vi.fn().mockResolvedValue(sha), getFile: vi.fn().mockResolvedValue({ content: Buffer.from('spec') }) };
-  const github = { mintReadOnlyToken: vi.fn(), getBranchHead: vi.fn(), getFile: vi.fn() };
+  const gitlab = { getBranchHead: vi.fn().mockResolvedValue(sha), getFile: vi.fn().mockResolvedValue({ content: Buffer.from('spec') }),
+    listOpenMergeRequests: vi.fn().mockResolvedValue([]) };
+  const github = { mintReadOnlyToken: vi.fn(), mintThreadReadToken: vi.fn(), getBranchHead: vi.fn(), getFile: vi.fn() };
   const gate = { run: vi.fn().mockResolvedValue({ status: 'pending', request: { id: 'create-ask' } }) };
   const controller = new FleetFlowsController(repos as never, projects as never, permissions as never, github as never,
     gate as never, {} as never, credentials as never, gitlab as never);
@@ -34,7 +35,10 @@ function setup(options: { installationId?: bigint | null; repo?: boolean; repos?
 async function refusal(promise: Promise<unknown>, status: number, prefix: string, args: Record<string, unknown> = {}) {
   const error: unknown = await promise.catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(AppException);
-  expect(error).toMatchObject({ status, response: { code: status === 403 ? 40003 : status, args, prefix } });
+  // The app exceptions carry their own code: a permission refusal answers 40003 and a validation
+  // refusal the request-parameter code, whatever the HTTP status is.
+  const code = status === 403 ? 40003 : status === 400 ? -2 : status;
+  expect(error).toMatchObject({ status, response: { code, args, prefix } });
 }
 
 describe('FleetFlowsController GitLab preflight', () => {
@@ -120,6 +124,99 @@ describe('FleetFlowsController GitLab preflight', () => {
     const error = new RepoCheckException('gitlab_host_blocked');
     credentials.call.mockRejectedValue(error);
     await expect(send()).rejects.toBe(error);
+  });
+});
+
+describe('FleetFlowsController GitLab handoff preflight', () => {
+  const feature = 'handoff-x';
+  const prdPath = `.nax/features/${feature}/prd.json`;
+  /** The chat run's record: its newest run is publishable at the head it hands over. */
+  const record = [{ runId: 'run-1', file: 'result.json', mtimeMs: 1,
+    content: JSON.stringify({ schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: sha } }) }];
+  const handoffBody = (branch: string) => ({
+    remoteUrl: 'https://gitlab.com/grp/app', branch,
+    roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25,
+    handoff: { feature, headSha: sha, record },
+  });
+  /** The PRD at the head: the branch it names and the stories it still holds. */
+  const prd = (branch: string, userStories: unknown[] = []) =>
+    Buffer.from(JSON.stringify({ branchName: branch, userStories }));
+
+  it('AC-1: reads the head, the PRD and the merge requests with one read credential, then opens the gate', async () => {
+    const { send, credentials, gitlab, github, gate } = setup();
+    gitlab.getFile.mockResolvedValue({ content: prd('feat/handoff-x') });
+    await expect(send(handoffBody('feat/handoff-x'))).rejects.toMatchObject({ request: { id: 'create-ask' } });
+    expect(credentials.call).toHaveBeenCalledTimes(1);
+    expect(credentials.call).toHaveBeenCalledWith(expect.objectContaining({ id: 'repo-1' }), 'read', expect.any(Function));
+    expect(gitlab.getBranchHead).toHaveBeenCalledWith({ token: 'read-secret' }, 'feat/handoff-x');
+    expect(gitlab.getFile).toHaveBeenCalledWith({ token: 'read-secret' }, prdPath, sha);
+    expect(gitlab.listOpenMergeRequests).toHaveBeenCalledWith({ token: 'read-secret' }, 'grp/app');
+    expect(gate.run).toHaveBeenCalledWith(expect.objectContaining({ variant: 'rest:fleet-nax-handoff-flow.create' }));
+    expect(github.mintThreadReadToken).not.toHaveBeenCalled();
+  });
+
+  it('AC-2: refuses a handoff on the default branch with 400 before any read', async () => {
+    const { send, credentials, gate } = setup();
+    await refusal(send(handoffBody('main')), 400, 'fleet.flowInput', { reason: 'branch' });
+    expect(credentials.call).not.toHaveBeenCalled();
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-3: refuses a handoff whose branch head moved with 409', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getBranchHead.mockResolvedValue('b'.repeat(40));
+    await refusal(send(handoffBody('feat/handoff-x')), 409, 'fleet.flows.handoffHeadMoved');
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-4: refuses a handoff without a PRD at the head with 422', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getFile.mockResolvedValue(null);
+    await refusal(send(handoffBody('feat/handoff-x')), 422, 'fleet.flows.prdMissing', { path: prdPath });
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-5: refuses a handoff whose PRD names another branch with 422', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getFile.mockResolvedValue({ content: prd('feat/other') });
+    await refusal(send(handoffBody('feat/handoff-x')), 422, 'fleet.flows.handoffBranchMismatch');
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: refuses a handoff with a pending PRD story with 422', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getFile.mockResolvedValue({ content: prd('feat/handoff-x', [{ id: 'US-002', status: 'pending', passes: false }]) });
+    await refusal(send(handoffBody('feat/handoff-x')), 422, 'fleet.flows.handoffStoriesPending', { storyIds: ['US-002'] });
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: refuses a handoff whose head already has an open merge request with 409', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getFile.mockResolvedValue({ content: prd('feat/handoff-x') });
+    gitlab.listOpenMergeRequests.mockResolvedValue([{ number: 9, headSha: sha, draft: false, headRepoFullName: 'grp/app', updatedAt: new Date() }]);
+    await refusal(send(handoffBody('feat/handoff-x')), 409, 'fleet.flows.handoffPrOpen', { prNumber: 9 });
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-8: maps a missing credential to GitLab not connected', async () => {
+    const { send, credentials, gate } = setup();
+    credentials.call.mockRejectedValue(new RepoCheckException('gitlab_credentials_missing'));
+    await refusal(send(handoffBody('feat/handoff-x')), 409, 'fleet.flows.gitlabNotConnected');
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: maps a missing branch to branch not found', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getBranchHead.mockRejectedValue(new RepoCheckException('repo_not_found'));
+    await refusal(send(handoffBody('feat/handoff-x')), 409, 'fleet.flows.branchNotFound');
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: maps a failing forge to forge unavailable', async () => {
+    const { send, gitlab, gate } = setup();
+    gitlab.getBranchHead.mockRejectedValue(new RepoCheckException('provider_error'));
+    await refusal(send(handoffBody('feat/handoff-x')), 503, 'fleet.flows.forgeUnavailable');
+    expect(gate.run).not.toHaveBeenCalled();
   });
 });
 

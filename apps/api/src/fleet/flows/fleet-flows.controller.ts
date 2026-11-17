@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags, type SchemaObject } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { AppException, ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -17,13 +17,64 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
+import type { ForgeFile } from '../git-broker/forge-tree';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import type { FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import { FleetFlowDto } from './dto/fleet-flow.dto';
 import { FleetFlowsService, type CreatedFlow } from './fleet-flows.service';
 import { parseFlowInput, type NormalizedNaxFlowInput } from './flow-input';
-import { parseFlowHandoffInput, readHandoffPrd, type NormalizedHandoffFlowInput } from './flow-handoff-input';
+import {
+  HANDOFF_MAX_RUNS,
+  HANDOFF_RECORD_FILES,
+  HANDOFF_RECORD_MAX_BYTES,
+  HANDOFF_RUN_ID_RE,
+  parseFlowHandoffInput,
+  readHandoffPrd,
+  type NormalizedHandoffFlowInput,
+} from './flow-handoff-input';
+import { FEATURE_RE } from '../jobs/dispatch-input';
 import { NAX_FLOW_CREATE_VARIANT, NAX_HANDOFF_FLOW_CREATE_VARIANT } from './flow-route.commands';
+
+/**
+ * The fields both create forms share. The spec form and the handoff form differ in the one key that
+ * selects them (`features` and `specSha` against `handoff`), never in the shared ones.
+ */
+const FLOW_CREATE_COMMON: Record<string, SchemaObject> = {
+  roles: { type: 'object', required: ['reviewer', 'supervisor'], properties: { reviewer: { type: 'string' }, supervisor: { type: 'string' } } },
+  costCapUsd: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+  remoteUrl: { type: 'string', description: 'HTTPS github.com or GitLab repository URL' },
+  branch: { type: 'string' },
+};
+
+/** The handoff form: the chat run's own record, handed over with the head it published. */
+const FLOW_CREATE_HANDOFF: SchemaObject = {
+  type: 'object',
+  required: ['handoff', 'roles', 'costCapUsd', 'remoteUrl', 'branch'],
+  properties: {
+    handoff: {
+      type: 'object',
+      required: ['feature', 'headSha', 'record'],
+      properties: {
+        feature: { type: 'string', pattern: FEATURE_RE.source },
+        headSha: { type: 'string', pattern: '^[a-f0-9]{40}$', description: 'The commit the chat run handed over' },
+        record: {
+          type: 'array', minItems: 1, maxItems: HANDOFF_MAX_RUNS,
+          description: `The chat run's own files, at most ${HANDOFF_RECORD_MAX_BYTES} bytes in total`,
+          items: {
+            type: 'object', required: ['runId', 'file', 'mtimeMs', 'content'],
+            properties: {
+              runId: { type: 'string', pattern: HANDOFF_RUN_ID_RE.source },
+              file: { type: 'string', enum: [...HANDOFF_RECORD_FILES] },
+              mtimeMs: { type: 'integer', minimum: 0 },
+              content: { type: 'string', maxLength: HANDOFF_RECORD_MAX_BYTES },
+            },
+          },
+        },
+      },
+    },
+    ...FLOW_CREATE_COMMON,
+  },
+};
 
 @ApiTags('fleet')
 @ApiBearerAuth()
@@ -63,12 +114,17 @@ export class FleetFlowsController {
   @Requires('fleet.flow.create', { enforcedBy: 'service' })
   @ApprovalGated()
   @ApiOperation({ summary: 'Create a nax fleet flow from verified branch-head specs (fleet.flow.create)' })
-  @ApiBody({ schema: { type: 'object', required: ['features', 'roles', 'costCapUsd', 'remoteUrl', 'branch', 'specSha'], properties: {
-    features: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['feature', 'specPath'], properties: { feature: { type: 'string' }, specPath: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } } } },
-    roles: { type: 'object', required: ['reviewer', 'supervisor'], properties: { reviewer: { type: 'string' }, supervisor: { type: 'string' } } },
-    costCapUsd: { oneOf: [{ type: 'number' }, { type: 'string' }] }, remoteUrl: { type: 'string', description: 'HTTPS github.com or GitLab repository URL' },
-    branch: { type: 'string' }, specSha: { type: 'string', pattern: '^[a-f0-9]{40}$' },
-  } } })
+  @ApiBody({ schema: {
+    description: 'A create body carries either the spec form (features and specSha) or the handoff form (handoff), never both.',
+    oneOf: [
+      { type: 'object', required: ['features', 'roles', 'costCapUsd', 'remoteUrl', 'branch', 'specSha'], properties: {
+        features: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['feature', 'specPath'], properties: { feature: { type: 'string' }, specPath: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } } } },
+        ...FLOW_CREATE_COMMON,
+        specSha: { type: 'string', pattern: '^[a-f0-9]{40}$' },
+      } },
+      FLOW_CREATE_HANDOFF,
+    ],
+  } })
   @ApiResponse({ status: 201, type: FleetFlowDto })
   @ApiResponse({ status: 202, description: 'Approval request for fleet.flow.create' })
   @ApiResponse({ status: 400, description: 'Invalid flow input, naming the property' })
@@ -167,31 +223,20 @@ export class FleetFlowsController {
     if (handoff.branch === repo.defaultBranch) {
       throw new ValidationAppException({ reason: 'branch' }, 'fleet.flowInput');
     }
-    if (repo.provider === 'gitlab') {
-      // US-005 adds the GitLab handoff reads (the read credential and the merge-request listing).
-      // Until then the form fails closed: a GitLab handoff never creates a flow.
-      throw new ConflictAppException({}, 'fleet.flows.gitlabNotConnected');
-    }
     const { feature, headSha } = handoff.handoff;
     const prdPath = `.nax/features/${feature}/prd.json`;
     try {
+      if (repo.provider === 'gitlab') {
+        await this.checkGitLabHandoff(handoff, repo, prdPath);
+        return;
+      }
       // The thread read token can list pull requests; the read-only one cannot, so the handoff form
       // never mints it.
       const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId as bigint, repo.name);
       const head = await this.github.getBranchHead(token, repo.owner, repo.name, handoff.branch);
       if (head !== headSha) throw new ConflictAppException({}, 'fleet.flows.handoffHeadMoved');
       const prd = await this.github.getFile(token, repo.owner, repo.name, prdPath, headSha);
-      if (prd === null) throw new AppException(422, { path: prdPath }, 'fleet.flows.prdMissing', 422);
-      const read = readHandoffPrd(prd.content.toString('utf8'));
-      if (read === null) throw new AppException(422, { path: prdPath }, 'fleet.flows.prdMissing', 422);
-      // The runner checks out `prd.branchName`, so a mismatch would publish another branch than the
-      // one this flow guards.
-      if (read.branchName === null || read.branchName !== handoff.branch) {
-        throw new AppException(422, {}, 'fleet.flows.handoffBranchMismatch', 422);
-      }
-      if (read.pendingStoryIds.length > 0) {
-        throw new AppException(422, { storyIds: read.pendingStoryIds }, 'fleet.flows.handoffStoriesPending', 422);
-      }
+      this.checkHandoffPrd(prd, prdPath, handoff.branch);
       const pullRequests = await this.github.listOpenPullRequests(token, repo.owner, repo.name);
       // A pull request from another repository (a fork) is not this feature's: the handoff only
       // refuses a pull request the same repository already opened at this head.
@@ -200,6 +245,44 @@ export class FleetFlowsController {
       if (open) throw new ConflictAppException({ prNumber: open.number }, 'fleet.flows.handoffPrOpen');
     } catch (error) {
       this.mapForgeError(error, repo.provider);
+    }
+  }
+
+  /**
+   * The GitLab reads of the handoff, with the repo's own read credential: the branch head, the PRD
+   * at that head and the project's open merge requests. The listing is the project's own, so a merge
+   * request at the head is the pull request this handoff would duplicate.
+   */
+  private async checkGitLabHandoff(handoff: NormalizedHandoffFlowInput, repo: FleetRepoRecord, prdPath: string): Promise<void> {
+    const { headSha } = handoff.handoff;
+    const fullName = `${repo.owner}/${repo.name}`;
+    // One read credential for every read, exactly as the GitHub form mints one thread read token.
+    await this.gitlabCredentials.call(repo, 'read', async (access) => {
+      const head = await this.gitlab.getBranchHead(access, handoff.branch);
+      if (head !== headSha) throw new ConflictAppException({}, 'fleet.flows.handoffHeadMoved');
+      const prd = await this.gitlab.getFile(access, prdPath, headSha);
+      this.checkHandoffPrd(prd, prdPath, handoff.branch);
+      const mergeRequests = await this.gitlab.listOpenMergeRequests(access, fullName);
+      const open = mergeRequests.find((mergeRequest) => mergeRequest.headSha === headSha);
+      if (open) throw new ConflictAppException({ prNumber: open.number }, 'fleet.flows.handoffPrOpen');
+    });
+  }
+
+  /**
+   * The PRD at the head: it must be there, it must name the handed-over branch and it must hold no
+   * pending story — the runner would publish the branch the PRD names.
+   */
+  private checkHandoffPrd(prd: ForgeFile | null, prdPath: string, branch: string): void {
+    if (prd === null) throw new AppException(422, { path: prdPath }, 'fleet.flows.prdMissing', 422);
+    const read = readHandoffPrd(prd.content.toString('utf8'));
+    if (read === null) throw new AppException(422, { path: prdPath }, 'fleet.flows.prdMissing', 422);
+    // The runner checks out `prd.branchName`, so a mismatch would publish another branch than the
+    // one this flow guards.
+    if (read.branchName === null || read.branchName !== branch) {
+      throw new AppException(422, {}, 'fleet.flows.handoffBranchMismatch', 422);
+    }
+    if (read.pendingStoryIds.length > 0) {
+      throw new AppException(422, { storyIds: read.pendingStoryIds }, 'fleet.flows.handoffStoriesPending', 422);
     }
   }
 

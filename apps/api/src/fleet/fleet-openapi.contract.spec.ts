@@ -5,7 +5,22 @@ import { join } from 'path';
  * Fleet slice 4a contract (overview D116-D120): the committed openapi.json must carry what the CLI
  * and web build on. Regenerate with `bun run api:export-spec` from the repo root.
  */
-interface Operation { parameters?: Array<{ name: string; in: string; required?: boolean }> }
+interface SchemaNode {
+  type?: string;
+  required?: string[];
+  properties?: Record<string, SchemaNode>;
+  items?: SchemaNode;
+  enum?: unknown[];
+  pattern?: string;
+  maxItems?: number;
+  minItems?: number;
+  maxLength?: number;
+  oneOf?: SchemaNode[];
+}
+interface Operation {
+  parameters?: Array<{ name: string; in: string; required?: boolean }>;
+  requestBody?: { content?: Record<string, { schema?: SchemaNode }> };
+}
 interface Spec {
   paths: Record<string, Record<string, Operation>>;
   components: { schemas: Record<string, { properties?: Record<string, unknown>; required?: string[] }> };
@@ -14,6 +29,32 @@ interface Spec {
 const spec = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', '..', 'openapi.json'), 'utf-8')) as Spec;
 
 describe('fleet OpenAPI contract', () => {
+  it('US-005: documents the nax flow create body as the spec form and the handoff form, one of the two', () => {
+    const body = spec.paths['/api/fleet/flows']?.['post']?.requestBody?.content?.['application/json']?.schema;
+    const alternatives = body?.oneOf ?? [];
+    expect(alternatives).toHaveLength(2);
+    const [specForm, handoffForm] = alternatives;
+    // The two forms are exclusive: the spec form asks for the specs, the handoff form for the
+    // record, and neither asks for the other's key.
+    expect(specForm.required).toEqual(expect.arrayContaining(['features', 'specSha', 'roles', 'costCapUsd', 'remoteUrl', 'branch']));
+    expect(handoffForm.required).toEqual(expect.arrayContaining(['handoff', 'roles', 'costCapUsd', 'remoteUrl', 'branch']));
+    expect(handoffForm.required).not.toContain('features');
+    expect(specForm.required).not.toContain('handoff');
+    // The shared top-level fields are the same in both forms.
+    for (const key of ['roles', 'costCapUsd', 'remoteUrl', 'branch']) {
+      expect(handoffForm.properties?.[key]).toEqual(specForm.properties?.[key]);
+    }
+    // The handoff's own shape: the feature, the lowercase head sha and the bounded record.
+    const handoff = handoffForm.properties?.['handoff'];
+    expect(handoff?.required).toEqual(['feature', 'headSha', 'record']);
+    expect(handoff?.properties?.['headSha']?.pattern).toBe('^[a-f0-9]{40}$');
+    const record = handoff?.properties?.['record'];
+    expect(record?.minItems).toBe(1);
+    expect(record?.maxItems).toBe(20);
+    expect(record?.items?.properties?.['file']?.enum).toEqual(['result.json', 'ledger.md']);
+    expect(record?.items?.required).toEqual(['runId', 'file', 'mtimeMs', 'content']);
+  });
+
   it('US-004 AC-8: documents AGENT dispatch input and required agent fields', () => {
     const requestBody = spec.paths['/api/projects/{slug}/fleet/jobs']?.['post'] as {
       requestBody?: { content?: { 'application/json'?: { schema?: { $ref?: string } } } };
