@@ -25,15 +25,19 @@ async function copyableFile(path: string, opts: { minMtimeMs?: number } = {}): P
  * Copies a workflow RUN's result files out of the checkout into `<jobDir>/workflow/` so the bundle can carry them.
  * Mirrors `stashPlanOutputs`: copy into the job dir, never commit. Never writes inside `repoDir` and never runs git.
  * Returns the names copied; empty (and no folder created) when there is no result.
+ *
+ * flow-handoff US-007: `excludeRunIds` names the run directories of a restored handoff record. They are the sender's
+ * record, never this job's own result, so they are never stashed as this job's outcome.
  */
 export async function stashWorkflowOutputs(
   repoDir: string,
   jobDir: string,
   feature: string,
   sinceMs: number,
+  excludeRunIds?: ReadonlySet<string>,
 ): Promise<readonly WorkflowStashName[]> {
   const featureDir = featureDirFor(repoDir, feature);
-  const found = await findWorkflowResult(featureDir, sinceMs).catch(() => null);
+  const found = await findWorkflowResult(featureDir, sinceMs, excludeRunIds).catch(() => null);
   if (!found) return [];
   const candidates: { readonly name: WorkflowStashName; readonly from: string; readonly minMtimeMs?: number }[] = [
     { name: 'result.json', from: join(found.runDir, 'result.json') },

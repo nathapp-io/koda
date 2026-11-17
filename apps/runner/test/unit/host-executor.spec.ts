@@ -844,6 +844,86 @@ describe('HostExecutor workflow stash and bundle (US-003)', () => {
   });
 });
 
+describe('HostExecutor handoff RUN (flow-handoff US-007)', () => {
+  const RESULT = JSON.stringify({ schemaVersion: 1, runId: 'run-a', verdict: { outcome: 'ready', reasons: [] } });
+  const LEDGER = '# ledger\n';
+
+  /** A handoff record whose mtimes run ahead of the job's clock: the sender's machine is ahead of the runner's. */
+  const handoffRecord = () => ([
+    { runId: 'run-a', file: 'result.json' as const, mtimeMs: Date.now() + 60_000, content: RESULT },
+    { runId: 'run-a', file: 'ledger.md' as const, mtimeMs: Date.now() + 60_000, content: LEDGER },
+  ]);
+
+  /** The file's own `world()` fixture with the nax start stubbed: the spawn records argv and what the checkout holds. */
+  async function handoffWorld() {
+    const w = await world('RUN', { handoff: { record: handoffRecord() } });
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    const calls: { readonly argv: readonly string[]; readonly options: SpawnNaxOptions }[] = [];
+    const atSpawn: { readonly result: string | null; readonly ledger: string | null }[] = [];
+    const read = (path: string): string | null => { try { return readFileSync(path, 'utf8'); } catch { return null; } };
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+      spawnNax: (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => {
+        calls.push({ argv, options });
+        atSpawn.push({
+          result: read(join(repoDir, '.nax', 'features', 'feat', 'workflow', 'run-a', 'result.json')),
+          ledger: read(join(repoDir, '.nax', 'features', 'feat', 'workflow', 'run-a', 'ledger.md')),
+        });
+        return { pid: 4242, pgid: 4242 };
+      },
+    });
+    return { ...w, ex, calls, atSpawn, repoDir };
+  }
+
+  test('AC-14: the record files are written under the checkout when nax is spawned', async () => {
+    const w = await handoffWorld();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    await w.ex.spawn(w.row);
+    expect(w.atSpawn).toHaveLength(1);
+    expect(w.atSpawn[0]?.result).toBe(RESULT);
+    expect(w.atSpawn[0]?.ledger).toBe(LEDGER);
+    expect([...(w.calls[0]?.argv ?? [])]).toContain('--publish-only');
+  });
+
+  test('AC-15: the job profile of a handoff RUN publishes the PR', async () => {
+    const w = await handoffWorld();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
+    expect(profile.workflow).toEqual({ publish: 'pr' });
+  });
+
+  test('AC-12: readWorkflowResult never reports the restored record as this job\'s result', async () => {
+    const w = await handoffWorld();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    const restored = join(w.repoDir, '.nax', 'features', 'feat', 'workflow', 'run-a', 'result.json');
+    await stat(restored);                                   // the record is in the checkout
+    expect(await w.ex.readWorkflowResult(w.row)).toBeNull();
+  });
+
+  test('AC-13: collectBundle stashes no workflow folder for a handoff RUN', async () => {
+    const w = await handoffWorld();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    await stat(join(w.repoDir, '.nax', 'features', 'feat', 'workflow', 'run-a', 'result.json'));   // the record is in the checkout
+    await w.ex.collectBundle(w.row);
+    await expect(stat(join(w.row.jobDir, 'workflow'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('a RUN without a handoff keeps no workflow key in its profile and no --publish-only in its argv', async () => {
+    const w = await world('RUN');
+    const calls: { readonly argv: readonly string[] }[] = [];
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+      spawnNax: (argv: readonly string[]): SpawnHandle => { calls.push({ argv }); return { pid: 4242, pgid: 4242 }; },
+    });
+    expect((await ex.prepare(w.row)).ok).toBe(true);
+    await ex.spawn(w.row);
+    expect('workflow' in JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'))).toBe(false);
+    expect([...(calls[0]?.argv ?? [])]).not.toContain('--publish-only');
+  });
+});
+
 describe('HostExecutor REVIEW token file (US-006)', () => {
   const BOT = 'koda-fleet[bot]';
   const TOKEN = 'tok-review-9';

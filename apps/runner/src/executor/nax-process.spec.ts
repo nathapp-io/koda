@@ -109,6 +109,34 @@ describe('buildFixArgv', () => {
   });
 });
 
+describe('handoff publish-only argv (flow-handoff US-007)', () => {
+  const HANDOFF = { record: [{ runId: 'run-a', file: 'result.json' as const, mtimeMs: 1_763_370_000_000, content: '{"schemaVersion":1}' }] };
+
+  test('AC-8: a RUN assign with a handoff ends its argv with --publish-only', () => {
+    const argv = buildNaxArgv(['nax'], assign({ handoff: HANDOFF }));
+    expect(argv[argv.length - 1]).toBe('--publish-only');
+  });
+
+  test('AC-8: the publish-only flag follows the cost cap and changes nothing else', () => {
+    expect(buildNaxArgv(['nax'], assign({ handoff: HANDOFF }))).toEqual(
+      ['nax', 'run', '--headless', '--json', '-f', 'feat', '--profile', 'fast,strict,koda-job-cj1', '--max-cost', '5.25', '--publish-only'],
+    );
+  });
+
+  test('AC-9: a RUN assign without a handoff has no --publish-only', () => {
+    const argv = buildNaxArgv(['nax'], assign());
+    expect(argv).not.toContain('--publish-only');
+    expect(argv[argv.length - 1]).toBe('5.25');
+  });
+
+  test('a handoff never reaches a PLAN, REVIEW, FIX or AGENT argv', () => {
+    const plan = buildNaxArgv(['nax'], assign({ command: 'PLAN', planFrom: 'docs/spec.md', handoff: HANDOFF }));
+    expect(plan).not.toContain('--publish-only');
+    const review = buildNaxArgv(['nax'], assign({ command: 'REVIEW', review: { prNumber: 4, botLogin: 'koda-fleet[bot]' }, handoff: HANDOFF }));
+    expect(review).not.toContain('--publish-only');
+  });
+});
+
 describe('isProcessAlive injected kill', () => {
   test('AC-1: treats EPERM as dead', () => {
     const kill = () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); };

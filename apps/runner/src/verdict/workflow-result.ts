@@ -34,8 +34,15 @@ export function parseWorkflowResult(raw: unknown): WorkflowResult | null {
   return { runId: raw['runId'], outcome: verdict['outcome'], reasons };
 }
 
-/** Newest-first over `<featureDir>/workflow/<id>/result.json` (real directories, regular files, at most 1 MiB, mtime >= sinceMs): the first that parses, with its run dir. */
-export async function findWorkflowResult(featureDir: string, sinceMs: number): Promise<{ result: WorkflowResult; runDir: string } | null> {
+/**
+ * Newest-first over `<featureDir>/workflow/<id>/result.json` (real directories, regular files, at most 1 MiB,
+ * mtime >= sinceMs): the first that parses, with its run dir.
+ *
+ * flow-handoff US-007: `excludeRunIds` names the run directories of a restored handoff record. They are never this
+ * job's own result, so they are skipped even when their `result.json` is newer than the job (the sender's clock may
+ * run ahead of the runner's).
+ */
+export async function findWorkflowResult(featureDir: string, sinceMs: number, excludeRunIds?: ReadonlySet<string>): Promise<{ result: WorkflowResult; runDir: string } | null> {
   const workflowDir = join(featureDir, 'workflow');
   let entries;
   try {
@@ -50,6 +57,7 @@ export async function findWorkflowResult(featureDir: string, sinceMs: number): P
   const candidates: Candidate[] = [];
   for (const entry of entries) {
     if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
+    if (excludeRunIds?.has(entry.name) === true) continue;
     const resultPath = join(workflowDir, entry.name, 'result.json');
     let st;
     try {
