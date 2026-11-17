@@ -176,7 +176,14 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
 
   async findAutoReviewPage(limit: number): Promise<FleetRepoRecord[]> {
     const rows = await this.db.fleetRepo.findMany({
-      where: { autoReview: true, provider: 'github', githubInstallationId: { not: null }, project: { deletedAt: null } },
+      where: {
+        autoReview: true,
+        project: { deletedAt: null },
+        OR: [
+          { provider: 'github', githubInstallationId: { not: null } },
+          { provider: 'gitlab', gitlabCredential: { isNot: null } },
+        ],
+      },
       orderBy: { id: 'asc' }, take: limit,
     });
     return rows.map((row) => this.toDomain(row));

@@ -67,6 +67,23 @@ describeIntegration('FleetRepo auto-review repository (PG)', () => {
     expect((await repos.findAutoReviewPage(50)).map((r) => r.id)).not.toContain(inserted.id);
   });
 
+  it('AC-10: includes enabled GitLab repos with credentials', async () => {
+    await prisma.fleetRepo.updateMany({ data: { autoReview: false } });
+    const p = await project();
+    const inserted = await create(p.id, { name: 'gitlab-connected', provider: 'gitlab', githubInstallationId: null });
+    await prisma.fleetRepoGitlabCredential.create({ data: { repoId: inserted.id, gitlabProjectId: 42, encryptedReadToken: 'r', encryptedWriteToken: 'w', readTokenUserId: 1, readTokenUsername: 'read', writeTokenUserId: 2, writeTokenUsername: 'write', writeTokenIsBot: false } });
+    await prisma.fleetRepo.update({ where: { id: inserted.id }, data: { autoReview: true } });
+    expect((await repos.findAutoReviewPage(50)).map((r) => r.id)).toContain(inserted.id);
+  });
+
+  it('AC-11: excludes enabled GitLab repos without credentials', async () => {
+    await prisma.fleetRepo.updateMany({ data: { autoReview: false } });
+    const p = await project();
+    const inserted = await create(p.id, { name: 'gitlab-disconnected', provider: 'gitlab', githubInstallationId: null });
+    await prisma.fleetRepo.update({ where: { id: inserted.id }, data: { autoReview: true } });
+    expect((await repos.findAutoReviewPage(50)).map((r) => r.id)).not.toContain(inserted.id);
+  });
+
   it('AC-10: limits results and orders enabled repos by id', async () => {
     await prisma.fleetRepo.updateMany({ data: { autoReview: false } });
     const p = await project();

@@ -5,6 +5,8 @@ import type { PrincipalRef } from '../../permissions/permissions.types';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import type { FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { EnablerGate } from './enabler-gate';
@@ -45,6 +47,8 @@ export class FleetPrReviewPass {
     private readonly github: GitHubAppClient,
     private readonly dispatcher: ReviewHeadDispatcher,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'prReviewMaxDispatch' | 'prReviewPollMs'>,
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlab: GitLabAccessChecker,
   ) {}
 
   /**
@@ -88,8 +92,9 @@ export class FleetPrReviewPass {
         COMPONENT,
         async () => {
           if ((await this.gate.check(repo)) === null) return 0;
-          const { token } = await this.github.mintInstallationToken(this.installationId(repo), repo.name);
-          const prs = await this.github.listOpenPullRequests(token, repo.owner, repo.name);
+          const prs = repo.provider === 'gitlab'
+            ? await this.gitlabCredentials.call(repo, 'read', (access) => this.gitlab.listOpenMergeRequests(access, `${repo.owner}/${repo.name}`))
+            : await this.githubList(repo);
           return await this.dispatcher.dispatchRepo(repo, prs, {
             now,
             pollMs: this.config.prReviewPollMs,
@@ -103,6 +108,11 @@ export class FleetPrReviewPass {
       this.logger.warn(`Auto-review pass skipped repo ${repo.id}: ${errorName(error)}`);
       return attempts;
     }
+  }
+
+  private async githubList(repo: FleetRepoRecord) {
+    const { token } = await this.github.mintInstallationToken(this.installationId(repo), repo.name);
+    return this.github.listOpenPullRequests(token, repo.owner, repo.name);
   }
 
   /** The repo page only returns rows with an installation id; a row that lost one has nothing to mint with. */
