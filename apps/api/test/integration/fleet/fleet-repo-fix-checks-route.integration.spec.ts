@@ -23,7 +23,13 @@ import { resetDb } from '../../helpers/reset-db';
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const KEY = 'fleet.repo.review.configure';
 
-interface RepoBody { id: string; fixTrustDetectedChecks: boolean }
+interface RepoBody { id: string; fixTrustDetectedChecks: boolean; gitlab: GitLabSummary | null }
+/** The connection summary the answer carries, without the tokens themselves. */
+interface GitLabSummary {
+  projectId: number;
+  readToken: { username: string; status: string };
+  writeToken: { username: string; status: string; isBot: boolean };
+}
 interface Pending { id: string; permissionKey: string; projectId: string | null }
 interface Decided { status: string; result: unknown }
 
@@ -103,6 +109,14 @@ describeIntegration('fleet repo fix-checks route (PG)', () => {
     const body = data<RepoBody>(await patch(target.id, { trustDetectedChecks: true }).expect(200));
     expect(body).toMatchObject({ id: target.id, fixTrustDetectedChecks: true });
     expect((await stored(target.id)).fixTrustDetectedChecks).toBe(true);
+    // The answer carries the repo's connection summary: the admin repos page replaces its whole row
+    // with this answer, so a bare row would make the connected GitLab repo look disconnected and
+    // drop every switch the row holds (the connection decides whether they mount at all).
+    expect(body.gitlab).toMatchObject({
+      projectId: 4711,
+      readToken: { username: 'koda-read', status: 'ok' },
+      writeToken: { username: 'koda-bot', status: 'ok', isBot: true },
+    });
   });
 
   it('AC-9: GitLab without credentials is 422 with exact message and stores nothing', async () => {
