@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import type { FleetFlowRecord } from './domain/fleet-flow.domain';
@@ -40,6 +42,9 @@ export interface FleetFlowCallsTarget {
   replay?: { reviewedHead: string; paths: readonly string[] };
 }
 
+/** The repo row a calls write addresses: its identity, its forge and its host. */
+type ReviewRepo = NonNullable<Awaited<ReturnType<FleetReposService['findReviewRepo']>>>;
+
 /**
  * Appends a review's calls to the target feature's spec on its branch (spec US-006, US-007).
  *
@@ -52,6 +57,8 @@ export class FleetFlowCallsService {
   constructor(
     private readonly repos: FleetReposService,
     private readonly github: GitHubAppClient,
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlab: GitLabAccessChecker,
   ) {}
 
   async applyPrdEdits(
@@ -127,7 +134,11 @@ export class FleetFlowCallsService {
     if (!flow.features[0]) return { kind: 'failed', detail: 'feature missing' };
 
     const repo = await this.repos.findReviewRepo(flow.repoId);
-    if (!repo || repo.githubInstallationId === null) return { kind: 'failed', detail: 'repo not connected' };
+    if (!repo) return { kind: 'failed', detail: 'repo not connected' };
+    // The repo row names the forge: a GitLab row takes the GitLab path whatever installation id it
+    // carries, and never mints a GitHub token.
+    if (repo.provider === 'gitlab') return this.applyGitLab(repo, action, expectedHead, target);
+    if (repo.githubInstallationId === null) return { kind: 'failed', detail: 'repo not connected' };
 
     try {
       const { token } = await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
@@ -174,5 +185,80 @@ export class FleetFlowCallsService {
         ? { kind: 'failed', detail: error.reason }
         : { kind: 'retry' };
     }
+  }
+
+  /**
+   * The GitLab branch of `apply`: the same decision rules on GitLab's own API.
+   *
+   * Every client call gets its own credential call, so a token that rotates in the middle of the pass
+   * is only marked invalid for the request that saw the refusal. The write is one commits-API commit
+   * guarded by the file's last commit id, so a spec that moved under us is a conflict, not a rewrite.
+   */
+  private async applyGitLab(
+    repo: ReviewRepo, action: ApplyCallsAction, expectedHead: string, target: FleetFlowCallsTarget,
+  ): Promise<CallsOutcome> {
+    try {
+      const head = await this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getBranchHead(access, target.branch));
+      // Pin the read to the head we compare, not a moving branch name.
+      const file = await this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getFileForUpdate(access, target.specPath, head));
+      if (!file) return { kind: 'failed', detail: `spec missing on ${target.branch}` };
+
+      const built = buildFlowCalls(file.content.toString('utf8'), action);
+      if (built.alreadyApplied) {
+        // A heading alone is not proof of our commit: an external edit may have retained it.
+        // Recover only a single spec-only commit directly after the reviewed head, containing exactly
+        // the expected append. Any later commit (even outside the spec) must re-ask approval.
+        const baseHead = target.replay?.reviewedHead ?? expectedHead;
+        const base = await this.gitlabCredentials.call(repo, 'read', (access) =>
+          this.gitlab.getFile(access, target.specPath, baseHead));
+        const expected = base && buildFlowCalls(base.content.toString('utf8'), action);
+        if (!expected || expected.alreadyApplied || !file.content.equals(Buffer.from(expected.text, 'utf8'))
+          || !(await this.isOwnEarlierCommitGitLab(repo, baseHead, head, action, target))) {
+          return { kind: 'stale', head };
+        }
+        return { kind: 'committed', specSha: head };
+      }
+
+      if (head !== expectedHead) return { kind: 'stale', head };
+
+      const written = await this.gitlabCredentials.call(repo, 'write', (access) =>
+        this.gitlab.commitFile(access, target.specPath, {
+          branch: target.branch,
+          content: Buffer.from(built.text, 'utf8'),
+          lastCommitId: file.lastCommitId,
+          message: `docs(${target.feature}): flow calls from ${action.step} job ${action.jobId}`,
+        }));
+      if (written.kind === 'committed') return { kind: 'committed', specSha: written.commitSha };
+      // A refusal of the commit itself is never a transient failure.
+      if (written.kind === 'refused') return { kind: 'failed', detail: 'spec write refused' };
+
+      // A 400/409 may still be a refusal: the same lock means nobody moved the file, so the branch
+      // refused the commit. A moved (or deleted) file is worth another pass against the new one.
+      const reread = await this.gitlabCredentials.call(repo, 'read', (access) =>
+        this.gitlab.getFileForUpdate(access, target.specPath, target.branch));
+      if (reread && reread.lastCommitId === file.lastCommitId) return { kind: 'failed', detail: 'spec write refused' };
+      return { kind: 'retry' };
+    } catch (error) {
+      if (!(error instanceof RepoCheckException)) throw error;
+      return callsOutcomeForForgeError(error.reason) === 'failed'
+        ? { kind: 'failed', detail: error.reason }
+        : { kind: 'retry' };
+    }
+  }
+
+  /** The GitLab proof that the head above the base is this job's own calls commit. */
+  private async isOwnEarlierCommitGitLab(
+    repo: ReviewRepo, baseHead: string, head: string,
+    action: ApplyCallsAction, target: FleetFlowCallsTarget,
+  ): Promise<boolean> {
+    if (await this.gitlabCredentials.call(repo, 'read', (access) =>
+      this.gitlab.isSingleFileCommit(access, baseHead, head, target.specPath))) return true;
+    if (!target.replay) return false;
+    return this.gitlabCredentials.call(repo, 'read', (access) =>
+      this.gitlab.isOwnCallsRun(access, baseHead, head, {
+        paths: target.replay.paths, marker: `flow calls from ${action.step} job ${action.jobId}`,
+      }));
   }
 }
