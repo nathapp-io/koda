@@ -48,8 +48,25 @@ describe('FleetReposService.configureAutoReview', () => {
     expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReview: false, autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null }));
     expect(repo.updateAutoReview.mock.calls[0][1]).not.toHaveProperty('autoReviewProfiles');
   });
-  it.each([{ provider: 'gitlab' }, { githubInstallationId: null }])('AC-9/AC-10 requires installed GitHub app: %o', async (overrides) => {
-    repo.findById.mockResolvedValue(row(overrides)); await expect(configure(true)).rejects.toMatchObject({ reason: 'github app required', status: 422 });
+  it('AC-1: enables auto-review for GitLab with credentials and attributes principal id', async () => {
+    repo.findById.mockResolvedValue(row({ provider: 'gitlab', githubInstallationId: null, gitlabCredential: {} }));
+    await configure(true);
+    expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReview: true, autoReviewEnabledById: 'u1' }));
+  });
+  it('AC-2: refuses GitLab without credentials before update or audit', async () => {
+    repo.findById.mockResolvedValue(row({ provider: 'gitlab', githubInstallationId: null, gitlabCredential: null }));
+    await expect(configure(true)).rejects.toMatchObject({ reason: 'gitlab credentials required', status: 422 });
+    expect(repo.updateAutoReview).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+  it('AC-3: refuses GitLab with no credential field', async () => {
+    const { gitlabCredential: _ignored, ...gitlabRow } = row({ provider: 'gitlab', githubInstallationId: null, gitlabCredential: {} });
+    repo.findById.mockResolvedValue(gitlabRow);
+    await expect(configure(true)).rejects.toMatchObject({ reason: 'gitlab credentials required' });
+  });
+  it('preserves GitHub installation refusal', async () => {
+    repo.findById.mockResolvedValue(row({ githubInstallationId: null }));
+    await expect(configure(true)).rejects.toMatchObject({ reason: 'github app required', status: 422 });
   });
   it('AC-11/AC-12 rejects reserved profiles and duplicates', async () => {
     await expect(configure(true, { profiles: ['koda-job-x'] })).rejects.toMatchObject({ reason: 'profiles' });

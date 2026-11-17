@@ -245,7 +245,8 @@ export class FleetReposService {
         : { autoReview: false, autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null };
 
       if (dto.enabled) {
-        if (row.provider !== 'github' || row.githubInstallationId === null) throw new AutoReviewException('github app required');
+        if (row.provider === 'github' && row.githubInstallationId === null) throw new AutoReviewException('github app required');
+        if (row.provider === 'gitlab' && row.gitlabCredential == null) throw new AutoReviewException('gitlab credentials required');
         const profiles = dto.profiles ?? [];
         if (profiles.some((profile) => !PROFILE_NAME_RE.test(profile) || profile.startsWith(RESERVED_PROFILE_PREFIX))) throw new AutoReviewException('profiles');
         if (new Set(profiles).size !== profiles.length) throw new AutoReviewException('duplicate profile');
@@ -267,9 +268,9 @@ export class FleetReposService {
   }
 
   /**
-   * Fleet FIX US-001: the repo-level `fixTrustDetectedChecks` switch (default off). Enabling is only
-   * allowed where koda can broker a GitHub App token, because that is the flow a FIX uses to read the
-   * repo and push; disabling is always allowed. The write and its audit share one transaction.
+   * Fleet FIX US-001: the repo-level `fixTrustDetectedChecks` switch (default off). Enabling requires
+   * the provider connection koda uses to read and push (a GitHub App installation or stored GitLab
+   * credentials); disabling is always allowed. The write and its audit share one transaction.
    *
    * The principal is part of the signature because the approval engine re-enters this method as the
    * requesting actor; the setting records no attribution (unlike auto-review's enabler columns), so it
@@ -279,8 +280,13 @@ export class FleetReposService {
     return this.txManager.run(async () => {
       const row = await this.repo.findById(id);
       if (!row) throw new NotFoundAppException({}, 'fleet.repos');
-      if (dto.trustDetectedChecks && (row.provider !== 'github' || row.githubInstallationId === null)) {
-        throw new FixChecksException('github app required');
+      if (dto.trustDetectedChecks) {
+        if (row.provider === 'github' && row.githubInstallationId === null) {
+          throw new FixChecksException('github app required');
+        }
+        if (row.provider === 'gitlab' && row.gitlabCredential == null) {
+          throw new FixChecksException('gitlab credentials required');
+        }
       }
       const updated = await this.repo.updateFixChecks(id, dto.trustDetectedChecks);
       await this.audit.record({

@@ -121,11 +121,25 @@ describeIntegration('fleet repo auto-review route (PG)', () => {
     expect(await db.approvalRequest.count()).toBe(0);
   });
 
-  it('AC-5: enabling auto-review on a GitLab repo is 422 with the github app reason', async () => {
+  it('AC-6: enables auto-review on a connected GitLab repo and stores it', async () => {
+    const target = await repo({ provider: 'gitlab', githubInstallationId: null });
+    await db.fleetRepoGitlabCredential.create({
+      data: {
+        repoId: target.id, gitlabProjectId: 4711, encryptedReadToken: 'enc-read', encryptedWriteToken: 'enc-write',
+        readTokenUserId: 11, readTokenUsername: 'koda-read', writeTokenUserId: 12, writeTokenUsername: 'koda-bot', writeTokenIsBot: true,
+      },
+    });
+    const body = data<RepoBody>(await patch(target.id, { enabled: true }).expect(200));
+    expect(body).toMatchObject({ id: target.id, autoReview: true, autoReviewEnabledById: world.ids.root });
+    expect((await stored(target.id)).autoReview).toBe(true);
+  });
+
+  it('AC-7: GitLab without credentials is 422 and stores nothing', async () => {
     const target = await repo({ provider: 'gitlab', githubInstallationId: null });
     const res = await patch(target.id, { enabled: true }).expect(422);
-    expect(JSON.stringify(res.body)).toContain('github app required');
+    expect(JSON.stringify(res.body)).toContain('gitlab credentials required');
     expect((await stored(target.id)).autoReview).toBe(false);
+    expect(await db.auditEntry.findFirst({ where: { key: KEY, resourceId: target.id } })).toBeNull();
   });
 
   it('AC-6: an unknown repo id answers 404 from the repo lookup, not from a missing route', async () => {
