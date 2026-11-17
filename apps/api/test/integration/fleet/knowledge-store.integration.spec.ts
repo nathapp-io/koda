@@ -577,6 +577,72 @@ describePg('PrismaKnowledgeIndexRepository (PG)', () => {
 
     expect(await prisma.client.knowledgeProjectPatterns.count({ where: { projectId } })).toBe(0);
   });
+
+  /**
+   * US-004 AC-1/AC-2: the GitLab projection and the enumeration a poll reads. The rows are seeded once and both
+   * cases read the same set, because `findAllGitlabRepos` is a whole-table read — a per-case seed would let one
+   * case's rows leak into the other's exact expectation.
+   */
+  describe('GitLab projections and enumeration (US-004)', () => {
+    const connected = { first: 'glrepo-first', second: 'glrepo-second', third: 'glrepo-third' };
+    const disconnected = 'glrepo-disconnected';
+    let githubRepoId: string;
+
+    beforeAll(async () => {
+      const base = await seedFleetBase(prisma.client);
+      githubRepoId = base.repoId;
+      let gitlabProjectId = 100;
+      const gitlabRepo = async (id: string, name: string, createdAt: Date, withCredential: boolean): Promise<void> => {
+        await prisma.client.fleetRepo.create({
+          data: {
+            id, projectId: base.projectId, provider: 'gitlab', owner: 'group', name, defaultBranch: 'main',
+            host: 'https://gitlab.example.com', githubInstallationId: null, createdById: base.adminId, createdAt,
+          },
+        });
+        if (!withCredential) return;
+        gitlabProjectId += 1;
+        await prisma.client.fleetRepoGitlabCredential.create({
+          data: {
+            repoId: id, gitlabProjectId, encryptedReadToken: 'read-ciphertext', encryptedWriteToken: 'write-ciphertext',
+            readTokenUserId: 1, readTokenUsername: 'reader', writeTokenUserId: 2, writeTokenUsername: 'writer', writeTokenIsBot: true,
+          },
+        });
+      };
+      // `second` and `third` share a timestamp on purpose: the id breaks the tie.
+      await gitlabRepo(connected.first, 'alpha', new Date('2026-10-01T00:00:00.000Z'), true);
+      await gitlabRepo(connected.third, 'gamma', new Date('2026-10-02T00:00:00.000Z'), true);
+      await gitlabRepo(connected.second, 'beta', new Date('2026-10-02T00:00:00.000Z'), true);
+      await gitlabRepo(disconnected, 'delta', new Date('2026-10-03T00:00:00.000Z'), false);
+    });
+
+    it('AC-1: findRepo carries gitlabConnected true and the host for a GitLab repo with a credential row', async () => {
+      expect(await repo.findRepo(connected.first)).toEqual({
+        id: connected.first, projectId: expect.any(String), provider: 'gitlab', owner: 'group', name: 'alpha',
+        defaultBranch: 'main', host: 'https://gitlab.example.com', githubInstallationId: null, gitlabConnected: true,
+      });
+    });
+
+    it('AC-1: findRepo carries gitlabConnected false for a GitLab repo without a credential row', async () => {
+      expect(await repo.findRepo(disconnected)).toMatchObject({
+        provider: 'gitlab', host: 'https://gitlab.example.com', gitlabConnected: false,
+      });
+    });
+
+    it('AC-2: findAllGitlabRepos answers the connected GitLab repos in createdAt then id order', async () => {
+      const found = await repo.findAllGitlabRepos();
+
+      expect(found.map((row) => row.id)).toEqual([connected.first, connected.second, connected.third]);
+      expect(found.every((row) => row.provider === 'gitlab' && row.gitlabConnected === true)).toBe(true);
+      expect(found[0].host).toBe('https://gitlab.example.com');
+    });
+
+    it('AC-2: findAllGitlabRepos omits GitLab repos without a row and every GitHub repo', async () => {
+      const ids = (await repo.findAllGitlabRepos()).map((row) => row.id);
+
+      expect(ids).not.toContain(disconnected);
+      expect(ids).not.toContain(githubRepoId);
+    });
+  });
 });
 
 /**

@@ -4,9 +4,12 @@ import { EmbeddingService } from '../../rag/embedding.service';
 import { RagService } from '../../rag/rag.service';
 import { LanceRecord, OUTCOME_SOURCE } from '../../rag/lance-table-manager';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
+import { GitLabRepoCredentials, type GitLabAccess } from '../git-broker/gitlab-repo-credentials';
+import type { ForgeFile, ForgeTreeEntry } from '../git-broker/forge-tree';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
-import { KNOWLEDGE_CAP_MESSAGE, selectIndexableEntries } from './knowledge-allowlist';
+import { KNOWLEDGE_CAP_MESSAGE, MAX_KNOWLEDGE_FILE_BYTES, selectIndexableEntries } from './knowledge-allowlist';
 import { knowledgePatternsKey } from './knowledge-patterns';
 import { chunkMarkdown } from './markdown-chunker';
 import { chunkDecisions } from './decisions-chunker';
@@ -58,6 +61,8 @@ export class KnowledgeRepoIndexer {
     private readonly embeddings: EmbeddingService,
     private readonly rag: RagService,
     private readonly audit: AuditRecorder,
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlabChecker: GitLabAccessChecker,
     @Inject(KNOWLEDGE_INDEX_CLOCK) private readonly clock: () => number = Date.now,
   ) {}
 
@@ -76,15 +81,39 @@ export class KnowledgeRepoIndexer {
       leaseUntil: null,
       ...result,
     });
-    if (repo.provider !== 'github' || repo.githubInstallationId === null) {
-      const reason = repo.provider !== 'github' ? 'not a GitHub repository' : 'no installation';
-      await finish({ status: 'skipped', lastError: reason });
-      return { status: 'skipped', reason };
+    if (repo.provider === 'gitlab') {
+      // US-004: a GitLab repo without a credential row has no read token, so it indexes nothing (not even a claim).
+      if (repo.gitlabConnected !== true) {
+        await finish({ status: 'skipped', lastError: 'no credentials' });
+        return { status: 'skipped', reason: 'no credentials' };
+      }
+    } else if (repo.githubInstallationId === null) {
+      await finish({ status: 'skipped', lastError: 'no installation' });
+      return { status: 'skipped', reason: 'no installation' };
     }
+    // The GitLab branch is taken if and only if the provider is `gitlab`; every other repo keeps the GitHub pass.
+    const gitlab = repo.provider === 'gitlab';
+    const installationId = repo.githubInstallationId;
     if (!await this.state.claim(repoId, repo.projectId, now, LEASE_MS)) return { status: 'busy' };
     let token: string | undefined;
     let previousSha: string | null = null;
     let finishedIdle = false;
+    /**
+     * US-004: one `GitLabRepoCredentials.call` per forge request — never one call around a whole pass — so a refusal
+     * marks exactly the call it happened in and a token rotated mid-pass is judged by its own requests. The token of
+     * the latest read stays in memory only, to redact it from a persisted error the way the GitHub token is.
+     */
+    const readVia = <T>(fn: (access: GitLabAccess) => Promise<T>): Promise<T> =>
+      this.gitlabCredentials.call(repo, 'read', async (access) => { token = access.token; return fn(access); });
+    const headOf = async (): Promise<string> => (gitlab
+      ? readVia(access => this.gitlabChecker.getBranchHead(access, repo.defaultBranch))
+      : this.github.getBranchHead(token as string, repo.owner, repo.name, repo.defaultBranch));
+    const treeOf = async (ref: string): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }> => (gitlab
+      ? readVia(access => this.gitlabChecker.getTree(access, ref))
+      : this.github.getTree(token as string, repo.owner, repo.name, ref, true));
+    const fileOf = async (path: string, ref: string): Promise<ForgeFile | null> => (gitlab
+      ? readVia(access => this.gitlabChecker.getFile(access, path, ref))
+      : this.github.getFile(token as string, repo.owner, repo.name, path, ref));
     try {
       const [patterns, previousStates, previousFiles] = await Promise.all([
         this.state.findProjectPatterns(repo.projectId),
@@ -98,8 +127,8 @@ export class KnowledgeRepoIndexer {
       const previous = previousStates.find(state => state.repoId === repoId);
       previousSha = previous?.indexedSha ?? null;
       skippedCount = previous?.skippedCount ?? 0;
-      token = (await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name)).token;
-      const head = await this.github.getBranchHead(token, repo.owner, repo.name, repo.defaultBranch);
+      if (!gitlab) token = (await this.github.mintReadOnlyToken(installationId as bigint, repo.name)).token;
+      const head = await headOf();
       // A row written before the feature has a null key, so its first pass re-selects as well.
       if (head === previous?.indexedSha && previousFiles.every(file => file.unembeddedCount === 0) && previous?.patternsKey === patternsKey) {
         // This pass just read the head, so only the cap message (a property of the unchanged tree) carries forward.
@@ -108,7 +137,7 @@ export class KnowledgeRepoIndexer {
           chunkCount: previous.chunkCount, unembeddedCount: previous.unembeddedCount, patternsKey });
         return { status: 'unchanged' };
       }
-      const tree = await this.github.getTree(token, repo.owner, repo.name, head, true);
+      const tree = await treeOf(head);
       if (tree.truncated) throw new Error('tree truncated');
       const selection = selectIndexableEntries(tree.entries, patterns ?? undefined);
       skippedCount = selection.skipped;
@@ -121,12 +150,21 @@ export class KnowledgeRepoIndexer {
       for (const entry of selection.kept) {
         const existing = files.get(entry.path);
         if (existing?.blobSha === entry.sha && existing.unembeddedCount === 0) continue;
-        const file = await this.github.getFile(token, repo.owner, repo.name, entry.path, head);
+        const file = await fileOf(entry.path, head);
+        // US-004: a GitLab tree entry carries no size, so an oversized file is only known after it is fetched. Its
+        // rows are dropped exactly as the GitHub missing-file branch drops them, and it is not chunked.
+        const oversized = gitlab && file !== null && file.size > MAX_KNOWLEDGE_FILE_BYTES;
         if (file === null) {
           await this.store.deleteFile(repo.projectId, this.sourceId(repoId, entry.path));
           if (!await this.state.renew(repoId, new Date(this.clock() + LEASE_MS), now)) return { status: 'failed', reason: 'lease lost' };
           await this.state.deleteFile(repoId, entry.path);
           files.delete(entry.path);
+        } else if (oversized) {
+          await this.store.deleteFile(repo.projectId, this.sourceId(repoId, entry.path));
+          if (!await this.state.renew(repoId, new Date(this.clock() + LEASE_MS), now)) return { status: 'failed', reason: 'lease lost' };
+          await this.state.deleteFile(repoId, entry.path);
+          files.delete(entry.path);
+          skippedCount += 1;
         } else {
           const { rows, unembeddedCount } = await this.rows(repo, entry.path, entry.sha, head, file.content.toString('utf8'), now);
           await this.store.replaceFile(repo.projectId, this.sourceId(repoId, entry.path), rows);
@@ -136,7 +174,7 @@ export class KnowledgeRepoIndexer {
           files.set(entry.path, next);
         }
         mutated = true;
-        if (!existing || existing.blobSha !== entry.sha || file === null) changedCount += 1;
+        if (!oversized && (!existing || existing.blobSha !== entry.sha || file === null)) changedCount += 1;
       }
       for (const path of files.keys()) {
         if (kept.has(path)) continue;

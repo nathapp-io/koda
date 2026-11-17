@@ -68,6 +68,14 @@ describe('GitLabAccessChecker', () => {
       expect(lastRequest().headers['private-token']).toBe('glpat');
     });
 
+    it('AC-1: maps sha to headSha only when it is a string', async () => {
+      respond = () => ({ status: 200, body: { state: 'opened', web_url: 'u', sha: 'abc123' } });
+      await expect(checker.getMergeRequest(access, 7)).resolves.toEqual(expect.objectContaining({ headSha: 'abc123' }));
+      respond = () => ({ status: 200, body: { state: 'opened', web_url: 'u' } });
+      const result = await checker.getMergeRequest(access, 7);
+      expect(result).not.toHaveProperty('headSha');
+    });
+
     it.each([
       [{ state: 'opened', draft: true }, { state: 'open', draft: true, merged: false }],
       [{ state: 'opened', work_in_progress: true }, { state: 'open', draft: true, merged: false }],
@@ -83,6 +91,105 @@ describe('GitLabAccessChecker', () => {
       await expect(checker.getMergeRequest(access, 4)).resolves.toBeNull();
       respond = () => ({ status: 502, body: {} });
       await expect(checker.getMergeRequest(access, 4)).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+  });
+
+  describe('GitLab reads', () => {
+    it('AC-2: pages and maps recursive trees, stopping at a short page', async () => {
+      const page = (start: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `sha-${start + i}`, path: `p${start + i}`, type: i % 2 ? 'tree' : 'blob' }));
+      let n = 0;
+      respond = () => ({ status: 200, body: ++n === 1 ? page(0, 100) : page(100, 2) });
+      const result = await checker.getTree(access, 'h1');
+      expect(sent.map((r) => r.url)).toEqual([
+        `${API_BASE}/projects/${PROJECT_ID}/repository/tree?ref=h1&recursive=true&per_page=100&page=1`,
+        `${API_BASE}/projects/${PROJECT_ID}/repository/tree?ref=h1&recursive=true&per_page=100&page=2`,
+      ]);
+      expect(result).toEqual({ entries: [{ path: 'p0', type: 'blob', sha: 'sha-0', size: null }, { path: 'p1', type: 'tree', sha: 'sha-1', size: null }, ...Array.from({ length: 100 }, (_, i) => ({ path: `p${i + 2}`, type: i % 2 ? 'tree' : 'blob', sha: `sha-${i + 2}`, size: null }))], truncated: false });
+    });
+
+    it('AC-3: caps tree reads at 100 full pages and reports truncation', async () => {
+      respond = () => ({ status: 200, body: Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, path: `p${i}`, type: 'blob' })) });
+      const result = await checker.getTree(access, 'h1');
+      expect(sent).toHaveLength(100);
+      expect(result.entries).toHaveLength(10000);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('AC-4: reports a missing tree page', async () => {
+      respond = () => ({ status: 404, body: [] });
+      await expect(checker.getTree(access, 'h1')).rejects.toMatchObject({ reason: 'repo_not_found' });
+      let page = 0;
+      respond = () => ({ status: ++page === 1 ? 200 : 404, body: Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, path: `p${i}`, type: 'blob' })) });
+      await expect(checker.getTree(access, 'h1')).rejects.toMatchObject({ reason: 'repo_not_found' });
+    });
+
+    it('AC-5: reads note bodies in order and uses the requested URL', async () => {
+      respond = () => ({ status: 200, body: [{ body: 'first' }, { body: 2 }, { body: 'second' }] });
+      await expect(checker.listMergeRequestNotes(access, 4)).resolves.toEqual(['first', 'second']);
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/merge_requests/4/notes?per_page=100`);
+    });
+
+    it('AC-6: rejects a non-array notes response', async () => {
+      respond = () => ({ status: 200, body: {} });
+      await expect(checker.listMergeRequestNotes(access, 4)).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
+    it('AC-7: extracts discussion authors and encodes the discussion id', async () => {
+      respond = () => ({ status: 200, body: { notes: [{ author: { username: 'alice' } }, { author: { username: 'bob' } }, {}] } });
+      await expect(checker.getMergeRequestDiscussion(access, 4, 'd/1')).resolves.toEqual({ authors: ['alice', 'bob'] });
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/merge_requests/4/discussions/d%2F1`);
+    });
+
+    it('AC-8: returns null for a missing discussion', async () => {
+      respond = () => ({ status: 404, body: {} });
+      await expect(checker.getMergeRequestDiscussion(access, 4, 'd')).resolves.toBeNull();
+    });
+
+    it('AC-9: queries members and confirms an exact case-insensitive username match', async () => {
+      respond = () => ({ status: 200, body: [{ username: 'alice.b', access_level: 30 }, { username: 'alice.bx', access_level: 50 }] });
+      await expect(checker.getMemberAccessLevel(access, 'Alice.B')).resolves.toBe(30);
+      expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/members/all?query=Alice.B&per_page=100`);
+    });
+
+    it('AC-10: returns zero without an exact username match', async () => {
+      respond = () => ({ status: 200, body: [{ username: 'alice.bx', access_level: 50 }] });
+      await expect(checker.getMemberAccessLevel(access, 'Alice.B')).resolves.toBe(0);
+    });
+
+    it.each([
+      ['getTree', () => checker.getTree(access, 'h1')],
+      ['listMergeRequestNotes', () => checker.listMergeRequestNotes(access, 4)],
+      ['getMergeRequestDiscussion', () => checker.getMergeRequestDiscussion(access, 4, 'd')],
+      ['getMemberAccessLevel', () => checker.getMemberAccessLevel(access, 'alice')],
+    ])('AC-11: %s maps HTTP failures', async (_name, invoke) => {
+      for (const [status, reason] of [[401, 'gitlab_token_invalid'], [403, 'app_permissions_insufficient'], [500, 'provider_error']] as const) {
+        respond = () => ({ status, body: {} });
+        await expect(invoke()).rejects.toMatchObject({ reason });
+      }
+    });
+
+    it.each([
+      ['getTree', () => checker.getTree(access, 'h1')],
+      ['listMergeRequestNotes', () => checker.listMergeRequestNotes(access, 4)],
+      ['getMergeRequestDiscussion', () => checker.getMergeRequestDiscussion(access, 4, 'd')],
+      ['getMemberAccessLevel', () => checker.getMemberAccessLevel(access, 'alice')],
+    ])('AC-12: %s blocks loopback hosts before requesting', async (_name, invoke) => {
+      lookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+      await expect(invoke()).rejects.toMatchObject({ reason: 'gitlab_host_blocked' });
+      expect(sent).toEqual([]);
+    });
+
+    it('AC-13: rejects malformed shapes and maps missing resources', async () => {
+      for (const invoke of [() => checker.getTree(access, 'h1'), () => checker.listMergeRequestNotes(access, 4), () => checker.getMemberAccessLevel(access, 'a')]) {
+        respond = () => ({ status: 200, body: {} });
+        await expect(invoke()).rejects.toMatchObject({ reason: 'provider_error' });
+      }
+      respond = () => ({ status: 200, body: {} });
+      await expect(checker.getMergeRequestDiscussion(access, 4, 'd')).rejects.toMatchObject({ reason: 'provider_error' });
+      for (const invoke of [() => checker.listMergeRequestNotes(access, 4), () => checker.getMemberAccessLevel(access, 'a')]) {
+        respond = () => ({ status: 404, body: {} });
+        await expect(invoke()).rejects.toMatchObject({ reason: 'repo_not_found' });
+      }
     });
   });
 

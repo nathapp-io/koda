@@ -25,7 +25,7 @@
   "fixUnprotected": { "422": "FIX on an unprotected default branch cannot be allowed: {reason}." },
   "ruleOverride": { "-2": "Invalid rule override: {reason}", "400": "Invalid rule override: {reason}" },
   "rulings": {
-    "notDraft": { "409": "Only draft RUN jobs with a GitHub pull request can be ruled" },
+    "notDraft": { "409": "Only draft RUN jobs with a pull or merge request can be ruled" },
     "notLatest": { "409": "Only the latest RUN of this pull request can be ruled" },
     "settled": { "409": "This item has already been applied" },
     "alreadyRuled": { "409": "This item already has a pending ruling from a person or an agent" },
@@ -33,7 +33,7 @@
     "noItemIndex": { "409": "This pull request has no nax item index, so a FIX cannot settle a ruling on it; re-run the job to republish" },
     "invalidText": { "-2": "{property}: Text must start with a supported ruling and the required evidence" },
     "unknownItem": { "404": "Workflow item not found" },
-    "invalidPr": { "400": "The job must identify a GitHub pull request" }
+    "invalidPr": { "400": "The job must identify a pull or merge request" }
   },
   "providerCredentials": {
     "duplicate": { "409": "A key for this provider already exists at this scope" },

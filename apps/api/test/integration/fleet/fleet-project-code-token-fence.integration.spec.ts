@@ -23,11 +23,12 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
-import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
+import { GitLabRepoCredentials } from '../../../src/fleet/git-broker/gitlab-repo-credentials';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
-const ENV_KEYS = ['GITHUB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG', 'FLEET_SYNC_WAIT_MS'] as const;
+const ENV_KEYS = ['GITHUB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG', 'FLEET_SYNC_WAIT_MS', 'VCS_ENCRYPTION_KEY'] as const;
 
 describeIntegration('fleet project-code token fence (PG + HTTP, S5b 1c-b)', () => {
   let app: NathApplication;
@@ -81,6 +82,7 @@ describeIntegration('fleet project-code token fence (PG + HTTP, S5b 1c-b)', () =
     Object.assign(process.env, {
       GITHUB_API_URL: forge.url, GITHUB_APP_ID: '4242',
       GITHUB_APP_PRIVATE_KEY_FILE: keyFile, GITHUB_APP_SLUG: 'koda-fleet', FLEET_SYNC_WAIT_MS: '0',
+      VCS_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     });
     // The read-only mint posts to the same endpoint as the write mint (1c-b-D3).
     forge.routes.set('POST /app/installations/77/access_tokens', () => ({
@@ -126,6 +128,27 @@ describeIntegration('fleet project-code token fence (PG + HTTP, S5b 1c-b)', () =
     expect(res.gitTokens).toEqual([expect.objectContaining({
       jobId: job.id, repoId: world.repoId, token: 'ghs_read_only', username: 'x-access-token',
     })]);
+  });
+
+  it('US-002 AC-6/AC-7: grants a connected GitLab project repo its read token, never its write token', async () => {
+    const job = await seedThreadJob('PROJECT');
+    const repo = await prisma.fleetRepo.create({
+      data: { projectId: world.projectId, provider: 'gitlab', owner: 'acme', name: 'connected-gl', defaultBranch: 'main',
+        githubInstallationId: null, host: 'https://gitlab.com', createdById: world.ids.root },
+    });
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => app.get(GitLabRepoCredentials).save(repo.id, {
+      gitlabProjectId: 123,
+      read: { token: 'gitlab-read-plaintext', userId: 7, username: 'reader', expiresAt: null },
+      write: { token: 'gitlab-write-plaintext', userId: 8, username: 'writer', expiresAt: null, isBot: true },
+    }));
+
+    const res = await sync({ tokenRequests: [requestFor(job.id, repo.id)] });
+
+    expect(res.gitTokenErrors).toEqual([]);
+    expect(res.gitTokens).toEqual([expect.objectContaining({
+      jobId: job.id, repoId: repo.id, token: 'gitlab-read-plaintext', username: 'oauth2',
+    })]);
+    expect(res.gitTokens.some((token) => token.token === 'gitlab-write-plaintext')).toBe(false);
   });
 
   it('US-002 AC-5: refuses another project’s repository and mints nothing', async () => {

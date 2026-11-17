@@ -27,6 +27,18 @@ import { FleetPrRulingsService } from '../../../src/fleet/rulings/fleet-pr-rulin
     const policy = await seedWaitPolicy(db, 'fleet.job.rule', world.projectId);
     await db.approvalPolicy.update({ where: { id: policy.id }, data: { mode: 'human' } });
   };
+  /** US-005: a draft RUN job on a GitLab repo, whose result URL names merge request `mr`. */
+  const gitlabJob = async (feature: string, mr: number) => {
+    const repo = await db.fleetRepo.create({ data: {
+      projectId: world.projectId, provider: 'gitlab', host: 'https://gitlab.com', owner: 'acme', name: `${feature}-app`,
+      defaultBranch: 'main', createdById: world.ids.root,
+    } });
+    return db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: repo.id, command: 'RUN', feature, ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: agent.id,
+      resultPrUrl: `https://gitlab.com/acme/${feature}-app/-/merge_requests/${mr}`,
+      workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+    } });
+  };
   const approve = async (id: string) => data<{ status: string; result: unknown }>(await request(server()).post(`/api/approvals/${id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
   beforeAll(async () => {
     await resetDb();
@@ -47,19 +59,28 @@ import { FleetPrRulingsService } from '../../../src/fleet/rulings/fleet-pr-rulin
     const j = await job();
     expect(data(await post(j.id).expect(201))).toMatchObject({ jobId: j.id, state: 'pending', disposition: 'confirmed', actorType: 'AGENT', actorId: agent.id });
   });
-  it.each(['ready', 'PLAN', 'no-pr', 'wrong-repo', 'gitlab'])('AC-2: refuses non-draft target %s before gate', async (kind) => {
+  it.each(['ready', 'PLAN', 'no-pr', 'wrong-repo'])('AC-2: refuses non-draft target %s before gate', async (kind) => {
     const j = await job();
     await humanPolicy();
     if (kind === 'ready') await db.fleetJob.update({ where: { id: j.id }, data: { workflow: { outcome: 'ready' } } });
     if (kind === 'PLAN') await db.fleetJob.update({ where: { id: j.id }, data: { command: 'PLAN' } });
     if (kind === 'no-pr') await db.fleetJob.update({ where: { id: j.id }, data: { resultPrUrl: null } });
     if (kind === 'wrong-repo') await db.fleetJob.update({ where: { id: j.id }, data: { resultPrUrl: 'https://github.com/other/repo/pull/1' } });
-    if (kind === 'gitlab') {
-      const repo = await db.fleetRepo.create({ data: { projectId: world.projectId, provider: 'gitlab', owner: 'acme', name: 'ruling-gitlab', defaultBranch: 'main', createdById: world.ids.root } });
-      await db.fleetJob.update({ where: { id: j.id }, data: { repoId: repo.id, resultPrUrl: 'https://gitlab.com/acme/ruling-gitlab/-/merge_requests/1' } });
-    }
     const response = await post(j.id).expect(409);
-    expect(JSON.stringify(response.body)).toContain('Only draft RUN jobs with a GitHub pull request can be ruled');
+    expect(JSON.stringify(response.body)).toContain('Only draft RUN jobs with a pull or merge request can be ruled');
+    await noWrites(j.id);
+  });
+  it('AC-5: a draft RUN on a GitLab merge request takes a ruling', async () => {
+    const j = await gitlabJob('gitlab-rule', 12);
+    expect(data(await post(j.id).expect(201))).toMatchObject({ jobId: j.id, state: 'pending', disposition: 'confirmed', prNumber: 12 });
+    expect(await db.fleetPrRuling.findMany({ where: { jobId: j.id } })).toEqual([expect.objectContaining({ state: 'pending', repoId: j.repoId, prNumber: 12 })]);
+  });
+  it('AC-6: a non-draft RUN on a GitLab merge request is refused with the forge-neutral message', async () => {
+    const j = await gitlabJob('gitlab-ready', 13);
+    await db.fleetJob.update({ where: { id: j.id }, data: { workflow: { outcome: 'ready' } } });
+    await humanPolicy();
+    const response = await post(j.id).expect(409);
+    expect(JSON.stringify(response.body)).toContain('Only draft RUN jobs with a pull or merge request can be ruled');
     await noWrites(j.id);
   });
   it('AC-3: rejects unknown item before gate', async () => {

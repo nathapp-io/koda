@@ -53,6 +53,8 @@ const reviewRepo = (over: { githubInstallationId?: bigint | null } = {}) => ({
   id: 'repo-1', projectId: 'p1', owner: 'o', name: 'r',
   githubInstallationId: 'githubInstallationId' in over ? over.githubInstallationId ?? null : 1n,
   defaultBranch: 'main',
+  // US-006: the review projection names the forge and its host, so the fixture does too.
+  provider: 'github', host: 'https://github.com',
 });
 
 interface HarnessOptions {

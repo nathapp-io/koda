@@ -76,6 +76,7 @@ export class GitLabAccessChecker {
       mergedAt: typeof b.merged_at === 'string' ? new Date(b.merged_at) : null,
       mergedBy: typeof mergedBy === 'string' ? mergedBy : null,
       mergeSha: sha,
+      ...(typeof b.sha === 'string' ? { headSha: b.sha } : {}),
       url: b.web_url,
       title: typeof b.title === 'string' ? b.title : '',
     };
@@ -105,6 +106,7 @@ export class GitLabAccessChecker {
 
   static readonly TREE_PAGE = 100;
   static readonly TREE_MAX_PAGES = 10;
+  static readonly TREE_FULL_MAX_PAGES = 100;
 
   /**
    * Fleet S3 §4.1: recursive tree under `path` at `ref`. FleetHttpClient exposes no headers, so paging stops at the first short
@@ -129,6 +131,65 @@ export class GitLabAccessChecker {
       if (res.body.length < GitLabAccessChecker.TREE_PAGE) return out;
     }
     throw new RepoCheckException('provider_error');
+  }
+
+  /** Reads the complete recursive tree at a ref, bounded to 100 pages. */
+  async getTree(access: GitLabAccess, ref: string): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }> {
+    const entries: ForgeTreeEntry[] = [];
+    for (let page = 1; page <= GitLabAccessChecker.TREE_FULL_MAX_PAGES; page += 1) {
+      await this.guard(access.target.apiBase);
+      const query = `ref=${encodeURIComponent(ref)}&recursive=true&per_page=${GitLabAccessChecker.TREE_PAGE}&page=${page}`;
+      const res = await this.http.request('GET', `${this.projectUrl(access)}/repository/tree?${query}`, { 'private-token': access.token });
+      if (res.status === 404) throw new RepoCheckException('repo_not_found');
+      if (res.status !== 200) this.fail(res.status);
+      if (!Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+      for (const raw of res.body) {
+        const entry = obj(raw);
+        if ((entry.type === 'blob' || entry.type === 'tree') && typeof entry.path === 'string' && typeof entry.id === 'string') {
+          entries.push({ path: entry.path, type: entry.type, sha: entry.id, size: null });
+        }
+      }
+      if (res.body.length < GitLabAccessChecker.TREE_PAGE) return { entries, truncated: false };
+    }
+    return { entries, truncated: true };
+  }
+
+  /** Reads the first page of merge-request note bodies. */
+  async listMergeRequestNotes(access: GitLabAccess, iid: number): Promise<string[]> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/merge_requests/${iid}/notes?per_page=100`, { 'private-token': access.token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) this.fail(res.status);
+    if (!Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+    return res.body.map((note: unknown) => obj(note).body).filter((body): body is string => typeof body === 'string');
+  }
+
+  /** Reads the authors on a merge-request discussion; null when it no longer exists. */
+  async getMergeRequestDiscussion(access: GitLabAccess, iid: number, discussionId: string): Promise<{ authors: string[] } | null> {
+    await this.guard(access.target.apiBase);
+    const url = `${this.projectUrl(access)}/merge_requests/${iid}/discussions/${encodeURIComponent(discussionId)}`;
+    const res = await this.http.request('GET', url, { 'private-token': access.token });
+    if (res.status === 404) return null;
+    if (res.status !== 200) this.fail(res.status);
+    const notes = obj(res.body).notes;
+    if (!Array.isArray(notes)) throw new RepoCheckException('provider_error');
+    const authors = notes.map((note: unknown) => obj(obj(note).author).username).filter((username): username is string => typeof username === 'string');
+    return { authors };
+  }
+
+  /** Looks up a project or inherited group member by exact, case-insensitive username. */
+  async getMemberAccessLevel(access: GitLabAccess, username: string): Promise<number> {
+    await this.guard(access.target.apiBase);
+    const query = `query=${encodeURIComponent(username)}&per_page=100`;
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/members/all?${query}`, { 'private-token': access.token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) this.fail(res.status);
+    if (!Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+    const match = res.body.find((member: unknown) => {
+      const found = obj(member).username;
+      return typeof found === 'string' && found.toLowerCase() === username.toLowerCase();
+    });
+    return level(match);
   }
 
   /** Fleet S3 §4.1: one file at a ref (files API, base64). Null when absent. */

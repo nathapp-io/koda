@@ -1,6 +1,9 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { capText, maskSecrets } from '../assistant/assistant-tool-safety';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FLEET_REPO_REPOSITORY, type FleetRepoRecord, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 
 /** Injection token for the clock this service reads; tests provide a fake (spec 1c-D4). */
@@ -20,7 +23,7 @@ const MAX_CONTEXT_BYTES = 10_240;
 
 const GITHUB_PROVIDER = 'github';
 
-type UnavailableReason = 'no repository' | 'not a GitHub repository' | 'no installation' | 'no context file' | 'timeout' | 'read failed';
+type UnavailableReason = 'no repository' | 'not a GitHub repository' | 'no installation' | 'no credentials' | 'no context file' | 'timeout' | 'read failed';
 
 /** What one GitHub read found at one commit: `path` and `text` are null when neither file exists. */
 interface BriefRead {
@@ -56,6 +59,8 @@ export class ProjectBriefService {
   constructor(
     private readonly github: GitHubAppClient,
     @Inject(FLEET_REPO_REPOSITORY) private readonly repos: IFleetRepoRepository,
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlabChecker: GitLabAccessChecker,
     @Optional() @Inject(PROJECT_BRIEF_CLOCK) now?: () => number,
   ) {
     this.now = now ?? Date.now;
@@ -88,6 +93,7 @@ export class ProjectBriefService {
     const repo = await this.repos.findById(repoId);
     if (!repo) return unavailable('no repository');
     state.repo = repo;
+    if (repo.provider === 'gitlab') return await this.contextForGitLab(repoId, repo);
     if (repo.provider !== GITHUB_PROVIDER) return unavailable('not a GitHub repository');
     const installationId = repo.githubInstallationId;
     if (installationId === null) return unavailable('no installation');
@@ -108,6 +114,45 @@ export class ProjectBriefService {
     const entry: BriefCacheEntry = { ...read, checkedAt: this.now() };
     this.remember(repoId, entry);
     return this.section(repo, entry, false);
+  }
+
+  private async contextForGitLab(repoId: string, repo: FleetRepoRecord): Promise<string> {
+    const cached = this.cache.get(repoId);
+    if (cached && this.now() - cached.checkedAt < CACHE_TTL_MS) return this.section(repo, cached, false);
+
+    let read: BriefRead;
+    try {
+      read = await this.readGitLab(repo, cached);
+    } catch (error) {
+      this.logFailure(repoId, 'read failed', error);
+      if (error instanceof RepoCheckException && error.reason === 'gitlab_credentials_missing') return unavailable('no credentials');
+      return this.afterFailure(repo, cached, 'read failed');
+    }
+    const entry: BriefCacheEntry = { ...read, checkedAt: this.now() };
+    this.remember(repoId, entry);
+    return this.section(repo, entry, false);
+  }
+
+  private async readGitLab(repo: FleetRepoRecord, cached?: BriefCacheEntry): Promise<BriefRead> {
+    const sha = await this.gitlabCredentials.call(repo, 'read', (access) => this.gitlabChecker.getBranchHead(access, repo.defaultBranch));
+    if (cached && cached.sha === sha) return { sha, path: cached.path, text: cached.text };
+    const context = await this.gitlabCredentials.call(repo, 'read', async (access) => {
+      const file = await this.gitlabChecker.getFile(access, CONTEXT_FILE, sha);
+      return file ? file.content.toString('utf8') : null;
+    });
+    const contextText = this.cleanFileText(context);
+    if (contextText !== null) return { sha, path: CONTEXT_FILE, text: contextText };
+    const fallback = await this.gitlabCredentials.call(repo, 'read', async (access) => {
+      const file = await this.gitlabChecker.getFile(access, FALLBACK_FILE, sha);
+      return file ? file.content.toString('utf8') : null;
+    });
+    const fallbackText = this.cleanFileText(fallback);
+    return fallbackText === null ? { sha, path: null, text: null } : { sha, path: FALLBACK_FILE, text: fallbackText };
+  }
+
+  private cleanFileText(text: string | null): string | null {
+    if (text === null || text.trim().length === 0) return null;
+    return capText(maskSecrets(text), MAX_CONTEXT_BYTES);
   }
 
   /**

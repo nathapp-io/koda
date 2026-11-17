@@ -69,6 +69,12 @@ describe('parseBotReview', () => {
   it('AC-11 validates trusted boolean', () => expect(parseBotReview(files([run('r1', artifact([], { trusted: 'yes' }))]), 42)).toEqual({ outcome: 'invalid', reason: 'artifact-invalid' }));
   it('AC-12 ignores other event types', () => expect(parseBotReview(files([run('r1', artifact([event(), event({ type: 'finding-agreed', threadId: 'ignored' })]))]), 42)).toMatchObject({ events: [{ threadId: 'thread-1' }] }));
   it('AC-13 filters invalid logins', () => expect(parseBotReview(files([run('r1', artifact([event({ disagreedBy: ['alice', 'bad login', 'bob'] })]))]), 42)).toMatchObject({ events: [{ disagreedBy: ['alice', 'bob'] }] }));
+  it('US-006 AC-1 keeps GitLab usernames with a dot or an underscore', () => {
+    const invented = ['jane.doe', 'j_d', 'octo-cat[bot]', 'bad login', '.dot', 'jane doe', 'x'.repeat(256)];
+    const parsed = parseBotReview(files([run('r1', artifact([event({ disagreedBy: invented })]))]), 42);
+    // 'octo-cat[bot]' is a GitHub bot login and stays; the GitLab usernames survive; the rest are dropped.
+    expect(parsed).toMatchObject({ events: [{ disagreedBy: ['jane.doe', 'j_d', 'octo-cat[bot]'] }] });
+  });
   it('AC-14 caps events to the first 50', () => {
     const events = Array.from({ length: 60 }, (_, i) => event({ threadId: `thread-${i}` }));
     expect(parseBotReview(files([run('r1', artifact(events))]), 42)).toMatchObject({ events: Array.from({ length: 50 }, (_, i) => expect.objectContaining({ threadId: `thread-${i}` })) });

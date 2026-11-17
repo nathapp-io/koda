@@ -13,7 +13,11 @@ export interface KnowledgeRepoRef {
   owner: string;
   name: string;
   defaultBranch: string;
+  /** US-004: the forge host the repo lives on; a ref built without it is addressed at the default host. */
+  host?: string;
   githubInstallationId: bigint | null;
+  /** US-004: whether the repo has a GitLab credential row; absent counts as not connected. */
+  gitlabConnected?: boolean;
 }
 
 export interface KnowledgeIndexState {
@@ -101,6 +105,11 @@ export interface IKnowledgeIndexRepository {
   findRepo(repoId: string): Promise<KnowledgeRepoRef | null>;
   findProjectRepos(projectId: string): Promise<KnowledgeRepoRef[]>;
   findAllGithubRepos(): Promise<KnowledgeRepoRef[]>;
+  /**
+   * US-004: the GitLab repositories that have a credential row, at most 500, in `createdAt` then `id` order.
+   * A GitLab repo without one is not polled: its pass would only record `no credentials`.
+   */
+  findAllGitlabRepos(): Promise<KnowledgeRepoRef[]>;
   /** Takes the repository's lease when it is free or expired; false when another pass holds it. */
   claim(repoId: string, projectId: string, now: Date, leaseMs: number): Promise<boolean>;
   /** Extends this pass's lease; startedAt fences a renewal against a later claim. */

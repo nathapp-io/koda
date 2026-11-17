@@ -10,25 +10,59 @@ import type { AssistantToolRegistry } from '../assistant/assistant-tool.registry
 import type { AssistantTool, ToolContext } from '../assistant/assistant-tool.types';
 import { ToolActionError, ToolInputError } from '../assistant/assistant-tool.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import type { IGitLabCredentialRepository } from '../git-broker/prisma-gitlab-credential.repository';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
+import { encryptToken } from '../../common/utils/encryption.util';
 
 const agent: AgentPrincipal = { actorType: 'agent', id: 'agent', slug: 'ruler', status: 'ACTIVE', capabilities: [] };
 
-function setup() {
+/** US-005: the key the GitLab credential store decrypts under; 32 bytes of hex, as the env holds it. */
+const GITLAB_KEY = 'a'.repeat(64);
+/** US-005: the two tokens differ, so the access a read passes proves which token kind was resolved. */
+const GITLAB_READ_TOKEN = 'gitlab-read-token';
+const GITLAB_WRITE_TOKEN = 'gitlab-write-token';
+/** US-005: the stored credential of the GitLab repo under test, or none at all. */
+const gitlabCredentialRow = () => ({
+  repoId: 'r1', gitlabProjectId: 4711,
+  encryptedReadToken: encryptToken(GITLAB_READ_TOKEN, GITLAB_KEY), encryptedWriteToken: encryptToken(GITLAB_WRITE_TOKEN, GITLAB_KEY),
+  readTokenUserId: 1, readTokenUsername: 'reader', writeTokenUserId: 2, writeTokenUsername: 'writer', writeTokenIsBot: true,
+  readTokenExpiresAt: null, writeTokenExpiresAt: null, readTokenInvalidAt: null, writeTokenInvalidAt: null,
+});
+/** US-005: the access a GitLab notes read presents: the read token and the repo's own host and project id. */
+const gitlabAccess = { token: GITLAB_READ_TOKEN, target: { apiBase: 'https://gitlab.example.com/api/v4', projectId: 4711 } };
+
+function setup(options: { credentialRow?: ReturnType<typeof gitlabCredentialRow> | null } = {}) {
   const repo: IFleetPrRulingRepository = {
     findTarget: vi.fn(), lockTarget: vi.fn(async () => null), latestRunForPr: vi.fn(async () => 'run'),
     latestRuling: vi.fn(async () => null), list: vi.fn(), pendingForFix: vi.fn(async () => []), replaceOlderRuns: vi.fn(),
     runsForPr: vi.fn(async () => []), settlePending: vi.fn(), replacePending: vi.fn(), insert: vi.fn(),
   };
   const github = { mintThreadReadToken: vi.fn(async () => ({ token: 'ephemeral', expiresAt: new Date() })), listIssueComments: vi.fn() };
-  const service = new FleetPrRulingsService(repo, { run: (fn: () => Promise<unknown>) => fn() } as never, {} as never, {} as never, github as never, {} as never);
-  return { repo, github, service };
+  // US-005: the production credential store over an in-memory row, so `call` and its invalid mark are real.
+  const markInvalid = vi.fn(async () => undefined);
+  const credentialRow = 'credentialRow' in options ? options.credentialRow : gitlabCredentialRow();
+  const credentials = new GitLabRepoCredentials(
+    { findByRepoId: vi.fn(async () => credentialRow), markInvalid, upsert: vi.fn() } as unknown as IGitLabCredentialRepository,
+    { encryptionKey: GITLAB_KEY },
+  );
+  const gitlab = { listMergeRequestNotes: vi.fn(async () => [] as string[]) };
+  const service = new FleetPrRulingsService(repo, { run: (fn: () => Promise<unknown>) => fn() } as never, {} as never, {} as never, github as never, {} as never,
+    credentials, gitlab as never);
+  return { repo, github, service, credentials, gitlab, markInvalid };
 }
 
 const target = (over: Partial<RulingJobTarget> = {}): RulingJobTarget => ({
   projectId: 'project', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }],
-  repo: { provider: 'github', owner: 'acme', name: 'app', githubInstallationId: 77n }, ...over,
+  repo: { id: 'repo', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: 77n }, ...over,
 });
 const draft = (openItems: { id: string; kind: string }[]) => ({ ...target({ openItems }), command: 'RUN', outcome: 'draft' });
+/** US-005: a ruling target on a GitLab merge request, with the repo projection the repository supplies. */
+const gitlabTarget = (over: Partial<RulingJobTarget> = {}): RulingJobTarget => target({
+  prNumber: 12,
+  repo: { id: 'r1', provider: 'gitlab', host: 'https://gitlab.example.com', owner: 'acme', name: 'app', githubInstallationId: null },
+  ...over,
+});
 
 describe('ruling preflight', () => {
   it('AC-1: ruleTarget refuses a ci item before any forge read', async () => {
@@ -81,14 +115,104 @@ describe('ruling preflight', () => {
 
   it('AC-6: assertItemIndex reads nothing when the repo has no installation id', async () => {
     const { service, github } = setup();
-    await expect(service.assertItemIndex(target({ repo: { provider: 'github', owner: 'acme', name: 'app', githubInstallationId: null } }))).resolves.toBeUndefined();
+    await expect(service.assertItemIndex(target({ repo: { id: 'repo', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: null } }))).resolves.toBeUndefined();
     expect(github.mintThreadReadToken).not.toHaveBeenCalled();
   });
 
-  it('AC-6: assertItemIndex reads nothing for a GitLab repo', async () => {
-    const { service, github } = setup();
-    await expect(service.assertItemIndex(target({ repo: { provider: 'gitlab', owner: 'acme', name: 'app', githubInstallationId: 77n } }))).resolves.toBeUndefined();
-    expect(github.mintThreadReadToken).not.toHaveBeenCalled();
+  it('AC-6: assertItemIndex fails open for a GitLab repo without a credential row and reads no GitHub method', async () => {
+    const { service, github, credentials, gitlab } = setup({ credentialRow: null });
+    const call = vi.spyOn(credentials, 'call');
+    try {
+      await expect(service.assertItemIndex(gitlabTarget())).resolves.toBeUndefined();
+      expect(github.mintThreadReadToken).not.toHaveBeenCalled();
+      expect(github.listIssueComments).not.toHaveBeenCalled();
+      expect(gitlab.listMergeRequestNotes).not.toHaveBeenCalled();
+      expect(call.mock.calls.map((args) => args[1])).toEqual(['read']);
+    } finally { call.mockRestore(); }
+  });
+
+  it('AC-10: preflight reads the GitLab MR notes with { id, host } and the read token', async () => {
+    const { service, repo, github, credentials, gitlab } = setup();
+    vi.mocked(repo.findTarget).mockResolvedValue({ ...gitlabTarget(), command: 'RUN', outcome: 'draft' });
+    gitlab.listMergeRequestNotes.mockResolvedValue([`published\n${NAX_ITEM_INDEX_MARKER}`]);
+    const call = vi.spyOn(credentials, 'call');
+    try {
+      await expect(service.preflight('project', 'run', { itemId: 'D-1', text: 'confirm: green' })).resolves.toBeUndefined();
+      expect(call).toHaveBeenCalledOnce();
+      // The store addresses the repo by its id and its own host, and always asks for the read token.
+      const [{ id, host }, kind] = call.mock.calls[0];
+      expect({ id, host }).toEqual({ id: 'r1', host: 'https://gitlab.example.com' });
+      expect(kind).toBe('read');
+      expect(gitlab.listMergeRequestNotes).toHaveBeenCalledExactlyOnceWith(gitlabAccess, 12);
+      expect(github.mintThreadReadToken).not.toHaveBeenCalled();
+      expect(github.listIssueComments).not.toHaveBeenCalled();
+    } finally { call.mockRestore(); }
+  });
+
+  it('AC-11: a short page of GitLab notes with no index marker is refused', async () => {
+    const { service, gitlab } = setup();
+    gitlab.listMergeRequestNotes.mockResolvedValue(['Looks good', 'nit: naming', 'LGTM']);
+    await expect(service.assertItemIndex(gitlabTarget())).rejects.toMatchObject({ prefix: 'fleet.rulings.noItemIndex' });
+  });
+
+  it('AC-12: one GitLab note with the marker resolves the check', async () => {
+    const { service, gitlab } = setup();
+    gitlab.listMergeRequestNotes.mockResolvedValue(['Ready for review', `published nax items\n${NAX_ITEM_INDEX_MARKER}`]);
+    await expect(service.assertItemIndex(gitlabTarget())).resolves.toBeUndefined();
+    expect(gitlab.listMergeRequestNotes).toHaveBeenCalledExactlyOnceWith(gitlabAccess, 12);
+  });
+
+  it('AC-12: a full page of GitLab notes with no marker fails open', async () => {
+    const { service, gitlab } = setup();
+    gitlab.listMergeRequestNotes.mockResolvedValue(Array.from({ length: 100 }, (_, i) => `note ${i}`));
+    await expect(service.assertItemIndex(gitlabTarget())).resolves.toBeUndefined();
+    expect(gitlab.listMergeRequestNotes).toHaveBeenCalledExactlyOnceWith(gitlabAccess, 12);
+  });
+
+  it('AC-13: a repo with no credential row fails open', async () => {
+    const { service, credentials, gitlab } = setup({ credentialRow: null });
+    const call = vi.spyOn(credentials, 'call');
+    try {
+      await expect(service.assertItemIndex(gitlabTarget())).resolves.toBeUndefined();
+      expect(call.mock.calls.map((args) => args[1])).toEqual(['read']);
+      expect(gitlab.listMergeRequestNotes).not.toHaveBeenCalled();
+    } finally { call.mockRestore(); }
+  });
+
+  it('AC-13: a thrown notes read fails open', async () => {
+    const { service, gitlab } = setup();
+    gitlab.listMergeRequestNotes.mockRejectedValue(new RepoCheckException('provider_error'));
+    await expect(service.assertItemIndex(gitlabTarget())).resolves.toBeUndefined();
+    expect(gitlab.listMergeRequestNotes).toHaveBeenCalledExactlyOnceWith(gitlabAccess, 12);
+  });
+
+  it('AC-14: a GitHub target reads issue comments through a minted thread-read token and never the GitLab store', async () => {
+    const { service, github, credentials, gitlab } = setup();
+    github.listIssueComments.mockResolvedValue([`published\n${NAX_ITEM_INDEX_MARKER}`]);
+    const call = vi.spyOn(credentials, 'call');
+    try {
+      await expect(service.assertItemIndex(target())).resolves.toBeUndefined();
+      expect(github.mintThreadReadToken).toHaveBeenCalledExactlyOnceWith(77n, 'app');
+      expect(github.listIssueComments).toHaveBeenCalledExactlyOnceWith('ephemeral', 'acme', 'app', 42);
+      expect(call).not.toHaveBeenCalled();
+      expect(gitlab.listMergeRequestNotes).not.toHaveBeenCalled();
+    } finally { call.mockRestore(); }
+  });
+
+  it('AC-15: a 401 notes read marks the read token invalid before the check fails open', async () => {
+    const { service, gitlab, markInvalid } = setup();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    markInvalid.mockImplementation(async () => { await gate; });
+    // The checker turns a 401 into this refusal; `call` is what marks the token invalid.
+    gitlab.listMergeRequestNotes.mockRejectedValue(new RepoCheckException('gitlab_token_invalid'));
+    let settled = false;
+    const answer = service.assertItemIndex(gitlabTarget()).then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(markInvalid).toHaveBeenCalledExactlyOnceWith('r1', 'read', expect.any(Date));
+    expect(settled).toBe(false);
+    release();
+    await expect(answer).resolves.toBeUndefined();
   });
 
   it('preflight runs ruleTarget then the item-index check', async () => {
@@ -187,9 +311,9 @@ describe('ruling target repo projection', () => {
     project: { id: 'project', slug: 'slug', deletedAt: null },
     repo: { id: 'repo', projectId: 'project', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: 77n },
   };
-  const repository = () => {
+  const repository = (row: typeof jobRow = jobRow) => {
     const client = {
-      fleetJob: { findFirst: vi.fn(async () => jobRow), findUnique: vi.fn(async () => jobRow) },
+      fleetJob: { findFirst: vi.fn(async () => row), findUnique: vi.fn(async () => row) },
       $queryRaw: vi.fn(async () => []),
     };
     return new PrismaFleetPrRulingRepository({} as never, { client } as never);
@@ -202,6 +326,14 @@ describe('ruling target repo projection', () => {
 
   it('AC-7: lockTarget returns the job repo', async () => {
     expect(await repository().lockTarget('slug', 'run')).toMatchObject({ repo: expected });
+  });
+
+  // F1: only `provider === 'gitlab'` selects the merge-request parser; any other stored value is a GitHub repo.
+  it('F1: a repo with an unsupported provider takes the GitHub PR path', async () => {
+    const row = { ...jobRow, repo: { ...jobRow.repo, provider: 'bitbucket', host: 'https://bitbucket.org' } };
+    const repo = repository(row);
+    expect(await repo.findTarget('project', 'run')).toMatchObject({ prNumber: 42 });
+    expect(await repo.lockTarget('slug', 'run')).toMatchObject({ prNumber: 42 });
   });
 });
 
@@ -217,5 +349,15 @@ describe('ruling refusal i18n', () => {
 
   it.each(['en', 'zh'])('US-005: %s carries the already-ruled refusal code', (locale) => {
     expect(fleet(locale).rulings).toMatchObject({ alreadyRuled: { 409: expect.stringMatching(/\S/) } });
+  });
+
+  // GitLab parity US-005: a GitLab merge request is a ruling target, so neither refusal names only GitHub.
+  it.each([
+    ['en', 'Only draft RUN jobs with a pull or merge request can be ruled', 'The job must identify a pull or merge request'],
+    ['zh', '只能裁定具有拉取请求或合并请求的草稿 RUN 作业', '任务必须指定拉取请求或合并请求'],
+  ])('US-005: %s drops GitHub from the draft and PR refusals', (locale, notDraft, invalidPr) => {
+    const { rulings } = fleet(locale);
+    expect({ notDraft: rulings.notDraft[409], invalidPr: rulings.invalidPr[400] }).toEqual({ notDraft, invalidPr });
+    expect(JSON.stringify(rulings.notDraft) + JSON.stringify(rulings.invalidPr)).not.toContain('GitHub');
   });
 });

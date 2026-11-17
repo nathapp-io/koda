@@ -105,7 +105,7 @@ describe('US-003 AC-6: a PROJECT SESSION on a projectCode runner carries the pro
     await service.placeJob('j1', NOW);
 
     expect(assignThread().projectReposUnavailable).toEqual([
-      { owner: 'acme', name: 'gl', reason: 'not a GitHub repository' },
+      { owner: 'acme', name: 'gl', reason: 'no installation' },
       { owner: 'acme', name: 'stale', reason: 'no installation' },
     ]);
   });

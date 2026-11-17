@@ -25,8 +25,8 @@ const githubRepos = (n: number): FleetRepoRef[] =>
   Array.from({ length: n }, (_, i) => repo({ id: `r${i + 1}`, owner: 'acme', name: `app${i + 1}` }));
 
 /** `n` GitLab repositories, in input order. */
-const gitlabRepos = (n: number): FleetRepoRef[] =>
-  Array.from({ length: n }, (_, i) => repo({ id: `g${i + 1}`, provider: 'gitlab', owner: 'acme', name: `gl${i + 1}`, githubInstallationId: null }));
+const gitlabRepos = (n: number, connected = false): FleetRepoRef[] =>
+  Array.from({ length: n }, (_, i) => repo({ id: `g${i + 1}`, provider: 'gitlab', owner: 'acme', name: `gl${i + 1}`, githubInstallationId: null, gitlabWriteUser: connected ? { id: 7, username: 'kodabot' } : null }));
 
 describe('fetchableProjectRepos (US-003)', () => {
   it('returns the installed GitHub repositories in input order', () => {
@@ -37,6 +37,17 @@ describe('fetchableProjectRepos (US-003)', () => {
     expect(fetchableProjectRepos([a, b, c, d]).map((r) => r.id)).toEqual(['a', 'd']);
   });
 
+  it('AC-2: keeps only installed GitHub and connected GitLab repos in input order', () => {
+    const gh = repo({ id: 'gh' });
+    const connected = gitlabRepos(1, true)[0];
+    const disconnected = gitlabRepos(1)[0];
+    const legacy = { ...gitlabRepos(1)[0] };
+    delete (legacy as Partial<FleetRepoRef>).gitlabWriteUser;
+    const noInstall = repo({ id: 'no-install', githubInstallationId: null });
+
+    expect(fetchableProjectRepos([gh, disconnected, legacy, connected, noInstall]).map((item) => item.id)).toEqual(['gh', 'g1']);
+  });
+
   it('keeps at most 10 repositories', () => {
     expect(fetchableProjectRepos(githubRepos(12)).map((r) => r.id)).toEqual(githubRepos(10).map((r) => r.id));
   });
@@ -44,6 +55,14 @@ describe('fetchableProjectRepos (US-003)', () => {
   it('returns an empty list for a project with no fetchable repository', () => {
     expect(fetchableProjectRepos(gitlabRepos(3))).toEqual([]);
     expect(fetchableProjectRepos([])).toEqual([]);
+  });
+
+  it('AC-3: includes a connected GitLab repo with its host-specific clone URL', () => {
+    const gitlab = repo({ id: 'gl', provider: 'gitlab', owner: 'team', name: 'app', githubInstallationId: null,
+      host: 'https://gitlab.example.com', gitlabWriteUser: { id: 7, username: 'kodabot' } });
+    expect(withProjectRepos(thread, [gitlab], VCS).projectRepos).toEqual([
+      { repoId: 'gl', owner: 'team', name: 'app', defaultBranch: 'main', cloneUrl: 'https://gitlab.example.com/team/app.git' },
+    ]);
   });
 });
 
@@ -68,6 +87,13 @@ describe('withProjectRepos (US-003 AC-1, AC-2)', () => {
     expect(result.kind).toBe('PROJECT');
   });
 
+  it('AC-4: lists a GitLab repo without credentials as no installation', () => {
+    const gitlab = repo({ id: 'gl', provider: 'gitlab', owner: 'acme', name: 'gl', githubInstallationId: null, gitlabWriteUser: null });
+    expect(withProjectRepos(thread, [gitlab], VCS).projectReposUnavailable).toEqual([
+      { owner: 'acme', name: 'gl', reason: 'no installation' },
+    ]);
+  });
+
   it('AC-2: lists each unavailable repository in input order with its reason', () => {
     const a = repo({ id: 'a' });
     const b = repo({ id: 'b', provider: 'gitlab', owner: 'acme', name: 'gl', githubInstallationId: null });
@@ -76,7 +102,7 @@ describe('withProjectRepos (US-003 AC-1, AC-2)', () => {
     const result = withProjectRepos(thread, [a, b, c], VCS);
 
     expect(result.projectReposUnavailable).toEqual([
-      { owner: 'acme', name: 'gl', reason: 'not a GitHub repository' },
+      { owner: 'acme', name: 'gl', reason: 'no installation' },
       { owner: 'acme', name: 'other', reason: 'no installation' },
     ]);
   });
@@ -87,6 +113,13 @@ describe('withProjectRepos (US-003 AC-1, AC-2)', () => {
 });
 
 describe('withProjectRepos caps (US-003 AC-3, AC-4)', () => {
+  it('AC-5: marks a connected GitLab repo after ten GitHub repos as limit', () => {
+    const repos = [...githubRepos(10), ...gitlabRepos(1, true)];
+    const result = withProjectRepos(thread, repos, VCS);
+    expect(result.projectRepos).toHaveLength(10);
+    expect(result.projectReposUnavailable).toEqual([{ owner: 'acme', name: 'gl1', reason: 'limit' }]);
+  });
+
   it('AC-3: takes the first 10 of 12 installed repositories and marks the rest `limit`', () => {
     const repos = githubRepos(12);
 
@@ -107,8 +140,8 @@ describe('withProjectRepos caps (US-003 AC-3, AC-4)', () => {
 
     expect(result.projectRepos).toEqual([]);
     expect(result.projectReposUnavailable).toHaveLength(50);
-    expect(result.projectReposUnavailable?.[0]).toEqual({ owner: 'acme', name: 'gl1', reason: 'not a GitHub repository' });
-    expect(result.projectReposUnavailable?.[49]).toEqual({ owner: 'acme', name: 'gl50', reason: 'not a GitHub repository' });
+    expect(result.projectReposUnavailable?.[0]).toEqual({ owner: 'acme', name: 'gl1', reason: 'no installation' });
+    expect(result.projectReposUnavailable?.[49]).toEqual({ owner: 'acme', name: 'gl50', reason: 'no installation' });
   });
 
   it('AC-4: drops the unavailable entries past the cap instead of the fetchable ones', () => {
@@ -127,7 +160,7 @@ describe('withProjectRepos caps (US-003 AC-3, AC-4)', () => {
 
     expect(result.projectRepos).toHaveLength(10);
     expect(result.projectReposUnavailable).toEqual([
-      { owner: 'acme', name: 'gl1', reason: 'not a GitHub repository' },
+      { owner: 'acme', name: 'gl1', reason: 'no installation' },
       { owner: 'acme', name: 'last', reason: 'limit' },
     ]);
   });

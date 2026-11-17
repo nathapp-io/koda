@@ -50,6 +50,124 @@ function build(paths: string[]): { repo: PrismaKnowledgeIndexRepository; findMan
 const pagePaths = (count: number): string[] =>
   Array.from({ length: count }, (_, i) => `docs/${String(i).padStart(5, '0')}.md`);
 
+/**
+ * US-004: the `FleetRepo` projection. The Prisma client is faked again (no database); the same projection and the
+ * same enumeration are pinned against Postgres in test/integration/fleet/knowledge-store.integration.spec.ts.
+ */
+interface RepoRow {
+  id: string;
+  projectId: string;
+  provider: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  host: string;
+  githubInstallationId: bigint | null;
+  createdAt: Date;
+  gitlabCredential: { repoId: string } | null;
+}
+
+interface RepoFindManyArgs {
+  where: { projectId?: string; provider?: string; githubInstallationId?: { not: null }; gitlabCredential?: { isNot: null } };
+  orderBy: Array<{ createdAt: 'asc' } | { id: 'asc' }>;
+  take: number;
+  select: Record<string, unknown>;
+}
+
+function repoRow(over: Partial<RepoRow> & { id: string }): RepoRow {
+  return {
+    projectId: 'p1', provider: 'github', owner: 'o', name: over.id, defaultBranch: 'main',
+    host: 'https://github.com', githubInstallationId: BigInt(7), createdAt: new Date('2026-10-01T00:00:00Z'),
+    gitlabCredential: null, ...over,
+  };
+}
+
+/** The selected columns of a row, as Prisma would answer them: `createdAt` is not in `REPO_SELECT`. */
+function project(row: Record<string, unknown>, select: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(select)) {
+    if (value === true) out[key] = row[key];
+    else if (typeof value === 'object' && value !== null) {
+      const nested = row[key];
+      out[key] = nested === null ? null : project(nested as Record<string, unknown>, (value as { select: Record<string, unknown> }).select);
+    }
+  }
+  return out;
+}
+
+/** A `fleetRepo` delegate that honours the `where`, the ordered `orderBy`, the `take` and the `select` it is handed. */
+function repoClient(rows: RepoRow[]) {
+  const findMany = vi.fn(async (args: RepoFindManyArgs) => rows
+    .filter((row) => (args.where.projectId === undefined || row.projectId === args.where.projectId)
+      && (args.where.provider === undefined || row.provider === args.where.provider)
+      && (args.where.githubInstallationId === undefined || row.githubInstallationId !== null)
+      && (args.where.gitlabCredential === undefined || row.gitlabCredential !== null))
+    .sort((a, b) => (a.createdAt.getTime() - b.createdAt.getTime()) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .slice(0, args.take)
+    .map((row) => project(row as unknown as Record<string, unknown>, args.select)));
+  const findUnique = vi.fn(async (args: { where: { id: string }; select: Record<string, unknown> }) => {
+    const row = rows.find((candidate) => candidate.id === args.where.id);
+    return row === undefined ? null : project(row as unknown as Record<string, unknown>, args.select);
+  });
+  const repo = new PrismaKnowledgeIndexRepository({ client: { fleetRepo: { findMany, findUnique } } } as unknown as PrismaService<PrismaClient>);
+  return { repo, findMany, findUnique };
+}
+
+describe('PrismaKnowledgeIndexRepository GitLab projections (US-004)', () => {
+  const gitlabRow = (over: Partial<RepoRow> & { id: string }): RepoRow => repoRow({
+    provider: 'gitlab', host: 'https://gitlab.example.com', githubInstallationId: null,
+    gitlabCredential: { repoId: over.id }, ...over,
+  });
+
+  it('AC-1: findRepo reports a connected GitLab repo as connected, with its host', async () => {
+    const { repo } = repoClient([gitlabRow({ id: 'gl1' })]);
+
+    expect(await repo.findRepo('gl1')).toEqual({
+      id: 'gl1', projectId: 'p1', provider: 'gitlab', owner: 'o', name: 'gl1', defaultBranch: 'main',
+      host: 'https://gitlab.example.com', githubInstallationId: null, gitlabConnected: true,
+    });
+  });
+
+  it('AC-1: findRepo reports a GitLab repo without a credential row as not connected', async () => {
+    const { repo } = repoClient([gitlabRow({ id: 'gl1', gitlabCredential: null })]);
+
+    expect(await repo.findRepo('gl1')).toEqual(expect.objectContaining({ gitlabConnected: false, host: 'https://gitlab.example.com' }));
+  });
+
+  it('does not copy the credential relation onto the ref', async () => {
+    const { repo } = repoClient([gitlabRow({ id: 'gl1' })]);
+
+    expect(await repo.findRepo('gl1')).not.toHaveProperty('gitlabCredential');
+  });
+
+  it('AC-2: findAllGitlabRepos reads connected GitLab repos in createdAt then id order, capped at 500', async () => {
+    const { repo, findMany } = repoClient([gitlabRow({ id: 'gl1' })]);
+
+    await repo.findAllGitlabRepos();
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { provider: 'gitlab', gitlabCredential: { isNot: null } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: 500,
+      select: expect.objectContaining({ host: true, gitlabCredential: { select: { repoId: true } } }),
+    });
+  });
+
+  it('AC-2: findAllGitlabRepos omits GitLab repos without a row and every GitHub repo', async () => {
+    const { repo } = repoClient([
+      gitlabRow({ id: 'gl2', createdAt: new Date('2026-10-03T00:00:00Z') }),
+      gitlabRow({ id: 'gl1', createdAt: new Date('2026-10-02T00:00:00Z') }),
+      gitlabRow({ id: 'gl3', gitlabCredential: null }),
+      repoRow({ id: 'gh1' }),
+    ]);
+
+    const found = await repo.findAllGitlabRepos();
+
+    expect(found.map((row) => row.id)).toEqual(['gl1', 'gl2']);
+    expect(found.every((row) => row.gitlabConnected === true && row.provider === 'gitlab')).toBe(true);
+  });
+});
+
 describe('PrismaKnowledgeIndexRepository.listFiles', () => {
   it('reads one page when the repository fits the corpus cap', async () => {
     const { repo, findMany } = build(pagePaths(3));

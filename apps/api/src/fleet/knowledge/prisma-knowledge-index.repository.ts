@@ -11,6 +11,7 @@ import {
 export { KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
 
 const MAX_GITHUB_REPOS = 500;
+const MAX_GITLAB_REPOS = 500;
 /** S5b 3c-2-D4: the caps of one `describeJobs` read — the jobs a search may name, and their fleet links. */
 const MAX_DESCRIBED_JOBS = 200;
 const MAX_DESCRIBED_LINKS = 1000;
@@ -20,12 +21,36 @@ const FLEET_LINK_SOURCE = 'fleet';
 const INGESTED_STATUSES = ['done', 'partial'] as const;
 /** S5b 3c-2-D6: the outcome files, in the order a pass writes them. */
 const OUTCOME_KINDS = ['report', 'decisions'] as const;
-const REPO_SELECT = { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true } as const;
+const REPO_SELECT = {
+  id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, host: true,
+  githubInstallationId: true, gitlabCredential: { select: { repoId: true } },
+} as const;
 
-const toRepo = (r: { id: string; projectId: string; provider: string; owner: string; name: string; defaultBranch: string; githubInstallationId: bigint | null }): KnowledgeRepoRef => ({
-  ...r,
-  provider: r.provider as KnowledgeRepoRef['provider'],
-});
+/** The selected row: the repo's own columns plus the presence of its GitLab credential (US-004). */
+interface RepoRow {
+  id: string;
+  projectId: string;
+  provider: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  host: string;
+  githubInstallationId: bigint | null;
+  gitlabCredential: { repoId: string } | null;
+}
+
+/**
+ * US-004: a ref carries `gitlabConnected` instead of the credential relation. Only the relation's presence is
+ * meaningful here (its token columns are the credential store's business), so it is reduced to a boolean.
+ */
+const toRepo = (r: RepoRow): KnowledgeRepoRef => {
+  const { gitlabCredential, ...rest } = r;
+  return {
+    ...rest,
+    provider: r.provider as KnowledgeRepoRef['provider'],
+    gitlabConnected: gitlabCredential !== null,
+  };
+};
 
 const toState = (r: IndexRow): KnowledgeIndexState => ({ ...r, status: r.status as KnowledgeIndexStatus });
 
@@ -63,6 +88,21 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
       where: { provider: 'github', githubInstallationId: { not: null } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: MAX_GITHUB_REPOS,
+      select: REPO_SELECT,
+    });
+    return rows.map(toRepo);
+  }
+
+  /**
+   * US-004: the GitLab repos a poll can index — those with a credential row. A repo without one would only record
+   * `no credentials`, so it is not polled; it is indexed once its connection is saved (a merge event or the next
+   * poll after that). Same order and bound as `findAllGithubRepos`.
+   */
+  async findAllGitlabRepos(): Promise<KnowledgeRepoRef[]> {
+    const rows = await this.db.fleetRepo.findMany({
+      where: { provider: 'gitlab', gitlabCredential: { isNot: null } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_GITLAB_REPOS,
       select: REPO_SELECT,
     });
     return rows.map(toRepo);

@@ -35,12 +35,21 @@ export class KnowledgePoller implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
-  /** Never rejects: a failed read must not kill the interval (the `void`ed call would be unhandled otherwise). */
+  /**
+   * Never rejects: a failed read must not kill the interval (the `void`ed call would be unhandled otherwise).
+   * US-004: the two sources are read and enqueued one after the other, each under its own `try`, so one
+   * failing read still queues the other's repositories.
+   */
   async poll(): Promise<void> {
-    try {
-      for (const repo of await this.repos.findAllGithubRepos()) this.queue.enqueue(repo.id, 'poll');
-    } catch (error) {
-      this.logger.warn(`Knowledge poll failed: ${error instanceof Error ? error.message : String(error)}`);
+    for (const [label, read] of [
+      ['GitHub', () => this.repos.findAllGithubRepos()],
+      ['GitLab', () => this.repos.findAllGitlabRepos()],
+    ] as const) {
+      try {
+        for (const repo of await read()) this.queue.enqueue(repo.id, 'poll');
+      } catch (error) {
+        this.logger.warn(`Knowledge poll of ${label} repositories failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 }

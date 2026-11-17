@@ -76,11 +76,29 @@ describeIntegration('PrismaFleetJobRepository project-code projections (PG, S5b 
     const found = await repo.findProjectRepos(web.id);
 
     expect(found).toEqual([
-      { id: 'map-github', projectId: web.id, provider: 'github', owner: 'acme', name: 'map-github', defaultBranch: 'main', githubInstallationId: BigInt(7), host: 'https://github.com' },
+      { id: 'map-github', projectId: web.id, provider: 'github', owner: 'acme', name: 'map-github', defaultBranch: 'main', githubInstallationId: BigInt(7), host: 'https://github.com', gitlabWriteUser: null },
       // The fence and the ASSIGN walk classify these two as unavailable; the projection must not hide that.
       // US-003: the host travels with the row, so the clone url of a self-hosted repo follows it.
-      { id: 'map-gitlab', projectId: web.id, provider: 'gitlab', owner: 'acme', name: 'map-gitlab', defaultBranch: 'main', githubInstallationId: null, host: 'https://gitlab.example.com' },
+      { id: 'map-gitlab', projectId: web.id, provider: 'gitlab', owner: 'acme', name: 'map-gitlab', defaultBranch: 'main', githubInstallationId: null, host: 'https://gitlab.example.com', gitlabWriteUser: null },
     ]);
+  });
+
+  it('US-002 AC-1: projects the GitLab write user and leaves disconnected repos null', async () => {
+    const web = await project('gitlab-user');
+    await fleetRepo({ id: 'connected-gitlab', projectId: web.id, createdAt: '2026-01-01T00:00:00.000Z', provider: 'gitlab', installation: null });
+    await prisma.fleetRepoGitlabCredential.create({ data: {
+      repoId: 'connected-gitlab', gitlabProjectId: 123, encryptedReadToken: 'encrypted-read', encryptedWriteToken: 'encrypted-write',
+      readTokenUserId: 6, readTokenUsername: 'reader', writeTokenUserId: 7, writeTokenUsername: 'kodabot', writeTokenIsBot: true,
+    } });
+    await fleetRepo({ id: 'disconnected-gitlab', projectId: web.id, createdAt: '2026-01-02T00:00:00.000Z', provider: 'gitlab', installation: null });
+
+    const found = await repo.findProjectRepos(web.id);
+
+    expect(found.map(({ id, gitlabWriteUser }) => ({ id, gitlabWriteUser }))).toEqual([
+      { id: 'connected-gitlab', gitlabWriteUser: { id: 7, username: 'kodabot' } },
+      { id: 'disconnected-gitlab', gitlabWriteUser: null },
+    ]);
+    expect(found[0]).not.toHaveProperty('gitlabCredential');
   });
 
   it('US-003 AC-5: at most 60 rows of a project with 61, the oldest ones', async () => {

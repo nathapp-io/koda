@@ -7,16 +7,18 @@ import { cloneUrlFor } from '../git-broker/clone-url';
  *
  * Both functions are pure and share one walk over the project's repositories (the anchor order the repository reads
  * them in), so the list the ASSIGN publishes and the list the token fence recomputes (US-002) can never disagree: a
- * repository the walk drops — GitLab, no installation, past the cap — is exactly a repository no token is minted for.
+ * repository the walk drops — a disconnected repo or one past the cap — is exactly a repository no token is minted for.
  */
 
 /**
- * The project's repositories a session can fetch: GitHub, with an installation, in input order, at most `maxRepos`.
- * The token fence (1c-b-D5) reads this same list to decide which `repoId`s it may grant.
+ * The project's repositories a session can fetch: installed GitHub repos and connected GitLab repos, in input order,
+ * at most `maxRepos`. The token fence (1c-b-D5) reads this same list to decide which `repoId`s it may grant.
  */
 export function fetchableProjectRepos(repos: readonly FleetRepoRef[]): FleetRepoRef[] {
   return repos
-    .filter((repo) => repo.provider === 'github' && repo.githubInstallationId !== null)
+    .filter((repo) =>
+      (repo.provider === 'github' && repo.githubInstallationId !== null) ||
+      (repo.provider === 'gitlab' && repo.gitlabWriteUser != null))
     .slice(0, PROJECT_CODE_LIMITS.maxRepos);
 }
 
@@ -50,7 +52,6 @@ export function withProjectRepos(
 
 /** Why this repository is not fetchable at all, or null when it is. */
 function unavailableReason(repo: FleetRepoRef): ProjectRepoUnavailable['reason'] | null {
-  if (repo.provider !== 'github') return 'not a GitHub repository';
-  if (repo.githubInstallationId === null) return 'no installation';
-  return null;
+  if (repo.provider === 'github') return repo.githubInstallationId === null ? 'no installation' : null;
+  return repo.gitlabWriteUser == null ? 'no installation' : null;
 }

@@ -10,6 +10,10 @@ import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateR
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import type { FleetRepoRef, FleetJobPrRulings, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+// A value import: Nest resolves this constructor parameter through its emitted decorator metadata.
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
+import type { VcsPrStatus } from '../../vcs/types';
 import { parseRulingText } from './ruling-keyword';
 import type { BotReviewParse } from '../ingest/parsers/bot-review.parser';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
@@ -29,6 +33,10 @@ export class FleetPrRulingsService {
     private readonly ticketEffects: FleetJobTicketEffects,
     private readonly github: GitHubAppClient,
     private readonly actors: ActorPrincipalLoader,
+    // US-005: appended after the existing required dependencies, so an older positional construction
+    // keeps working on its GitHub cases.
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlabChecker: GitLabAccessChecker,
   ) {}
 
   /** Dispatch-only, outside the insert transaction; forge failures never reject the FIX. */
@@ -38,13 +46,13 @@ export class FleetPrRulingsService {
     const pending = await this.repo.pendingForFix(runId);
     if (!pending.length) return undefined;
     try {
-      if (repo.githubInstallationId === null) return { notSent: 'head-unreadable' };
-      // Reading a PR needs pull_requests:read; the contents-only read token gets a 403 on a private repo.
-      const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name);
-      const pr = await this.github.getPullRequest(token, repo.owner, repo.name, prNumber);
-      if (!pr || pr.state !== 'open') return { notSent: 'pr-not-open' };
-      if (!pr.headSha) return { notSent: 'head-unreadable' };
-      return { headSha: pr.headSha, rulings: [...pending].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, 100).map((r) => ({
+      const head = repo.provider === 'gitlab'
+        // US-005: one call per forge request, so a 401 marks the read token invalid even where this
+        // feature then degrades to `head-unreadable`.
+        ? await this.gitlabHeadSha(repo, prNumber)
+        : await this.githubHeadSha(repo, prNumber);
+      if (head.kind === 'unreadable') return { notSent: head.reason };
+      return { headSha: head.headSha, rulings: [...pending].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, 100).map((r) => ({
         rulingId: r.id, item: r.itemId, ruling: r.text,
         by: `koda:${r.actorType === 'AGENT' ? 'agent' : r.actorType === 'SYSTEM' ? 'system' : 'user'}:${r.actorType === 'SYSTEM' ? r.actorId : r.actorName}`.replace(/[\r\n\u2028\u2029]/g, '').slice(0, 100),
         at: r.createdAt.toISOString(),
@@ -53,6 +61,21 @@ export class FleetPrRulingsService {
       // Deliberately do not log provider errors: they may contain the ephemeral credential.
       return { notSent: 'head-unreadable' };
     }
+  }
+
+  /** The PR head a FIX must see; `head-unreadable` when the PR is closed or its head cannot be read. */
+  private async githubHeadSha(repo: FleetRepoRef, prNumber: number): Promise<HeadRead> {
+    if (repo.githubInstallationId === null) return { kind: 'unreadable', reason: 'head-unreadable' };
+    // Reading a PR needs pull_requests:read; the contents-only read token gets a 403 on a private repo.
+    const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name);
+    const pr = await this.github.getPullRequest(token, repo.owner, repo.name, prNumber);
+    return headOf(pr);
+  }
+
+  /** US-005: the same read of a GitLab MR, with the repo's own read token and on its own host. */
+  private async gitlabHeadSha(repo: FleetRepoRef, prNumber: number): Promise<HeadRead> {
+    const mr = await this.gitlabCredentials.call(repo, 'read', (access) => this.gitlabChecker.getMergeRequest(access, prNumber));
+    return headOf(mr);
   }
 
   /** Ingest owns the transaction, terminal-state/epoch fence and FIX job lock. */
@@ -116,18 +139,29 @@ export class FleetPrRulingsService {
    * One page of comments, no pagination and no author check: a planted marker only restores today's
    * behaviour (a later `unknown-item` skip), and the check fails open on any forge failure, on a
    * missing installation id and on a full page, so an outage never blocks a ruling.
+   * US-005: a GitLab repo reads the merge request's notes with its own read token, by the same rules.
    */
   async assertItemIndex(target: RulingJobTarget): Promise<void> {
     const { repo, prNumber } = target;
-    if (prNumber === null || repo.provider !== 'github' || repo.githubInstallationId === null) return;
+    if (prNumber === null) return;
     let bodies: string[];
-    try {
-      // pull_requests:read is what reading a PR's issue comments needs; the thread-read token grants exactly that.
-      const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name);
-      bodies = await this.github.listIssueComments(token, repo.owner, repo.name, prNumber);
-    } catch {
-      // Fail open. Deliberately unlogged: a provider error may carry the ephemeral credential.
-      return;
+    if (repo.provider === 'gitlab') {
+      try {
+        bodies = await this.gitlabCredentials.call(repo, 'read', (access) => this.gitlabChecker.listMergeRequestNotes(access, prNumber));
+      } catch {
+        // Fail open. Deliberately unlogged: a provider error may carry the ephemeral credential.
+        return;
+      }
+    } else {
+      if (repo.githubInstallationId === null) return;
+      try {
+        // pull_requests:read is what reading a PR's issue comments needs; the thread-read token grants exactly that.
+        const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name);
+        bodies = await this.github.listIssueComments(token, repo.owner, repo.name, prNumber);
+      } catch {
+        // Fail open. Deliberately unlogged: a provider error may carry the ephemeral credential.
+        return;
+      }
     }
     if (bodies.length >= ITEM_INDEX_COMMENT_PAGE) return;
     if (bodies.some((body) => body.includes(NAX_ITEM_INDEX_MARKER))) return;
@@ -293,4 +327,13 @@ export type FlowRulingOutcome = { kind: 'recorded'; rulingId: string } | { kind:
 function refusalReason(error: unknown): string | null {
   if (!(error instanceof AppException)) return null;
   return error.prefix ?? null;
+}
+
+/** US-005: the head of an open PR/MR, or why the FIX must not be sent one. Shared by both forges. */
+type HeadRead = { kind: 'head'; headSha: string } | { kind: 'unreadable'; reason: 'pr-not-open' | 'head-unreadable' };
+
+function headOf(pr: VcsPrStatus | null): HeadRead {
+  if (!pr || pr.state !== 'open') return { kind: 'unreadable', reason: 'pr-not-open' };
+  if (!pr.headSha) return { kind: 'unreadable', reason: 'head-unreadable' };
+  return { kind: 'head', headSha: pr.headSha };
 }

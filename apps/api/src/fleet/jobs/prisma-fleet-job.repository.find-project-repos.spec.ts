@@ -42,7 +42,7 @@ describe('PrismaFleetJobRepository.findProjectRepos (US-003 AC-5)', () => {
     expect(result.map((r) => r.id)).toEqual(['oldest', 'middle', 'newest']);
     expect(result[0]).toEqual({
       id: 'oldest', projectId: 'p1', provider: 'github', owner: 'acme', name: 'oldest', defaultBranch: 'main',
-      githubInstallationId: 7n,
+      githubInstallationId: 7n, host: undefined, gitlabWriteUser: null,
     });
   });
 
@@ -62,7 +62,7 @@ describe('PrismaFleetJobRepository.findProjectRepos (US-003 AC-5)', () => {
     await repo.findProjectRepos('p1');
 
     expect(fleetRepo.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, host: true },
+      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, host: true, gitlabCredential: { select: { writeTokenUserId: true, writeTokenUsername: true } } },
     }));
   });
 
