@@ -3,7 +3,7 @@
   "feature": "gitlab-flows",
   "branchName": "feat/gitlab-flows",
   "createdAt": "2026-11-17T04:40:08.048Z",
-  "updatedAt": "2026-11-17T05:11:50.876Z",
+  "updatedAt": "2026-11-17T05:19:43.653Z",
   "userStories": [
     {
       "id": "US-001",
@@ -214,14 +214,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One controller branch reuses existing authorization, approval and GitLab read APIs, with mechanical i18n/DI-stub/spec updates; permission ordering and credential isolation mandate strict security TDD."
+        "reasoning": "One controller branch reuses existing authorization, approval and GitLab read APIs, with mechanical i18n/DI-stub/spec updates; permission ordering and credential isolation mandate strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.controller.ts",
@@ -255,7 +258,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "75e81db0fc5a9e8881bf43bf936f6d2443c0150a"
     },
     {
       "id": "US-005",
