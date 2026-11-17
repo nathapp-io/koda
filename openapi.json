@@ -14790,7 +14790,7 @@
                   },
                   "remoteUrl": {
                     "type": "string",
-                    "description": "HTTPS github.com repository URL"
+                    "description": "HTTPS github.com or GitLab repository URL"
                   },
                   "branch": {
                     "type": "string"

@@ -11,8 +11,10 @@ import { PermissionService } from '../../permissions/permission.service';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { ProjectsService } from '../../projects/projects.service';
-import { parseGitHubUrl } from '../../skills/github-url';
+import { parseFlowRemoteUrl } from './flow-remote-url';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { FleetFlowDto } from './dto/fleet-flow.dto';
@@ -32,6 +34,8 @@ export class FleetFlowsController {
     private readonly github: GitHubAppClient,
     private readonly routeGate: ApprovalRouteGate,
     private readonly flows: FleetFlowsService,
+    private readonly gitlabCredentials: GitLabRepoCredentials,
+    private readonly gitlab: GitLabAccessChecker,
   ) {}
 
   @Get(':flowId')
@@ -59,7 +63,7 @@ export class FleetFlowsController {
   @ApiBody({ schema: { type: 'object', required: ['features', 'roles', 'costCapUsd', 'remoteUrl', 'branch', 'specSha'], properties: {
     features: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['feature', 'specPath'], properties: { feature: { type: 'string' }, specPath: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } } } },
     roles: { type: 'object', required: ['reviewer', 'supervisor'], properties: { reviewer: { type: 'string' }, supervisor: { type: 'string' } } },
-    costCapUsd: { oneOf: [{ type: 'number' }, { type: 'string' }] }, remoteUrl: { type: 'string', description: 'HTTPS github.com repository URL' },
+    costCapUsd: { oneOf: [{ type: 'number' }, { type: 'string' }] }, remoteUrl: { type: 'string', description: 'HTTPS github.com or GitLab repository URL' },
     branch: { type: 'string' }, specSha: { type: 'string', pattern: '^[a-f0-9]{40}$' },
   } } })
   @ApiResponse({ status: 201, type: FleetFlowDto })
@@ -73,29 +77,59 @@ export class FleetFlowsController {
   async create(@Body() body: unknown, @Principal() principal: KodaPrincipal) {
     const parsed = parseFlowInput(body, 'NAX');
     // NAX parsing validates these three required fields, including the supported remote URL shape.
-    const { owner, repo: name } = parseGitHubUrl(parsed.remoteUrl);
+    const remote = parseFlowRemoteUrl(parsed.remoteUrl);
     const { branch, specSha } = parsed;
-    const repo = await this.repos.findByIdentity('github', owner, name);
+    const repo = remote.provider === 'gitlab'
+      ? await this.repos.findGitLabByRemoteUrl(parsed.remoteUrl)
+      : await this.repos.findByIdentity('github', remote.owner, remote.name);
     if (!repo) throw new NotFoundAppException({}, 'fleet.flows.repoNotFound');
     const project = (await this.projects.findAllForPrincipal(principal)).find((candidate) => candidate.id === repo.projectId);
     if (!project) throw new NotFoundAppException({}, 'fleet.flows.repoNotFound');
     if (!(await this.permissions.can(principal, 'fleet.flow.create', { projectId: project.id })).allowed) {
       throw new ForbiddenAppException({}, 'permissions');
     }
-    if (repo.githubInstallationId === null) throw new ConflictAppException({}, 'fleet.flows.repoNotConnected');
+    // GitLab provider identity takes precedence over the GitHub installation field: that field is
+    // null on ordinary GitLab rows, but its value must never route a GitLab row through GitHub.
+    if (repo.provider !== 'gitlab' && repo.githubInstallationId === null) {
+      throw new ConflictAppException({}, 'fleet.flows.repoNotConnected');
+    }
 
     // All external reads finish before the gate can open a transaction or persist approval input.
     // Only the immutable snapshot and resolved identities cross that boundary, never the token.
     try {
-      const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
-      const head = await this.github.getBranchHead(token, repo.owner, repo.name, branch);
-      if (head !== specSha) throw new ConflictAppException({}, 'fleet.flows.specShaNotHead');
-      const files = await Promise.all(parsed.features.map(({ specPath }) => this.github.getFile(token, repo.owner, repo.name, specPath, specSha)));
-      const missing = parsed.features.find((_, index) => files[index] === null);
-      // No specific Nathapp App exception exists for 422/503; keep their i18n code and HTTP status.
-      if (missing) throw new AppException(422, { path: missing.specPath }, 'fleet.flows.specMissing', 422);
+      if (repo.provider === 'gitlab') {
+        const head = await this.gitlabCredentials.call(repo, 'read', (access) => this.gitlab.getBranchHead(access, branch));
+        if (head !== specSha) throw new ConflictAppException({}, 'fleet.flows.specShaNotHead');
+        const files = await Promise.all(parsed.features.map(({ specPath }) =>
+          this.gitlabCredentials.call(repo, 'read', (access) => this.gitlab.getFile(access, specPath, specSha))));
+        const missing = parsed.features.find((_, index) => files[index] === null);
+        if (missing) throw new AppException(422, { path: missing.specPath }, 'fleet.flows.specMissing', 422);
+      } else {
+        const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId as bigint, repo.name);
+        const head = await this.github.getBranchHead(token, repo.owner, repo.name, branch);
+        if (head !== specSha) throw new ConflictAppException({}, 'fleet.flows.specShaNotHead');
+        const files = await Promise.all(parsed.features.map(({ specPath }) => this.github.getFile(token, repo.owner, repo.name, specPath, specSha)));
+        const missing = parsed.features.find((_, index) => files[index] === null);
+        if (missing) throw new AppException(422, { path: missing.specPath }, 'fleet.flows.specMissing', 422);
+      }
     } catch (error) {
       if (!(error instanceof RepoCheckException)) throw error;
+      if (repo.provider === 'gitlab') {
+        switch (error.reason) {
+          case 'gitlab_credentials_missing':
+          case 'gitlab_token_invalid':
+          case 'app_permissions_insufficient':
+            throw new ConflictAppException({}, 'fleet.flows.gitlabNotConnected');
+          case 'repo_not_found':
+            throw new ConflictAppException({}, 'fleet.flows.branchNotFound');
+          case 'provider_unreachable':
+          case 'provider_error':
+          case 'vcs_encryption_key_missing':
+            throw new AppException(503, {}, 'fleet.flows.forgeUnavailable', 503);
+          default:
+            throw error;
+        }
+      }
       switch (error.reason) {
         case 'app_not_installed':
         case 'app_permissions_insufficient':

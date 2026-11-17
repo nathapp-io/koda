@@ -53,6 +53,7 @@
     "duplicate": { "409": "A live flow already covers this branch and spec commit: {flowId}" },
     "repoNotFound": { "404": "No fleet repository matches this remote URL in a project you can reach" },
     "repoNotConnected": { "409": "Koda cannot read this repository yet: connect the GitHub App to it" },
+    "gitlabNotConnected": { "409": "Koda cannot read this GitLab repository: its tokens are missing or invalid; rotate them with koda fleet repo credentials" },
     "forgeUnavailable": { "503": "The forge is unavailable right now; the flow was not created" },
     "branchNotFound": { "409": "The branch does not exist in this repository" },
     "specShaNotHead": { "409": "The spec commit is not the head of the branch" },

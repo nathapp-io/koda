@@ -28,6 +28,8 @@ import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
 import { PrismaFleetFlowRepository } from './prisma-fleet-flow.repository';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitLabRepoCredentials } from '../git-broker/gitlab-repo-credentials';
+import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { ProjectsModule } from '../../projects/projects.module';
 import { ProjectsService } from '../../projects/projects.service';
 import { FleetFlowsController } from './fleet-flows.controller';
@@ -103,7 +105,14 @@ class StubFleetReposModule {}
   exports: [ThreadsService],
 })
 class StubThreadsModule {}
-@Module({ providers: [{ provide: GitHubAppClient, useValue: {} }], exports: [GitHubAppClient] })
+@Module({
+  providers: [
+    { provide: GitHubAppClient, useValue: {} },
+    { provide: GitLabRepoCredentials, useValue: {} },
+    { provide: GitLabAccessChecker, useValue: {} },
+  ],
+  exports: [GitHubAppClient, GitLabRepoCredentials, GitLabAccessChecker],
+})
 class StubGitBrokerModule {}
 @Module({ providers: [{ provide: ProjectsService, useValue: {} }], exports: [ProjectsService] })
 class StubProjectsModule {}
