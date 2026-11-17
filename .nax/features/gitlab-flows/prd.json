@@ -3,7 +3,7 @@
   "feature": "gitlab-flows",
   "branchName": "feat/gitlab-flows",
   "createdAt": "2026-11-17T04:40:08.048Z",
-  "updatedAt": "2026-11-17T05:51:18.615Z",
+  "updatedAt": "2026-11-17T05:58:03.425Z",
   "userStories": [
     {
       "id": "US-001",
@@ -419,14 +419,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One service gains a PRD-specific branch using the existing edit transformer and upstream locking/client seams; read/write token isolation and credential failure mapping still require strict security TDD."
+        "reasoning": "One service gains a PRD-specific branch using the existing edit transformer and upstream locking/client seams; read/write token isolation and credential failure mapping still require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
@@ -442,7 +445,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cf999bf7f100a81ac4873bc46ecb2e7957e6f101"
     },
     {
       "id": "US-008",
