@@ -1,7 +1,6 @@
 # Flow handoff: koda publishes and finishes a feature run in nax chat (#477)
 
-Status: DRAFT 2026-11-17 (brainstorm with the owner; builder check done, 4 questions settled as marked "my call"
-or answered from the code; awaiting owner approval)
+Status: APPROVED 2026-11-17 by the owner. koda half specified in `.nax/features/flow-handoff/spec.md`.
 Issue: koda #477. nax side: nathapp-io/nax#2968 items 6-7.
 
 ## Intent
@@ -69,7 +68,9 @@ snapshot with open items.
    runs so the outcome is `pushed` or `local-only`, never a PR. How the run is told (a run flag or a per-run
    override of `workflow.publish`) is the builder's call.
 3. **`handoff` = `nax-flow__send`, handoff form.** Instead of `features`, the request carries
-   `handoff: { feature, branch, headSha, record }` plus the existing `roles` and `costCapUsd`. The tool pushes the
+   `handoff: { feature, headSha, record }` plus the existing top-level `remoteUrl`, `branch`, `roles` and
+   `costCapUsd`; each record entry is `{ runId, file, mtimeMs, content }`. The exact wire shape is the contract in
+   koda `.nax/features/flow-handoff/spec.md`. The tool pushes the
    branch if the run left it local (as it already pushes for spec flows), then calls koda.
 4. **Local refusals before anything moves** (koda re-checks): no finished record for the feature; record not at
    `step: done`; outcome is `ready` or `draft` (already published); record `head` differs from HEAD; working tree
