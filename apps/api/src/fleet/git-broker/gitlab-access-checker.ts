@@ -99,12 +99,14 @@ export class GitLabAccessChecker {
       }
       if (sha === null) continue;
       if (typeof sha !== 'string') throw new RepoCheckException('provider_error');
+      const updatedAt = new Date(item.updated_at);
+      if (Number.isNaN(updatedAt.getTime())) throw new RepoCheckException('provider_error');
       prs.push({
         number: item.iid,
         headSha: sha,
         draft: item.draft === true || item.work_in_progress === true,
         headRepoFullName: item.source_project_id === access.target.projectId ? fullName : null,
-        updatedAt: new Date(item.updated_at),
+        updatedAt,
       });
     }
     return prs;

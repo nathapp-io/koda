@@ -118,6 +118,11 @@ describe('GitLabAccessChecker', () => {
       await expect(checker.listOpenMergeRequests(access, 'grp/app')).rejects.toMatchObject({ reason: 'provider_error' });
     });
 
+    it('MR-5: rejects an invalid updated_at date', async () => {
+      respond = () => ({ status: 200, body: [{ iid: 1, sha: 'abc', updated_at: 'not-a-date' }] });
+      await expect(checker.listOpenMergeRequests(access, 'grp/app')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
     it.each([[401, 'gitlab_token_invalid'], [404, 'repo_not_found']] as const)('MR-4: maps status %i', async (status, reason) => {
       respond = () => ({ status, body: {} });
       await expect(checker.listOpenMergeRequests(access, 'grp/app')).rejects.toMatchObject({ reason });
