@@ -3,7 +3,7 @@
   "feature": "flow-handoff",
   "branchName": "feat/flow-handoff-koda",
   "createdAt": "2026-11-17T13:25:19.162Z",
-  "updatedAt": "2026-11-17T13:55:53.401Z",
+  "updatedAt": "2026-11-17T14:57:49.177Z",
   "userStories": [
     {
       "id": "US-001",
@@ -156,14 +156,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-package protocol and additive database migration spanning flow/job repositories, omitted-row typing and approval-detail data projection; no access-control changes."
+        "reasoning": "Cross-package protocol and additive database migration spanning flow/job repositories, omitted-row typing and approval-detail data projection; no access-control changes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
@@ -190,7 +193,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d7b591d8858a33c7d26d09182263c2ebb5a9be2f"
     },
     {
       "id": "US-004",
