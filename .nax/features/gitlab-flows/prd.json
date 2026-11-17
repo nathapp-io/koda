@@ -1,0 +1,510 @@
+{
+  "project": "koda",
+  "feature": "gitlab-flows",
+  "branchName": "feat/gitlab-flows",
+  "createdAt": "2026-11-17T04:40:08.048Z",
+  "updatedAt": "2026-11-17T04:40:08.048Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add GitLab branch and file commit calls",
+      "description": "**Goal** — Add createBranch, getFileForUpdate and commitFile to GitLabAccessChecker for flow-owned writes.\n\n**Motivation** — Today every flow forge call mints a GitHub App token, so a flow on a GitLab repo is refused `fleet.flows.repoNotFound` (the remote URL parser accepts only github.com) or stopped `repo not connected` (`githubInstallationId === null`).\n\n**Approach** — All on `GitLabAccessChecker`. Each calls `guard(access.target.apiBase)` before **every** request it sends (not only the first) and sends the `private-token` header. Non-200/201 answers not listed below go through `fail(status)`.\n\nThe calls commit uses the commits API (`POST /repository/commits`), not the files API the design §5 table names, because only the commits API answers with the new commit's id, which the flow records as the spec sha.\n\n**Interface** —\n```ts\n// US-001\ncreateBranch(access, branch: string, sha: string):\n  Promise<{ kind: 'created' } | { kind: 'exists'; sha: string } | { kind: 'refused' }>\n// POST <project>/repository/branches?branch=<enc>&ref=<enc sha>\n// 201 -> created. 400 (exists or invalid name) -> getBranchHead: found -> exists(sha), repo_not_found -> refused.\n// 404 -> RepoCheckException('repo_not_found').\n\ngetFileForUpdate(access, path: string, ref: string):\n  Promise<(ForgeFile & { lastCommitId: string }) | null>\n// Same request and checks as getFile, plus `last_commit_id` (string, else provider_error). 404 -> null.\n\ncommitFile(access, path: string, input: { branch: string; content: Buffer; lastCommitId: string; message: string }):\n  Promise<PutFileResult>\n// POST <project>/repository/commits\n//   { branch, commit_message: message,\n//     actions: [{ action: 'update', file_path: path, content: <base64>, encoding: 'base64', last_commit_id }] }\n// 201 -> committed(commitSha = body.id, string else provider_error).\n// 400 or 409 -> conflict (GitLab answers a stale last_commit_id with 400). 404 -> repo_not_found.\n```\n\n`PutFileResult` = `{ kind: 'committed'; commitSha } | { kind: 'conflict' } | { kind: 'refused' }` — `github-app-client.ts:13`.\n\n`GitLabAccessChecker.getBranchHead(access, branch): Promise<string>` (404 → `repo_not_found`), `getFile(access, path, ref): Promise<ForgeFile | null>` (`sha` is the GitLab `blob_id`), `getMergeRequest(access, iid): Promise<VcsPrStatus | null>` — `apps/api/src/fleet/git-broker/gitlab-access-checker.ts`. Private helpers `projectUrl(access)`, `guard(apiBase)` (host check before a request) and `fail(status)` (401 → `gitlab_token_invalid`, 403 → `app_permissions_insufficient`, else `provider_error`) are the pattern for the new methods.\n\n**Scope** — In: extend the existing client; create gitlab-access-checker.flow-writes.spec.ts; add rows for createBranch/getFileForUpdate/commitFile to shared tables \"AC-11: %s maps HTTP failures\" (401, 403, 500) and \"AC-12: %s blocks loopback hosts before requesting\" in gitlab-access-checker.spec.ts; every existing case and row stays. The follow-up branch GET is guarded again and uses the same access/write token supplied by callers. Out: compare checks (US-002), flow integration (US-004 through US-008), changes to GitHubAppClient or new 403-refused mapping. Use stubbed HTTP and DNS in unit tests, including refusal of the second request.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] GitLabAccessChecker.createBranch(access, 'feat/a', 'abc') sends POST <apiBase>/projects/<projectId>/repository/branches?branch=feat%2Fa&ref=abc with the private-token header set to access.token.",
+        "AC-2 [unit] createBranch returns { kind: 'created' } for a 201 answer.",
+        "AC-3 [unit] When the branch POST answers 400 and the follow-up GET <apiBase>/projects/<projectId>/repository/branches/feat%2Fa answers 200 with commit.id: 'def', createBranch returns { kind: 'exists', sha: 'def' }.",
+        "AC-4 [unit] When the branch POST answers 400 and the follow-up branch GET answers 404, createBranch returns { kind: 'refused' }.",
+        "AC-5 [unit] When the host check refuses the second request of createBranch (the follow-up branch GET after a 400), createBranch throws that refusal and sends no second request.",
+        "AC-6 [unit] GitLabAccessChecker.getFileForUpdate(access, 'docs/a.md', 'c1') returns { sha: 'b9', size: 2, content: Buffer.from('hi'), lastCommitId: 'lc1' } for a 200 answer { blob_id: 'b9', size: 2, encoding: 'base64', content: 'aGk=', last_commit_id: 'lc1' }.",
+        "AC-7 [unit] getFileForUpdate returns null for a 404 answer.",
+        "AC-8 [unit] A 200 file answer without a string last_commit_id makes getFileForUpdate throw RepoCheckException with reason provider_error.",
+        "AC-9 [unit] GitLabAccessChecker.commitFile(access, 'docs/a.md', { branch: 'feat/a', content: Buffer.from('hi'), lastCommitId: 'lc1', message: 'm' }) sends POST <apiBase>/projects/<projectId>/repository/commits with body { branch: 'feat/a', commit_message: 'm', actions: [{ action: 'update', file_path: 'docs/a.md', content: 'aGk=', encoding: 'base64', last_commit_id: 'lc1' }] }.",
+        "AC-10 [unit] commitFile returns { kind: 'committed', commitSha: 'n1' } for a 201 answer { id: 'n1' }.",
+        "AC-11 [unit] commitFile returns { kind: 'conflict' } for a 400 answer.",
+        "AC-12 [unit] commitFile returns { kind: 'conflict' } for a 409 answer.",
+        "AC-13 [unit] commitFile throws RepoCheckException with reason app_permissions_insufficient for a 403 answer.",
+        "AC-14 [unit] commitFile throws RepoCheckException with reason provider_error for a 201 answer whose id is not a string."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "forge-client"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Additive client methods follow established transport patterns, but token headers, host checks on every request and permission/status handling require strict security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts",
+        "apps/api/src/fleet/git-broker/forge-tree.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.flow-writes.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts",
+          "reason": "gains rows for `createBranch`, `getFileForUpdate` and `commitFile` in the shared tables \"AC-11: %s maps HTTP failures\" (401, 403, 500) and \"AC-12: %s blocks loopback hosts before requesting\"; every existing case and row stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Prove GitLab flow-owned commits with compare checks",
+      "description": "**Goal** — Add isSingleFileCommit, isOwnCallsRun and OWN_RUN_MAX_COMMITS to GitLabAccessChecker so replay recovery can prove the flow's own changes.\n\n**Motivation** — F1-F4a (merged #472-#475) made registration, jobs, reads and auto-review work on GitLab; flows are the last GitHub-only feature.\n\n**Approach** — All on `GitLabAccessChecker`. Each calls `guard(access.target.apiBase)` before **every** request it sends (not only the first) and sends the `private-token` header. Non-200/201 answers not listed below go through `fail(status)`.\n\n**Interface** —\n```ts\n// US-002\nstatic readonly OWN_RUN_MAX_COMMITS = 50;\nisSingleFileCommit(access, base: string, head: string, path: string): Promise<boolean>\nisOwnCallsRun(access, base: string, head: string, own: { paths: readonly string[]; marker: string }): Promise<boolean>\n// Both: GET <project>/repository/compare?from=<base>&to=<head>&straight=false\n//   404 -> repo_not_found. `compare_timeout: true` -> false. Empty `commits` or empty `diffs` -> false.\n// GitLab compare commits carry no parents and no full message, so each listed commit is read with\n//   GET <project>/repository/commits/<id> (parent_ids, message); a 404 there -> false.\n// Linear-chain rule: walking from head through each commit's parent reaches base; every commit on the walk has\n//   exactly one parent; every listed commit is on the walk and the walk visits no unlisted commit.\n// isSingleFileCommit: exactly one commit, its id === head, parent_ids === [base], exactly one diff with\n//   old_path === new_path === path and new_file, deleted_file, renamed_file all false.\n// isOwnCallsRun: 1..OWN_RUN_MAX_COMMITS commits (more -> false before any commit read), the linear-chain rule,\n//   every message contains own.marker, and every diff has old_path === new_path, that path in own.paths, and\n//   new_file, deleted_file, renamed_file all false.\n```\n\nPrivate helpers `projectUrl(access)`, `guard(apiBase)` (host check before a request) and `fail(status)` (401 → `gitlab_token_invalid`, 403 → `app_permissions_insufficient`, else `provider_error`) are the pattern for the new methods.\n\n**Scope** — In: extend gitlab-access-checker.ts and create gitlab-access-checker.compare.spec.ts with stubbed compare/commit answers and per-request host checks, retaining all existing tests unchanged. Out: client writes (US-001), recovery integration (US-006/007). US-002 only: a GitLab compare whose `diffs` list is truncated on a very large change is judged on the diffs it lists; a flow's own calls run touches at most 20 spec files, far below GitLab's diff limits. US-002 only: `isOwnCallsRun` refuses a run longer than 50 commits even if it is the flow's own; a flow's set has at most 20 features, so a longer own run does not occur.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] GitLabAccessChecker.isSingleFileCommit(access, 'b0', 'h1', 'docs/a.md') sends GET <apiBase>/projects/<projectId>/repository/compare?from=b0&to=h1&straight=false and GET <apiBase>/projects/<projectId>/repository/commits/h1, and returns true when the compare lists commits [{ id: 'h1' }] and diffs [{ old_path: 'docs/a.md', new_path: 'docs/a.md', new_file: false, deleted_file: false, renamed_file: false }] and the commit answers parent_ids: ['b0'].",
+        "AC-2 [unit] isSingleFileCommit returns false when the commit h1 answers parent_ids: ['x9'], with the compare answer of AC-1.",
+        "AC-3 [unit] isSingleFileCommit returns false when the compare answer of AC-1 has a second diff for another path.",
+        "AC-4 [unit] isSingleFileCommit returns false when the one diff of AC-1 has new_path: 'docs/b.md'.",
+        "AC-5 [unit] isSingleFileCommit returns false when the one diff of AC-1 has renamed_file: true.",
+        "AC-6 [unit] isSingleFileCommit returns false without reading any commit when the compare answers compare_timeout: true.",
+        "AC-7 [unit] GitLabAccessChecker.isOwnCallsRun(access, 'b0', 'h2', { paths: ['a.md', 'b.md'], marker: 'flow calls from SPEC_REVIEW job j1' }) returns true when the compare lists commits h1 and h2 and diffs modifying only a.md and b.md (each with new_file, deleted_file, renamed_file false), commit h1 answers parent_ids: ['b0'], commit h2 answers parent_ids: ['h1'], and both messages contain the marker.",
+        "AC-8 [unit] isOwnCallsRun returns false for the answers of AC-7 when commit h2's message lacks the marker.",
+        "AC-9 [unit] isOwnCallsRun returns false for the answers of AC-7 when one diff modifies c.md, a path outside own.paths.",
+        "AC-10 [unit] isOwnCallsRun returns false for the answers of AC-7 when the a.md diff has new_file: true.",
+        "AC-11 [unit] isOwnCallsRun returns false for the answers of AC-7 when commit h2 answers parent_ids: ['h1', 'x9'] (a merge commit).",
+        "AC-12 [unit] isOwnCallsRun returns false when the compare lists h1, h2 and h3 but the walk from h2 through h1 reaches b0 without visiting h3.",
+        "AC-13 [unit] isOwnCallsRun returns false without reading any commit when the compare lists 51 commits, and returns false when a commit read answers 404.",
+        "AC-14 [unit] When the host check refuses the third request of isOwnCallsRun (the second commit read), isOwnCallsRun throws that refusal and sends no further request."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "forge-client",
+        "replay"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two bounded algorithms extend one existing client using its transport and status helpers; authenticated requests and per-request DNS/host guards require strict security TDD despite the localized scope."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.compare.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Resolve GitLab flow remotes to host-aware registered repos",
+      "description": "**Goal** — Introduce parseFlowRemoteUrl, use it in parseFlowInput and add host-aware GitLab repository lookup.\n\n**Motivation** — Today every flow forge call mints a GitHub App token, so a flow on a GitLab repo is refused `fleet.flows.repoNotFound` (the remote URL parser accepts only github.com) or stopped `repo not connected` (`githubInstallationId === null`).\n\n**Approach** — New `apps/api/src/fleet/flows/flow-remote-url.ts`:\n\n**Interface** —\n```ts\nexport type FlowRemote =\n  | { provider: 'github'; owner: string; name: string }\n  | { provider: 'gitlab'; url: string };\nexport function parseFlowRemoteUrl(url: string): FlowRemote;\n```\n\nRules, in order:\n\n1. A URL `parseGitHubUrl` accepts returns the `github` variant with its lowercased `owner` and `repo` (as `name`).\n2. The URL must parse with `new URL`; its protocol must be `https:`; it must carry no username, no password, no query and no fragment; its hostname must not be `github.com` or `www.github.com` (a github.com URL rule 1 refused stays refused).\n3. The path is normalised by removing one trailing `/`, then one trailing `.git` (case-insensitive). The normalised path must have at least two segments, none empty, `.` or `..`.\n4. It returns the `gitlab` variant with `url` = `(origin + normalised path).toLowerCase()`.\n\nAny URL failing rule 2 or 3 throws `ValidationAppException` `skills.unsupportedHost` (what `parseGitHubUrl` throws), so `parseFlowInput` reports `remoteUrl`.\n\nNew `FleetReposService.findGitLabByRemoteUrl(url: string): Promise<FleetRepoRecord | null>` backed by a new `IFleetRepoRepository.findGitLabByName(name: string): Promise<FleetRepoRecord[]>` (provider `gitlab`, name equal case-insensitively, ordered by `createdAt`, then `id`). The service keeps the first row whose `(host without trailing '/') + '/' + owner + '/' + name`, lowercased, equals `url`. A host with a path prefix therefore matches only URLs under that prefix, and the same path on another host never matches.\n\n`parseFlowInput` (`apps/api/src/fleet/flows/flow-input.ts:64-65`)\n- Target: validates `remoteUrl` with the new `parseFlowRemoteUrl`; `normalized.remoteUrl` stays the input string.\n\nGitLab rows store `owner` as the full namespace path (`group/sub`) and `host` as the origin plus any path prefix (`https://gitlab.com`, `https://example.com/gitlab`); `@@unique([provider, host, owner, name])`.\n\n**Scope** — In: new parser and unit spec, switch only flow-input validation, extend repo domain interface/Prisma implementation/service, and create Postgres integration lookup spec. Verify real case-insensitive name queries, host isolation and prefix matching with shared DB helpers and canRunDbTests; run DB-backed spec outside sandbox via testScoped. No schema migration is required. Every existing test and contract file remains unchanged. Out: controller routing and reads (US-004), shared parseGitHubUrl changes, forge calls, and registration behavior. An ssh remote URL (`git@host:group/app.git`) stays refused for GitLab, as it is for GitHub.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] parseFlowRemoteUrl('https://github.com/Org/Repo.git') returns { provider: 'github', owner: 'org', name: 'repo' }.",
+        "AC-2 [unit] parseFlowRemoteUrl('https://GitLab.example.com/Grp/Sub/App.git/') returns { provider: 'gitlab', url: 'https://gitlab.example.com/grp/sub/app' }.",
+        "AC-3 [unit] parseFlowRemoteUrl('http://gitlab.com/grp/app') throws ValidationAppException skills.unsupportedHost.",
+        "AC-4 [unit] parseFlowRemoteUrl('https://user:pw@gitlab.com/grp/app') throws ValidationAppException skills.unsupportedHost.",
+        "AC-5 [unit] parseFlowRemoteUrl('https://github.com/org/repo/tree/main') throws ValidationAppException skills.unsupportedHost instead of returning a gitlab variant.",
+        "AC-6 [unit] parseFlowRemoteUrl('https://gitlab.com/app.git') throws ValidationAppException skills.unsupportedHost, because one segment remains after .git is removed.",
+        "AC-7 [unit] parseFlowInput with entry 'NAX' accepts remoteUrl: 'https://gitlab.com/grp/app.git' and returns it unchanged as remoteUrl.",
+        "AC-8 [unit] parseFlowInput with entry 'NAX' reports the property remoteUrl for remoteUrl: 'git@gitlab.com:grp/app.git'.",
+        "AC-9 [integration] With GitLab repos { host: 'https://gitlab.example.com', owner: 'Grp/Sub', name: 'App' } and { host: 'https://gitlab.com', owner: 'Grp/Sub', name: 'App' } stored, FleetReposService.findGitLabByRemoteUrl('https://gitlab.example.com/grp/sub/app') returns the first one.",
+        "AC-10 [integration] With a GitLab repo { host: 'https://example.com/gitlab', owner: 'grp', name: 'app' } stored, findGitLabByRemoteUrl('https://example.com/gitlab/grp/app') returns it.",
+        "AC-11 [integration] With only that prefixed repo stored, findGitLabByRemoteUrl('https://example.com/grp/app') returns null.",
+        "AC-12 [integration] With a GitHub repo { owner: 'grp', name: 'app' } stored and no GitLab repo, findGitLabByRemoteUrl('https://github.example.com/grp/app') returns null."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "repositories",
+        "security",
+        "integration"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Five production files follow existing parsing and Prisma lookup patterns with one real-DB seam; cross-host repository identity and rejection of embedded URL credentials retain the strict security strategy."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/skills/github-url.ts",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/test/integration/fleet/fleet-repo-fix-unprotected-route.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-remote-url.ts",
+        "apps/api/src/fleet/flows/flow-remote-url.spec.ts",
+        "apps/api/test/integration/fleet/fleet-repo-gitlab-remote.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Create NAX flows from GitLab repositories",
+      "description": "**Goal** — Extend FleetFlowsController.create to resolve GitLab remotes and verify head/specs with read credentials before approval.\n\n**Motivation** — F1-F4a (merged #472-#475) made registration, jobs, reads and auto-review work on GitLab; flows are the last GitHub-only feature.\n\n**Approach** — `FleetFlowsController.create` (`apps/api/src/fleet/flows/fleet-flows.controller.ts:73-121`)\n- Target: `parseFlowRemoteUrl`; a `github` result keeps the baseline path; a `gitlab` result resolves the repo with `FleetReposService.findGitLabByRemoteUrl(url)`, runs the same project and permission checks, then reads the branch head and every spec through `call(repo, 'read', ...)`. Constructor gains `gitlabCredentials`, `gitlab` (appended). The `@ApiBody` `remoteUrl` description becomes `HTTPS github.com or GitLab repository URL`, and `openapi.json` is regenerated with `bun run api:export-spec` from the repo root.\n\n**GitLab branch iff `repo.provider === 'gitlab'`.** A GitLab row takes the GitLab path whatever its `githubInstallationId` holds (a real GitLab row holds `null`), and never calls a `GitHubAppClient` method. The provider test comes before every `githubInstallationId === null` refusal; a GitHub row keeps today's code path unchanged, including those refusals.\n\n**One `GitLabRepoCredentials.call` per GitLab client method call.** `call(repo, kind, fn)` marks the token invalid on a 401; wrapping a whole pass in one `call` would mark a token rotated mid-pass.\n\n**New constructor dependencies are appended** after the existing ones: `GitLabRepoCredentials`, then `GitLabAccessChecker`. `GitBrokerModule` already exports both and `FlowsModule` (`flows.module.ts`) already imports it.\n\n**Interface** — `GitLabRepoCredentials.call<T>(repo: { id: string; host?: string }, kind: 'read' | 'write', fn: (access: GitLabAccess) => Promise<T>): Promise<T>` — `apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts`; throws `RepoCheckException('gitlab_credentials_missing')` for a repo with no credential row.\n`FleetReposService.findGitLabByRemoteUrl(url: string): Promise<FleetRepoRecord | null>`; `parseFlowRemoteUrl(url: string): FlowRemote`; existing `getBranchHead(access, branch): Promise<string>` and `getFile(access, path, ref): Promise<ForgeFile | null>` remain the read interfaces.\n\nFailure handling: Controller, GitLab: `gitlab_credentials_missing`, `gitlab_token_invalid`, `app_permissions_insufficient` → 409 `fleet.flows.gitlabNotConnected`; `repo_not_found` from the branch read → 409 `fleet.flows.branchNotFound`; `provider_unreachable`, `provider_error`, `vcs_encryption_key_missing` → 503 `fleet.flows.forgeUnavailable`; any other `RepoCheckException` reason → rethrown (422 `fleet.repoCheck`). Keep permission checks before every GitLab call and keep all reads before ApprovalRouteGate opens a transaction or persists its immutable input.\n\nNew API i18n key `flows.gitlabNotConnected.409` in `apps/api/src/i18n/en/fleet.json` (\"Koda cannot read this GitLab repository: its tokens are missing or invalid; rotate them with koda fleet repo credentials\") and `apps/api/src/i18n/zh/fleet.json` (\"Koda 无法读取此 GitLab 仓库：其令牌缺失或无效；请使用 koda fleet repo credentials 轮换令牌\").\n\n**Scope** — In: controller GitLab path and new controller.gitlab.spec.ts; i18n keys; regenerate openapi.json with only remoteUrl description changed; extend flows.module.spec.ts StubGitBrokerModule to provide/export GitLabRepoCredentials and GitLabAccessChecker using useValue: {}, keeping every existing assertion. Production module already exports/imports the dependencies. Out: URL/repository implementation (US-003), advance/watch (US-005), calls/PRD/start write passes (US-006/007/008), hand-editing generated CLI files. GitHub path and existing controller specs remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] FleetFlowsController.create with remoteUrl: 'https://gitlab.com/grp/app', a repo { provider: 'gitlab', githubInstallationId: null } returned by FleetReposService.findGitLabByRemoteUrl('https://gitlab.com/grp/app'), and a caller holding fleet.flow.create, calls GitLabRepoCredentials.call with the repo and 'read' and GitLabAccessChecker.getBranchHead with branch.",
+        "AC-2 [unit] In the call of AC-1, when getBranchHead resolves specSha, create calls GitLabAccessChecker.getFile through call(repo, 'read', ...) with each feature's specPath and specSha, then ApprovalRouteGate.run with input { projectId, repoId: repo.id, body }.",
+        "AC-3 [unit] In the call of AC-1, create never calls a GitHubAppClient method and never calls FleetReposService.findByIdentity.",
+        "AC-4 [unit] For a GitLab repo row carrying githubInstallationId: 9n, create still takes the GitLab path and never calls GitHubAppClient.mintReadOnlyToken.",
+        "AC-5 [unit] When findGitLabByRemoteUrl resolves null, create throws 404 fleet.flows.repoNotFound.",
+        "AC-6 [unit] When the repo's project is not among ProjectsService.findAllForPrincipal(principal), create throws 404 fleet.flows.repoNotFound and makes no GitLab call.",
+        "AC-7 [unit] When the caller lacks fleet.flow.create in the repo's project, create throws 403 and makes no GitLab call.",
+        "AC-8 [unit] When getBranchHead resolves a sha other than specSha, create throws 409 fleet.flows.specShaNotHead and never calls ApprovalRouteGate.run.",
+        "AC-9 [unit] When getFile resolves null for a feature's specPath, create throws 422 fleet.flows.specMissing naming that path.",
+        "AC-10 [unit] For each reason of gitlab_credentials_missing, gitlab_token_invalid and app_permissions_insufficient that GitLabRepoCredentials.call rejects with, create throws 409 fleet.flows.gitlabNotConnected.",
+        "AC-11 [unit] When getBranchHead rejects with RepoCheckException('repo_not_found'), create throws 409 fleet.flows.branchNotFound.",
+        "AC-12 [unit] For each reason of provider_error, provider_unreachable and vcs_encryption_key_missing that the GitLab read rejects with, create throws 503 fleet.flows.forgeUnavailable.",
+        "AC-13 [unit] When the GitLab read rejects with RepoCheckException('gitlab_host_blocked'), create rethrows that RepoCheckException unchanged."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "permissions",
+        "openapi",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One controller branch reuses existing authorization, approval and GitLab read APIs, with mechanical i18n/DI-stub/spec updates; permission ordering and credential isolation mandate strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flows.controller.spec.ts",
+        "apps/api/src/fleet/flows/flows.module.spec.ts",
+        "apps/api/src/fleet/flows/flow-remote-url.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.controller.gitlab.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.spec.ts",
+          "reason": "`StubGitBrokerModule` provides and exports only `GitHubAppClient`; it now also provides and exports `GitLabRepoCredentials` and `GitLabAccessChecker` (`useValue: {}`), because `FleetFlowsController`, `FleetFlowAdvanceService` and `FleetFlowCallsService` now inject them. Every existing assertion stays."
+        },
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "adds `flows.gitlabNotConnected.409`; every existing key stays."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "adds `flows.gitlabNotConnected.409`; every existing key stays."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: the flow-create route's `remoteUrl` description changes from `HTTPS github.com repository URL` to `HTTPS github.com or GitLab repository URL`; nothing else in the contract changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Read GitLab flow heads and watch merge requests",
+      "description": "**Goal** — Route flow spec-head preflight, awaited merge-request reads and PR-number attribution to GitLab and classify missing/invalid GitLab credentials.\n\n**Motivation** — F1-F4a (merged #472-#475) made registration, jobs, reads and auto-review work on GitLab; flows are the last GitHub-only feature.\n\n**Approach** — `FleetFlowAdvanceService.readSpecHead` (`fleet-flow-advance.service.ts:794-812`), `prNumberOf` (`:898-906`)\n- Target: a GitLab row reads the head through `call(repo, 'read', a => gitlab.getBranchHead(a, flow.branch))`; `prNumberOf` passes `provider: repo.provider === 'gitlab' ? 'gitlab' : 'github'` and `host: repo.host`, so a repo stub without `provider` (as the existing advance specs use) still parses GitHub PR URLs. Constructor gains `gitlabCredentials`, `gitlab` (appended); `featurePassDeps()` passes both.\n\n`FeaturePassDeps` (`fleet-flow-feature-passes.ts:17`)\n- Target: gains `gitlabCredentials: GitLabRepoCredentials` and `gitlab: GitLabAccessChecker`.\n\n`runMergeWatch` / `pollAwaited` (`fleet-flow-feature-passes.ts:240-359`)\n- Target: a GitLab row skips the GitHub mint and reads each awaited MR with `call(repo, 'read', a => gitlab.getMergeRequest(a, prNumber))`; the outcome rules (merged, closed, gone, retry, stop) are unchanged.\n\n`callsOutcomeForForgeError` (`apps/api/src/fleet/flows/flow-calls.ts:13`)\n- Target: also `'failed'` for `gitlab_credentials_missing` and `gitlab_token_invalid`.\n\n**GitLab branch iff `repo.provider === 'gitlab'`.** A GitLab row takes the GitLab path whatever its `githubInstallationId` holds (a real GitLab row holds `null`), and never calls a `GitHubAppClient` method. The provider test comes before every `githubInstallationId === null` refusal; a GitHub row keeps today's code path unchanged, including those refusals. The private helpers typed `githubInstallationId: bigint` (`createFeatureBranch`, `pollAwaited`) are called only for GitHub rows; GitLab rows get their own helpers.\n\n**One `GitLabRepoCredentials.call` per GitLab client method call.** `call(repo, kind, fn)` marks the token invalid on a 401; wrapping a whole pass in one `call` would mark a token rotated mid-pass.\n\n**New constructor dependencies are appended** after the existing ones: `GitLabRepoCredentials`, then `GitLabAccessChecker`. `GitBrokerModule` already exports both and `FlowsModule` (`flows.module.ts`) already imports it.\n\n**Missing or invalid GitLab credentials stop a flow** where a GitHub App that is not installed stops it: `callsOutcomeForForgeError` classifies `gitlab_credentials_missing` and `gitlab_token_invalid` as `'failed'`. `vcs_encryption_key_missing` and the host refusals (`gitlab_host_blocked`, `gitlab_host_invalid`, `gitlab_host_unclassified`) keep the default `'retry'`: they are deployment or DNS faults an operator fixes, and the flow resumes on the next tick once fixed.\n\n**The spec-head read stays a preflight hint.** `FleetFlowAdvanceService.advance` catches every `RepoCheckException` from `readSpecHead` and ends the pass without a write (`fleet-flow-advance.service.ts:589-594`); a GitLab repo keeps that rule, exactly as a GitHub one does. A flow whose token went bad is stopped only when a calls, PRD edits, start or watch pass reaches the forge and classifies the failure; a first-feature pass that only reads the spec head ends quietly each tick, as on GitHub.\n\n**Interface** — `FeaturePassDeps` gains `gitlabCredentials: GitLabRepoCredentials` and `gitlab: GitLabAccessChecker`. `GitLabRepoCredentials.call<T>(repo: { id: string; host?: string }, kind: 'read' | 'write', fn: (access: GitLabAccess) => Promise<T>): Promise<T>`. `GitLabAccessChecker.getMergeRequest(access, iid): Promise<VcsPrStatus | null>`. `prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'name' | 'host'>, url)` — `apps/api/src/fleet/sync/pr-attribution.service.ts:27`; already parses GitLab MR URLs including a host path prefix.\n\n**Scope** — In: advance constructor, spec head and PR-number mapping, featurePassDeps interface/factory, separate GitLab watch helper with existing observation/transaction semantics, classifier reasons, new fleet-flow-advance-gitlab.spec.ts driven through advance. flow-calls.spec.ts \"marks known repository setup failures as failed\" gains gitlab_credentials_missing and gitlab_token_invalid; \"retries other forge failures\" stays. Keep older GitHub specs and provider-less fixtures unchanged. Out: feature-start writes (US-008), calls and PRD writes (US-006/007), changing prNumberFor itself. US-005 only: a GitLab spec-head read failure does not stop the flow; the read is a preflight hint and the existing catch ends the pass with no write, as on GitHub.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] FleetFlowAdvanceService.advance on an APPROVED NAX flow whose repo is { provider: 'gitlab', githubInstallationId: null } reads the spec head with GitLabAccessChecker.getBranchHead(access, flow.branch) through call(repo, 'read', ...) and never calls GitHubAppClient.mintReadOnlyToken.",
+        "AC-2 [unit] On that flow, when getBranchHead rejects with RepoCheckException('gitlab_token_invalid'), advance ends the pass without stopping the flow and without a write.",
+        "AC-3 [unit] FleetFlowAdvanceService.advance on a WAITING_MERGE flow on a GitLab repo { provider: 'gitlab', githubInstallationId: null }, whose awaited feature has prNumber: 12, calls GitLabAccessChecker.getMergeRequest with the access and 12 through call(repo, 'read', ...), and never calls GitHubAppClient.mintThreadReadToken.",
+        "AC-4 [unit] In that merge watch, when getMergeRequest resolves { merged: true }, the feature is recorded MERGED.",
+        "AC-5 [unit] In that merge watch, when getMergeRequest resolves { merged: false, state: 'closed' }, the flow is stopped with reason pr_closed.",
+        "AC-6 [unit] In that merge watch, when getMergeRequest resolves null, the flow is stopped with reason pr_closed.",
+        "AC-7 [unit] In that merge watch, when GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_token_invalid'), the flow is stopped with reason dispatch_refused and detail gitlab_token_invalid.",
+        "AC-8 [unit] In that merge watch, for each reason of provider_error, gitlab_host_blocked and vcs_encryption_key_missing that getMergeRequest rejects with, the pass writes nothing and the flow keeps waiting.",
+        "AC-9 [unit] callsOutcomeForForgeError('gitlab_credentials_missing') returns 'failed'.",
+        "AC-10 [unit] callsOutcomeForForgeError('gitlab_token_invalid') returns 'failed'.",
+        "AC-11 [unit] callsOutcomeForForgeError('gitlab_host_blocked') returns 'retry'.",
+        "AC-12 [unit] For a RUNNING flow on GitLab repo { provider: 'gitlab', host: 'https://gitlab.com', owner: 'grp', name: 'app' } whose finished RUN job has resultPrUrl: 'https://gitlab.com/grp/app/-/merge_requests/7' and a claimed review head, FleetFlowAdvanceService.advance records the REVIEW step with steps.markStep(flowId, featureId, 'REVIEW', { flowState: 'RUNNING', prNumber: 7 }).",
+        "Failure handling [unit] When the GitLab merge watch encounters RepoCheckException('gitlab_credentials_missing'), it stops the flow with reason dispatch_refused and detail gitlab_credentials_missing.",
+        "Failure handling [unit] When the GitLab merge watch encounters gitlab_host_invalid or gitlab_host_unclassified, runMergeWatch returns { kind: 'retry' } without writing flow progress."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "polling",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three production files add provider branches and collaborator forwarding while reusing existing watch observations, locks and URL parsing; credential selection and failure classification require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-feature-passes.ts",
+        "apps/api/src/fleet/flows/fleet-flow-merge-watch.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-review.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance-gitlab.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-calls.spec.ts",
+          "reason": "\"marks known repository setup failures as failed\" gains `gitlab_credentials_missing` and `gitlab_token_invalid`; \"retries other forge failures\" stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Commit flow calls on GitLab with replay-safe locking",
+      "description": "**Goal** — Add the GitLab branch of FleetFlowCallsService.apply, preserving GitHub's existing algorithm and public outcomes.\n\n**Motivation** — Today every flow forge call mints a GitHub App token, so a flow on a GitLab repo is refused `fleet.flows.repoNotFound` (the remote URL parser accepts only github.com) or stopped `repo not connected` (`githubInstallationId === null`).\n\n**Approach** — Relevant target for `FleetFlowCallsService.apply` / `applyPrdEdits` / `isOwnEarlierCommit` (`fleet-flow-calls.service.ts:57-175`):\n- Target: a GitLab row runs the same decision rules with `getBranchHead`, `getFileForUpdate` (pinned to the head), `commitFile` (with the file's `lastCommitId` as the lock), `isSingleFileCommit` and `isOwnCallsRun`. The base read (the file at `expectedHead`, or at `target.replay.reviewedHead` for a replay) is `call(repo, 'read', a => gitlab.getFile(a, path, baseHead))`, and an already-applied head is accepted only when its bytes equal the text built from that base AND the compare check passes, exactly as on GitHub. After a `conflict` the GitLab branch re-reads the file with `getFileForUpdate` on `target.branch` and compares `lastCommitId` (the lock it sent), not the blob sha: the same `lastCommitId` means nobody moved the file, so the branch refused the commit (`failed`); a moved file, a deleted file (null) or a re-read that throws a retry reason is `retry`. Constructor gains `gitlabCredentials`, `gitlab` (appended).\n\n**GitLab branch iff `repo.provider === 'gitlab'`.** A GitLab row takes the GitLab path whatever its `githubInstallationId` holds (a real GitLab row holds `null`), and never calls a `GitHubAppClient` method. The provider test comes before every `githubInstallationId === null` refusal; a GitHub row keeps today's code path unchanged, including those refusals.\n\n**One `GitLabRepoCredentials.call` per GitLab client method call.** `call(repo, kind, fn)` marks the token invalid on a 401; wrapping a whole pass in one `call` would mark a token rotated mid-pass.\n\n**Token kind per request (design §5):** reads (`getBranchHead`, `getFile`, `getFileForUpdate`, `getMergeRequest`, `isSingleFileCommit`, `isOwnCallsRun`), including the re-read after a conflict, use `'read'`; writes (`createBranch`, `commitFile`) use `'write'`. `createBranch`'s own follow-up branch read runs inside the same `'write'` call, with the write token.\n\n**New constructor dependencies are appended** after the existing ones: `GitLabRepoCredentials`, then `GitLabAccessChecker`. `GitBrokerModule` already exports both and `FlowsModule` (`flows.module.ts`) already imports it.\n\n**Interface** — Preserve the existing `apply(flow: FleetFlowRecord, action: ApplyCallsAction, expectedHead: string, target: FleetFlowCallsTarget): Promise<CallsOutcome>` entry point. Consume these US-001/002 interfaces:\n```ts\ngetFileForUpdate(access, path: string, ref: string):\n  Promise<(ForgeFile & { lastCommitId: string }) | null>\ncommitFile(access, path: string, input: { branch: string; content: Buffer; lastCommitId: string; message: string }):\n  Promise<PutFileResult>\nisSingleFileCommit(access, base: string, head: string, path: string): Promise<boolean>\nisOwnCallsRun(access, base: string, head: string, own: { paths: readonly string[]; marker: string }): Promise<boolean>\n```\n\nThe base for a normal recovery is expectedHead, for a set replay it is target.replay.reviewedHead. Build exact expected bytes from that base with buildFlowCalls; a heading alone is not proof. First try the single-file proof, then only for replay try isOwnCallsRun with target.replay.paths and marker `flow calls from <step> job <jobId>`. Return stale when bytes/proof disagree, without a write. Commit message is `docs(<feature>): flow calls from <step> job <jobId>`; return committed specSha from commitSha. Existing feature missing, spec missing, stale and retry decision rules remain. No flow-state write or transaction across forge calls. The production path is `FleetFlowAdvanceService.advance` → `advanceCalls` → `calls.apply`, with no GitHub gate on the way; `readSpecHead` returns before any repo lookup on an `apply_calls` pass.\n\nFailure handling: missing or invalid GitLab credentials return failed with the reason as detail; host refusal, encryption key missing and provider error return retry. commitFile 400/409 is conflict; unchanged lastCommitId after reread returns failed detail `spec write refused`, otherwise retry. A retry-class exception on reread also returns retry.\n\n**Scope** — In: append service dependencies once, new separate GitLab apply and own-earlier-commit helpers, and fleet-flow-calls-gitlab.spec.ts directly pinning apply; keep existing GitHub tests and contracts unchanged. Out: applyPrdEdits GitLab implementation (US-007), feature start (US-008), modifying client methods (US-001/002). Sharing one forge-neutral implementation of the calls algorithm between GitHub and GitLab is not done: the GitHub path stays byte-for-byte as it is so its existing specs keep proving it. US-006 only: the own-commit checks verify linearity, marker and paths, not the commit author, exactly as on GitHub. US-006 only: a GitLab push rule or protected-branch refusal of the calls commit surfaces as `app_permissions_insufficient` and fails the calls pass; no separate `refused` mapping for a GitLab 403 is added.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] FleetFlowCallsService.apply(flow, action, 'h0', target) on a GitLab repo { provider: 'gitlab', githubInstallationId: null }, when getBranchHead resolves 'h0', reads the branch head with getBranchHead(access, target.branch) and the spec with getFileForUpdate(access, target.specPath, 'h0'), each through call(repo, 'read', ...).",
+        "AC-2 [unit] When that head is 'h0', apply calls GitLabAccessChecker.commitFile through call(repo, 'write', ...) with target.specPath and { branch: target.branch, content: <built calls text>, lastCommitId: <the file's lastCommitId>, message: 'docs(<feature>): flow calls from <step> job <jobId>' }, and returns { kind: 'committed', specSha: <commitSha> }.",
+        "AC-3 [unit] When the branch head is not expectedHead and the spec does not yet carry the calls, apply returns { kind: 'stale', head } and never calls commitFile.",
+        "AC-4 [unit] When commitFile returns { kind: 'conflict' } and the re-read with getFileForUpdate(access, target.specPath, target.branch) through call(repo, 'read', ...) has the same lastCommitId, apply returns { kind: 'failed', detail: 'spec write refused' }.",
+        "AC-5 [unit] When commitFile returns { kind: 'conflict' } and the re-read has a different lastCommitId, or resolves null, apply returns { kind: 'retry' }.",
+        "AC-6 [unit] When the spec at the head already carries the calls, the base spec read with getFile(access, target.specPath, expectedHead) through call(repo, 'read', ...) builds exactly the head's bytes, and isSingleFileCommit(access, expectedHead, head, target.specPath) resolves true through call(repo, 'read', ...), apply returns { kind: 'committed', specSha: head } and never calls commitFile.",
+        "AC-7 [unit] When the spec at the head carries the calls and isSingleFileCommit resolves true, but the head's bytes differ from the calls built on the base spec, apply returns { kind: 'stale', head }.",
+        "AC-8 [unit] For a set replay target whose head carries the calls built on the base at target.replay.reviewedHead, when isSingleFileCommit resolves false and isOwnCallsRun(access, target.replay.reviewedHead, head, { paths: target.replay.paths, marker: 'flow calls from <step> job <jobId>' }) resolves true through call(repo, 'read', ...), apply returns { kind: 'committed', specSha: head }.",
+        "AC-9 [unit] In the replay of AC-8, when isOwnCallsRun resolves false, apply returns { kind: 'stale', head }.",
+        "AC-10 [unit] When GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_credentials_missing'), apply returns { kind: 'failed', detail: 'gitlab_credentials_missing' }.",
+        "AC-11 [unit] When a GitLab read rejects with RepoCheckException('gitlab_host_blocked'), apply returns { kind: 'retry' }.",
+        "AC-12 [unit] For a GitLab repo row carrying githubInstallationId: 9n, apply never calls GitHubAppClient.mintInstallationToken.",
+        "Failure handling [unit] When GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_token_invalid'), apply returns { kind: 'failed', detail: 'gitlab_token_invalid' }.",
+        "Failure handling [unit] When a GitLab request, including the conflict re-read, rejects with gitlab_host_invalid, gitlab_host_unclassified, vcs_encryption_key_missing or provider_error, apply returns { kind: 'retry' }."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "concurrency",
+        "replay"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Exact-byte idempotency, replay ancestry and file-level optimistic concurrency have substantial risk; read/write credential separation mandates strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-calls-gitlab.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Commit GitLab flow PRD edits safely",
+      "description": "**Goal** — Add the GitLab path of FleetFlowCallsService.applyPrdEdits using lastCommitId locking and exact-byte single-commit recovery.\n\n**Motivation** — F1-F4a (merged #472-#475) made registration, jobs, reads and auto-review work on GitLab; flows are the last GitHub-only feature.\n\n**Approach** — Implement only the GitLab branch of `FleetFlowCallsService.applyPrdEdits` (`fleet-flow-calls.service.ts:57-115`). Read the branch head, then getFileForUpdate pinned to that head. The base read for moved-head recovery is `call(repo, 'read', a => gitlab.getFile(a, path, expectedHead))`; accept the head only if its bytes exactly equal applyPrdEditsToText applied to that base AND isSingleFileCommit proves the one-file direct-child commit. Like the GitHub path, PRD recovery uses isSingleFileCommit only.\n\nAfter a `conflict` the GitLab branch re-reads the file with `getFileForUpdate` on `target.branch` and compares `lastCommitId` (the lock it sent), not the blob sha: the same `lastCommitId` means nobody moved the file, so the branch refused the commit (`failed`); a moved file, a deleted file (null) or a re-read that throws a retry reason is `retry`.\n\nThe constructor dependencies GitLabRepoCredentials then GitLabAccessChecker were appended in US-006 and must not be duplicated or reordered.\n\n**GitLab branch iff `repo.provider === 'gitlab'`.** A GitLab row takes the GitLab path whatever its `githubInstallationId` holds (a real GitLab row holds `null`), and never calls a `GitHubAppClient` method. The provider test comes before every `githubInstallationId === null` refusal; a GitHub row keeps today's code path unchanged, including those refusals.\n\n**One `GitLabRepoCredentials.call` per GitLab client method call.** `call(repo, kind, fn)` marks the token invalid on a 401; wrapping a whole pass in one `call` would mark a token rotated mid-pass.\n\n**Token kind per request (design §5):** reads (`getBranchHead`, `getFile`, `getFileForUpdate`, `getMergeRequest`, `isSingleFileCommit`, `isOwnCallsRun`), including the re-read after a conflict, use `'read'`; writes (`createBranch`, `commitFile`) use `'write'`. `createBranch`'s own follow-up branch read runs inside the same `'write'` call, with the write token.\n\n**Interface** — Preserve `applyPrdEdits(flow: FleetFlowRecord, action: ApplyPrdEditsAction, expectedHead: string, target: FleetFlowCallsTarget): Promise<PrdEditsOutcome>`.\n```ts\ngetFileForUpdate(access, path: string, ref: string):\n  Promise<(ForgeFile & { lastCommitId: string }) | null>\ncommitFile(access, path: string, input: { branch: string; content: Buffer; lastCommitId: string; message: string }):\n  Promise<PutFileResult>\nisSingleFileCommit(access, base: string, head: string, path: string): Promise<boolean>\n```\n\nUse `.nax/features/<feature>/prd.json` on target.branch. Read head and pinned update file separately through read credentials; build edits with applyPrdEditsToText and preserve applied/refused and unreadable/missing/empty-edit decisions. If applied === 0 return unchanged without a commit. If head moved, getFile at expectedHead through read credentials must yield base bytes whose edits exactly equal the head file AND the single-file compare must pass, otherwise stale. Commit through write credentials with message `chore(<feature>): flow PRD edits from PRD_REVIEW job <jobId>` and the update file's lastCommitId; return committed sha from commitSha plus applied/refused. Do not mutate flow state or hold a transaction over forge calls.\n\nFailure handling: missing or invalid GitLab credentials return failed with the reason as detail; host refusal, encryption key missing and provider error return retry. commitFile 400/409 is conflict; unchanged lastCommitId on read-token reread returns failed detail `prd.json write refused`; moved/deleted file or retry-class reread error returns retry.\n\n**Scope** — In: GitLab applyPrdEdits helper and new fleet-flow-prd-edits-gitlab.spec.ts. Out: calls implementation and constructor setup (US-006), client additions (US-001/002), feature start (US-008). Existing GitHub algorithm, tests and contract files stay unchanged. Sharing one forge-neutral implementation of the calls algorithm between GitHub and GitLab is not done: the GitHub path stays byte-for-byte as it is so its existing specs keep proving it. US-007 only: the own-commit check verifies linearity and the path, not the commit author, exactly as on GitHub. US-007 only: a GitLab push rule or protected-branch refusal of the PRD edits commit surfaces as `app_permissions_insufficient` and fails the pass; no separate `refused` mapping for a GitLab 403 is added.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] FleetFlowCallsService.applyPrdEdits on a GitLab repo { provider: 'gitlab', githubInstallationId: null } whose head equals expectedHead calls commitFile through call(repo, 'write', ...) with .nax/features/<feature>/prd.json, the edited text, the file's lastCommitId and message chore(<feature>): flow PRD edits from PRD_REVIEW job <jobId>, and returns { kind: 'committed', sha: <commitSha>, applied, refused }.",
+        "AC-2 [unit] When the GitLab prd.json has no edit to apply (applied === 0), applyPrdEdits returns { kind: 'unchanged', refused } and never calls commitFile.",
+        "AC-3 [unit] When the GitLab head moved and isSingleFileCommit(access, expectedHead, head, '.nax/features/<feature>/prd.json') resolves false through call(repo, 'read', ...), applyPrdEdits returns { kind: 'stale', head }.",
+        "AC-4 [unit] When the GitLab head moved, the file at the head equals the edits applied to the file read with getFile(access, path, expectedHead) through call(repo, 'read', ...), and isSingleFileCommit resolves true, applyPrdEdits returns { kind: 'committed', sha: head, applied, refused }.",
+        "AC-5 [unit] When the GitLab head moved and isSingleFileCommit resolves true but the file at the head differs from the edits applied to the base file, applyPrdEdits returns { kind: 'stale', head }.",
+        "AC-6 [unit] When commitFile returns { kind: 'conflict' } and the re-read with getFileForUpdate on target.branch has the same lastCommitId, applyPrdEdits returns { kind: 'failed', detail: 'prd.json write refused' }.",
+        "AC-7 [unit] When commitFile returns { kind: 'conflict' } and the re-read has a different lastCommitId, applyPrdEdits returns { kind: 'retry' }.",
+        "AC-8 [unit] When GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_credentials_missing'), applyPrdEdits returns { kind: 'failed', detail: 'gitlab_credentials_missing' }.",
+        "AC-9 [unit] For a GitLab repo row carrying githubInstallationId: 9n, applyPrdEdits never calls GitHubAppClient.mintInstallationToken.",
+        "Failure handling [unit] When GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_token_invalid'), applyPrdEdits returns { kind: 'failed', detail: 'gitlab_token_invalid' }.",
+        "Failure handling [unit] When a GitLab request rejects with gitlab_host_blocked, gitlab_host_invalid, gitlab_host_unclassified, vcs_encryption_key_missing or provider_error, applyPrdEdits returns { kind: 'retry' }.",
+        "Failure handling [unit] When commitFile returns conflict and the read-token getFileForUpdate re-read returns null, applyPrdEdits returns { kind: 'retry' }.",
+        "Failure handling [unit] When the conflict re-read rejects with a retry-class RepoCheckException, applyPrdEdits returns { kind: 'retry' }."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "concurrency",
+        "prd-edits"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One service gains a PRD-specific branch using the existing edit transformer and upstream locking/client seams; read/write token isolation and credential failure mapping still require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.spec.ts",
+        "apps/api/src/fleet/flows/flow-prd-edits.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls-gitlab.spec.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-prd-edits-gitlab.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Start later GitLab flow features on their own branches",
+      "description": "**Goal** — Extend the feature-start pass to read approved GitLab specs and create feature branches with write credentials.\n\n**Motivation** — F1-F4a (merged #472-#475) made registration, jobs, reads and auto-review work on GitLab; flows are the last GitHub-only feature.\n\n**Approach** — `runFeatureStart` / `createFeatureBranch` / `specMatchesApproved` (`fleet-flow-feature-passes.ts:77-163`)\n- Target: a GitLab row reads the default-branch head and both spec blobs with the read token and creates the branch with `call(repo, 'write', a => gitlab.createBranch(a, branch, baseSha))`; the decision rules (`refused`, `exists` at the base, `exists` elsewhere) are unchanged.\n\n**GitLab branch iff `repo.provider === 'gitlab'`.** A GitLab row takes the GitLab path whatever its `githubInstallationId` holds (a real GitLab row holds `null`), and never calls a `GitHubAppClient` method. The provider test comes before every `githubInstallationId === null` refusal; a GitHub row keeps today's code path unchanged, including those refusals. The private helpers typed `githubInstallationId: bigint` (`createFeatureBranch`, `pollAwaited`) are called only for GitHub rows; GitLab rows get their own helpers.\n\n**One `GitLabRepoCredentials.call` per GitLab client method call.** `call(repo, kind, fn)` marks the token invalid on a 401; wrapping a whole pass in one `call` would mark a token rotated mid-pass.\n\n**Token kind per request (design §5):** reads (`getBranchHead`, `getFile`, `getFileForUpdate`, `getMergeRequest`, `isSingleFileCommit`, `isOwnCallsRun`), including the re-read after a conflict, use `'read'`; writes (`createBranch`, `commitFile`) use `'write'`. `createBranch`'s own follow-up branch read runs inside the same `'write'` call, with the write token.\n\n**Interface** — Consume upstream `FeaturePassDeps.gitlabCredentials: GitLabRepoCredentials` and `FeaturePassDeps.gitlab: GitLabAccessChecker`.\n```ts\ncreateBranch(access, branch: string, sha: string):\n  Promise<{ kind: 'created' } | { kind: 'exists'; sha: string } | { kind: 'refused' }>\n```\n\nPreserve runFeatureStart's existing FeatureStartInput and FeatureStartOutcome interfaces. Resolve baseSha from defaultBranch when base === 'default', otherwise flow.setSha. Compare getFile blob shas at baseSha/setSha; missing or mismatched approved spec refuses spec_changed before any write. Keep the same-head optimization of one file read. Create feat/<feature>; exists at base is crash recovery, exists elsewhere stops dispatch_refused with `branch <branch> already exists`, refused stops dispatch_refused with `branch <branch> not created`. Only after forge work use existing recordFeatureStart to re-lock/recheck approval generation and write branch/state/audit/activity. Never hold DB transactions over HTTP. Missing/invalid credentials stop dispatch_refused with the reason as detail; host refusals, encryption key missing and provider errors retry next tick without writing.\n\n**Scope** — In: separate GitLab branch creation/spec-matching helpers and new fleet-flow-feature-start-gitlab.spec.ts exercising FleetFlowAdvanceService.advance. Preserve every existing GitHub test and contract file. Out: client methods (US-001), FeaturePassDeps/advance constructor setup (US-005), calls and PRD edits (US-006/007). Thread-entry flows: they already run one feature on the thread's project repo, and threads on GitLab shipped in F3; nothing in this feature changes the thread entry.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] FleetFlowAdvanceService.advance starting a later feature b with base 'default' on a GitLab repo { provider: 'gitlab', githubInstallationId: null } reads the default-branch head with getBranchHead through call(repo, 'read', ...), and when the spec blob sha read with getFile through call(repo, 'read', ...) is equal at that head and at the set sha, calls GitLabAccessChecker.createBranch through call(repo, 'write', ...) with 'feat/b' and that head, and records the feature started on feat/b.",
+        "AC-2 [unit] When createBranch returns { kind: 'exists', sha } with the base sha, the start pass records the feature started on feat/b (a crash leftover of its own).",
+        "AC-3 [unit] When createBranch returns { kind: 'exists', sha } with a sha other than the base, the start pass stops the flow with reason dispatch_refused and detail branch feat/b already exists.",
+        "AC-4 [unit] When createBranch returns { kind: 'refused' }, the start pass stops the flow with reason dispatch_refused and detail branch feat/b not created.",
+        "AC-5 [unit] When the spec blob sha at the base differs from the one at the set sha on a GitLab repo, the start pass stops the flow with reason spec_changed and never calls createBranch.",
+        "AC-6 [unit] When GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_credentials_missing'), the start pass stops the flow with reason dispatch_refused and detail gitlab_credentials_missing.",
+        "AC-7 [unit] For each reason of provider_error and gitlab_host_blocked that createBranch rejects with, the start pass writes nothing and, when the fault is fixed and forge calls succeed, the feature is started on a later tick.",
+        "AC-8 [unit] For a GitLab repo row carrying githubInstallationId: 9n, the start pass never calls GitHubAppClient.mintInstallationToken.",
+        "Failure handling [unit] When GitLabRepoCredentials.call rejects with RepoCheckException('gitlab_token_invalid'), the start pass stops the flow with reason dispatch_refused and detail gitlab_token_invalid.",
+        "Failure handling [unit] When a GitLab start request rejects with gitlab_host_invalid, gitlab_host_unclassified or vcs_encryption_key_missing, advance records neither feature progress nor a flow stop for that pass."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "api",
+        "gitlab",
+        "security",
+        "workflow",
+        "branches"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A localized helper branch reuses existing feature-start recording and approval locks through upstream dependencies; read/write credentials and provider-first connection checks require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-feature-passes.ts",
+        "apps/api/src/fleet/flows/fleet-flow-feature-start.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-feature-start-gitlab.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Document the GitLab operator setup path",
+      "description": "**Goal** — Write docs/deployment/gitlab.md covering the complete GitLab fleet setup and operational differences.\n\n**Motivation** — The design's §7 Docs item (the GitLab setup guide) is also still open.\n\n**Approach** — **No-test:** documentation only. Writes `docs/deployment/gitlab.md` for operators.\n\nRead docs/superpowers/specs/2026-11-16-gitlab-parity-design.md §6 credentials, §7 surfaces and §8 host rule; mirror docs/deployment/runner.md's concise operator tone; use the real add and credentials flags in apps/cli/src/commands/fleet-repo.ts. Cover bot account, the two tokens/scopes and Developer role, registration including self-hosted host, rotation, FIX default-branch protection/override, host restrictions, token-health remediation, REVIEW write-token scope and polling. The guide must state that a human-account write token is accepted only with --confirm-bot and shown with a warning. Document existing behavior, do not modify CLI/API registration logic to reconcile older design prose.\n\n**Interface** — Operator commands required by the spec:\n```text\nkoda fleet repo add <group/app> --provider gitlab --read-token-file <f> --write-token-file <f>\nkoda fleet repo credentials <repoId>\n```\nAdd --host <url> for self-hosted registration and use rotation's actual --read-token-file/--write-token-file flags in runnable examples. Tokens come from files or stdin, not literal argv secrets.\n\n**Scope** — In: new GitLab setup guide only; review all seven documentary assertions against the guide and actual CLI flags. Out: implementation in US-001 through US-008, edits to CLI/runtime, generated clients, new automated tests. nax-side flow support (`nax-flow__send` and the forge kind for self-hosted hosts, nax #2957) is nax work, not koda work. The live check of design §9 step 5 (a flow end to end on `freqtrade/quant-crypto-trader`) is an operator step after deployment, not a story.",
+      "acceptanceCriteria": [
+        "AC-1 [review] docs/deployment/gitlab.md has a section on the bot account stating that the write token should belong to a dedicated GitLab user, and that a human-account write token is accepted only with --confirm-bot and shown with a warning.",
+        "AC-2 [review] The guide's tokens section states the read token needs scopes read_api and read_repository, the write token needs api and write_repository, and the bot user needs the Developer role (or above) on the project.",
+        "AC-3 [review] The guide shows registration with koda fleet repo add <group/app> --provider gitlab --read-token-file <f> --write-token-file <f> (with --host <url> for self-hosted) and rotation with koda fleet repo credentials <repoId>.",
+        "AC-4 [review] The guide's FIX section states that a FIX job needs a protected default branch the bot cannot push to, unless the repo's fixAllowUnprotected override is on.",
+        "AC-5 [review] The guide's self-hosted section states the host rule: https only, private and LAN hosts allowed, loopback, link-local and cloud-metadata addresses refused, no redirects, and a host name without gitlab refused with gitlab_host_unclassified until nax #2957 ships.",
+        "AC-6 [review] The guide's token health section states that a 401 marks the token invalid until it is rotated and that a token expiring within 14 days shows as expiring.",
+        "AC-7 [review] The guide's known differences section states that REVIEW jobs use the write token because GitLab has no comment-only token scope, and that koda polls GitLab instead of receiving webhooks."
+      ],
+      "tags": [
+        "gitlab-flows",
+        "documentation",
+        "deployment",
+        "operators"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "A single additive guide is reviewed for exact setup requirements and real CLI syntax; automated behavior tests would not verify documentation accuracy.",
+        "noTestJustification": "The binding spec explicitly declares this documentation-only story no-test; it creates one Markdown operator guide with review criteria and changes no runtime, credentials or access-control behavior."
+      },
+      "contextFiles": [
+        "docs/superpowers/specs/2026-11-16-gitlab-parity-design.md",
+        "docs/deployment/runner.md",
+        "apps/cli/src/commands/fleet-repo.ts"
+      ],
+      "expectedFiles": [
+        "docs/deployment/gitlab.md"
+      ]
+    }
+  ],
+  "analysis": "Goal and completion: finish GitLab parity F4b by making registered GitLab repositories usable by NAX-entry fleet flows, including entry verification, spec-head reads, MR attribution/polling, calls commits, PRD edits and later-feature branches, plus the operator guide. This is an enhancement of existing NestJS/Fastify services, not greenfield. The binding nine stories and dependencies are retained, including the explicitly declared documentation-only US-009. US-001/002/003/009 can begin independently; US-004 follows US-003; US-005 follows US-004; US-006 follows US-001/002/005; US-007 follows US-006; US-008 follows US-001/005. No extra validation, migration or analysis story is needed. Navigation: codebase-memory MCP was unavailable in this session, so findings come from direct reads and text searches at the supplied execution root. Citations below refer to the current checkout, not assumed historical line numbers.\n\nArchitecture and guidance: .nax/mono/apps/api/context.md is the API-specific authoring context. API owns persistence, permissions and workflow rules; no CLI, runner or web runtime changes are required. Despite auto-detected web context saying Next.js, repository guidance identifies web as Nuxt 4; this feature does not touch it. Use existing Nathapp exception/envelope, approval, audit and transaction patterns rather than introducing a forge-neutral framework. Before implementing NestJS code, consult .nax/rules/nathapp-packages.md and available Nathapp docs MCP; do not edit generated AGENTS.md. GitLab forge HTTP must continue through FleetHttpClient, with no redirects, no credential logging, and a host guard before every outbound request.\n\nClient extension: apps/api/src/fleet/git-broker/gitlab-access-checker.ts:30 defines the existing injectable client; :34 builds requests from the access target's API base and numeric project id, :39 performs the host guard, and :47 maps 401 to gitlab_token_invalid, 403 to app_permissions_insufficient, all other unhandled statuses to provider_error. Existing getMergeRequest (:63), getBranchHead (:127), and getFile (:226) are reusable reads; ForgeFile.sha is blob_id, NOT a last-commit lock. US-001 adds createBranch, getFileForUpdate and commitFile there, importing the existing PutFileResult union from apps/api/src/fleet/git-broker/github-app-client.ts:13. Branch POST 400 requires a guarded follow-up branch read; a missing branch after that is refused, while a direct POST 404 remains repo_not_found. The commits API, not the files API in the older parity design, must return body.id as the resulting spec SHA. Its 400/409 conflict classification differs from GitHub's 409/422 mapping. US-002 adds bounded compare checks: compare response commits lack parents/full messages, so retrieve each commit separately with the guard and private-token header; prove an exact linear head-to-base walk containing all and only listed commits, reject merges and forbidden diffs. Own runs cap at 50 before any commit read; missing commit details return false, compare 404 throws repo_not_found. Existing GitHub branch/compare/write algorithms at github-app-client.ts:314, :356, :377 and :436 are reference behavior and must not be changed.\n\nCredentials and security: apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts:123 resolve uses only the named repo's encrypted credentials and host; :143 call resolves access per invocation and marks the used token invalid for gitlab_token_invalid before rethrowing. Never wrap an entire flow pass in one call: token rotation between requests must resolve anew and correctly identify the failing credential. Each GitLab client method invocation gets one credentials.call; getBranchHead/getFile/getFileForUpdate/getMergeRequest/isSingleFileCommit/isOwnCallsRun and conflict rereads use read, createBranch/commitFile use write. createBranch's internal follow-up GET uses the same write access. No fallbacks to GitHub or another repo/token. The branch discriminator is exactly repo.provider === 'gitlab', before every GitHub null-installation refusal, even for anomalous GitLab rows carrying a bigint installation id. GitHub and provider-less legacy test stubs retain existing paths. Append new constructor collaborators after all current collaborators, in order GitLabRepoCredentials then GitLabAccessChecker. Services are exported already at git-broker.module.ts:21 and FlowsModule already imports GitBrokerModule at apps/api/src/fleet/flows/flows.module.ts:42; no production module restructuring is needed.\n\nRemote and repository resolution: apps/api/src/fleet/flows/flow-input.ts:63-72 currently invokes parseGitHubUrl and deliberately preserves input remoteUrl. apps/api/src/skills/github-url.ts:16 accepts only HTTPS github.com owner/repo URLs and lowercases identity. US-003 introduces flow-remote-url.ts without widening that shared GitHub parser. First try existing GitHub parsing; otherwise require HTTPS, no URL userinfo/query/fragment, reject github.com/www.github.com, remove one trailing slash then one case-insensitive .git, require at least two nonempty non-dot segments, and lowercase origin plus normalized path. Validation errors remain skills.unsupportedHost; parseFlowInput translates them to property remoteUrl. URL validation is syntax only; GitLab outbound host/DNS policy remains the existing client guard. Add IFleetRepoRepository.findGitLabByName at apps/api/src/fleet/repos/domain/fleet-repo.domain.ts:100 and its Prisma implementation alongside findByIdentity at prisma-fleet-repo.repository.ts:169. Query only provider gitlab and case-insensitive name, order createdAt then id, map rows with toDomain. FleetReposService.findGitLabByRemoteUrl goes alongside findByIdentity at fleet-repos.service.ts:592 and selects the first full host/prefix/namespace/name match from those candidates. Do not reuse host-blind findByIdentity for GitLab. GitLab owner includes all subgroup segments. FleetRepo already stores host with a path prefix and has @@unique([provider, host, owner, name]) at apps/api/prisma/schema.prisma:885. No schema/data migration is necessary.\n\nController: apps/api/src/fleet/flows/fleet-flows.controller.ts:28 constructor currently ends in FleetFlowsService; :61 has the only remoteUrl Swagger description to change; :73 create parses input then does a GitHub identity lookup. The current reachable-project filtering (:81), project permission check (:83), no-forge-before-authorization ordering, immutable head/spec verification (:92-98), exception translation (:100-118) and ApprovalRouteGate boundary (:121 onward in historical spec; current :113 onward) must be retained. Resolve via the new parser and GitLab URL service only for GitLab. Read branch and each feature spec through separate read calls before gate.run, never retain tokens in gate input. GitLab credentials_missing/token_invalid/permissions failures become 409 fleet.flows.gitlabNotConnected, branch repo_not_found becomes 409 fleet.flows.branchNotFound, provider_error/unreachable/encryption-key-missing become 503 fleet.flows.forgeUnavailable, remaining RepoCheckExceptions are rethrown unchanged. Add en/zh flows.gitlabNotConnected.409 without disturbing keys. Regenerate root openapi.json with bun run api:export-spec, only changing remoteUrl prose to HTTPS github.com or GitLab repository URL. US-004 remains scoped apps/api per binding structure even though its generated artifact is root openapi.json. There is no new endpoint or DTO shape; generated CLI sources must not be hand-edited, and description-only export should not expand CLI runtime scope.\n\nAdvance and feature passes: apps/api/src/fleet/flows/fleet-flow-advance.service.ts:66 constructor currently ends in rulings; :103 advance routes WAITING_MERGE to runMergeWatch, apply_calls to advanceCalls, apply_prd_edits to advancePrdEdits, and start_feature to advanceStart. :176 featurePassDeps constructs shared collaborators. US-005 adds GitLab collaborators to that interface (fleet-flow-feature-passes.ts:17) and this factory. readSpecHead at advance.service.ts:794 checks eligibility and deliberately returns before repo lookup when SPEC_REVIEW needs apply_calls (:802-804), so no extra GitHub gate exists before calls.apply at :199/:248 or calls.applyPrdEdits at :336. Its GitLab branch must precede the existing null-installation gate (:809); decide already catches any RepoCheckException from this preflight at :589-594 and ends the pass without a write. Do not convert invalid credentials in a pure preflight into a stop. prNumberOf at :898-906 currently hardcodes github; pass provider: repo.provider === 'gitlab' ? 'gitlab' : 'github' plus host so older provider-less test stubs keep parsing GitHub. apps/api/src/fleet/sync/pr-attribution.service.ts:27 prNumberFor already supports subgroup MR paths and host prefixes and should not be rewritten. Merge watch at fleet-flow-feature-passes.ts:240-359 uses GitHub-only pollAwaited with bigint installation; add a distinct GitLab poll helper, preserve merged/closed/gone handling and all-settled semantics, including no writes for a transient failure in any awaited request. GitHub-only pollAwaited and createFeatureBranch keep their bigint signatures and are never called for GitLab. US-008 adds the separate GitLab feature-start helper next to runFeatureStart (:77), comparing blob shas at base and approved set before creating feat/<feature>. Keep base=spec optimization, branch-exists-at-base crash recovery, existing transaction/approval-generation locks and audit/activity recording in recordFeatureStart (:171 onward). Never hold DB transactions across forge HTTP; record only after re-locking and checking current flow/approval state.\n\nCalls and PRD writes: apps/api/src/fleet/flows/fleet-flow-calls.service.ts:52 constructor currently has repos and github; :57 applyPrdEdits, :118 isOwnEarlierCommit and :129 apply implement today's GitHub rules. US-006 appends credentials/client collaborators and a distinct GitLab apply path; US-007 adds the separate PRD path. Do not extract or refactor the existing GitHub algorithm. For GitLab, read head then getFileForUpdate pinned at that exact head, build with existing buildFlowCalls/applyPrdEditsToText, write using lastCommitId. A moved calls head is stale unless its complete bytes equal the transformation of the expectedHead base (or replay.reviewedHead) and the compare proof passes. A heading or marker alone is insufficient. Replay single-file proof may fall back to isOwnCallsRun over only target.replay.paths using the step/job marker. PRD recovery uses only the single-file proof and exact base-derived bytes; unchanged edits preserve refused results without a write. After commit conflict reread getFileForUpdate at target.branch with read credentials and compare lastCommitId, NOT blob sha: same lock -> failed spec write refused or prd.json write refused; changed/deleted -> retry; retry-class reread exception -> retry. app_permissions_insufficient (including protected-branch/push-rule 403) fails normally, not a fabricated refused client result. callsOutcomeForForgeError at apps/api/src/fleet/flows/flow-calls.ts:13 currently fails app_not_installed, app_permissions_insufficient and repo_not_found; US-005 also fails gitlab_credentials_missing/gitlab_token_invalid while deployment/DNS/host/encryption/provider faults remain retry. Invalid credentials only stop on substantive calls/PRD/start/watch passes, not spec preflight.\n\nTest impact and compatibility: API uses Vitest with vi, SWC decorator metadata, co-located unit specs and real-DB integration specs. Existing GitHub tests must stay unchanged except the explicitly allowed shared table/DI/classifier additions. Current controller specs instantiate the six-argument constructor (fleet-flows.controller.spec.ts:12-25), calls specs instantiate two arguments (fleet-flow-calls.service.spec.ts:77-99), and advance specs pass positional collaborators. Append, never reorder, dependencies; keep legacy GitHub fixtures runnable without touching their behavior assertions. apps/api/tsconfig.json:8 excludes **/*spec.ts from production type checking, and existing Vitest specs construct services positionally. Keep required production DI dependencies appended; unchanged GitHub tests can omit those unused trailing collaborators at runtime. Do not make credential injection optional or add a fallback merely to accommodate test constructors. flows.module.spec.ts:107-108 StubGitBrokerModule only provides/exports GitHubAppClient: US-004 adds both GitLab tokens using useValue: {}, preserving assertions and keeping it database-free. gitlab-access-checker.spec.ts:1-47 shows stubbed transport/DNS and private LAN address fixtures; US-001 alone adds three method rows to its existing AC-11 HTTP failures (:194-205) and AC-12 loopback (:207-218) tables, retaining every existing row. US-005 alone extends the known setup failure table in flow-calls.spec.ts with two reasons, preserving retry tests. All other requested behavior goes into the specified new spec files. Existing advance merge/start tests exercise advance rather than private helper calls (fleet-flow-merge-watch.spec.ts:9 and fleet-flow-feature-start.spec.ts:9), and assert forge calls outside and records inside transactions. Reuse this style for US-005/008. US-006/007 pin public calls service methods directly, as existing calls specs do; bytes, lock identity and separate token kinds need assertions. US-003 needs actual Postgres for case-insensitive names, distinct hosts and host prefixes; apps/api/test/integration/fleet/fleet-repo-fix-unprotected-route.integration.spec.ts:1-66 supplies shared canRunDbTests, bootHttpApp/fixtureDb/resetDb and seed style. Run that new integration spec outside the sandbox through declared testScoped; a skip is not verification. Use KODA_DB_TESTS=1, shared DB gate and test database helpers; never reset two DB-mode runs against the same DB concurrently. Generated acceptance material stays under .nax and is neither edited nor copied into src/test. For security-related token/host/access-control stories use strict three-session-tdd; US-009 is explicitly no-test with review-only checks. Quality gates are test strategy, not behavioral ACs.\n\nOperator guide and migration: US-009 creates docs/deployment/gitlab.md, using docs/deployment/runner.md:1-15 for terse operator tone and real CLI flags from apps/cli/src/commands/fleet-repo.ts:48-59 (add), :96-112 (credentials rotation) and :41-44 (human-token warning). The older parity design docs/superpowers/specs/2026-11-16-gitlab-parity-design.md:148-260 explains stored tokens, role/identity, health and known REVIEW differences; :262-280 describes runner/self-hosted limitation. Follow this feature's newer ACs when older design prose differs, especially commits API, host-aware URL matching, and confirm-bot wording. Guide needs bot account, scopes, Developer role, registration/rotation, protected-default-branch FIX requirement/override, host rules, 401/14-day health, REVIEW write token and polling. Do not alter CLI behavior while documenting it. No token data conversion, backfill, env redesign or live target automation is part of this release: existing GitLab per-repo credentials from F1-F4a are reused. Roll out additive API code/spec/i18n/docs, then operator can run the deferred live flow. Risks: accidental GitHub path changes; GitLab rows rejected because installation null; wrong token kind or credential wrapper breadth; DNS guard missed on second request; cross-host or prefix-insensitive matching; accepting externally edited bytes as own commits; confusing blob sha with lastCommitId; stopping on a preflight-only fault; introducing state writes outside existing locks; contract-generation drift. Done means all story behaviors and failure classifications are demonstrated by isolated unit tests plus real-DB lookup tests, existing GitHub assertions remain effective, generated contract changes only as specified, and guide passes operator review.\n\nSecond-pass adversarial audit: all 101 explicitly numbered spec ACs remain in their original stories. Enumeration: US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-004 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-006 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9; US-008 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8; US-009 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7. Qualifiers retained include GitHub URLs not falling through to GitLab, normalized.remoteUrl unchanged, one-segment rejection after .git removal, no GitHub calls despite 9n, exact base-derived bytes for already-applied/replay heads, provider-less GitHub fixtures, and exists-at-base as a crash leftover of its own. US-006 AC-1 now explicitly states the returned head h0 so implementers do not incorrectly pin all reads to expectedHead when a branch has moved. US-008 AC-7 keeps later-tick recovery and explicitly supplies successful forge responses after the fault is repaired.\n\nEvery story already has an observable negative case: US-001 refused/conflict/error; US-002 false ancestry/path/timeout; US-003 validation/null lookup; US-004 authorization and mapped errors; US-005 preflight failure and stopped/retry watch; US-006 stale/failed/retry; US-007 stale/failed/retry; US-008 refused/spec_changed/retry; US-009 reviewable warning, refusal and invalid-token remediation text (documentation only, not a new runtime failure path). Additional failure-table criteria remain behavioral and in the appropriate story. New regression criteria make the design's unchanged GitHub behavior explicit in US-004 through US-008 and can be proved by unchanged existing specs or new story-owned specs without modifying protected test files. US-003 AC-1/AC-5 already protect GitHub parser behavior; US-001/002 add new methods without changing existing method signatures or behavior and retain their existing client tests. No extra hardening feature was introduced.\n\nAll spec-recommended context files are included within five entries per story; existing upstream-created parser/calls test references have binding dependencies, and no story lists its own outputs as context. All nine ids, workdirs and dependencies remain exactly binding; US-009 has no package workdir because its output is root documentation. All 14 feature-level out-of-scope bullets remain verbatim, including those prefixed US-002/005/006/007 because they appear in the feature-level spec section; no story-local acceptance deferral was hoisted. Adjacent descriptions echo the relevant exclusions. Routing was reduced to medium for the localized client compare, URL lookup, controller, advance-read/watch, PRD-edit and feature-start stories; US-006 retains complex for multi-spec replay recovery and optimistic concurrency, and security strategies remain strict where credential/permission/host isolation is involved. The only no-test story remains the explicitly declared guide. Re-read source confirms the PRD uses existing helpers and client interfaces rather than invented infrastructure. Removed misleading shared calls replay prose from US-007: PRD recovery uses expectedHead plus isSingleFileCommit only. Corrected the speculative constructor warning using the actual tsconfig exclusion of specs; required DI remains required.",
+  "outOfScope": [
+    "An ssh remote URL (`git@host:group/app.git`) stays refused for GitLab, as it is for GitHub.",
+    "Thread-entry flows: they already run one feature on the thread's project repo, and threads on GitLab shipped in F3; nothing in this feature changes the thread entry.",
+    "nax-side flow support (`nax-flow__send` and the forge kind for self-hosted hosts, nax #2957) is nax work, not koda work.",
+    "Per-job GitLab token minting stays deferred (design §6.4).",
+    "Inbound GitLab webhooks stay ruled out (Track 3 ruling 2026-09-27); flows keep polling.",
+    "The live check of design §9 step 5 (a flow end to end on `freqtrade/quant-crypto-trader`) is an operator step after deployment, not a story.",
+    "Sharing one forge-neutral implementation of the calls algorithm between GitHub and GitLab is not done: the GitHub path stays byte-for-byte as it is so its existing specs keep proving it.",
+    "US-002 only: a GitLab compare whose `diffs` list is truncated on a very large change is judged on the diffs it lists; a flow's own calls run touches at most 20 spec files, far below GitLab's diff limits.",
+    "US-006 only: the own-commit checks verify linearity, marker and paths, not the commit author, exactly as on GitHub.",
+    "US-007 only: the own-commit check verifies linearity and the path, not the commit author, exactly as on GitHub.",
+    "US-005 only: a GitLab spec-head read failure does not stop the flow; the read is a preflight hint and the existing catch ends the pass with no write, as on GitHub.",
+    "US-006 only: a GitLab push rule or protected-branch refusal of the calls commit surfaces as `app_permissions_insufficient` and fails the calls pass; no separate `refused` mapping for a GitLab 403 is added.",
+    "US-007 only: a GitLab push rule or protected-branch refusal of the PRD edits commit surfaces as `app_permissions_insufficient` and fails the pass; no separate `refused` mapping for a GitLab 403 is added.",
+    "US-002 only: `isOwnCallsRun` refuses a run longer than 50 commits even if it is the flow's own; a flow's set has at most 20 features, so a longer own run does not occur."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}
