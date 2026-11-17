@@ -98,6 +98,7 @@ export class GitLabAccessChecker {
         throw new RepoCheckException('provider_error');
       }
       if (sha === null) continue;
+      if (typeof sha !== 'string') throw new RepoCheckException('provider_error');
       prs.push({
         number: item.iid,
         headSha: sha,
