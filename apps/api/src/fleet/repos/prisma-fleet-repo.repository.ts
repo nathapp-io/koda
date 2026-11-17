@@ -39,6 +39,19 @@ const GITLAB_CREDENTIAL_SELECT = {
   writeTokenInvalidAt: true,
 } as const;
 
+/**
+ * The relations a repo write answers with: the rule-override summary and the GitLab connection's
+ * health, never their secrets.
+ *
+ * A write that answered with the bare row would drop both, and the caller (the admin repos page)
+ * replaces its whole row with the answer: the connected GitLab repo would look disconnected and
+ * every switch the row holds would disappear until the next reload.
+ */
+const REPO_WRITE_INCLUDE = {
+  ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT },
+  gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT },
+} as const;
+
 /** The rule-override summary columns as a repo row carries them. */
 interface RuleOverrideSummaryRow {
   sha256: string;
@@ -134,21 +147,21 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
   }
 
   async updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord> {
-    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: patch }));
+    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: patch, include: REPO_WRITE_INCLUDE }));
   }
 
   /** Fleet FIX US-001: the one-column write behind `PATCH /fleet/repos/:id/fix-checks`. */
   async updateFixChecks(id: string, value: boolean): Promise<FleetRepoRecord> {
-    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: { fixTrustDetectedChecks: value } }));
+    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: { fixTrustDetectedChecks: value }, include: REPO_WRITE_INCLUDE }));
   }
 
   /** The one-column write behind `PATCH /fleet/repos/:id/fix-unprotected`. */
   async updateFixUnprotected(id: string, value: boolean): Promise<FleetRepoRecord> {
-    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: { fixAllowUnprotected: value } }));
+    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: { fixAllowUnprotected: value }, include: REPO_WRITE_INCLUDE }));
   }
 
   async findById(id: string): Promise<FleetRepoRecord | null> {
-    const row = await this.db.fleetRepo.findUnique({ where: { id }, include: { ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT }, gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT } } });
+    const row = await this.db.fleetRepo.findUnique({ where: { id }, include: REPO_WRITE_INCLUDE });
     return row ? this.toDomain(row) : null;
   }
 
@@ -176,7 +189,14 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
 
   async findAutoReviewPage(limit: number): Promise<FleetRepoRecord[]> {
     const rows = await this.db.fleetRepo.findMany({
-      where: { autoReview: true, provider: 'github', githubInstallationId: { not: null }, project: { deletedAt: null } },
+      where: {
+        autoReview: true,
+        project: { deletedAt: null },
+        OR: [
+          { provider: 'github', githubInstallationId: { not: null } },
+          { provider: 'gitlab', gitlabCredential: { isNot: null } },
+        ],
+      },
       orderBy: { id: 'asc' }, take: limit,
     });
     return rows.map((row) => this.toDomain(row));
@@ -184,7 +204,7 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
 
   async findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>> {
     const where: Prisma.FleetRepoWhereInput = filters.projectId ? { projectId: filters.projectId } : {};
-    const rows = await Paginate(this.db.fleetRepo, page, { where, orderBy: [{ owner: 'asc' }, { name: 'asc' }, { id: 'asc' }], include: { ruleOverride: { select: RULE_OVERRIDE_SUMMARY_SELECT }, gitlabCredential: { select: GITLAB_CREDENTIAL_SELECT } } });
+    const rows = await Paginate(this.db.fleetRepo, page, { where, orderBy: [{ owner: 'asc' }, { name: 'asc' }, { id: 'asc' }], include: REPO_WRITE_INCLUDE });
     return rows.remap((m) => this.toDomain(m));
   }
 

@@ -28,6 +28,7 @@ const checkOk = (repoId: string, reachable = true): FleetRepoCheck =>
 interface Api {
   get: jest.Mock
   post: jest.Mock
+  patch: jest.Mock
   delete: jest.Mock
 }
 
@@ -57,18 +58,36 @@ function mountRepos(
   over: { repos?: FleetRepo[]; check?: (id: string) => Promise<FleetRepoCheck>; failRepos?: unknown; confirm?: boolean; allowed?: boolean } = {},
 ): MountedRepos {
   const check = over.check ?? (async (id: string) => checkOk(id))
+  const repoRows = over.repos ?? [repo('alpha'), repo('beta')]
   const api: Api = {
     get: jest.fn(async (path: string) => {
       if (path === '/projects') return [{ id: 'p1', slug: 'koda', name: 'Koda', key: 'KODA' }]
       if (over.failRepos) throw over.failRepos
-      return pageOf(over.repos ?? [repo('alpha'), repo('beta')])
+      return pageOf(repoRows)
     }),
     post: jest.fn(async (path: string) => check(path.split('/')[3])),
+    // A settings write answers with the whole repo, connection summary included: the API hydrates
+    // the row it writes, so the page can replace its row with the answer without losing anything.
+    patch: jest.fn(async (path: string, body: Record<string, unknown>) => {
+      // `/fleet/repos/<id>/fix-checks` and friends: the id is the fourth segment.
+      const id = path.split('/')[3] ?? ''
+      const current = repoRows.find((row) => row.id === id)
+      if (!current) throw new Error(`unknown repo ${id}`)
+      return {
+        ...current,
+        autoReview: 'enabled' in body ? body.enabled === true : current.autoReview,
+        fixTrustDetectedChecks: 'trustDetectedChecks' in body ? body.trustDetectedChecks === true : current.fixTrustDetectedChecks,
+        fixAllowUnprotected: 'allowUnprotected' in body ? body.allowUnprotected === true : current.fixAllowUnprotected,
+      }
+    }),
     delete: jest.fn(async () => ({})),
   }
   const toasts = toastRecorder()
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
   globalThis.window = { confirm: () => over.confirm ?? true } as never
+  // One composable instance for the page and for the row components, so a save travels the real
+  // path: the component asks the composable, the composable patches the API and replaces its row.
+  const fleetRepos = useFleetRepos()
 
   const app = mountSfc(reposPage, {
     components: {
@@ -92,7 +111,9 @@ function mountRepos(
     fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview', 'FleetRepoFixChecks', 'FleetRepoFixUnprotected'],
     alias: {
       '~/composables/useApi': apiModule,
-      '~/composables/useFleetRepos': { useFleetRepos: () => ({ getRuleOverride: async () => null, setRuleOverride: async () => ({ kind: 'saved', repo: repo('gitlab', { provider: 'gitlab', githubInstallationId: null, ruleOverride: { sha256: 'a'.repeat(64), ruleFiles: 3, rulesMode: 'merge', contextMode: null, updatedAt: '' } }) }), clearRuleOverride: async () => ({ kind: 'saved', repo: repo('gitlab') }), setFixChecks: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setFixUnprotected: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setAutoReview: async () => ({ kind: 'pending', request: { id: 'ap1' } }) }) },
+      // The row components ask the same composable the page uses, so a save replaces the page's
+      // row exactly as it does in the browser.
+      '~/composables/useFleetRepos': { useFleetRepos: () => fleetRepos },
     },
     globals: {
       ref, computed, watch, nextTick,
@@ -101,7 +122,7 @@ function mountRepos(
       useI18n: () => enI18n(),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
-      useFleetRepos: () => useFleetRepos(),
+      useFleetRepos: () => fleetRepos,
       useGlobalPermissions: () => ({ permissions: computed(() => ({ has: () => over.allowed ?? true })) }),
     },
   })
@@ -151,6 +172,60 @@ describe('Fleet admin Repos page (behaviour)', () => {
     delete (globalThis as Record<string, unknown>).useApi
   })
 
+  test('AC-1: connected GitLab row renders the automatic reviews switch', async () => {
+    const connected = repo('connected', {
+      provider: 'gitlab', githubInstallationId: null,
+      gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] },
+    })
+    const { app, settle, rowOf, unmount } = mountRepos({ repos: [connected] })
+    await settle()
+    expect(app.find('[data-stub="switch"]', rowOf('connected')).map((node) => node.props['aria-label']))
+      .toContain('Enable automatic reviews')
+    unmount()
+  })
+
+  test('AC-2: connected GitLab row renders the trusted detected checks switch', async () => {
+    const connected = repo('connected', {
+      provider: 'gitlab', githubInstallationId: null,
+      gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] },
+    })
+    const { app, settle, rowOf, unmount } = mountRepos({ repos: [connected] })
+    await settle()
+    expect(app.find('[data-stub="switch"]', rowOf('connected')).map((node) => node.props['aria-label']))
+      .toContain('Trust detected checks for fixes')
+    unmount()
+  })
+
+  /**
+   * The page replaces its whole row with the answer of a settings write, so the answer has to
+   * carry the repo's connection summary: an answer without it makes the connected GitLab repo look
+   * disconnected, and the connection is what mounts the three switches in the first place.
+   */
+  test('a saved setting keeps the connected GitLab row and its switches mounted', async () => {
+    const connected = repo('connected', {
+      provider: 'gitlab', githubInstallationId: null,
+      gitlab: { projectId: 42, readToken: { username: 'bot', expiresAt: null, status: 'ok' }, writeToken: { username: 'bot', expiresAt: null, status: 'ok', isBot: true }, warnings: [] },
+    })
+    const { app, api, settle, rowOf, unmount } = mountRepos({ repos: [connected] })
+    await settle()
+
+    const switches = (): Node[] => app.find('[data-stub="switch"]', rowOf('connected'))
+    expect(switches()).toHaveLength(3)
+
+    // The trusted-checks switch saves straight away; the API answers with the whole repo.
+    const trusted = switches().find((node) => node.props['aria-label'] === 'Trust detected checks for fixes')
+    await (trusted?.props['onUpdate:checked'] as (value: boolean) => Promise<void>)(true)
+    await settle()
+
+    expect(api.patch).toHaveBeenCalledWith('/fleet/repos/connected/fix-checks', { trustDetectedChecks: true })
+    // The row still holds its three switches, and its connection summary is still on screen.
+    expect(switches()).toHaveLength(3)
+    expect(switches().find((node) => node.props['aria-label'] === 'Trust detected checks for fixes')?.props.checked).toBe(true)
+    expect(app.textOf(rowOf('connected'))).toContain('Read token')
+    expect(app.textOf(rowOf('connected'))).not.toContain('No tokens stored')
+    unmount()
+  })
+
   test('GitLab FIX override mounts only for connected repos and keeps other controls GitHub-only (US-005 AC-1/2/3)', async () => {
     const connected = repo('connected', {
       provider: 'gitlab', githubInstallationId: null,
@@ -162,13 +237,15 @@ describe('Fleet admin Repos page (behaviour)', () => {
     const labels = app.find('[data-stub="switch"]').map((node) => node.props['aria-label'])
     expect(labels).toEqual([
       'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
-      'Allow fixes on an unprotected default branch',
+      'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
     ])
     const connectedRow = app.find('[data-testid="fleet-repo-acme-connected"]')[0]
     const unconnectedRow = app.find('[data-testid="fleet-repo-acme-unconnected"]')[0]
-    expect(app.find('[data-stub="switch"]', connectedRow)).toHaveLength(1)
+    expect(app.find('[data-stub="switch"]', connectedRow)).toHaveLength(3)
     expect(app.find('[data-stub="switch"]', unconnectedRow)).toHaveLength(0)
-    expect(app.find('[data-stub="switch"]', connectedRow).map((node) => node.props['aria-label'])).toEqual(['Allow fixes on an unprotected default branch'])
+    expect(app.find('[data-stub="switch"]', connectedRow).map((node) => node.props['aria-label'])).toEqual([
+      'Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch',
+    ])
     unmount()
   })
 

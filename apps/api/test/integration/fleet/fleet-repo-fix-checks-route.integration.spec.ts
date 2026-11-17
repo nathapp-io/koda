@@ -5,8 +5,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * `nax bot fix` refuses a PR whose base branch has no nax check commands; this repo-level, default-off
  * switch lets a human allow FIX to run the checks it detects. The route is a global, approvable write
  * under the existing `fleet.repo.review.configure` key: a human holding it configures the repo, an
- * agent waits for a human and changes nothing until the request is approved, and enabling is refused
- * where koda cannot broker a GitHub App token (a GitLab repo, or a GitHub repo with no installation).
+ * agent waits for a human and changes nothing until the request is approved, and enabling requires
+ * the provider connection (GitHub App installation or stored GitLab credentials).
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/fleet-repo-fix-checks-route.integration.spec.ts
  */
@@ -23,7 +23,13 @@ import { resetDb } from '../../helpers/reset-db';
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const KEY = 'fleet.repo.review.configure';
 
-interface RepoBody { id: string; fixTrustDetectedChecks: boolean }
+interface RepoBody { id: string; fixTrustDetectedChecks: boolean; gitlab: GitLabSummary | null }
+/** The connection summary the answer carries, without the tokens themselves. */
+interface GitLabSummary {
+  projectId: number;
+  readToken: { username: string; status: string };
+  writeToken: { username: string; status: string; isBot: boolean };
+}
 interface Pending { id: string; permissionKey: string; projectId: string | null }
 interface Decided { status: string; result: unknown }
 
@@ -92,13 +98,33 @@ describeIntegration('fleet repo fix-checks route (PG)', () => {
       .toMatchObject({ resourceType: 'fleet-repo', projectId: world.projectId });
   });
 
-  it('AC-3: enabling on a GitLab repo answers 422 with the github app reason and stores nothing', async () => {
+  it('AC-8: enables detected checks on a connected GitLab repo and stores it', async () => {
+    const target = await repo({ provider: 'gitlab', githubInstallationId: null });
+    await db.fleetRepoGitlabCredential.create({
+      data: {
+        repoId: target.id, gitlabProjectId: 4711, encryptedReadToken: 'enc-read', encryptedWriteToken: 'enc-write',
+        readTokenUserId: 11, readTokenUsername: 'koda-read', writeTokenUserId: 12, writeTokenUsername: 'koda-bot', writeTokenIsBot: true,
+      },
+    });
+    const body = data<RepoBody>(await patch(target.id, { trustDetectedChecks: true }).expect(200));
+    expect(body).toMatchObject({ id: target.id, fixTrustDetectedChecks: true });
+    expect((await stored(target.id)).fixTrustDetectedChecks).toBe(true);
+    // The answer carries the repo's connection summary: the admin repos page replaces its whole row
+    // with this answer, so a bare row would make the connected GitLab repo look disconnected and
+    // drop every switch the row holds (the connection decides whether they mount at all).
+    expect(body.gitlab).toMatchObject({
+      projectId: 4711,
+      readToken: { username: 'koda-read', status: 'ok' },
+      writeToken: { username: 'koda-bot', status: 'ok', isBot: true },
+    });
+  });
+
+  it('AC-9: GitLab without credentials is 422 with exact message and stores nothing', async () => {
     const target = await repo({ provider: 'gitlab', githubInstallationId: null });
     const res = await patch(target.id, { trustDetectedChecks: true }).expect(422);
-    expect(JSON.stringify(res.body)).toContain('github app required');
-    // The refusal is worded by the module's own 422 message, not a bare reason code.
-    expect(String(res.body.message)).toContain('Detected checks cannot be trusted: github app required');
+    expect(res.body.message).toBe('Detected checks cannot be trusted: gitlab credentials required.');
     expect((await stored(target.id)).fixTrustDetectedChecks).toBe(false);
+    expect(await db.auditEntry.findFirst({ where: { key: KEY, resourceId: target.id } })).toBeNull();
   });
 
   it('AC-4: enabling on a GitHub repo without an installation answers 422 with the github app reason', async () => {

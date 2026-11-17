@@ -78,6 +78,8 @@ function build(options: BuildOptions = {}) {
     github as never,
     dispatcher as never,
     config,
+    { call: vi.fn() } as never,
+    { listOpenMergeRequests: vi.fn() } as never,
   );
   const repoSeenBy = (call: number) => dispatcher.dispatchRepo.mock.calls[call][0];
   const remainingSeenBy = (call: number) =>

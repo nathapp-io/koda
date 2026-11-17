@@ -19,7 +19,13 @@ import { resetDb } from '../../helpers/reset-db';
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const KEY = 'fleet.repo.fix.unprotected';
 
-interface RepoBody { id: string; fixAllowUnprotected: boolean }
+interface RepoBody { id: string; fixAllowUnprotected: boolean; gitlab: GitLabSummary | null }
+/** The connection summary the answer carries, without the tokens themselves. */
+interface GitLabSummary {
+  projectId: number;
+  readToken: { username: string; status: string };
+  writeToken: { username: string; status: string; isBot: boolean };
+}
 interface Pending { id: string; permissionKey: string; projectId: string | null }
 interface Decided { status: string; result: unknown }
 
@@ -108,6 +114,14 @@ describeIntegration('fleet repo fix-unprotected route (PG)', () => {
     const body = data<RepoBody>(await patch(target.id, { allowUnprotected: true }).expect(200));
     expect(body).toMatchObject({ id: target.id, fixAllowUnprotected: true });
     expect((await stored(target.id)).fixAllowUnprotected).toBe(true);
+    // The answer carries the repo's connection summary: the admin repos page replaces its whole row
+    // with this answer, so a bare row would make the connected GitLab repo look disconnected and
+    // drop every switch the row holds (the connection decides whether they mount at all).
+    expect(body.gitlab).toMatchObject({
+      projectId: 4711,
+      readToken: { username: 'koda-read', status: 'ok' },
+      writeToken: { username: 'koda-bot', status: 'ok', isBot: true },
+    });
     // The setting is an audited repo write, under the key the route already asks for.
     expect(await db.auditEntry.findFirst({ where: { key: KEY, resourceId: target.id, summary: 'fix on unprotected default branch allowed' } }))
       .toMatchObject({ resourceType: 'fleet-repo', projectId: world.projectId });

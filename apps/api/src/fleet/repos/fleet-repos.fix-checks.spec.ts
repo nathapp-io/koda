@@ -77,16 +77,25 @@ describe('FleetReposService.configureFixChecks', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { provider: 'gitlab' },
-    { githubInstallationId: null },
-  ])('refuses to enable on a repo without a GitHub App installation: %o', async (overrides) => {
-    repo.findById.mockResolvedValue(row(overrides));
+  it('AC-4: enables detected checks for GitLab with credentials and records audit', async () => {
+    repo.findById.mockResolvedValue(row({ provider: 'gitlab', githubInstallationId: null, gitlabCredential: {} }));
+    await configure(true);
+    expect(repo.updateFixChecks).toHaveBeenCalledExactlyOnceWith('r1', true);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ summary: 'fix detected checks enabled' }));
+  });
+
+  it('AC-5: refuses GitLab without credentials before update or audit', async () => {
+    repo.findById.mockResolvedValue(row({ provider: 'gitlab', githubInstallationId: null, gitlabCredential: null }));
     const error = await configure(true).catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(FixChecksException);
-    expect(error).toMatchObject({ reason: 'github app required', status: 422 });
+    expect(error).toMatchObject({ reason: 'gitlab credentials required', status: 422 });
     expect(repo.updateFixChecks).not.toHaveBeenCalled();
     expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('preserves GitHub installation refusal', async () => {
+    repo.findById.mockResolvedValue(row({ githubInstallationId: null }));
+    await expect(configure(true)).rejects.toMatchObject({ reason: 'github app required', status: 422 });
   });
 
   it.each([

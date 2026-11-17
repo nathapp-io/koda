@@ -94,6 +94,41 @@ describe('GitLabAccessChecker', () => {
     });
   });
 
+  describe('listOpenMergeRequests', () => {
+    it('MR-1: requests and maps opened merge requests', async () => {
+      respond = () => ({ status: 200, body: [{ iid: 7, sha: 'abc', draft: false, updated_at: '2026-11-17T00:00:00Z', source_project_id: PROJECT_ID }] });
+      await expect(checker.listOpenMergeRequests(access, 'grp/app')).resolves.toEqual([{ number: 7, headSha: 'abc', draft: false, headRepoFullName: 'grp/app', updatedAt: new Date('2026-11-17T00:00:00Z') }]);
+      expect(lastRequest()).toEqual({ method: 'GET', url: `${API_BASE}/projects/${PROJECT_ID}/merge_requests?state=opened&per_page=100`, headers: { 'private-token': 'glpat' } });
+    });
+
+    it('MR-2: marks draft and work-in-progress requests and excludes forks and missing heads', async () => {
+      respond = () => ({ status: 200, body: [
+        { iid: 1, sha: 'a', draft: true, updated_at: '2026-11-17', source_project_id: PROJECT_ID },
+        { iid: 2, sha: 'b', work_in_progress: true, updated_at: '2026-11-17', source_project_id: 9 },
+        { iid: 3, sha: null, updated_at: '2026-11-17', source_project_id: PROJECT_ID },
+      ] });
+      await expect(checker.listOpenMergeRequests(access, 'grp/app')).resolves.toEqual([
+        { number: 1, headSha: 'a', draft: true, headRepoFullName: 'grp/app', updatedAt: new Date('2026-11-17') },
+        { number: 2, headSha: 'b', draft: true, headRepoFullName: null, updatedAt: new Date('2026-11-17') },
+      ]);
+    });
+
+    it('MR-3: rejects malformed items', async () => {
+      respond = () => ({ status: 200, body: [{ iid: 1, sha: 5, updated_at: '2026-11-17' }] });
+      await expect(checker.listOpenMergeRequests(access, 'grp/app')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
+    it('MR-5: rejects an invalid updated_at date', async () => {
+      respond = () => ({ status: 200, body: [{ iid: 1, sha: 'abc', updated_at: 'not-a-date' }] });
+      await expect(checker.listOpenMergeRequests(access, 'grp/app')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
+    it.each([[401, 'gitlab_token_invalid'], [404, 'repo_not_found']] as const)('MR-4: maps status %i', async (status, reason) => {
+      respond = () => ({ status, body: {} });
+      await expect(checker.listOpenMergeRequests(access, 'grp/app')).rejects.toMatchObject({ reason });
+    });
+  });
+
   describe('GitLab reads', () => {
     it('AC-2: pages and maps recursive trees, stopping at a short page', async () => {
       const page = (start: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `sha-${start + i}`, path: `p${start + i}`, type: i % 2 ? 'tree' : 'blob' }));
@@ -161,6 +196,7 @@ describe('GitLabAccessChecker', () => {
       ['listMergeRequestNotes', () => checker.listMergeRequestNotes(access, 4)],
       ['getMergeRequestDiscussion', () => checker.getMergeRequestDiscussion(access, 4, 'd')],
       ['getMemberAccessLevel', () => checker.getMemberAccessLevel(access, 'alice')],
+      ['listOpenMergeRequests', () => checker.listOpenMergeRequests(access, 'grp/app')],
     ])('AC-11: %s maps HTTP failures', async (_name, invoke) => {
       for (const [status, reason] of [[401, 'gitlab_token_invalid'], [403, 'app_permissions_insufficient'], [500, 'provider_error']] as const) {
         respond = () => ({ status, body: {} });
@@ -173,6 +209,7 @@ describe('GitLabAccessChecker', () => {
       ['listMergeRequestNotes', () => checker.listMergeRequestNotes(access, 4)],
       ['getMergeRequestDiscussion', () => checker.getMergeRequestDiscussion(access, 4, 'd')],
       ['getMemberAccessLevel', () => checker.getMemberAccessLevel(access, 'alice')],
+      ['listOpenMergeRequests', () => checker.listOpenMergeRequests(access, 'grp/app')],
     ])('AC-12: %s blocks loopback hosts before requesting', async (_name, invoke) => {
       lookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
       await expect(invoke()).rejects.toMatchObject({ reason: 'gitlab_host_blocked' });

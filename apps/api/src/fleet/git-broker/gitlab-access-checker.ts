@@ -4,6 +4,7 @@ import type { GitLabAccess } from './gitlab-repo-credentials';
 import { assertGitLabHostAllowed } from './gitlab-host';
 import { RepoCheckException } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
+import type { OpenPullRequest } from './github-app-client';
 import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
 /** The GitLab access level a fleet job needs: Developer or above. */
@@ -80,6 +81,35 @@ export class GitLabAccessChecker {
       url: b.web_url,
       title: typeof b.title === 'string' ? b.title : '',
     };
+  }
+
+  /** Lists the first page of open merge requests in the target project. */
+  async listOpenMergeRequests(access: GitLabAccess, fullName: string): Promise<OpenPullRequest[]> {
+    await this.guard(access.target.apiBase);
+    const res = await this.http.request('GET', `${this.projectUrl(access)}/merge_requests?state=opened&per_page=100`, { 'private-token': access.token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) this.fail(res.status);
+    if (!Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+    const prs: OpenPullRequest[] = [];
+    for (const raw of res.body) {
+      const item = obj(raw);
+      const sha = item.sha;
+      if (typeof item.iid !== 'number' || typeof item.updated_at !== 'string' || (sha !== null && typeof sha !== 'string')) {
+        throw new RepoCheckException('provider_error');
+      }
+      if (sha === null) continue;
+      if (typeof sha !== 'string') throw new RepoCheckException('provider_error');
+      const updatedAt = new Date(item.updated_at);
+      if (Number.isNaN(updatedAt.getTime())) throw new RepoCheckException('provider_error');
+      prs.push({
+        number: item.iid,
+        headSha: sha,
+        draft: item.draft === true || item.work_in_progress === true,
+        headRepoFullName: item.source_project_id === access.target.projectId ? fullName : null,
+        updatedAt,
+      });
+    }
+    return prs;
   }
 
   /** The branch protection state and whether this access token's user can push to the branch. */

@@ -25,6 +25,13 @@ interface RepoBody {
   id: string; autoReview: boolean; autoReviewProfiles: string[]; autoReviewMaxCostUsd: string;
   autoReviewEnabledById: string | null; autoReviewEnabledByType: 'USER' | 'AGENT' | null;
   autoReviewEnabledAt: string | null;
+  gitlab: GitLabSummary | null;
+}
+/** The connection summary the answer carries, without the tokens themselves. */
+interface GitLabSummary {
+  projectId: number;
+  readToken: { username: string; status: string };
+  writeToken: { username: string; status: string; isBot: boolean };
 }
 interface Pending { id: string; permissionKey: string; projectId: string | null }
 interface Decided { status: string; result: unknown }
@@ -121,11 +128,33 @@ describeIntegration('fleet repo auto-review route (PG)', () => {
     expect(await db.approvalRequest.count()).toBe(0);
   });
 
-  it('AC-5: enabling auto-review on a GitLab repo is 422 with the github app reason', async () => {
+  it('AC-6: enables auto-review on a connected GitLab repo and stores it', async () => {
+    const target = await repo({ provider: 'gitlab', githubInstallationId: null });
+    await db.fleetRepoGitlabCredential.create({
+      data: {
+        repoId: target.id, gitlabProjectId: 4711, encryptedReadToken: 'enc-read', encryptedWriteToken: 'enc-write',
+        readTokenUserId: 11, readTokenUsername: 'koda-read', writeTokenUserId: 12, writeTokenUsername: 'koda-bot', writeTokenIsBot: true,
+      },
+    });
+    const body = data<RepoBody>(await patch(target.id, { enabled: true }).expect(200));
+    expect(body).toMatchObject({ id: target.id, autoReview: true, autoReviewEnabledById: world.ids.root });
+    expect((await stored(target.id)).autoReview).toBe(true);
+    // The answer carries the repo's connection summary: the admin repos page replaces its whole row
+    // with this answer, so a bare row would make the connected GitLab repo look disconnected and
+    // drop every switch the row holds (the connection decides whether they mount at all).
+    expect(body.gitlab).toMatchObject({
+      projectId: 4711,
+      readToken: { username: 'koda-read', status: 'ok' },
+      writeToken: { username: 'koda-bot', status: 'ok', isBot: true },
+    });
+  });
+
+  it('AC-7: GitLab without credentials is 422 and stores nothing', async () => {
     const target = await repo({ provider: 'gitlab', githubInstallationId: null });
     const res = await patch(target.id, { enabled: true }).expect(422);
-    expect(JSON.stringify(res.body)).toContain('github app required');
+    expect(JSON.stringify(res.body)).toContain('gitlab credentials required');
     expect((await stored(target.id)).autoReview).toBe(false);
+    expect(await db.auditEntry.findFirst({ where: { key: KEY, resourceId: target.id } })).toBeNull();
   });
 
   it('AC-6: an unknown repo id answers 404 from the repo lookup, not from a missing route', async () => {
