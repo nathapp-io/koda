@@ -3,7 +3,7 @@
   "feature": "gitlab-auto-review",
   "branchName": "feat/gitlab-auto-review",
   "createdAt": "2026-11-17T02:21:56.132Z",
-  "updatedAt": "2026-11-17T02:57:45.390Z",
+  "updatedAt": "2026-11-17T03:05:02.130Z",
   "userStories": [
     {
       "id": "US-001",
@@ -107,14 +107,17 @@
         "settings"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two narrow service guards reuse an established provider pattern with existing unit and route suites; credential-dependent enable decisions and approvable admin writes require the security override."
+        "reasoning": "Two narrow service guards reuse an established provider pattern with existing unit and route suites; credential-dependent enable decisions and approvable admin writes require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/repos/fleet-repos.service.ts",
@@ -147,7 +150,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7eb377b0e0be0e37b29237f326fb2df043aed2b5"
     },
     {
       "id": "US-003",
