@@ -3,7 +3,7 @@
   "feature": "flow-handoff",
   "branchName": "feat/flow-handoff-koda",
   "createdAt": "2026-11-17T13:25:19.162Z",
-  "updatedAt": "2026-11-17T14:57:49.177Z",
+  "updatedAt": "2026-11-17T15:13:35.590Z",
   "userStories": [
     {
       "id": "US-001",
@@ -228,14 +228,17 @@
         "US-002",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Provider credential use, reachable-project permission enforcement and approval-gated creation are security-sensitive; branch-lock concurrency and shared error mapping add integration risk."
+        "reasoning": "Provider credential use, reachable-project permission enforcement and approval-gated creation are security-sensitive; branch-lock concurrency and shared error mapping add integration risk.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.controller.ts",
@@ -261,7 +264,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1147b5739379943dd11281d40e757d44c14b3b8e"
     },
     {
       "id": "US-005",
