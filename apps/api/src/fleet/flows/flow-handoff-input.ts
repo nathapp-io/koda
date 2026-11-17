@@ -1,5 +1,6 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
+import { isStorableRecordText } from '../common/handoff-record';
 import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
 import { parseFlowCommonInput } from './flow-input';
 
@@ -12,6 +13,8 @@ export const HANDOFF_MAX_RUNS = 20;
 export const HANDOFF_RECORD_MAX_BYTES = 524288;
 export const HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const HANDOFF_RECORD_FILES = ['result.json', 'ledger.md'] as const;
+/** The mtime an entry may carry: the Date range `utimes` accepts, so the runner restores it exactly. */
+export const HANDOFF_MAX_MTIME_MS = 8640000000000000;
 
 /** US-003: the record's file shape is the protocol's; only the limits above are copied. */
 export type HandoffRecordEntry = HandoffRecordFile;
@@ -24,7 +27,6 @@ export interface NormalizedHandoffFlowInput {
 }
 
 const HEAD_SHA_RE = /^[a-f0-9]{40}$/;
-const MAX_MTIME_MS = 8640000000000000;
 
 function fail(reason: string): never {
   throw new ValidationAppException({ reason }, 'fleet.flowInput');
@@ -56,8 +58,10 @@ export function parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput
     const identity = `${foldedRunId}/${candidate.file}`;
     if (seenFiles.has(identity)) fail('handoff.record');
     seenFiles.add(identity);
-    if (typeof candidate.mtimeMs !== 'number' || !Number.isInteger(candidate.mtimeMs) || candidate.mtimeMs < 0 || candidate.mtimeMs > MAX_MTIME_MS) fail(`${prefix}.mtimeMs`);
-    if (typeof candidate.content !== 'string') fail(`${prefix}.content`);
+    if (typeof candidate.mtimeMs !== 'number' || !Number.isInteger(candidate.mtimeMs) || candidate.mtimeMs < 0 || candidate.mtimeMs > HANDOFF_MAX_MTIME_MS) fail(`${prefix}.mtimeMs`);
+    // The record travels through JSONB columns, and JSONB refuses a NUL and an unpaired surrogate.
+    // Such a file is refused here, before the route gate opens, instead of failing the write later.
+    if (typeof candidate.content !== 'string' || !isStorableRecordText(candidate.content)) fail(`${prefix}.content`);
     totalBytes += Buffer.byteLength(candidate.content, 'utf8');
     return { runId: candidate.runId, file: candidate.file as HandoffRecordEntry['file'], mtimeMs: candidate.mtimeMs, content: candidate.content };
   });

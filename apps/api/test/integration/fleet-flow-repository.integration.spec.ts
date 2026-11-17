@@ -306,6 +306,36 @@ describeDb('PrismaFleetFlowRepository', () => {
     expect(await repo.findHandoffRecord(flow.features[0].id)).toEqual(handoffRecord);
   });
 
+  it('US-003: a record with multi-byte text survives the JSONB column unchanged', async () => {
+    // The record holds the chat run's own files: their bytes are stored as they are, so the
+    // runner restores exactly what the chain produced.
+    const record: HandoffRecordFile[] = [
+      { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1,"note":"shipped 🚀"}' },
+      { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger\n"quoted" \\ backslash\ttab\n' },
+    ];
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record },
+    });
+    expect(await repo.findHandoffRecord(flow.features[0].id)).toEqual(record);
+  });
+
+  it('US-003: the JSONB column refuses the text the parser refuses', async () => {
+    // The boundary the API's parser guards: JSONB cannot hold a NUL or an unpaired surrogate, so
+    // the create parser refuses such a record before it reaches a column.
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    const unstorable = (content: string) => [{ runId: 'run-1', file: 'result.json', mtimeMs: 1, content }];
+    for (const content of [`a${String.fromCharCode(0)}b`, `a${String.fromCharCode(0xd800)}b`]) {
+      await expect(prisma.fleetFlowFeature.update({
+        where: { id: flow.features[0].id },
+        data: { handoffRecord: unstorable(content) as never },
+      })).rejects.toThrow(/json|Unicode escape sequence/i);
+    }
+  });
+
   it('US-003 AC-3: marks the first feature of a handoff flow', async () => {
     const flow = await createFlow({
       features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],

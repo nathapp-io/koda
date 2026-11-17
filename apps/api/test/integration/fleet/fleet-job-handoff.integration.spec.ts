@@ -57,4 +57,19 @@ describeIntegration('a dispatched job stores the handoff record (PG)', () => {
     const stored = await db.fleetJob.findUniqueOrThrow({ where: { id: result.job.id } });
     expect(stored.handoff).toEqual(RECORD);
   });
+
+  it('the stored record keeps the chat run\'s bytes, multi-byte text included', async () => {
+    // The record holds the chat run's own files: the JSONB column stores their text as it is, so
+    // the runner restores exactly what the chain produced.
+    const record: HandoffRecordFile[] = [
+      { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1,"note":"shipped 🚀"}' },
+      { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger\n"quoted" \\ backslash\n' },
+    ];
+    const result = await withTestActor({ type: 'USER', id: actorId }, async () => jobs.dispatch(actorId, projectId, {
+      repoId, command: 'RUN', feature: 'handoff-run-bytes', maxCostUsd: 5,
+    }, { handoff: record }));
+
+    const stored = await db.fleetJob.findUniqueOrThrow({ where: { id: result.job.id } });
+    expect(stored.handoff).toEqual(record);
+  });
 });

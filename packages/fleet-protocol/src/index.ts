@@ -305,6 +305,30 @@ export interface HandoffRecordFile {
   content: string;
 }
 
+/**
+ * Whether the text of a record file can be stored and written as it is.
+ *
+ * The record travels through JSON (the API stores it in JSONB columns, the runner writes it to the
+ * checkout), and neither can hold a NUL or an unpaired surrogate: PostgreSQL's JSONB refuses them
+ * outright, and UTF-8 has no encoding for an unpaired surrogate. A record file that carries one is
+ * refused whole; its bytes are never rewritten to make them storable, because a rewritten file is not
+ * the file the chat run produced.
+ */
+export function isStorableRecordText(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0) return false;                          // a NUL
+    if (code >= 0xd800 && code <= 0xdbff) {                // a high surrogate
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
+      if (next < 0xdc00 || next > 0xdfff) return false;    // without its low half
+      index += 1;                                          // the pair is one character
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;                                        // a low surrogate without its high half
+    }
+  }
+  return true;
+}
+
 /** The record an ASSIGN carries for a handoff RUN: the runner restores it before nax starts. */
 export interface HandoffAssign {
   record: HandoffRecordFile[];

@@ -69,4 +69,18 @@ describe('parseFlowHandoffInput', () => {
   });
   it('AC-13 refuses ready outcomes', () => expect(rejectRecord([entry({ content: resultWith({ step: 'done', outcome: 'ready', head: headSha }) })])).toBe('handoff.record'));
   it('AC-14 remains idempotent after newest-run validation', () => { const parsed = parseFlowHandoffInput(body()); expect(parseFlowHandoffInput(parsed)).toEqual(parsed); });
+  it('refuses a record file PostgreSQL cannot store (a NUL)', () => {
+    expect(rejectRecord([entry(), entry({ file: 'ledger.md', content: 'ledger\u0000text' })])).toBe('handoff.record.1.content');
+  });
+  it('refuses a record file with an unpaired surrogate', () => {
+    expect(rejectRecord([entry({ content: '{"schemaVersion":1,"note":"\ud800"}' })])).toBe('handoff.record.0.content');
+  });
+  it('refuses a record file with a lone low surrogate', () => {
+    expect(rejectRecord([entry({ content: '{"schemaVersion":1,"note":"\udc00"}' })])).toBe('handoff.record.0.content');
+  });
+  it('accepts a record file with a surrogate pair', () => {
+    const content = JSON.stringify({ schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: headSha }, note: 'shipped 🚀' });
+    const record = [entry({ content }), entry({ file: 'ledger.md', content: '# ledger 🚀' })];
+    expect(parseFlowHandoffInput(body({ handoff: handoff({ record }) })).handoff.record).toEqual(record);
+  });
 });

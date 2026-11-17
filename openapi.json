@@ -14834,8 +14834,8 @@
                           "record": {
                             "type": "array",
                             "minItems": 1,
-                            "maxItems": 20,
-                            "description": "The chat run's own files, at most 524288 bytes in total",
+                            "maxItems": 40,
+                            "description": "The chat run's own files: at most 20 distinct runs of 2 files each, at most 524288 bytes in total",
                             "items": {
                               "type": "object",
                               "required": [
@@ -14858,7 +14858,8 @@
                                 },
                                 "mtimeMs": {
                                   "type": "integer",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 8640000000000000
                                 },
                                 "content": {
                                   "type": "string",

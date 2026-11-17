@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from '@jest/globals'
+import { afterEach, beforeAll, describe, expect, jest, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import * as Vue from 'vue'
@@ -383,6 +383,18 @@ export function mountEnginePage(over: EnginePageOver) {
 }
 
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
+
+/**
+ * The first mount of the real page compiles it and every module it imports, which is slow on a
+ * loaded machine (this suite runs beside the other packages' suites). The warm-up pays that cost in
+ * a hook with its own budget, so no test's own budget carries it — and the hook runs in every file
+ * that imports this one, because the import registers it there too.
+ */
+beforeAll(async () => {
+  const warm = mountEnginePage({ records: [] })
+  await warm.settle()
+  warm.app.unmount()
+}, 60_000)
 
 describe('job detail option-name loading', () => {
   test('an options rejection settles the page and displays the raw assigned runner id', async () => {

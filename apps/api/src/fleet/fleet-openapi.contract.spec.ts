@@ -15,6 +15,9 @@ interface SchemaNode {
   maxItems?: number;
   minItems?: number;
   maxLength?: number;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
   oneOf?: SchemaNode[];
 }
 interface Operation {
@@ -50,9 +53,15 @@ describe('fleet OpenAPI contract', () => {
     expect(handoff?.properties?.['headSha']?.pattern).toBe('^[a-f0-9]{40}$');
     const record = handoff?.properties?.['record'];
     expect(record?.minItems).toBe(1);
-    expect(record?.maxItems).toBe(20);
+    // The limit is on the runs, not on the files: a run carries the two files of the protocol's
+    // list, so a full record holds 20 runs of 2 files each.
+    expect(record?.maxItems).toBe(40);
+    expect(record?.description).toContain('20 distinct runs');
     expect(record?.items?.properties?.['file']?.enum).toEqual(['result.json', 'ledger.md']);
     expect(record?.items?.required).toEqual(['runId', 'file', 'mtimeMs', 'content']);
+    // The mtime is the Date range `utimes` accepts, so the schema carries the parser's bound.
+    expect(record?.items?.properties?.['mtimeMs']?.minimum).toBe(0);
+    expect(record?.items?.properties?.['mtimeMs']?.maximum).toBe(8640000000000000);
   });
 
   it('US-004 AC-8: documents AGENT dispatch input and required agent fields', () => {

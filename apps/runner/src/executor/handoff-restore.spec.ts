@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AssignPayload, HandoffRecordFile } from '@nathapp/fleet-protocol';
+import { HANDOFF_MAX_RUNS, HANDOFF_RECORD_MAX_BYTES, type AssignPayload, type HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { handoffRunIds, restoreHandoffRecord } from './handoff-restore';
 
@@ -67,11 +67,10 @@ describe('restoreHandoffRecord (flow-handoff US-007)', () => {
     expect(Math.abs(st.atimeMs - RESULT_ENTRY.mtimeMs)).toBeLessThan(1);
   });
 
-  test('an empty record leaves an empty workflow folder behind', async () => {
+  test('an empty record is refused: a restore needs a record to restore', async () => {
     const repoDir = await repo();
-    await restoreHandoffRecord(repoDir, 'feat', []);
-    const entries = await stat(workflowDir(repoDir));
-    expect(entries.isDirectory()).toBe(true);
+    await expect(restoreHandoffRecord(repoDir, 'feat', [])).rejects.toThrow();
+    await expect(stat(workflowDir(repoDir))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   test('the restore creates the feature folder when the checkout has none', async () => {
@@ -88,10 +87,27 @@ describe('restoreHandoffRecord (flow-handoff US-007)', () => {
     ['an mtime that is not an integer', { ...RESULT_ENTRY, mtimeMs: 1.5 }],
     ['an mtime beyond the Date range', { ...RESULT_ENTRY, mtimeMs: 8640000000000001 }],
     ['a content that is not a string', { ...RESULT_ENTRY, content: 5 as never }],
+    ['a content with a NUL', { ...RESULT_ENTRY, content: `a${String.fromCharCode(0)}b` }],
+    ['a content with an unpaired surrogate', { ...RESULT_ENTRY, content: `a${String.fromCharCode(0xd800)}b` }],
   ])('refuses %s before it touches the filesystem', async (_label, entry) => {
     const repoDir = await repo();
     await expect(restoreHandoffRecord(repoDir, 'feat', [entry])).rejects.toThrow();
     await expect(stat(workflowDir(repoDir))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test.each([
+    ['more runs than the protocol allows', Array.from({ length: HANDOFF_MAX_RUNS + 1 }, (_, index) => ({ ...RESULT_ENTRY, runId: `run-${index}` }))],
+    ['more bytes than the protocol allows', [{ ...RESULT_ENTRY, content: 'x'.repeat(HANDOFF_RECORD_MAX_BYTES + 1) }]],
+    ['the same file of one run twice', [RESULT_ENTRY, RESULT_ENTRY]],
+    ['a ledger without a result.json', [{ ...LEDGER_ENTRY }]],
+    ['two spellings of one run id', [RESULT_ENTRY, { ...LEDGER_ENTRY, runId: 'RUN-A' }]],
+  ])('refuses a record with %s, and the checkout keeps the workflow folder it had', async (_label, record) => {
+    const repoDir = await repo();
+    await mkdir(join(workflowDir(repoDir), 'old-run'), { recursive: true });
+    await writeFile(join(workflowDir(repoDir), 'old-run', 'result.json'), '{"old":true}');
+    await expect(restoreHandoffRecord(repoDir, 'feat', record as HandoffRecordFile[])).rejects.toThrow();
+    // The folder an earlier job left is untouched: a refused record never deletes it.
+    expect(await readFile(join(workflowDir(repoDir), 'old-run', 'result.json'), 'utf8')).toBe('{"old":true}');
   });
 
   test('a feature name that is not a path segment is refused', async () => {

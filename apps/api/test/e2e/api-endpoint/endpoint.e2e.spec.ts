@@ -5424,6 +5424,27 @@ describeIntegration('API Integration Tests', () => {
         } finally { forge.restore(); }
       });
 
+      it('US-003: refuses a handoff whose record the database cannot store with 400 fleet.flowInput', async () => {
+        const branch = 'feat/handoff-e2e-unstorable';
+        // The record travels through JSONB columns, and JSONB cannot hold a NUL or an unpaired
+        // surrogate. The ledger is opaque text, so such a record is otherwise a valid handoff: it is
+        // refused before the route gate opens, instead of failing the write with a server error.
+        const forge = withForge({ branch });
+        try {
+          const before = { flows: await db().fleetFlow.count(), requests: await db().approvalRequest.count() };
+          const unstorable = handoffBody(branch);
+          unstorable.handoff.record = [
+            { runId: 'run-handoff-e2e', file: 'result.json', mtimeMs: 1763370000000,
+              content: JSON.stringify({ schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: headSha } }) },
+            { runId: 'run-handoff-e2e', file: 'ledger.md', mtimeMs: 1763370000000, content: `ledger${String.fromCharCode(0)}text` },
+          ];
+          const response = await post(unstorable).expect(400);
+          refusal(response, 'fleet.flowInput.-2', { reason: 'handoff.record.1.content' });
+          expect(await db().fleetFlow.count()).toBe(before.flows);
+          expect(await db().approvalRequest.count()).toBe(before.requests);
+        } finally { forge.restore(); }
+      });
+
       it('US-004 AC-6: refuses a handoff whose branch head moved with 409', async () => {
         const branch = 'feat/handoff-e2e-moved';
         const forge = withForge({ branch, head: 'e'.repeat(40) });

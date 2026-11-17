@@ -24,6 +24,7 @@ import { FleetFlowDto } from './dto/fleet-flow.dto';
 import { FleetFlowsService, type CreatedFlow } from './fleet-flows.service';
 import { parseFlowInput, type NormalizedNaxFlowInput } from './flow-input';
 import {
+  HANDOFF_MAX_MTIME_MS,
   HANDOFF_MAX_RUNS,
   HANDOFF_RECORD_FILES,
   HANDOFF_RECORD_MAX_BYTES,
@@ -58,14 +59,16 @@ const FLOW_CREATE_HANDOFF: SchemaObject = {
         feature: { type: 'string', pattern: FEATURE_RE.source },
         headSha: { type: 'string', pattern: '^[a-f0-9]{40}$', description: 'The commit the chat run handed over' },
         record: {
-          type: 'array', minItems: 1, maxItems: HANDOFF_MAX_RUNS,
-          description: `The chat run's own files, at most ${HANDOFF_RECORD_MAX_BYTES} bytes in total`,
+          // The limit is on the runs, not on the files: a run carries the two files of the
+          // protocol's list, so a full record holds HANDOFF_MAX_RUNS runs of two files each.
+          type: 'array', minItems: 1, maxItems: HANDOFF_MAX_RUNS * HANDOFF_RECORD_FILES.length,
+          description: `The chat run's own files: at most ${HANDOFF_MAX_RUNS} distinct runs of ${HANDOFF_RECORD_FILES.length} files each, at most ${HANDOFF_RECORD_MAX_BYTES} bytes in total`,
           items: {
             type: 'object', required: ['runId', 'file', 'mtimeMs', 'content'],
             properties: {
               runId: { type: 'string', pattern: HANDOFF_RUN_ID_RE.source },
               file: { type: 'string', enum: [...HANDOFF_RECORD_FILES] },
-              mtimeMs: { type: 'integer', minimum: 0 },
+              mtimeMs: { type: 'integer', minimum: 0, maximum: HANDOFF_MAX_MTIME_MS },
               content: { type: 'string', maxLength: HANDOFF_RECORD_MAX_BYTES },
             },
           },

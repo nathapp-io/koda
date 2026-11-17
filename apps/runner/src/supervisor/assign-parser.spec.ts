@@ -338,6 +338,8 @@ describe('handoff assignment (flow-handoff US-007)', () => {
     ['a run id of 129 characters', [{ ...RECORD[0], runId: `r${'a'.repeat(128)}` }]],
     ['a file outside the allowlist', [{ ...RECORD[0], file: 'prd.json' }]],
     ['a content that is not a string', [{ ...RECORD[0], content: 5 }]],
+    ['a content with a NUL', [{ ...RECORD[0], content: `a${String.fromCharCode(0)}b` }]],
+    ['a content with an unpaired surrogate', [{ ...RECORD[0], content: `a${String.fromCharCode(0xd800)}b` }]],
     ['an mtime that is not an integer', [{ ...RECORD[0], mtimeMs: 1.5 }]],
     ['a negative mtime', [{ ...RECORD[0], mtimeMs: -1 }]],
     ['an mtime beyond the Date range', [{ ...RECORD[0], mtimeMs: 8640000000000001 }]],
