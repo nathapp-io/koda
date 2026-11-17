@@ -88,7 +88,17 @@ export async function runFeatureStart(
     return { kind: 'stop', reason: 'dispatch_refused', detail: 'thread entry runs one feature' };
   }
   const repo = await deps.repos.findReviewRepo(flow.repoId);
-  if (!repo || repo.githubInstallationId === null) {
+  if (!repo) {
+    return { kind: 'stop', reason: 'dispatch_refused', detail: 'repo not connected' };
+  }
+  if (repo.provider === 'gitlab') {
+    const branch = `feat/${feature.feature}`;
+    const created = await createGitLabFeatureBranch(deps, repo, feature, branch, base, flow.setSha);
+    if (created.kind !== 'created') return created;
+    await recordFeatureStart(deps, flow, feature, { base, sha: created.sha, branch });
+    return { kind: 'started', branch, sha: created.sha };
+  }
+  if (repo.githubInstallationId === null) {
     return { kind: 'stop', reason: 'dispatch_refused', detail: 'repo not connected' };
   }
   const branch = `feat/${feature.feature}`;
@@ -96,6 +106,55 @@ export async function runFeatureStart(
   if (created.kind !== 'created') return created;
   await recordFeatureStart(deps, flow, feature, { base, sha: created.sha, branch });
   return { kind: 'started', branch, sha: created.sha };
+}
+
+/** The GitLab forge calls are scoped to one token per client method, never a whole pass. */
+async function createGitLabFeatureBranch(
+  deps: FeaturePassDeps,
+  repo: { id: string; host?: string; defaultBranch: string },
+  feature: FleetFlowFeatureRecord,
+  branch: string,
+  base: FeatureStartBase,
+  setSha: string,
+): Promise<FeatureBranch> {
+  try {
+    const baseSha = base === 'default'
+      ? await deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getBranchHead(access, repo.defaultBranch))
+      : setSha;
+    const approved = await specMatchesApprovedGitLab(deps, repo, feature.specPath, baseSha, setSha);
+    if (!approved) {
+      return { kind: 'stop', reason: 'spec_changed', detail: `${feature.specPath} differs from the approved spec` };
+    }
+    const result = await deps.gitlabCredentials.call(repo, 'write', (access) => deps.gitlab.createBranch(access, branch, baseSha));
+    if (result.kind === 'refused') {
+      return { kind: 'stop', reason: 'dispatch_refused', detail: `branch ${branch} not created` };
+    }
+    if (result.kind === 'exists' && result.sha !== baseSha) {
+      return { kind: 'stop', reason: 'dispatch_refused', detail: `branch ${branch} already exists` };
+    }
+    return { kind: 'created', sha: baseSha };
+  } catch (error) {
+    if (!(error instanceof RepoCheckException)) throw error;
+    return callsOutcomeForForgeError(error.reason) === 'failed'
+      ? { kind: 'stop', reason: 'dispatch_refused', detail: error.reason }
+      : { kind: 'retry' };
+  }
+}
+
+/** Compare the approved GitLab spec using a separate read-token call for each file request. */
+async function specMatchesApprovedGitLab(
+  deps: FeaturePassDeps,
+  repo: { id: string; host?: string },
+  specPath: string,
+  baseSha: string,
+  setSha: string,
+): Promise<boolean> {
+  const atBase = await deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getFile(access, specPath, baseSha));
+  if (!atBase) return false;
+  const atSet = baseSha === setSha
+    ? atBase
+    : await deps.gitlabCredentials.call(repo, 'read', (access) => deps.gitlab.getFile(access, specPath, setSha));
+  return atSet !== null && atSet.sha === atBase.sha;
 }
 
 /** The forge half of the start: the branch of the feature exists at the base sha. */
