@@ -12,6 +12,7 @@ const FLOW_QUESTIONS_MAX = 2000;
 
 export function callsOutcomeForForgeError(reason: string): 'failed' | 'retry' {
   return reason === 'app_not_installed' || reason === 'app_permissions_insufficient' || reason === 'repo_not_found'
+    || reason === 'gitlab_credentials_missing' || reason === 'gitlab_token_invalid'
     ? 'failed'
     : 'retry';
 }
