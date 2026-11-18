@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextPageNumber } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, MAX_MR_LOOKUP_PAGES, inclusiveSince, laterOf, nextGitLabPage } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -51,6 +51,8 @@ interface GitLabMrStatusResponse {
   web_url: string;
   title: string;
   source_branch: string;
+  source_project_id?: number;
+  target_project_id?: number;
 }
 
 /**
@@ -109,12 +111,13 @@ export class GitLabProvider implements IVcsProvider {
       per_page: ISSUES_PER_PAGE,
       ...(since ? { updated_after: inclusiveSince(since) } : {}),
     };
+    const endpoint = `${this.baseUrl}/issues`;
     const issues: VcsIssue[] = [];
     let cursor: Date | null = null;
     let page: number | null = 1;
 
     for (let pages = 0; page !== null && pages < MAX_ISSUE_PAGES; pages++) {
-      const response = await this.httpClient.get(`${this.baseUrl}/issues`, {
+      const response = await this.httpClient.get(endpoint, {
         headers: this.authHeaders,
         params: { ...baseParams, page },
       });
@@ -122,7 +125,7 @@ export class GitLabProvider implements IVcsProvider {
         cursor = laterOf(cursor, item.updated_at);
         issues.push(this.mapGitLabIssueToVcsIssue(item));
       }
-      page = nextPageNumber(response.headers?.['x-next-page']);
+      page = nextGitLabPage(response.headers, endpoint, page);
     }
 
     return { issues, cursor, capped: page !== null };
@@ -238,6 +241,41 @@ export class GitLabProvider implements IVcsProvider {
       }
       throw error;
     }
+  }
+
+  /**
+   * Review B3: GitLab pages open merge requests in its own order, so a fork's request on the branch can fill the
+   * first page ahead of the same-project one. Every page is scanned until a same-project request is found or GitLab
+   * reports no next page; a scan that reaches MAX_MR_LOOKUP_PAGES throws, because an unfinished scan is not proof
+   * that the branch has no open merge request (the caller reads `null` as permission to create one).
+   *
+   * Continuation uses the same offset validation as issue polling and never follows the Link URL itself.
+   */
+  async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
+    const endpoint = `${this.baseUrl}/merge_requests`;
+    let page: number | null = 1;
+
+    for (let pages = 0; page !== null; pages++) {
+      if (pages >= MAX_MR_LOOKUP_PAGES) {
+        throw new Error(
+          `GitLab merge request lookup for branch '${branchName}' reached ${MAX_MR_LOOKUP_PAGES} pages without settling`,
+        );
+      }
+
+      const response = await this.httpClient.get(endpoint, {
+        headers: this.authHeaders,
+        params: { state: 'opened', source_branch: branchName, per_page: ISSUES_PER_PAGE, page },
+      });
+
+      const mergeRequest = (response.data as GitLabMrStatusResponse[]).find(
+        (mr) => mr.source_project_id !== undefined && mr.source_project_id === mr.target_project_id,
+      );
+      if (mergeRequest) return this.mapGitLabMrToVcsPrStatus(mergeRequest);
+
+      page = nextGitLabPage(response.headers, endpoint, page);
+    }
+
+    return null;
   }
 
   async listPullRequests(state: 'open' | 'closed' | 'all' = 'open'): Promise<VcsPrStatus[]> {

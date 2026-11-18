@@ -1,5 +1,8 @@
 import * as crypto from 'crypto';
 
+/** AES-GCM authentication tag length in bytes; the only length decryptToken accepts. */
+const GCM_AUTH_TAG_BYTES = 16;
+
 /**
  * Encrypts a plaintext token using AES-256-GCM.
  * Returns a string in format 'iv:authTag:ciphertext' where each segment is hex-encoded.
@@ -53,8 +56,14 @@ export function decryptToken(ciphertext: string, masterKey: string): string {
   const authTag = Buffer.from(authTagHex, 'hex');
   const encrypted = Buffer.from(encryptedHex, 'hex');
 
+  // Review US-004: AES-GCM accepts a 12-byte tag, which silently weakens the integrity check of a
+  // token sealed with the 16-byte tag encryptToken produces. Refuse it before decrypting.
+  if (authTag.length !== GCM_AUTH_TAG_BYTES) {
+    throw new Error('Invalid ciphertext format: auth tag must be 16 bytes');
+  }
+
   // Create decipher
-  const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, iv);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, iv, { authTagLength: GCM_AUTH_TAG_BYTES });
 
   // Set the authentication tag
   decipher.setAuthTag(authTag);

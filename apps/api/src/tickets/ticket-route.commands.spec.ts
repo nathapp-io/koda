@@ -113,7 +113,7 @@ describe('TicketRouteCommands', () => {
     if (!command) throw new Error('Missing status update command');
     const parsed = command.parse({ slug: 'alpha', ref: 'AL-1', patch: { status: 'IN_PROGRESS' } });
     await command.execute(parsed);
-    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { status: 'IN_PROGRESS' }, principal);
+    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { status: 'IN_PROGRESS' }, principal, { gatedEdgeKey: 'ticket.transition.start' });
   });
 
   it('B1 AC-1/2: a status update revoked of ticket.update after parking writes nothing', async () => {
@@ -173,7 +173,7 @@ describe('TicketRouteCommands', () => {
     await command.execute(command.parse({ slug: 'alpha', ref: 'AL-1', patch: { title: 'renamed' } }));
     expect(permissions.can).not.toHaveBeenCalled();
     expect(service.findByRef).not.toHaveBeenCalled();
-    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { title: 'renamed' }, principal);
+    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { title: 'renamed' }, principal, { gatedEdgeKey: null });
   });
 
   it('AC-8: registers create and update route commands', () => {

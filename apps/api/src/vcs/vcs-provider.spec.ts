@@ -163,6 +163,8 @@ describe('IVcsProvider Interface', () => {
           throw new Error('Not implemented');
         }
 
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
+
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
@@ -221,6 +223,8 @@ describe('IVcsProvider Interface', () => {
           throw new Error('Not implemented');
         }
 
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
+
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
@@ -270,6 +274,8 @@ describe('IVcsProvider Interface', () => {
         async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
           throw new Error('Not implemented');
         }
+
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
 
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
@@ -324,6 +330,8 @@ describe('IVcsProvider Interface', () => {
           throw new Error('Not implemented');
         }
 
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
+
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
@@ -375,6 +383,8 @@ describe('IVcsProvider Interface', () => {
           throw new Error('Not implemented');
         }
 
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
+
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
@@ -420,6 +430,8 @@ describe('IVcsProvider Interface', () => {
           throw new Error('Not implemented');
         }
 
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
+
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
@@ -462,6 +474,8 @@ describe('IVcsProvider Interface', () => {
         async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
           throw new Error('Not implemented');
         }
+
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
 
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
@@ -507,6 +521,8 @@ describe('IVcsProvider Interface', () => {
         async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
           throw new Error('Not implemented');
         }
+
+        async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
 
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
@@ -568,6 +584,8 @@ describe('VcsIssue and IVcsProvider exports', () => {
       async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
         throw new Error('Not implemented');
       }
+
+      async findOpenPullRequestByBranch(): Promise<VcsPrStatus | null> { return null; }
 
       async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
         return [];

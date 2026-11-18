@@ -3,7 +3,8 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { FIX_FOLLOW_UP } from '../../../src/fleet/common/fix-follow-up-events';
-import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { FanOutPublisher, OutboxFanOutError } from '../../../src/outbox/fan-out-publisher';
+import { PrismaFleetPrReviewRepository } from '../../../src/fleet/reviews/prisma-fleet-pr-review.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
@@ -82,6 +83,22 @@ describeIntegration('FIX follow-up review flow (PG)', () => {
       id: row.id,
       metadata: { projectId: row.projectId, eventId: row.eventId },
     });
+
+    const reviewClaims = app.get(PrismaFleetPrReviewRepository);
+    const linkClaim = reviewClaims.markDispatchedIfPending.bind(reviewClaims);
+    const failingFence = vi.spyOn(reviewClaims, 'markDispatchedIfPending').mockImplementationOnce(async (claimId, jobId) => {
+      await linkClaim(claimId, jobId);
+      throw new Error('transient fence failure');
+    });
+    try {
+      await expect(publisher.publish(persistedRecord)).rejects.toBeInstanceOf(OutboxFanOutError);
+      expect(failingFence).toHaveBeenCalledTimes(1);
+      expect(await prisma.fleetJob.count({ where: { command: 'REVIEW', repoId: world.repoId } })).toBe(0);
+      expect(await prisma.fleetPrReview.findFirst({ where: { repoId: world.repoId, prNumber, headSha: resultSha } }))
+        .toMatchObject({ outcome: 'pending', jobId: null });
+    } finally {
+      failingFence.mockRestore();
+    }
 
     await publisher.publish(persistedRecord);
 

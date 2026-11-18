@@ -1151,4 +1151,65 @@ describe('CommentsService', () => {
       );
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // US-008 — a workflow comment is evidence, not user text: delete refuses it the
+  // way edit does, with its own 409 key.
+  // ---------------------------------------------------------------------------
+
+  describe('US-008 workflow comment delete', () => {
+    const workflowComment = { ...mockComment, type: 'FIX_REPORT' };
+
+    it('AC-8: refuses to delete a non-GENERAL comment with 409 comments.workflowUndeletable', async () => {
+      givenComment(workflowComment);
+
+      const error = await service.delete('comment-123', mockUserPrincipal).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect(error).toMatchObject({ prefix: 'comments.workflowUndeletable', httpStatus: 409 });
+    });
+
+    it('AC-9: never reaches the repository softDelete for a workflow comment', async () => {
+      givenComment(workflowComment);
+
+      await expect(service.delete('comment-123', mockUserPrincipal)).rejects.toBeInstanceOf(ConflictAppException);
+
+      expect(mockCommentRepo.softDelete).not.toHaveBeenCalled();
+      expect(mockAudit.audited).not.toHaveBeenCalled();
+    });
+
+    it('refuses a workflow comment before asking for comment.delete', async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
+      givenComment(workflowComment);
+
+      await expect(service.delete('comment-123', mockUserPrincipal)).rejects.toBeInstanceOf(ConflictAppException);
+
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: resolveCommentProject with delete refuses a non-GENERAL comment with the same 409', async () => {
+      givenComment(workflowComment);
+
+      const error = await service.resolveCommentProject('comment-123', mockUserPrincipal, 'delete').catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect(error).toMatchObject({ prefix: 'comments.workflowUndeletable', httpStatus: 409 });
+      expect(mockAccessService.resolveMembership).toHaveBeenCalledWith('proj-123', mockUserPrincipal);
+    });
+
+    it('resolveCommentProject with delete still resolves a GENERAL comment', async () => {
+      givenComment(mockComment);
+
+      await expect(service.resolveCommentProject('comment-123', mockUserPrincipal, 'delete')).resolves.toBe('proj-123');
+    });
+
+    it('AC-13: deletes a GENERAL comment the caller may delete, calling softDelete once', async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
+      givenComment(mockComment);
+
+      await expect(service.delete('comment-123', mockUserPrincipal)).resolves.toBeUndefined();
+
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledExactlyOnceWith('comment-123');
+    });
+  });
 });

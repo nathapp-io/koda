@@ -3,22 +3,26 @@ import { type FleetPrReviewRecord, type IFleetPrReviewRepository } from './domai
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { FleetReviewsModule } from './fleet-reviews.module';
 import { FleetReviewEventsService } from './fleet-review-events.service';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 
 describe('FleetReviewClaimService', () => {
   const now = new Date('2026-01-01T12:00:00.000Z');
   const row = (overrides: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord => ({
     id: 'claim-1', repoId: 'repo-1', prNumber: 12, headSha: 'h1', jobId: null,
-    outcome: 'pending', createdAt: now, updatedAt: now, ...overrides,
+    outcome: 'pending', followUpEventId: null, createdAt: now, updatedAt: now, ...overrides,
   });
   let repository: IFleetPrReviewRepository;
+  let jobs: { findReviewJobIdBetween: ReturnType<typeof vi.fn> };
   let service: FleetReviewClaimService;
   beforeEach(() => {
     repository = {
       findHead: vi.fn().mockResolvedValue(null), insertPending: vi.fn().mockResolvedValue(row()),
-      markDispatched: vi.fn().mockResolvedValue(undefined), markFailed: vi.fn(), remove: vi.fn().mockResolvedValue(undefined),
+      markDispatched: vi.fn().mockResolvedValue(undefined), markDispatchedIfPending: vi.fn().mockResolvedValue(true),
+      markFailed: vi.fn(), remove: vi.fn().mockResolvedValue(undefined),
       removeStalePending: vi.fn().mockResolvedValue(true), findPrincipalAccess: vi.fn(),
     };
-    service = new FleetReviewClaimService(repository, { prReviewPollMs: 60_000 });
+    jobs = { findReviewJobIdBetween: vi.fn().mockResolvedValue(null) };
+    service = new FleetReviewClaimService(repository, { prReviewPollMs: 60_000 }, jobs as never);
   });
 
   it('AC-1: returns the inserted claim id', async () => {
@@ -85,5 +89,127 @@ describe('FleetReviewClaimService', () => {
   });
   it('AC-11: existing event service export remains', () => {
     expect(Reflect.getMetadata('exports', FleetReviewsModule)).toContain(FleetReviewEventsService);
+  });
+
+  /**
+   * US-006: a stale pending claim whose dispatch pass already created a job. The job is adopted rather than
+   * the claim dropped and the head dispatched a second time.
+   */
+  describe('stale claim recovery', () => {
+    const staleCreatedAt = new Date(now.getTime() - 60_001);
+    const staleRow = (overrides: Partial<FleetPrReviewRecord> = {}) => row({ createdAt: staleCreatedAt, ...overrides });
+
+    beforeEach(() => {
+      vi.mocked(repository.insertPending).mockResolvedValue(null);
+      vi.mocked(repository.findHead).mockResolvedValue(staleRow());
+    });
+
+    it('US-006 AC-4a: owns the job found inside the stale claim window', async () => {
+      jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+      vi.mocked(repository.markDispatchedIfPending).mockResolvedValue(true);
+
+      await expect(service.claimHead('repo-1', 12, 'h1', now)).resolves.toEqual({ kind: 'owned', jobId: 'job-1' });
+      expect(jobs.findReviewJobIdBetween).toHaveBeenCalledWith('repo-1', 12, staleCreatedAt, new Date(staleCreatedAt.getTime() + 60_000));
+      expect(repository.markDispatchedIfPending).toHaveBeenCalledWith('claim-1', 'job-1');
+    });
+
+    it('US-006 AC-4b: never drops the claim when it linked a job', async () => {
+      jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+      vi.mocked(repository.markDispatchedIfPending).mockResolvedValue(true);
+
+      await service.claimHead('repo-1', 12, 'h1', now);
+
+      expect(repository.removeStalePending).not.toHaveBeenCalled();
+      expect(repository.insertPending).toHaveBeenCalledTimes(1);
+    });
+
+    it('US-006 AC-5: reports the job the lost link left on the claim', async () => {
+      jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+      vi.mocked(repository.markDispatchedIfPending).mockResolvedValue(false);
+      vi.mocked(repository.findHead)
+        .mockResolvedValueOnce(staleRow())
+        .mockResolvedValueOnce(row({ outcome: 'dispatched', jobId: 'job-2' }));
+
+      await expect(service.claimHead('repo-1', 12, 'h1', now)).resolves.toEqual({ kind: 'owned', jobId: 'job-2' });
+    });
+
+    it('US-006 AC-6: removes and retries the claim when no job matches', async () => {
+      jobs.findReviewJobIdBetween.mockResolvedValue(null);
+      vi.mocked(repository.insertPending).mockResolvedValueOnce(null).mockResolvedValueOnce(row({ id: 'claim-2' }));
+
+      await expect(service.claimHead('repo-1', 12, 'h1', now)).resolves.toEqual({ kind: 'claimed', claimId: 'claim-2' });
+      expect(jobs.findReviewJobIdBetween).toHaveBeenCalledTimes(1);
+      expect(repository.removeStalePending).toHaveBeenCalledWith('claim-1', new Date(now.getTime() - 60_000));
+      expect(repository.markDispatchedIfPending).not.toHaveBeenCalled();
+    });
+
+    it('US-006 AC-7a: reports busy when the job lookup fails', async () => {
+      jobs.findReviewJobIdBetween.mockRejectedValue(new Error('lookup boom'));
+
+      await expect(service.claimHead('repo-1', 12, 'h1', now)).resolves.toEqual({ kind: 'busy' });
+      expect(jobs.findReviewJobIdBetween).toHaveBeenCalledTimes(1);
+      // No retry insert either: the claim was left exactly as it was for this pass.
+      expect(repository.insertPending).toHaveBeenCalledTimes(1);
+    });
+
+    it('US-006 AC-7b: leaves the claim as it is when the job lookup fails', async () => {
+      jobs.findReviewJobIdBetween.mockRejectedValue(new Error('lookup boom'));
+
+      await service.claimHead('repo-1', 12, 'h1', now);
+
+      expect(repository.removeStalePending).not.toHaveBeenCalled();
+      expect(repository.markDispatchedIfPending).not.toHaveBeenCalled();
+    });
+
+    it('US-006 AC-8: runs the conditional link in fleet.pr-review-bookkeeping', async () => {
+      jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+      let reason: string | undefined;
+      vi.mocked(repository.markDispatchedIfPending).mockImplementation(async () => {
+        reason = currentBookkeepingReason();
+        return true;
+      });
+
+      await service.claimHead('repo-1', 12, 'h1', now);
+
+      expect(reason).toBe('fleet.pr-review-bookkeeping');
+    });
+  });
+
+  /**
+   * Review B4: the claim link rides the job insert, so a stale-claim sweep interleaved with a live pass either finds
+   * the claim already dispatched (it cannot delete it) or has already removed it (the insert rolls back).
+   */
+  describe('review B4: the dispatch fence', () => {
+    it('links the claim with the inserted job id', async () => {
+      await service.fence('claim-1')('job-1');
+
+      expect(repository.markDispatchedIfPending).toHaveBeenCalledWith('claim-1', 'job-1');
+    });
+
+    it('runs the link in fleet.pr-review-bookkeeping', async () => {
+      let reason: string | undefined;
+      vi.mocked(repository.markDispatchedIfPending).mockImplementation(async () => {
+        reason = currentBookkeepingReason();
+        return true;
+      });
+
+      await service.fence('claim-1')('job-1');
+
+      expect(reason).toBe('fleet.pr-review-bookkeeping');
+    });
+
+    it('reports a lost claim when the conditional link changes nothing', async () => {
+      vi.mocked(repository.markDispatchedIfPending).mockResolvedValue(false);
+
+      await expect(service.fence('claim-1')('job-1')).rejects.toBeInstanceOf(ReviewClaimLostError);
+    });
+
+    it('propagates a failed link write as a fence failure, not as a lost claim', async () => {
+      const failure = new Error('connection lost');
+      vi.mocked(repository.markDispatchedIfPending).mockRejectedValue(failure);
+
+      await expect(service.fence('claim-1')('job-1')).rejects.toThrow(ReviewClaimFenceError);
+      await expect(service.fence('claim-1')('job-1')).rejects.toMatchObject({ cause: failure });
+    });
   });
 });

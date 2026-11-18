@@ -13,12 +13,16 @@ import { mayDispatch } from '../schedules/schedule-access';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import {
   FIX_FOLLOW_UP,
+  fixFollowUpEventId,
   parseFixFollowUpPayload,
   type FixFollowUpPayload,
 } from '../common/fix-follow-up-events';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { FLEET_PR_REVIEW_REPOSITORY, type IFleetPrReviewRepository } from './domain/fleet-pr-review.domain';
+import { exceptionResponse } from './dispatch-error';
+import { reviewClaimFence } from './review-claim-fence';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 
 /** The system component id: the second segment of `system.pr-fix.follow-up` (action-context rule). */
 const COMPONENT = 'pr-fix';
@@ -32,8 +36,8 @@ const COMPONENT = 'pr-fix';
  * the poller does not review that head a second time; a successful dispatch records the review job on the
  * claim and one audit entry on the FIX job, which is the link between the two jobs.
  *
- * Throws only on database failure (the `FleetJobOutcomeSubscriber` rule), so the relay redelivers: a claim
- * that still exists makes the redelivery skip instead of dispatching twice.
+ * After a database failure the relay redelivers. Only the same FIX attempt can resume its pending claim;
+ * settled claims and claims from other attempts or the poller still suppress dispatch.
  */
 @Injectable()
 @SystemWriter('system.pr-fix.follow-up')
@@ -86,14 +90,20 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       return;
     }
 
-    const claim = await bookkeeping(
+    const eventId = fixFollowUpEventId(p.jobId, p.leaseEpoch);
+    let claim = await bookkeeping(
       'fleet.pr-review-bookkeeping',
-      () => this.reviews.insertPending(p.repoId, p.prNumber, p.headSha),
+      () => this.reviews.insertPending(p.repoId, p.prNumber, p.headSha, eventId),
     );
-    // A null claim means the auto-review poller, or an earlier delivery of this event, already owns the head.
     if (claim === null) {
-      await this.recordSkip(p, 'head_already_claimed');
-      return;
+      // The failed dispatch transaction cannot undo the earlier claim insert. Resume only this event's
+      // unlinked claim; no separate cleanup write is needed before the relay can retry.
+      claim = await this.reviews.findHead(p.repoId, p.prNumber, p.headSha);
+      if (claim === null) throw new Error('Review claim disappeared during FIX follow-up; retrying');
+      if (claim.followUpEventId !== eventId || claim.outcome !== 'pending' || claim.jobId !== null) {
+        await this.recordSkip(p, 'head_already_claimed');
+        return;
+      }
     }
 
     let job: { id: string };
@@ -108,21 +118,40 @@ export class FixFollowUpSubscriber implements OnModuleInit {
           profiles: p.profiles,
           maxCostUsd: Number(p.maxCostUsd),
         },
-        { auditKey: 'system.pr-fix.follow-up' },
+        {
+          auditKey: 'system.pr-fix.follow-up',
+          // Review B4 (fix round 2): the same transactional fence the auto-review paths use. The claim link is
+          // written inside the job insert's transaction, so a stale-claim sweep cannot delete this claim between
+          // the job commit and a later link write: whichever write reaches the claim row first settles it.
+          fence: reviewClaimFence(this.reviews, claim.id),
+        },
       ));
     } catch (error) {
+      if (error instanceof ReviewClaimLostError) {
+        // The job insert rolled back. An expired delivery or the stale-claim sweep may have removed
+        // the shared claim, so acknowledge only if the head is still settled or owned by a different event.
+        const head = await this.reviews.findHead(p.repoId, p.prNumber, p.headSha);
+        if (head === null || (head.followUpEventId === eventId && head.outcome === 'pending' && head.jobId === null)) {
+          throw error;
+        }
+        await this.recordSkip(p, 'claim_lost');
+        return;
+      }
+      // The fence's own write failed: the insert rolled back with it, and the failure is a database problem, so the
+      // relay must redeliver this event.
+      if (error instanceof ReviewClaimFenceError) throw error.cause;
       if (error instanceof BudgetPausedException) {
         await this.removeClaim(claim.id);
         await this.recordSkip(p, 'budget_paused');
         return;
       }
-      if (error instanceof ConflictAppException && getExceptionResponse(error).prefix === 'fleet.jobs') {
+      if (error instanceof ConflictAppException && exceptionResponse(error).prefix === 'fleet.jobs') {
         await this.removeClaim(claim.id);
         await this.recordSkip(p, 'review_active');
         return;
       }
       if (error instanceof ValidationAppException || error instanceof NotFoundAppException || error instanceof FleetDispatchException) {
-        const response = getExceptionResponse(error);
+        const response = exceptionResponse(error);
         const reason = error instanceof ValidationAppException && typeof response.args?.reason === 'string'
           ? response.args.reason
           : error.constructor.name;
@@ -135,11 +164,6 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       await this.recordSkip(p, 'dispatch_error');
       return;
     }
-
-    await bookkeeping(
-      'fleet.pr-review-bookkeeping',
-      () => this.reviews.markDispatched(claim.id, job.id),
-    );
 
     // The entry on the FIX job is the link between the two jobs; `record` requires a transaction.
     await this.txManager.run(() => this.audit.record({
@@ -166,8 +190,3 @@ export class FixFollowUpSubscriber implements OnModuleInit {
   }
 }
 
-function getExceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> } {
-  const response: unknown = (error as Error & { getResponse: () => unknown }).getResponse();
-  if (typeof response !== 'object' || response === null) return {};
-  return response as { prefix?: string; args?: Record<string, unknown> };
-}

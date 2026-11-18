@@ -7,12 +7,19 @@ import { AGENT_NAME_RE } from '../fleet/common/agent-jobs';
 // (dev compose defaults); in a production image (ENV_NAME, set by the Dockerfile) or NODE_ENV=production
 // they would sign tokens with a published string, so boot fails instead. The message never echoes the value.
 const PLACEHOLDER_SECRET = /^change-me/i;
+// Review US-004: a 32-character floor rides on the same production-only branch, so dev and test keep
+// short secrets. The deployed koda-wk secrets are 64 characters.
+const MIN_SECRET_LENGTH = 32;
 const PRODUCTION = Joi.string().valid('production').insensitive().required();
 
 function secret(base: Joi.StringSchema): Joi.AnySchema {
   const refuse = base
     .pattern(PLACEHOLDER_SECRET, { invert: true, name: 'placeholder' })
-    .messages({ 'string.pattern.invert.name': '{{#label}} is a change-me placeholder; set a real secret' });
+    .min(MIN_SECRET_LENGTH)
+    .messages({
+      'string.pattern.invert.name': '{{#label}} is a change-me placeholder; set a real secret',
+      'string.min': '{{#label}} must be at least {{#limit}} characters; set a real secret',
+    });
   return base
     .when('ENV_NAME', { is: PRODUCTION, then: refuse })
     .when('NODE_ENV', { is: PRODUCTION, then: refuse });

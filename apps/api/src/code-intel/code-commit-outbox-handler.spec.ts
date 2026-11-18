@@ -28,6 +28,7 @@ function createMockVcsProvider(overrides?: Partial<IVcsProvider>): IVcsProvider 
     createPullRequest: vi.fn(),
     getPullRequestStatus: vi.fn(),
     listPullRequests: vi.fn().mockResolvedValue([]),
+    findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
     listPrCommits: vi.fn().mockResolvedValue([]),
     fetchCommitFiles: vi.fn().mockResolvedValue([]),
     ...overrides,

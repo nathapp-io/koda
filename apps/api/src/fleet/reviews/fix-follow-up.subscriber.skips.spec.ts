@@ -10,7 +10,7 @@ const payload = buildFixFollowUpPayload({
 } as FleetJobRecord, 22, 'a'.repeat(40));
 const claim: FleetPrReviewRecord = {
   id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: 'a'.repeat(40), jobId: null,
-  outcome: 'pending', createdAt: new Date(0), updatedAt: new Date(0),
+  outcome: 'pending', followUpEventId: null, createdAt: new Date(0), updatedAt: new Date(0),
 };
 
 function setup() {
@@ -18,7 +18,7 @@ function setup() {
     findPrincipalAccess: vi.fn(async () => ({ exists: true, disabled: false })),
     insertPending: vi.fn(async (): Promise<FleetPrReviewRecord | null> => claim),
     markDispatched: vi.fn(async () => undefined), markFailed: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined), findHead: vi.fn(async () => null),
+    remove: vi.fn(async () => undefined), findHead: vi.fn(async (): Promise<FleetPrReviewRecord | null> => claim),
   };
   const repos = { findReviewRepo: vi.fn(async () => ({ id: 'r1', projectId: 'p1', owner: 'o', name: 'n', githubInstallationId: 1n })) };
   const permissions = { effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch'])) };

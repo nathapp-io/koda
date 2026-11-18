@@ -403,7 +403,10 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
         .set(auth('interleaved'))
         .send({ status: 'IN_PROGRESS', title: 'Renamed by a refused PATCH' });
 
-      expectPermissionsRefusal(res);
+      // The PATCH was gated on `ticket.transition.start`, but the ticket the transition loaded is
+      // now in VERIFY_FIX, whose IN_PROGRESS edge is `ticket.transition.verify-fix.return`. The
+      // stale gated edge is refused with the transition's 409 (US-002), before any edge key check.
+      expect(res.status).toBe(409);
     } finally {
       spy.mockRestore();
     }

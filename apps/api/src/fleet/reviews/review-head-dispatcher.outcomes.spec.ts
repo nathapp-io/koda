@@ -14,7 +14,7 @@ const repo = { id: 'r1', projectId: 'p1', owner: 'o', name: 'n', autoReviewEnabl
 const pr = (number: number, headSha = `sha-${number}`): OpenPullRequest => ({ number, headSha, draft: false,
   headRepoFullName: 'o/n', updatedAt: NOW });
 const row = (number = 3, headSha = `sha-${number}`): FleetPrReviewRecord => ({ id: `row-${number}`, repoId: 'r1',
-  prNumber: number, headSha, outcome: 'pending', jobId: null, createdAt: NOW, updatedAt: NOW });
+  prNumber: number, headSha, outcome: 'pending', jobId: null, followUpEventId: null, createdAt: NOW, updatedAt: NOW });
 
 function setup(errors: unknown[] = []) {
   const rows = new Map<string, FleetPrReviewRecord>();
@@ -22,14 +22,21 @@ function setup(errors: unknown[] = []) {
     findHead: vi.fn(async (_repo: string, n: number, sha: string) => rows.get(`${n}:${sha}`) ?? null),
     insertPending: vi.fn(async (_repo: string, n: number, sha: string) => { const pending = row(n, sha); rows.set(`${n}:${sha}`, pending); return pending; }),
     markDispatched: vi.fn(async () => undefined),
+    markDispatchedIfPending: vi.fn(async () => true),
     markFailed: vi.fn(async (id: string, outcome: string) => { const pending = [...rows.values()].find((item) => item.id === id); if (pending) pending.outcome = outcome; }),
     remove: vi.fn(async (id: string) => { for (const [key, item] of rows) if (item.id === id) rows.delete(key); }),
+    removeStalePending: vi.fn(async (id: string, staleBefore: Date) => {
+      const pending = [...rows.values()].find((item) => item.id === id);
+      if (!pending || pending.outcome !== 'pending' || pending.jobId !== null || pending.createdAt.getTime() >= staleBefore.getTime()) return false;
+      for (const [key, item] of rows) if (item.id === id) rows.delete(key);
+      return true;
+    }),
   };
   const jobs = { dispatch: vi.fn(async () => {
     const error = errors.shift();
     if (error) throw error;
     return { job: { id: 'j1' } };
-  }) };
+  }), findReviewJobIdBetween: vi.fn(async () => null) };
   const dispatcher = new ReviewHeadDispatcher(reviews as never, jobs as never);
   return { dispatcher, reviews, jobs, rows };
 }

@@ -15,6 +15,7 @@ export interface FleetPrReviewRecord {
   headSha: string;
   jobId: string | null;
   outcome: string;
+  followUpEventId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,8 +29,10 @@ export interface PrincipalAccess {
 export interface IFleetPrReviewRepository {
   findHead(repoId: string, prNumber: number, headSha: string): Promise<FleetPrReviewRecord | null>;
   /** Claims the head as `pending`; null when another pass holds it (a P2002 on the unique index). */
-  insertPending(repoId: string, prNumber: number, headSha: string): Promise<FleetPrReviewRecord | null>;
+  insertPending(repoId: string, prNumber: number, headSha: string, followUpEventId?: string): Promise<FleetPrReviewRecord | null>;
   markDispatched(id: string, jobId: string): Promise<void>;
+  /** Conditionally links a still-pending claim with no job; true only when this call changed one row. */
+  markDispatchedIfPending(id: string, jobId: string): Promise<boolean>;
   markFailed(id: string, outcome: string): Promise<void>;
   remove(id: string): Promise<void>;
   /** Atomically removes only an old, unowned pending claim. */

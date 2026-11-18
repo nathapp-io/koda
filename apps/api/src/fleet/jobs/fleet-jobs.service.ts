@@ -84,7 +84,7 @@ export class FleetJobsService {
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; flowFeatureId?: string; handoff?: HandoffRecordFile[]; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; flowFeatureId?: string; handoff?: HandoffRecordFile[]; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance'; fence?: (jobId: string) => Promise<void> } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     const input = normalizeDispatch(dto, repo.defaultBranch);
@@ -140,6 +140,11 @@ export class FleetJobsService {
           handoff: input.command === FleetJobKind.RUN ? (opts.handoff ?? null) : null,
         });
         await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
+        // Review B4: the caller's conditional claim is fenced on this insert, in the same transaction. The fence
+        // throws when its claim was removed or settled in the meantime (a stale-claim sweep that won the race), and
+        // that throw rolls the insert back: no job exists for a claim that is no longer its owner's. A sweep that
+        // loses the race instead blocks on the claim row and finds it already dispatched, so it cannot drop it.
+        if (opts.fence) await opts.fence(created.id);
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
         await this.activity.record({
           actorType: 'USER', actorId, action: 'job.dispatched', entityType: 'job', entityId: created.id, jobId: created.id,
@@ -175,6 +180,10 @@ export class FleetJobsService {
       }),
       placement: { assigned: outcome.assigned, runnerId: outcome.runnerId, misfits: outcome.misfits },
     });
+  }
+
+  async findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null> {
+    return await this.repo.findReviewJobIdBetween(repoId, prNumber, from, to);
   }
 
   /**

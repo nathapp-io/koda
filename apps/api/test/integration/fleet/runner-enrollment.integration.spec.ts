@@ -73,7 +73,7 @@ describeIntegration('fleet enrollment (PG)', () => {
     expect(enrolled.apiKey).toMatch(/^kr_/);
 
     const me = data<Record<string, unknown>>(await request(server).get('/api/fleet/runner/me').set(auth(enrolled.apiKey)).expect(200));
-    expect(me).toEqual({ id: enrolled.runnerId, name: 'box-1', labels: ['gpu', 'linux'], capacity: 1, enabled: true });
+    expect(me).toEqual({ id: enrolled.runnerId, name: 'box-1', labels: ['gpu'], capacity: 1, enabled: true });
 
     await request(server).get('/api/projects').set(auth(enrolled.apiKey)).expect(401);
     // Task 8 added runners.controller.ts, so /api/fleet/runners now exists and a runner

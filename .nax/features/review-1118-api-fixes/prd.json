@@ -1,0 +1,626 @@
+{
+  "project": "koda",
+  "feature": "review-1118-api-fixes",
+  "branchName": "feat/review-1118-api-fixes",
+  "createdAt": "2026-11-18T08:17:05.546Z",
+  "updatedAt": "2026-11-18T09:54:58.082Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Look up an open PR by branch in the VCS providers",
+      "description": "**Goal** — Add a branch-specific open PR lookup to the VCS provider interface for GitHub and GitLab.\n\n**Motivation** — When the link write fails, the warning is logged and the PR stays open with no link.\n\n**Approach** — Only a PR from the connection's own repository is adopted: GitHub's `head: '{owner}:{branch}'` filter already scopes to the repository owner, and the GitLab lookup skips a merge request whose `source_project_id` differs from its `target_project_id` (a fork's merge request), taking the first same-project one.\n- `GitHubProvider` (`src/vcs/providers/github.provider.ts`). Target: implements it with `GET {apiBaseUrl}/repos/{owner}/{repo}/pulls` and params `{ state: 'open', head: '{owner}:{branchName}' }`, mapping the first element with `mapGitHubPrToVcsPrStatus`, `null` for an empty array.\n- `GitLabProvider` (`src/vcs/providers/gitlab.provider.ts`). Target: implements it with `GET {baseUrl}/merge_requests` and params `{ state: 'opened', source_branch: branchName }`, mapping the first element whose `source_project_id` equals its `target_project_id` with `mapGitLabMrToVcsPrStatus`, `null` when there is none. `GitLabMrStatusResponse` gains the optional `source_project_id` and `target_project_id` numbers.spec.ts` to resolve `null` and add `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)` to the typed `createMockVcsProvider` in `code-commit-outbox-handler.spec.ts`, keeping their existing assertions. Use the existing provider HTTP harness patterns.\n\n**Scope** — In: Provider interface, authenticated lookup implementations, HTTP unit tests and typed fixture compatibility. Out: Calling the lookup or writing ticket links in the VERIFIED workflow (US-010); adopting a closed or merged PR on the ticket's branch.\n\n**Interface** — `IVcsProvider` gains `findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null>`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When GitHubProvider.findOpenPullRequestByBranch('ACME-7-fix-login') runs, it sends GET {apiBaseUrl}/repos/{owner}/{repo}/pulls with params state: 'open' and head: '{owner}:ACME-7-fix-login'.",
+        "AC-2 [unit] When that GitHub call answers one pull request, GitHubProvider.findOpenPullRequestByBranch returns it mapped as a VcsPrStatus with its number and url.",
+        "AC-3 [unit] When that GitHub call answers an empty array, GitHubProvider.findOpenPullRequestByBranch returns null.",
+        "AC-4a [unit] When GitLabProvider.findOpenPullRequestByBranch('ACME-7-fix-login') runs, it sends GET {baseUrl}/merge_requests with params state: 'opened' and source_branch: 'ACME-7-fix-login'.",
+        "AC-4b [unit] When that GitLab call returns merge requests including same-project matches, GitLabProvider.findOpenPullRequestByBranch returns the first merge request whose source_project_id equals its target_project_id, mapped as a VcsPrStatus.",
+        "AC-5 [unit] When GitLab answers an empty array, or only merge requests whose source_project_id differs from their target_project_id, GitLabProvider.findOpenPullRequestByBranch returns null."
+      ],
+      "tags": [
+        "api",
+        "vcs"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extends two existing authenticated HTTP adapters and their shared contract using established query and mapping patterns; no auth mechanism changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-provider.ts",
+        "apps/api/src/vcs/providers/github.provider.ts",
+        "apps/api/src/vcs/providers/gitlab.provider.ts",
+        "apps/api/src/vcs/providers/github.provider.pagination.spec.ts",
+        "apps/api/src/vcs/providers/gitlab.provider.outbound.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/vcs/providers/github.provider.branch-lookup.spec.ts",
+        "apps/api/src/vcs/providers/gitlab.provider.branch-lookup.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the GitLab payload contains only a merge request without source and target project IDs, findOpenPullRequestByBranch returns null.",
+        "AC-6 [unit] When the existing listPullRequests('open') on either provider receives two open results from different branches, it still returns both as VcsPrStatus entries in response order."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-provider.spec.ts",
+          "reason": "every `implements IVcsProvider` class in it (the `MockVcsProvider` declarations and `TestProvider`, about line 547) no longer satisfies the interface once it gains `findOpenPullRequestByBranch`; each gains a `findOpenPullRequestByBranch` method resolving `null`, keeping every assertion."
+        },
+        {
+          "path": "apps/api/src/code-intel/code-commit-outbox-handler.spec.ts",
+          "reason": "`createMockVcsProvider(): IVcsProvider` (about line 22) returns an object literal without `findOpenPullRequestByBranch`; it gains `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)`, keeping every assertion."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b81c5834062a31f8294f289776736c21b6a1a31b"
+    },
+    {
+      "id": "US-002",
+      "title": "Refuse a status PATCH gated on a stale edge",
+      "description": "**Goal** — Bind a ticket status PATCH to the approval edge that actually gated its route command.\n\n**Motivation** — If the status changed in between, the edge taken was approved under another edge's mode.\n\n**Approach** — The ticket route commands pass the edge key they were gated on to `TicketsService.update`: the `rest:tickets.update-status` commands pass their own key, and the `rest:tickets.update` command passes `null` (it was gated on `ticket.update`, not an edge). `executeTransitionInternal` compares it with `transitionKeyFor(ticket.status, toStatus) ?? null` for the ticket it loaded, right after loading it and before `assertEdgeAllowed`, validation and any write, and refuses a mismatch with the same `409` `HttpException` the conditional status write throws (`Ticket state changed concurrently`). So inside the transition, when both apply, the `409` wins over the edge `403`. On the route path `TicketsService.update` first runs its existing `assertTransitionAllowed` pre-check against the live status, so a caller who lacks the live edge's key can still get that `403` before the transition runs; either way the request is refused and nothing is written. The conditional write is keyed on that same loaded status, so the check and the write agree. A caller that passes no gated key (every caller other than the two route commands) keeps today's behaviour. `TicketsService.update` passes a sixth `options` argument to `executeTransitionPublic` only when its own `options` is defined, so existing five-argument call expectations keep holding.\nUpdate the registered route-command tests to expect the fifth argument for both variants and preserve their other assertions. Cover the pre-check, mismatch ordering, null/undefined distinction, field-write atomicity and matching-edge conditional write using the existing service/transition harnesses.\n\n**Scope** — In: Registered ticket update commands, `TicketsService.update`, public-to-internal transition options and stale-edge refusal. Out: The VERIFIED PR side effect and provider lookup (US-010, US-001); approval policy and role changes.\n\n**Interface** — `TicketsService.update`: `(projectSlug, ref, updateTicketDto, principal, options?: { gatedEdgeKey?: string | null })`, passing `options` to `executeTransitionPublic` when the DTO carries a `status`. `TicketTransitionsService.executeTransitionPublic`: `(projectSlug, ticketRef, toStatus, principal, fields?, options?: { gatedEdgeKey?: string | null })`, passed on to `executeTransitionInternal`, whose `options` gains `gatedEdgeKey`. `updateCommand` for `rest:tickets.update-status` calls `service.update(..., { gatedEdgeKey: key })`; for `rest:tickets.update` it calls `service.update(..., { gatedEdgeKey: null })`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When the registered rest:tickets.update-status command for ticket.transition.start executes with { status: 'IN_PROGRESS' }, its call to TicketsService.update has fifth argument { gatedEdgeKey: 'ticket.transition.start' }.",
+        "AC-2 [unit] When the registered rest:tickets.update command executes, its call to TicketsService.update has fifth argument { gatedEdgeKey: null }.",
+        "AC-3a [unit] When TicketsService.update receives a status and options { gatedEdgeKey: 'ticket.transition.start' }, executeTransitionPublic receives that options object as its sixth argument.",
+        "AC-3b [unit] When TicketsService.update receives a status without options, it calls executeTransitionPublic with five arguments.",
+        "AC-4a [unit] When TicketTransitionsService.executeTransitionPublic(slug, ref, 'IN_PROGRESS', principal, undefined, { gatedEdgeKey: 'ticket.transition.start' }) loads a status for which transitionKeyFor(status, 'IN_PROGRESS') is a different key, it rejects with HTTP 409 'Ticket state changed concurrently'.",
+        "AC-4b [unit] When executeTransitionPublic receives gatedEdgeKey 'ticket.transition.start' for an IN_PROGRESS transition whose loaded ticket status requires a different edge key, updateTicketStatusIf is never called.",
+        "AC-5 [unit] When executeTransitionPublic receives gatedEdgeKey 'ticket.transition.start' for an IN_PROGRESS transition whose loaded ticket status requires a different edge key and the principal lacks that live key, the transition still rejects with 409, not 403.",
+        "AC-6 [unit] When executeTransitionPublic receives a gatedEdgeKey equal to the loaded status's edge key, the transition runs and calls updateTicketStatusIf with the loaded status.",
+        "AC-7a [unit] When executeTransitionPublic receives { gatedEdgeKey: null } for a pair that has an edge key, it rejects with 409.",
+        "AC-7b [unit] When executeTransitionPublic receives { gatedEdgeKey: null } for a pair with no edge key, such as CREATED to CLOSED, it reaches transition validation and rejects with ValidationAppException({}, 'tickets'), as it does today.",
+        "AC-8 [unit] When a PATCH to IN_PROGRESS was gated on ticket.transition.start but TicketsService.update's pre-check reads VERIFY_FIX and the caller lacks ticket.transition.verify-fix.return, execution rejects with HTTP 403 at the pre-check.",
+        "AC-9 [unit] When a status PATCH also carries a title change and is refused for a stale gated edge by the transition's 409 or the live pre-check's 403, the ticket repository receives no status or title write."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "tickets",
+        "approvals",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Threads one option through three existing ticket components and reuses the conditional write; the change to live approval-edge enforcement still requires strict test isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/tickets/state-machine/transition-keys.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.spec.ts",
+          "reason": "the status-update case (about line 116) asserts `service.update` was called exactly once with four arguments; it now expects a fifth argument `{ gatedEdgeKey: 'ticket.transition.start' }`. The plain update case (about line 176) now expects a fifth argument `{ gatedEdgeKey: null }`. Their other assertions stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a95d919656eb4d6e69f385d6c2403f4ce586d62e"
+    },
+    {
+      "id": "US-003",
+      "title": "Map concurrent ticket-link and project uniqueness conflicts",
+      "description": "**Goal** — Return the existing ticket link or the existing project conflict response when a concurrent write wins the unique constraint.\n\n**Motivation** — Two concurrent requests both pass the check, and the loser's P2002 becomes a 500.\n\n**Approach** — The services catch the error outside `AuditRecorder.audited`, because a unique violation aborts the Postgres transaction it happened in. `isUniqueViolation(error, field)` from `common/utils/prisma-errors.ts` identifies it, so no service imports `@prisma/client`. The project services test `slug` before `key`: `isUniqueViolation` matches by substring when the target is an index name, and the slug index `Project_slug_key` contains `key`, so a key-first test would label a slug race as `key`.\n`TicketLinksService.create` re-reads by the original ticket ID and URL only on a `url` unique violation and returns the existing link in the same DTO as the pre-check; if the re-read finds nothing, propagate the original error. Catch only after the audited write completes or rolls back; if the caller already owns an outer transaction, let the original error propagate rather than attempting recovery in an aborted transaction. Propagate all unrelated errors without retry; keep audit and successful create/update behavior. Augment the existing service suites with audited-write rejection fixtures, including an index-name target.\n\n**Scope** — In: Recovery for the ticket-link and project writes that own their audit transaction. Out: VERIFIED PR link adoption (US-010); recovering a ticket-link or project unique violation for a caller that is already inside an outer transaction (the violation aborts that transaction, so the error propagates as before).\n\n**Interface** — `TicketLinksService.create` (`src/ticket-links/ticket-links.service.ts`). Target: a unique violation on `url` from the audited create is answered by re-reading `findLinkByUrl` and returning `{ status: 200, link }`. `ProjectsService.create` and `ProjectsService.update` (`src/projects/projects.service.ts`). Target: a unique violation on `slug` or `key` from the audited write becomes `ConflictAppException({ field }, 'projects')`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When TicketLinksService.create's audited createLink rejects with a unique violation on url and findLinkByUrl(ticket.id, dto.url) then finds the winning row, create resolves { status: 200, link: TicketLinkResponseDto.from(winningRow) }, using the same response shape as the existing pre-check.",
+        "AC-2 [unit] When the ticket link re-read after a url unique violation returns null, TicketLinksService.create rejects with the original unique-violation error.",
+        "AC-3a [unit] When the audited createLink rejects with any other error, TicketLinksService.create rejects with that error, as before.",
+        "AC-3b [unit] When the audited createLink rejects with any other error, TicketLinksService.create calls findLinkByUrl only once, for the existing pre-check.",
+        "AC-4 [unit] When ProjectsService.create's audited createProject rejects with a unique violation on slug, create rejects with a 409 ConflictAppException with args { field: 'slug' } under prefix projects.",
+        "AC-5 [unit] When ProjectsService.create's audited write rejects with a unique violation on key, create rejects with a 409 ConflictAppException with args { field: 'key' } under prefix projects.",
+        "AC-6 [unit] When ProjectsService.update's audited updateBySlug rejects with a unique violation on slug, update rejects with a 409 ConflictAppException with args { field: 'slug' } under prefix projects.",
+        "AC-7 [unit] When ProjectsService.update's audited write rejects with a unique violation on key, update rejects with a 409 ConflictAppException with args { field: 'key' } under prefix projects.",
+        "AC-8 [unit] When ProjectsService.create's audited write rejects with a unique violation whose target is the index name Project_slug_key, create rejects with ConflictAppException args { field: 'slug' }."
+      ],
+      "tags": [
+        "api",
+        "persistence",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Maps existing database constraints to existing outcomes at two service transaction boundaries with a shared matcher.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/ticket-links/ticket-links.service.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/common/utils/prisma-errors.ts",
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/projects/projects.service.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1f62ca99ccb0c66455a377c0b76372a91b26d0f3"
+    },
+    {
+      "id": "US-004",
+      "title": "Harden authentication, secret validation, token decryption and shutdown",
+      "description": "**Goal** — Surface API-key lookup outages as retryable errors, enforce safe secret and tag lengths, and wire graceful shutdown.\n\n**Motivation** — An agent whose key is valid gets `401` during a database blip and may treat its key as revoked.\n\n**Approach**\n- **API-key lookup.** Only an error thrown by `tryApiKey` changes. A key that matches no agent, an `OFFLINE` agent and a JWT-shaped bearer keep falling through to JWT. The `503` uses the existing pattern `new AppException(HttpStatus.SERVICE_UNAVAILABLE, {}, 'auth.keyLookupUnavailable', HttpStatus.SERVICE_UNAVAILABLE)` (as `provider-credentials.service.ts` does for `vaultOff`), with an i18n entry in `src/i18n/en/auth.json` (`\"keyLookupUnavailable\": { \"503\": \"Authentication is temporarily unavailable; try again\" }`) and the matching `src/i18n/zh/auth.json` entry.\n- **Secret floor.** The 32-character minimum is part of the same production-only refusal as the placeholder check, so development and test environments keep short secrets. The deployed koda-wk secrets are 64 characters.\n- `decryptToken` (`src/common/utils/encryption.util.ts`). Target: refuses an auth tag that is not 16 bytes with `Error('Invalid ciphertext format: auth tag must be 16 bytes')` and passes `{ authTagLength: 16 }` to `createDecipheriv`.\n- **Shutdown hooks.** A small exported helper, `enableGracefulShutdown(app)`, calls `app.enableShutdownHooks(['SIGTERM', 'SIGINT'])` (`NathApp.enableShutdownHooks` in `@nathapp/nestjs-app` 4.2.4). `main.ts` calls it before `app.start`.\nExtend `combined-auth.guard.spec.ts`, `encryption.util.spec.ts` and `env.validation.spec.ts`; give `REQUIRED` three distinct 32-character secrets, and lengthen the existing production placeholder samples (`'change-me-in-production'`, `'change-me'`, `'CHANGE-ME'`) to 32 or more characters still starting with `change-me`, preserving their placeholder rule assertions. Keep outside-production assertions. Cover the helper with a unit spy; check the bootstrap call by review.\n\n**Scope** — In: Agent API-key error mapping and localization, the production validation of `JWT_SECRET`, `JWT_REFRESH_SECRET` and `API_KEY_SECRET`, GCM tag validation, and the two signal hooks. Out: Stream permission rechecks and runner enrollment (US-008); bounding how long an open SSE stream can delay `app.close()` after `SIGTERM`; a test that boots `main.ts`; a minimum length for `VCS_ENCRYPTION_KEY` or `PROVIDER_CREDENTIAL_ENCRYPTION_KEY`; both are already exactly 64 hex characters.\n\n**Interface** — `CombinedAuthGuard.canActivate` rethrows an error from `tryApiKey` as the `503` `AppException` above. `secret()` in `src/config/env.validation.ts`: the production branch also requires `.min(32)`, with a message naming the key and never the value. Keep `decryptToken(ciphertext: string, masterKey: string): string` and export `enableGracefulShutdown(app)` from `src/common/bootstrap/graceful-shutdown.ts`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When CombinedAuthGuard.canActivate receives a non-JWT bearer whose findAgentByKeyHash rejects, it throws an AppException with HTTP status 503 and prefix auth.keyLookupUnavailable.",
+        "AC-2 [unit] When findAgentByKeyHash rejects in that API-key path, CombinedAuthGuard.canActivate never calls the JWT path (super.canActivate).",
+        "AC-3 [unit] When a non-JWT bearer's findAgentByKeyHash resolves null, canActivate still falls back to JWT.",
+        "AC-4 [unit] When validate receives NODE_ENV: 'production' and a 31-character JWT_SECRET, it throws an error naming JWT_SECRET, preventing boot.",
+        "AC-5 [unit] When validate receives NODE_ENV: 'production' and a 31-character JWT_REFRESH_SECRET, it throws an error naming JWT_REFRESH_SECRET, preventing boot.",
+        "AC-6 [unit] When validate receives NODE_ENV: 'production' and a 31-character API_KEY_SECRET, it throws an error naming API_KEY_SECRET, preventing boot.",
+        "AC-7 [unit] When validate receives ENV_NAME: 'production' and a 31-character JWT_SECRET, it throws an error naming JWT_SECRET.",
+        "AC-8 [unit] When validate receives NODE_ENV: 'production' and three distinct 32-character secrets with other env values valid, it does not throw.",
+        "AC-9 [unit] When validate receives NODE_ENV: 'test' and one-character secrets with other env values valid, it does not throw.",
+        "AC-10 [unit] When validate throws the secret-length error, its message omits the secret's value.",
+        "AC-11 [unit] When the auth-tag segment of encryptToken output is cut to 12 bytes, decryptToken throws 'Invalid ciphertext format: auth tag must be 16 bytes' before decrypting.",
+        "AC-12 [unit] When decryptToken receives unmodified encryptToken output and the matching key, it returns the original plaintext.",
+        "AC-13 [unit] When enableGracefulShutdown(app) is called, it calls app.enableShutdownHooks once with ['SIGTERM', 'SIGINT']."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "auth",
+        "crypto",
+        "bootstrap"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Touches global auth failure handling, production configuration, cryptographic validation and lifecycle wiring; strict isolation is required for auth, secrets and cryptography.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/auth/guards/combined-auth.guard.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/common/utils/encryption.util.ts",
+        "apps/api/src/main.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/common/bootstrap/graceful-shutdown.ts",
+        "apps/api/src/common/bootstrap/graceful-shutdown.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/config/env.validation.spec.ts",
+          "reason": "`REQUIRED` uses one-character secrets (`'s'`, `'r'`, `'k'`); \"accepts real secrets in production\" and the production placeholder cases now need 32-character values. Give `REQUIRED` three distinct 32-character secrets, and lengthen the production placeholder values (`'change-me-in-production'`, `'change-me'`, `'CHANGE-ME'`) to 32 or more characters that still start with `change-me`, so those cases keep failing on the placeholder rule and not the length rule; the outside-production cases keep their assertions."
+        },
+        {
+          "path": "apps/api/src/auth/guards/combined-auth.guard.spec.ts",
+          "reason": "gains this story's AC-1 and AC-2 cases (the agent lookup rejects); no existing case changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1eea4b97741eca976a3db5f38e2742c13915913d"
+    },
+    {
+      "id": "US-005",
+      "title": "Add the review job lookup and conditional claim link",
+      "description": "**Goal** — Give callers a bounded REVIEW job lookup and an atomic way to link that job to a pending claim.\n\n**Motivation** — After one poll interval the dispatcher removes it as stale and dispatches a second review of the same head.\n\n**Approach** — The new lookup finds a REVIEW job for the claim's repo and `review-pr-<n>` feature created inside the claim's dispatch window, from the claim's `createdAt` to `createdAt` plus the poll interval (`prReviewPollMs`), in any state: the head was dispatched, and that job's outcome is the head's. A pass dispatches within seconds of inserting its claim, so the window bounds the match to that pass's job. `FleetJob` carries no head SHA, so a manual REVIEW of the same PR inside that window would also match (see Out of Scope).\nThe repository returns the oldest `FleetJob` id with that `repoId`, `command` `REVIEW`, `feature` `reviewFeature(prNumber)` and `from <= createdAt <= to`. `FleetJobsService` delegates to the repository. `markDispatchedIfPending` is an `updateMany` of `{ outcome: 'dispatched', jobId }` where `id`, `outcome: 'pending'` and `jobId: null`, answering whether one row changed. `markDispatched` is unchanged. Cover both repository methods against PostgreSQL and service delegation with a unit test.\n\n**Scope** — In: New repository and service methods, using existing schema fields and `reviewFeature`. Out: Deriving the claim's window, invoking the methods under bookkeeping, and recovery decisions (US-006); distinguishing same-PR jobs for different heads or manual jobs in the same window.\n\n**Interface** — `IFleetJobRepository`, `PrismaFleetJobRepository`, and `FleetJobsService` gain `findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null>`. `IFleetPrReviewRepository` and `PrismaFleetPrReviewRepository` gain `markDispatchedIfPending(id: string, jobId: string): Promise<boolean>`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] When a REVIEW job on repoId with feature review-pr-12 was created within the inclusive from-to window, PrismaFleetJobRepository.findReviewJobIdBetween(repoId, 12, from, to) returns its id when it is the only match.",
+        "AC-2 [integration] When the only REVIEW job on repoId with feature review-pr-12 was created before from, PrismaFleetJobRepository.findReviewJobIdBetween(repoId, 12, from, to) returns null.",
+        "AC-3 [integration] When the only REVIEW job on repoId with feature review-pr-12 was created after to, PrismaFleetJobRepository.findReviewJobIdBetween(repoId, 12, from, to) returns null.",
+        "AC-4 [integration] When the only REVIEW job inside the window has feature review-pr-13, PrismaFleetJobRepository.findReviewJobIdBetween(repoId, 12, from, to) returns null.",
+        "AC-5a [integration] When PrismaFleetPrReviewRepository.markDispatchedIfPending(id, jobId) runs on a pending row with no jobId, it returns true.",
+        "AC-5b [integration] When PrismaFleetPrReviewRepository.markDispatchedIfPending(id, jobId) runs on a pending row with no jobId, the stored row has outcome 'dispatched' with that jobId.",
+        "AC-6 [integration] When markDispatchedIfPending runs on a row already dispatched, it returns false, leaving the row unchanged.",
+        "AC-7 [integration] When markDispatchedIfPending runs on an id with no row, it returns false.",
+        "AC-8 [unit] When FleetJobsService.findReviewJobIdBetween('repo-1', 12, from, to) is called, it returns what the repository's findReviewJobIdBetween returns for the same arguments."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "persistence",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Adds standard Prisma query and compare-and-set operations to existing contracts, with real-database checks and no orchestration or schema changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/reviews/prisma-fleet-pr-review.repository.ts",
+        "apps/api/src/fleet/common/review-jobs.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-review-job-lookup.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When matching REVIEW jobs exist at both window bounds and the older one is terminal, findReviewJobIdBetween returns that older job's id.",
+        "AC-9 [integration] When the existing PrismaFleetPrReviewRepository.markDispatched(id, jobId) runs on a pending claim during ordinary dispatch, the stored row still has outcome 'dispatched' with that jobId."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "20c6ba9979beb9fbb53b7940d15e3cf7d12ddaaa"
+    },
+    {
+      "id": "US-006",
+      "title": "Recover stale review claims without redispatching existing jobs",
+      "description": "**Goal** — Recover an already dispatched REVIEW job in both stale-claim paths before they can remove the pending claim.\n\n**Motivation** — When `markDispatched` fails after a REVIEW job was created, the claim stays `pending`.\n\n**Approach** — The new lookup finds a REVIEW job for the claim's repo and `review-pr-<n>` feature created inside the claim's dispatch window, from the claim's `createdAt` to `createdAt` plus the poll interval (`prReviewPollMs`), in any state: the head was dispatched, and that job's outcome is the head's. A pass dispatches within seconds of inserting its claim, so the window bounds the match to that pass's job. `FleetJob` carries no head SHA, so a manual REVIEW of the same PR inside that window would also match (see Out of Scope). Both stale paths use it, the auto-review dispatcher (`ReviewHeadDispatcher`) and the flow's claim (`FleetReviewClaimService.claimHead`). A lookup that throws leaves the claim as it is for this pass. The link is conditional, so the two stale paths cannot both act on one row: a new repository method `markDispatchedIfPending(id, jobId)` updates the row only while it is `pending` with no `jobId`, mirroring `removeStalePending`, and reports whether it did. Both callers run it inside `bookkeeping('fleet.pr-review-bookkeeping', ...)`, like every other claim write. The dispatcher threads its `pollMs` from `dispatchRepo` into `headIsOpen` and `reopenStaleClaim`; the window's upper bound is `new Date(row.createdAt.getTime() + pollMs)` (the claim service uses `prReviewPollMs`). A lookup that rejects in the dispatcher is logged and that PR is skipped; `dispatchRepo` still resolves and goes on to the next PR.\n- `ReviewHeadDispatcher.reopenStaleClaim` first asks `jobs.findReviewJobIdBetween(row.repoId, row.prNumber, row.createdAt, row.createdAt + pollMs)`; a found id is recorded with `reviews.markDispatchedIfPending(row.id, jobId)` (in `bookkeeping`) and the head is not open, whatever that call answers.\n- `FleetReviewClaimService.claimHead` asks the same lookup (window `prReviewPollMs`) before `removeStalePending`. When a job is found and `markDispatchedIfPending` answers `true`, it returns `{ kind: 'owned', jobId }`; when it answers `false`, it re-reads the head and answers the way today's lost `removeStalePending` path does (`owned`, `failed` or `busy`). A rejected lookup returns `busy`. No match preserves the existing stale-removal/retry behavior.\nExtend both existing review suite stubs with `findReviewJobIdBetween` defaulting to `null` and `markDispatchedIfPending`; keep the stale-removal regression assertions and the module provider assertion.\n\n**Scope** — In: Auto-review and flow recovery, bounded job matching, conditional settlement and failure handling per head. Out: Implementing the job/claim repository methods (US-005), sharing dispatch exception extraction (US-009), and telling another REVIEW job of the same PR (a manual REVIEW, or one for a different head), dispatched inside a stale claim's dispatch window, from that claim's own job; `FleetJob` carries no head SHA, so such a job also settles the claim.\n\n**Interface** — `FleetReviewClaimService` constructor: `(reviews, config, jobs: FleetJobsService)`. Consumers call `findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null>` and `markDispatchedIfPending(id: string, jobId: string): Promise<boolean>` from US-005; `dispatchRepo` and `claimHead` keep their public result contracts.",
+      "acceptanceCriteria": [
+        "AC-1a [unit] When ReviewHeadDispatcher.dispatchRepo sees a stale pending head row and findReviewJobIdBetween resolves 'job-1', the job lookup receives the row's repoId, prNumber, createdAt and new Date(row.createdAt.getTime() + opts.pollMs).",
+        "AC-1b [unit] When dispatchRepo finds 'job-1' for a stale pending head row, it calls reviews.markDispatchedIfPending(row.id, 'job-1').",
+        "AC-2a [unit] When dispatchRepo's only candidate has a stale pending head with a matching job, its call trace for reviews.remove and jobs.dispatch is empty.",
+        "AC-2b [unit] When dispatchRepo's only candidate has a stale pending head with a matching job, dispatchRepo resolves to 0.",
+        "AC-3a [unit] When findReviewJobIdBetween rejects for a stale claim on the first of two eligible PRs and the second can be claimed and dispatched within the remaining budget, awaiting dispatchRepo finishes normally with exactly one jobs.dispatch call, for the second PR.",
+        "AC-3b [unit] When findReviewJobIdBetween rejects for a stale claim on the first of two eligible PRs, dispatchRepo keeps the first claim row, with no reviews.remove for that row.",
+        "AC-4a [unit] When FleetReviewClaimService.claimHead sees a stale pending row with no jobId and the lookup resolves 'job-1' and markDispatchedIfPending returns true, claimHead returns { kind: 'owned', jobId: 'job-1' }.",
+        "AC-4b [unit] When claimHead successfully links a job to a stale pending claim, it never calls removeStalePending.",
+        "AC-5 [unit] When markDispatchedIfPending returns false and claimHead's re-read head row carries jobId 'job-2', claimHead returns { kind: 'owned', jobId: 'job-2' }.",
+        "AC-6 [unit] When findReviewJobIdBetween resolves null for a stale claim, claimHead's write sequence removes the stale claim and retries the insert as it does today.",
+        "AC-7a [unit] When findReviewJobIdBetween rejects on a stale claim, claimHead returns { kind: 'busy' }.",
+        "AC-7b [unit] When findReviewJobIdBetween rejects on a stale claim, claimHead never calls removeStalePending.",
+        "AC-8 [unit] When claimHead calls markDispatchedIfPending, currentBookkeepingReason() is 'fleet.pr-review-bookkeeping'.",
+        "AC-9 [unit] When dispatchRepo's only candidate has a matching job but markDispatchedIfPending returns false because the row is already settled or removed, its call trace for reviews.remove and jobs.dispatch is empty for that pass."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "reviews",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Coordinates a new lookup and conditional write across two stale-claim paths, preserving dispatch accounting and race/failure outcomes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
+        "apps/api/src/fleet/reviews/fleet-review-claim.service.ts",
+        "apps/api/src/fleet/reviews/review-head-dispatcher.spec.ts",
+        "apps/api/src/fleet/reviews/fleet-review-claim.service.spec.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.ts"
+      ],
+      "suggestedCriteria": [
+        "When the conditional link loses and the re-read finds a failed claim, claimHead returns { kind: 'failed', outcome } using the stored outcome.",
+        "When the conditional link loses and the re-read finds no head, claimHead returns { kind: 'busy' }."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/reviews/review-head-dispatcher.spec.ts",
+          "reason": "`createDispatcher`'s `jobs` stub defines `dispatch` only; it gains `findReviewJobIdBetween` resolving `null`, so the stale-claim cases (about lines 176 and 190) keep removing and re-dispatching. The `reviews` fake gains `markDispatchedIfPending`."
+        },
+        {
+          "path": "apps/api/src/fleet/reviews/fleet-review-claim.service.spec.ts",
+          "reason": "the service is constructed with `(reviews, config)`; it now takes a third `jobs` stub whose `findReviewJobIdBetween` resolves `null`, so AC-4 and AC-5 keep their stale-removal and retry assertions. The `reviews` stub gains `markDispatchedIfPending`. The module case (AC-10) keeps its provider assertion."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "eda0d5d4706e15c8a0ead15dad896b6234ee2a32"
+    },
+    {
+      "id": "US-007",
+      "title": "Skip the count on short ranked memory pages",
+      "description": "**Goal** — Avoid a SQL aggregate on ranked memory pages whose exact total can be inferred from the returned ids.\n\n**Motivation** — Every ranked memory page runs `count(*)` over every match.\n\n**Approach** — The page query runs first. When the page is not full, its total is exact without a count: `skip + rows`, provided the page has rows or is the first page. `rows` is the number of ids the page query returned, not the number of hydrated records (`hydrateRanked` drops a row deleted between the two queries). A full page, or an empty page past the first, still counts. The `Page` contract is unchanged.\nIn the existing repository unit suite, `ranked(ids, total)` queues a count only for a full or later empty page. For the page 2 of size 5 with two ids, expect no count and `total: 7`. Adjust the probe/page/count call tallies and stop queueing count results for empty first pages in the any-word cases and the short page in `rankedOne`; preserve rank, filters, hydration behavior and unrelated assertions.\n\n**Scope** — In: Query ordering and conditional exact count in ranked memory search only. Out: Changes to other API list/lookup paths; approximate or capped memory totals; a full ranked page still counts exactly.\n\n**Interface** — `PrismaMemoryItemRepository.findRankedByText` (private, `src/memory/prisma-memory-item.repository.ts`). Target: the page query first, the count only when needed. `resolvePageOption` and `Page` remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1a [unit] When the page query for one findRankedByText pass on page 1 of size 10 returns 3 ids, the ranked Page has total: 3.",
+        "AC-1b [unit] When the page query for one findRankedByText pass on page 1 of size 10 returns 3 ids, that pass issues no count(*) query.",
+        "AC-2a [unit] When the page query for one findRankedByText pass on page 2 of size 5 returns 2 ids, the ranked Page has total: 7.",
+        "AC-2b [unit] When the page query for one findRankedByText pass on page 2 of size 5 returns 2 ids, that pass issues no count(*) query.",
+        "AC-3a [unit] When the page query for one findRankedByText pass returns exactly the page size, that pass still issues the count(*) query.",
+        "AC-3b [unit] When the page query for one findRankedByText pass returns exactly the page size, the ranked Page still has the count(*) query's total.",
+        "AC-4a [unit] When the page query for one findRankedByText pass on page 1 returns no ids, that pass returns a ranked Page with total: 0.",
+        "AC-4b [unit] When the page query for one findRankedByText pass on page 1 returns no ids, that pass issues no count(*) query.",
+        "AC-5a [unit] When the page query for one findRankedByText pass on page 3 returns no ids, that pass still issues the count(*) query.",
+        "AC-5b [unit] When the page query for one findRankedByText pass on page 3 returns no ids, the ranked Page has the count(*) query's total.",
+        "AC-6 [unit] When the page query for one findRankedByText pass on page 1 of size 10 returns 3 ids but hydration only finds 2 rows, the ranked Page has total: 3 with 2 records."
+      ],
+      "tags": [
+        "api",
+        "memory",
+        "performance"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A localized query-order change with pagination boundary, fallback and hydration regression cases; no new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/memory-item-repository.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/memory-item-repository.spec.ts",
+          "reason": "the `ranked(ids, total)` helper queues three `$queryRaw` results (probe, page, count). A page that returns fewer ids than its size, on page 1 or with ids, no longer issues the count, so the helper queues the count result only when `ids.length` equals the page size or the page is empty past page 1, and these expectations change: \"ranks, filters and pages in SQL, then loads the rows by id and keeps rank order\" (page 2 of 5, 2 ids) now expects no `count(*)::int` call and `total: 7`; the raw-call counts at about lines 369 (3 to 2), 398 (5 to 3), 434 (`it.each`, 3 to 2) and 444 (`ranked(['mem-1'], 1)`, 3 to 2) drop by the skipped counts; the any-word cases at about lines 388-418 (including \"hydrates any-word matches in rank order\", about line 414) stop queueing the `{ total: 0 }` results for their empty first pages; `rankedOne` (about line 477) answers one id on a page larger than one, so it stops queueing its `{ total: 1 }` count. Every other assertion stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8ff7860ac72217daf688ec7c6d875411adb94692"
+    },
+    {
+      "id": "US-008",
+      "title": "Recheck thread access, enforce enrollment labels and protect workflow comments",
+      "description": "**Goal** — Enforce current thread-read permission, enrollment-owned runner labels, and workflow comment deletion rules.\n\n**Motivation** — The thread stream re-check confirms project membership only, so a member whose `thread.read` was removed keeps receiving events.\n\n**Approach**\n- **Thread stream.** `stillAllowed` asks `PermissionService.can(fresh, 'thread.read', { projectId })` after the membership check, the key the guard checked when the stream opened. A denial or a rejected `PermissionService.can` makes `stillAllowed` resolve `false`; the stream closes. Keep principal refresh/revocation, membership, and stream teardown behavior. In the existing unit suite drive the actual `events()` Observable using a short `heartbeatMs` and fake timers: a closed stream completes.\n- **Runner labels.** Owner ruling 2026-11-18: the enrollment's labels are final. Runners already enrolled keep their stored labels; nothing is migrated. `EnrollmentService.enroll` (`src/fleet/runners/enrollment.service.ts`). Target: `labels: uniqueSorted(enrollment.labels)`, and the `runner.enrolled` activity payload gains `ignoredLabels`: the sorted, de-duplicated body labels that are not enrollment labels (`[]` when none). Update the unit example to store `['darwin', 'gpu']` and record `ignoredLabels: ['fast']`, and the integration runner `me` expectation to `labels: ['gpu']`, retaining their other assertions.\n- **Workflow comment delete.** It is refused with a new `409` key `comments.workflowUndeletable` (en \"Workflow comments cannot be deleted\", plus zh), both before the approval gate (`resolveCommentProject` with operation `'delete'`) and in `CommentsService.delete`, mirroring the edit refusal. No delete or approval request is opened for a workflow comment. Add a DELETE regression beside the workflow PATCH e2e case, plus unit coverage for the resolver, service and controller, preserving authorized GENERAL deletion.\n\n**Scope** — In: The project thread SSE re-check, new runner enrollment and its activity payload, workflow-comment deletion checks and localized conflict, and their unit, integration and e2e regressions. Out: Shutdown hook wiring (US-004). Re-labelling runners that are already enrolled; only new enrollments change. The workspace thread event stream (`workspace-thread-events.controller.ts`), whose `stillAllowed` is also membership-only; only the project thread stream gains the `thread.read` re-check here. Removing `fleet.thread.preapprove` from the Developer role (A/SEC-13): kept by owner ruling 2026-11-18.\n\n**Interface** — `ThreadEventsController`'s constructor gains `PermissionService`, and `stillAllowed` also requires `thread.read`. `EnrollmentService.enroll` keeps its input/return contract and adds `ignoredLabels` to the activity payload. `CommentsService.resolveCommentProject`: `operation?: 'update' | 'delete'`; `'delete'` refuses a non-`GENERAL` comment. `CommentsService.delete` refuses it too, and `CommentsController`'s delete route passes `'delete'`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When a viewer of a project thread stream opened by ThreadEventsController.events remains a project member but PermissionService.can(fresh, 'thread.read', { projectId }) returns a denied decision, that stream's stillAllowed promise resolves to false.",
+        "AC-2 [unit] When the refreshed viewer is a project member and still has thread.read, the project thread stream's stillAllowed promise resolves to true.",
+        "AC-3 [unit] When PermissionService.can rejects during the thread.read re-check, the project thread stream's stillAllowed promise resolves to false rather than rejecting.",
+        "AC-4 [unit] When EnrollmentService.enroll consumes an enrollment with labels ['gpu', 'darwin'] for a request with body labels ['darwin', 'fast'], it creates the runner with labels ['darwin', 'gpu'].",
+        "AC-5 [unit] When EnrollmentService.enroll consumes an enrollment with labels ['gpu', 'darwin'] for a request with body labels ['darwin', 'fast'], the runner.enrolled activity payload carries ignoredLabels: ['fast'].",
+        "AC-6 [unit] When all body labels are enrollment labels, EnrollmentService.enroll records ignoredLabels: [].",
+        "AC-7 [unit] When enrollment labels are [] and body labels are ['x'], EnrollmentService.enroll creates the runner with labels [].",
+        "AC-8a [unit] When CommentsService.delete(id, principal) resolves id to a non-GENERAL comment, it rejects with a 409 ConflictAppException under prefix comments.workflowUndeletable.",
+        "AC-8b [unit] When CommentsService.delete(id, principal) resolves id to a non-GENERAL comment, the comment repository's softDelete is never called.",
+        "AC-9 [unit] When CommentsService.resolveCommentProject(id, principal, 'delete') resolves id to a non-GENERAL comment, it rejects with the same 409 comments.workflowUndeletable.",
+        "AC-10a [unit] When CommentsController.deleteFromHttp(id, principal) targets a non-GENERAL comment visible to the caller, it rejects with 409.",
+        "AC-10b [unit] When CommentsController.deleteFromHttp(id, principal) targets a non-GENERAL comment visible to the caller, the approval gate's run is never called.",
+        "AC-11 [unit] When CommentsService.delete(id, principal) targets a GENERAL comment the caller may delete, it still calls softDelete(id) once."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "permissions",
+        "fleet",
+        "comments"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Spans live access checks, enrollment authority and pre-gate/service invariants; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/thread-events.controller.ts",
+        "apps/api/src/live/live-stream.ts",
+        "apps/api/src/fleet/runners/enrollment.service.ts",
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/src/comments/comments.controller.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/thread-events.controller.spec.ts",
+          "reason": "today it constructs only `ThreadEventsGuard`. It gains a `ThreadEventsController` describe block for this story's AC-1 to AC-3: the controller built with stubs (bus, stream registry, `JwtAuthProvider`, `ProjectAccessService`, `PermissionService`, a live config with a short `heartbeatMs`), `events()` called with an authorized request, and the returned Observable driven under fake timers, since `createLiveStream` calls `stillAllowed` on each heartbeat; a closed stream is one that completes. The existing guard cases stay."
+        },
+        {
+          "path": "apps/api/src/fleet/runners/enrollment.service.spec.ts",
+          "reason": "\"creates the runner with merged labels and returns a kr_ key once\" expects `['darwin', 'fast', 'gpu']`; it now expects the enrollment's `['darwin', 'gpu']`, and the activity payload gains `ignoredLabels: ['fast']`. Its key and return assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/runner-enrollment.integration.spec.ts",
+          "reason": "the enroll case (about line 76) enrolls with enrollment labels `['gpu']` and body labels `['linux']` and expects the runner `me` route to answer `labels: ['gpu', 'linux']`; it now expects `labels: ['gpu']`, keeping its other assertions."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "beside its workflow-comment PATCH case (about line 1219), gains a DELETE case: deleting a workflow comment returns `409`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "073e726cea38ec228046c2023f9bab961dc4220a"
+    },
+    {
+      "id": "US-009",
+      "title": "Share dispatch exception-response extraction",
+      "description": "**Goal** — Replace the duplicate exception-response extractors in the review dispatcher and FIX follow-up subscriber with one helper.\n\n**Motivation** — Two private copies of `getExceptionResponse` drift independently.\n\n**Approach** — `getExceptionResponse` (private copies in `review-head-dispatcher.ts` and `fix-follow-up.subscriber.ts`). Target: one exported `exceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> }` in the new `src/fleet/reviews/dispatch-error.ts`, which returns `{}` when the error has no `getResponse` function or its response is not an object.\nRefactor only: both files import `exceptionResponse` and their private copies are deleted. The deletion is verified by `bun run --cwd apps/api type-check` and `bun run --cwd apps/api lint`. Preserve classification and claim release, skip reason and error outcomes in the existing caller outcomes suites; drive both with a `fleet.jobs` conflict and test the helper directly. The subscriber records `review_active` in the `system.pr-fix.follow-up` audit entry for the original FIX job.\n\n**Scope** — In: Shared response extraction, both existing call sites, helper unit tests and caller regression checks. Out: Stale review-job recovery (US-005 and US-006) or changing dispatcher and subscriber classification policies.\n\n**Interface** — `exceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> }`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When exceptionResponse receives new ConflictAppException({}, 'fleet.jobs'), its result has prefix 'fleet.jobs'.",
+        "AC-2 [unit] When exceptionResponse receives new ValidationAppException({ reason: 'repo_unavailable' }, 'fleet.jobs'), its result has args.reason 'repo_unavailable'.",
+        "AC-3 [unit] When exceptionResponse receives new Error('plain'), it returns {}.",
+        "AC-4a [unit] When ReviewHeadDispatcher.dispatchRepo's jobs.dispatch rejects with ConflictAppException({}, 'fleet.jobs'), the dispatcher removes the claim, as before the refactor.",
+        "AC-4b [unit] When ReviewHeadDispatcher.dispatchRepo's jobs.dispatch rejects with ConflictAppException({}, 'fleet.jobs'), the dispatcher dispatches nothing more for that PR, as before the refactor.",
+        "AC-5a [unit] When FixFollowUpSubscriber.handle receives a valid follow-up payload and jobs.dispatch rejects with ConflictAppException({}, 'fleet.jobs'), the subscriber removes its claim, as before the refactor.",
+        "AC-5b [unit] When FixFollowUpSubscriber.handle receives a valid follow-up payload and jobs.dispatch rejects with ConflictAppException({}, 'fleet.jobs'), it records the skip reason review_active as the audit summary 'follow-up review skipped: review_active' on the original FIX job, as before the refactor."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "reviews",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A local helper extraction with a defined plain-Error result and explicit behavioral regressions for both callers.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
+        "apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts",
+        "apps/api/src/fleet/reviews/review-head-dispatcher.outcomes.spec.ts",
+        "apps/api/src/fleet/reviews/fix-follow-up.subscriber.outcomes.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/dispatch-error.ts",
+        "apps/api/src/fleet/reviews/dispatch-error.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When exceptionResponse receives an Error whose getResponse() returns a string, it returns {}."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ea131f731316f2056c569e65b802da04a370009a"
+    },
+    {
+      "id": "US-010",
+      "title": "Adopt an open PR on the ticket's branch",
+      "description": "**Goal** — Link an existing open PR during VERIFIED processing instead of creating a duplicate on the ticket's branch.\n\n**Motivation** — The next VERIFIED cycle passes the `hasPrLink` guard, and the provider refuses a second PR for the same branch, so the ticket never gets its link.\n\n**Approach** — The lookup runs after the `hasPrLink` guard and after `getDefaultBranch`, with the branch name `buildBranchName` returns. A lookup that throws is handled like the `hasPrLink` lookup failure: logged, and no PR is created, because a skipped PR is recoverable and a second PR is not. An adopted PR gets a `pr` link and runs `extractLinksFromPr` like a created one, but records no `VCS_PR_CREATED` activity, because koda did not create it. Only a PR from the connection's own repository is adopted: GitHub's `head: '{owner}:{branch}'` filter already scopes to the repository owner, and the GitLab lookup skips a merge request whose `source_project_id` differs from its `target_project_id` (a fork's merge request), taking the first same-project one.\nA null result retains the existing draft creation path. On adoption use the provider URL and number, `externalRef: '{repoOwner}/{repoName}#<number>'`, and `prState: 'draft'` or `'open'` according to the adopted PR's `draft` flag. A lookup error logs a warning, writes no link, and does not reject verify. Preserve `createPrAfterCommit` and the existing guards; add the lookup default (`null`, overridable in the after-commit harness) to the provider stubs in both transition suites and the auto-create integration suite. Drive the behavior through `verify` on a CREATED ticket.\n\n**Scope** — In: The branch lookup consumer, post-commit link/extraction/activity behavior, and the existing transition and auto-create test harnesses. Out: Provider lookup implementation (US-001); status-edge checking (US-002). Retrying the `TicketLink` write after a successful PR create; the next VERIFIED cycle adopts the PR instead. Adopting a closed or merged PR on the ticket's branch; only an open PR is adopted.\n\n**Interface** — `TicketTransitionsService.createPrForTicket` (private, `src/tickets/state-machine/ticket-transitions.service.ts`). Target: calls `provider.findOpenPullRequestByBranch(branchName)` first and links a found PR instead of creating one. Consumes `findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null>` from US-001.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When TicketTransitionsService.verify verifies a CREATED ticket and the provider's findOpenPullRequestByBranch resolves open PR number 7, it never calls createPullRequest.",
+        "AC-2 [unit] When TicketTransitionsService.verify on a CREATED ticket adopts open PR number 7, the ticket repository's createTicketLink is called once with prNumber: 7, linkType: 'pr' and externalRef '{repoOwner}/{repoName}#7'.",
+        "AC-3 [unit] When an open PR is adopted, its link has prState: 'draft' for draft: true and prState: 'open' for draft: false.",
+        "AC-4 [unit] When open PR number 7 is adopted, extractLinksFromPr receives the branch name buildBranchName returned and PR number 7.",
+        "AC-5 [unit] When an open PR is adopted, no VCS_PR_CREATED activity is recorded.",
+        "AC-6 [unit] When verifying an eligible ticket, findOpenPullRequestByBranch is called with the branch name buildBranchName returns for the ticket.",
+        "AC-7 [unit] When an eligible ticket is verified and findOpenPullRequestByBranch reports no adoptable PR by resolving null (the provider contract for GitLab fork-only results), the transition service calls createPullRequest once, as before.",
+        "AC-8a [unit] When findOpenPullRequestByBranch rejects, verifying the ticket never calls createPullRequest.",
+        "AC-8b [unit] When findOpenPullRequestByBranch rejects, verifying the ticket never calls createTicketLink.",
+        "AC-9 [unit] When findOpenPullRequestByBranch rejects, verify itself still resolves.",
+        "AC-10 [unit] When findOpenPullRequestByBranch rejects, the transition service logs a warning about the failed lookup."
+      ],
+      "tags": [
+        "api",
+        "tickets",
+        "vcs",
+        "reliability"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One post-commit service method consumes the existing US-001 lookup and reuses the current link, activity and extraction paths; existing transition harnesses can test both branches without new infrastructure.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts",
+        "apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts",
+        "apps/api/src/vcs/vcs-provider.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts",
+          "reason": "the provider stubs at the PR-creation cases (about lines 1330 and 1390) define `createPullRequest` only; add `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)` so those cases still reach `createPullRequest`, keeping every assertion."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts",
+          "reason": "the provider factory (about line 87) builds a provider with `createPullRequest` only; it gains `findOpenPullRequestByBranch` resolving `null` by default (overridable through the options), so the existing \"calls createPullRequest once\" cases keep their assertions."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts",
+          "reason": "`mockVcsProvider` (about line 153) gains `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)`, so the existing creation cases keep their assertions."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "87c756d67ec0d7ec694295cf79f69c430b070e56"
+    }
+  ],
+  "analysis": "This is a bounded maintenance release for the existing TypeScript NestJS/Fastify API, not a new service. The 2026-11-14 review graded koda B- (docs/20261114-review-whole-repo.md:37); the spec re-checks 13 API items on main 1fb137a83 on 2026-11-18 and excludes the already-fixed P0/P1 auth items. Repository graph tooling was unavailable in this session; findings below come from direct reads and searches. The API uses Nathapp for bootstrap, exceptions, and transaction management; Prisma 7 on PostgreSQL is behind repository interfaces; Vitest covers units and real-DB behavior (.nax/mono/apps/api/context.md:22). The API owns these behaviors and their English/Chinese messages. No new packages, schema changes, migrations, backfills, approval-policy changes, DTO/route shape changes, or CLI/web/runner changes are needed. Observable compatibility changes are intentional: exceptions on the agent API-key path now signal retry (503), stale approval or immutable-comment writes are refused, project streams close on the next denied heartbeat, and newly enrolled runners only receive server-authorized labels. Review pass setup supplies pollMs at apps/api/src/fleet/reviews/fleet-pr-review.pass.ts:98, while the flow consumes the HeadClaim union at apps/api/src/fleet/flows/fleet-flow-advance.service.ts:449; do not alter the pass-wide dispatch budget or flow result shape. The global permissions provider is already exported at apps/api/src/permissions/permissions.module.ts:61 and the project and workspace SSE controllers are registered together at apps/api/src/fleet/threads/threads.module.ts:26; controller injection needs no new module dependency. The existing Postgres uniqueness scopes are per ticket URL and per repo/PR/head (apps/api/prisma/schema.prisma:356 and apps/api/prisma/schema.prisma:951), so lookup recovery must not broaden either identity. The code does not make shared forge and database operations atomic: PR adoption fixes the lost-link retry, not every possible simultaneous external create. Keep the existing response envelopes and refresh/revocation semantics. Before a production rollout, check that JWT_SECRET, JWT_REFRESH_SECRET and API_KEY_SECRET already satisfy the new policy without logging them; koda-wk's deployed values are already 64 characters per spec. Do not rotate compliant secrets simply to deploy this feature. Existing ciphertexts produced by encryptToken remain readable; stored runner labels and existing workflow-comment rows are not rewritten. PR links and stale review claims are repaired lazily on subsequent eligible operations. The API's code and fixtures ship together: US-001 must land before US-010, US-005 before US-006, and US-006 before US-009. US-002 and US-010 both touch ticket-transitions.service.ts and its tests in different areas; preserve both edits when integrating parallel work. Keep verification in scoped Vitest suites, with Postgres integration and e2e cases run via the host DB-mode scoped command rather than treating sandbox skips as evidence.\n\nUS-001 / A/BUG-5 provider seam: apps/api/src/vcs/vcs-provider.ts:6 defines the contract. The existing authenticated list calls and mappers are at apps/api/src/vcs/providers/github.provider.ts:287 and :336 and apps/api/src/vcs/providers/gitlab.provider.ts:243 and :283; add a targeted branch lookup, not a change to general list behavior. GitLab's response type is at apps/api/src/vcs/providers/gitlab.provider.ts:44. Repo scope is important: a GitLab result must identify the same source and target project; two omitted IDs are not evidence that an MR is from the same project. The factory already returns these concrete providers and needs no new selection logic. The required method affects the typed mock classes in apps/api/src/vcs/vcs-provider.spec.ts:141 through :547 and the typed object factory in apps/api/src/code-intel/code-commit-outbox-handler.spec.ts:22. Mirror the existing github.provider.pagination.spec.ts and gitlab.provider.outbound.spec.ts HTTP-client harnesses for the new branch specs. Do not start invoking the new method until US-010.\n\nUS-002 / A/BUG-6: apps/api/src/tickets/tickets.controller.ts:245 chooses a route key/variant from an unlocked ticket read and includes ticket.update as a companion key when there is an edge. The registered command at apps/api/src/tickets/ticket-route.commands.ts:76 runs for immediate and approved execution; it already rechecks ticket.update for status commands and must keep doing so. Derive gatedEdgeKey from the registered command, not client data or a new route-side status read. apps/api/src/tickets/tickets.service.ts:282 checks the live permission before passing status and a deferred field patch to the transition. apps/api/src/tickets/state-machine/ticket-transitions.service.ts:740 loads the status, checks authority and validates; :788 guards the write by that same status; the field patch follows it in the transaction. Preserve the distinction between undefined (no guard parameter) and null (explicitly gated under the non-edge command), the existing skipEdgeCheck use at :473, and the route pre-check's possible 403 before the transition's 409. Compare keys, not timestamps or raw status: CREATED and VERIFIED both map to ticket.transition.start for IN_PROGRESS, while VERIFY_FIX maps to ticket.transition.verify-fix.return (apps/api/src/tickets/state-machine/transition-keys.ts:14). That makes VERIFY_FIX a suitable mismatched-edge fixture. Extend the registered-command suite (apps/api/src/tickets/ticket-route.commands.spec.ts:116 and :176), update and field-atomicity cases (apps/api/src/tickets/tickets.service.spec.ts:720), and public transition and conditional-write cases (apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts:918; apps/api/src/tickets/prisma-tickets.repository.spec.ts:5). Deferred approvals keep their existing failure settlement (apps/api/src/approvals/approval-execution.service.ts:231 and :281); no approval serialization or backfill.\n\nUS-003 / A/BUG-4: apps/api/src/ticket-links/ticket-links.service.ts:91 already returns the DTO with 200 for the same ticket/URL and 201 on insert; the controller maps 200 without an API-shape change (apps/api/src/ticket-links/ticket-links.controller.ts:64). Re-read the winning row without mutating creator or writing a second audit entry. Project checks and audited writes are in apps/api/src/projects/projects.service.ts:34 and :115, called by approval route commands (apps/api/src/projects/project-route.commands.ts:40). apps/api/src/audit/audit-recorder.service.ts:33 runs the write and audit together; handle a violation only outside that boundary. If an outer transaction already owns the write, let the original error propagate instead of trying to recover in the aborted transaction; apps/api/src/vcs/prisma-vcs.repository.ts:243 and :285 show an existing transaction-state guard for P2002. The generated-client P2002 matcher supports array targets and adapter index strings (apps/api/src/common/utils/prisma-errors.ts:9); check slug before key because Project_slug_key matches both substrings. Reuse the constraints at apps/api/prisma/schema.prisma:139 and :356, not new indexes. Extend apps/api/src/ticket-links/ticket-links.service.spec.ts:59 and apps/api/src/projects/projects.service.spec.ts:55, alongside existing pre-check contract examples in apps/api/test/unit/projects/projects-conflict-responses.spec.ts:84; generate real-shaped P2002 fixtures from the generated Prisma client.\n\nUS-004 / A/BUG-3, A/SEC-9, A/SEC-10, A/ENH-2: apps/api/src/auth/guards/combined-auth.guard.ts:25 separates public/runner paths; :46 catches tryApiKey and currently falls through, and :75 skips JWT-shaped tokens and unrecognized/offline agents. Leave runner isolation, JWT fallback on misses, and HMAC lookup unchanged. Reuse the localized 503 AppException style from apps/api/src/fleet/provider-credentials/provider-credentials.service.ts:402. apps/api/src/config/env.validation.ts:12 uses both production markers and already enforces refresh-secret separation and 64-hex encryption keys at :28. Update production fixtures in apps/api/src/config/env.validation.spec.ts:3 so placeholder-policy failures still exercise that policy, and keep short secrets valid in dev/test. apps/api/src/common/utils/encryption.util.ts:7 writes the iv:authTag:ciphertext format; :33 parses it and currently has no tag-length guard. VCS connection/sync and Fleet GitLab and provider credential stores use this helper (apps/api/src/vcs/vcs-connection.service.ts:7; apps/api/src/fleet/git-broker/gitlab-repo-credentials.ts:2; apps/api/src/fleet/provider-credentials/secret-store.ts:3). Verify compatibility through the existing encryption unit suite and use the guard unit suite to assert no JWT attempt on rejected lookup. apps/api/src/main.ts:53 calls ready then start; add the exported helper before start without disturbing guard/plugin/security wiring. API already depends on @nathapp/nestjs-app ~4.2.4 (apps/api/package.json:46); lifecycle consumers include apps/api/src/rag/hybrid-retriever.service.ts:81 and apps/api/src/vcs/vcs-webhook.service.ts:129. Unit-test the helper, review bootstrap wiring, and do not add an SSE-drain policy.\n\nUS-005 and US-006 / C/BUG-1: apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:208 shows the id-only read pattern, not the active-state filter to reuse. Match repo, REVIEW, and reviewFeature(prNumber) (apps/api/src/fleet/common/review-jobs.ts:3) with inclusive bounds on immutable createdAt, oldest first, selecting only id. FleetJob already has these fields and a repo/command/createdAt index (apps/api/prisma/schema.prisma:1158 and :1257); FleetPrReview already stores nullable jobId and a unique repo/PR/head claim (apps/api/prisma/schema.prisma:939). Extend the two interfaces and implementations; model conditional settlement on apps/api/src/fleet/reviews/prisma-fleet-pr-review.repository.ts:73, not the unconditional markDispatched at :59. Use the shared DB gate and transaction/repo wiring demonstrated by apps/api/test/integration/fleet/fleet-pr-review.integration.spec.ts:12 and :47. For consumers, apps/api/src/fleet/reviews/review-head-dispatcher.ts:56 derives the stale boundary and :86 reopens; :134 can leave a pending row after a job already exists. A failed job lookup must be handled per PR, not at the whole repo pass, and recovery must not spend a dispatch attempt. The flow claim path (apps/api/src/fleet/reviews/fleet-review-claim.service.ts:19) already re-reads after losing a conditional stale removal; reuse its outcome precedence for a lost conditional link. Fleet flow advancement consumes this service at apps/api/src/fleet/flows/fleet-flow-advance.service.ts:81 and :473. FleetReviewsModule already imports FleetJobsModule and exports the claim service (apps/api/src/fleet/reviews/fleet-reviews.module.ts:31 and :46; jobs module exports FleetJobsService at apps/api/src/fleet/jobs/fleet-jobs.module.ts:53). No new module or dispatch transaction is needed. Update both review test harnesses (apps/api/src/fleet/reviews/review-head-dispatcher.spec.ts:79 and apps/api/src/fleet/reviews/fleet-review-claim.service.spec.ts:21); keep no-match stale retries covered. Test the date window against claim creation rather than current time. FleetJob has no PR head SHA, so repo/PR/time matches are deliberately not unique proof of the head and terminal jobs count as evidence of dispatch.\n\nUS-007 / C/PERF-2: apps/api/src/memory/prisma-memory-item.repository.ts:628 uses the ranked result total to decide whether to fall through to any-word or contains search. Never infer zero from an empty page past page 1; the query may match on earlier pages. At :656 retain the same filtering/order and Page construction, run the id query first, and count only full or later empty pages. At :706 hydration may omit deleted rows; use the id count, not hydrated record count. Full pages now do two sequential reads, a deliberate trade-off for avoiding the aggregate on short pages. Adjust existing raw-query counts and queues in apps/api/src/memory/memory-item-repository.spec.ts:369, :388, :434, and :477; preserve both search fallbacks and rank-order assertions.\n\nUS-008 / A/ENH-1, B/SEC-5, B/SEC-3: the project SSE guard already checks member + thread.read (apps/api/src/fleet/threads/thread-events.controller.ts:44); the controller's heartbeat at :100 reloads the principal and currently checks membership only. PermissionService is already available to the guard in the same ThreadsModule (apps/api/src/fleet/threads/threads.module.ts:25). Reuse it after fresh membership; apps/api/src/live/live-stream.ts:45 completes on false/rejection and :66 releases resources. Extend the guard-only suite with fake timers and actual Observable completion/heartbeat checks, leaving workspace SSE untouched. Enrollment token consumption, runner creation and activity happen in one transaction at apps/api/src/fleet/runners/enrollment.service.ts:50 through :90. Placement reads stored labels (apps/api/src/fleet/jobs/placement-rules.ts:221); preserve input compatibility but ignore non-enrollment labels and record them in the existing activity without adding secrets. Update the merge fixture (apps/api/src/fleet/runners/enrollment.service.spec.ts:77) and runner /me result (apps/api/test/integration/fleet/runner-enrollment.integration.spec.ts:68). Workflow edit is already refused after membership in apps/api/src/comments/comments.service.ts:53 and :227; extend both the pre-gate resolver and the direct delete at :250 with a distinct localized conflict, preserving membership concealment and GENERAL ownership rules. apps/api/src/comments/comments.controller.ts:155 must pass 'delete'; registered commands consume the service too (apps/api/src/comments/comment-route.commands.ts:28). The existing controller delete assertion expects two arguments (apps/api/src/comments/comments.controller.spec.ts:161); update it and verify no gate call for workflow comments. Extend service cases at apps/api/src/comments/comments.service.spec.ts:839 and add DELETE next to the PATCH workflow case in apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:1217.\n\nUS-009 / C/STYLE-1: apps/api/src/fleet/reviews/review-head-dispatcher.ts:118 and apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts:119 branch on localized exception payloads; the duplicates at :139 and :169 assume getResponse exists. Extract only the payload helper, keep classification decisions in each caller and verify both with the existing dispatcher and subscriber harnesses (apps/api/src/fleet/reviews/review-head-dispatcher.spec.ts:79; apps/api/src/fleet/reviews/fix-follow-up.subscriber.spec.ts:45). Test the exported helper for plain Error and structured responses. Review that both private copies are gone and run the spec's type-check/lint checks separately from behavioral acceptance.\n\nUS-010 / A/BUG-5 consumer: apps/api/src/tickets/state-machine/ticket-transitions.service.ts:206 routes VCS work through AfterCommitService and :845 calls it for VERIFIED. The existing Fleet-ownership and PR-link guards at :299 and :319 precede connection/default-branch lookup; leave their short-circuits alone. At :341 add the branch-scoped lookup, use its first eligible PR to build the ticket link and run the same extractor, and distinguish adoption from creation so the activity ledger stays accurate. Lookup error must log and stop VCS work without rejecting verify; it is not a miss. This recovers an orphan on the next eligible VERIFIED cycle, not a blanket concurrency guarantee across two provider create calls. Use the public verify seam and provider override harness at apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts:87. Update provider doubles in apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts:1330 and :1390 and both setup paths in apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts:148 and :386, keeping creation and rollback regressions.",
+  "outOfScope": [
+    "The tool-relay fence race (B/BUG-3): accepted as is by owner ruling 2026-11-18.",
+    "Removing `fleet.thread.preapprove` from the Developer role (A/SEC-13): kept by owner ruling 2026-11-18.",
+    "Re-labelling runners that are already enrolled; only new enrollments change.",
+    "Retrying the `TicketLink` write after a successful PR create; the next VERIFIED cycle adopts the PR instead.",
+    "Adopting a closed or merged PR on the ticket's branch; only an open PR is adopted.",
+    "Approximate or capped memory totals; a full ranked page still counts exactly.",
+    "US-003 only: recovering a ticket-link or project unique violation for a caller that is already inside an outer transaction (the violation aborts that transaction, so the error propagates as before).",
+    "US-004 only: bounding how long an open SSE stream can delay `app.close()` after `SIGTERM`.",
+    "US-006 only: telling another REVIEW job of the same PR (a manual REVIEW, or one for a different head), dispatched inside a stale claim's dispatch window, from that claim's own job; `FleetJob` carries no head SHA, so such a job also settles the claim.",
+    "The workspace thread event stream (`workspace-thread-events.controller.ts`), whose `stillAllowed` is also membership-only; only the project thread stream gains the `thread.read` re-check here.",
+    "US-004 only: a test that boots `main.ts`; the `enableGracefulShutdown(app)` call in `main.ts` is checked by review.",
+    "US-004 only: a minimum length for `VCS_ENCRYPTION_KEY` or `PROVIDER_CREDENTIAL_ENCRYPTION_KEY`; both are already exactly 64 hex characters.",
+    "The other 2026-11-14 review items: the runner, web, CI and deploy fixes are a separate feature, and the ruling-dependent items wait for their rulings."
+  ],
+  "routingProfile": "native-codex-dsm"
+}

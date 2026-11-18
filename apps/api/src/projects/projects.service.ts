@@ -15,6 +15,7 @@ import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
 import { AfterCommitService } from '../permissions/after-commit.service';
 import { PROJECT_SOFT_DELETED, type ProjectSoftDeletedEvent } from './project-events';
+import { isUniqueViolation } from '../common/utils/prisma-errors';
 
 @Injectable()
 export class ProjectsService {
@@ -62,18 +63,24 @@ export class ProjectsService {
     }
 
     // Create project
-    return this.audit.audited(
-      async () => ProjectResponseDto.from(await this.projectRepo.createProject({
-        name: createProjectDto.name,
-        slug: createProjectDto.slug,
-        key: createProjectDto.key,
-        description: createProjectDto.description,
-        gitRemoteUrl: createProjectDto.gitRemoteUrl,
-        autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
-        autoAssign: createProjectDto.autoAssign ?? 'OFF',
-      })),
-      (project) => ({ key: 'project.create', resourceType: 'project', resourceId: project.id, projectId: project.id, summary: `created ${project.key}` }),
-    );
+    try {
+      return await this.audit.audited(
+        async () => ProjectResponseDto.from(await this.projectRepo.createProject({
+          name: createProjectDto.name,
+          slug: createProjectDto.slug,
+          key: createProjectDto.key,
+          description: createProjectDto.description,
+          gitRemoteUrl: createProjectDto.gitRemoteUrl,
+          autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
+          autoAssign: createProjectDto.autoAssign ?? 'OFF',
+        })),
+        (project) => ({ key: 'project.create', resourceType: 'project', resourceId: project.id, projectId: project.id, summary: `created ${project.key}` }),
+      );
+    } catch (error) {
+      if (this.audit.isInTransaction()) throw error;
+      this.throwUniqueProjectConflict(error);
+      throw error;
+    }
   }
 
   /**
@@ -164,21 +171,28 @@ export class ProjectsService {
     }
 
     // Update project
-    const updatedProject = await this.audit.audited(
-      () => this.projectRepo.updateBySlug(slug, {
-        name: updateProjectDto.name,
-        slug: updateProjectDto.slug,
-        key: updateProjectDto.key,
-        description: updateProjectDto.description,
-        brief: updateProjectDto.brief,
-        gitRemoteUrl: updateProjectDto.gitRemoteUrl,
-        autoIndexOnClose: updateProjectDto.autoIndexOnClose,
-        autoAssign: updateProjectDto.autoAssign,
-        ciWebhookToken: updateProjectDto.ciWebhookToken,
-        graphifyEnabled: updateProjectDto.graphifyEnabled,
-      }),
-      (project) => ({ key: 'project.update', resourceType: 'project', resourceId: project.id, projectId: project.id, summary: fieldsSummary(updateProjectDto) }),
-    );
+    let updatedProject: ProjectDomain;
+    try {
+      updatedProject = await this.audit.audited(
+        () => this.projectRepo.updateBySlug(slug, {
+          name: updateProjectDto.name,
+          slug: updateProjectDto.slug,
+          key: updateProjectDto.key,
+          description: updateProjectDto.description,
+          brief: updateProjectDto.brief,
+          gitRemoteUrl: updateProjectDto.gitRemoteUrl,
+          autoIndexOnClose: updateProjectDto.autoIndexOnClose,
+          autoAssign: updateProjectDto.autoAssign,
+          ciWebhookToken: updateProjectDto.ciWebhookToken,
+          graphifyEnabled: updateProjectDto.graphifyEnabled,
+        }),
+        (project) => ({ key: 'project.update', resourceType: 'project', resourceId: project.id, projectId: project.id, summary: fieldsSummary(updateProjectDto) }),
+      );
+    } catch (error) {
+      if (this.audit.isInTransaction()) throw error;
+      this.throwUniqueProjectConflict(error);
+      throw error;
+    }
 
     // Handle graphifyEnabled transition from true to false
     if (
@@ -202,6 +216,16 @@ export class ProjectsService {
     }
 
     return ProjectResponseDto.from(updatedProject);
+  }
+
+  private throwUniqueProjectConflict(error: unknown): void {
+    // Test slug first: the Project_slug_key index name also contains "key".
+    if (isUniqueViolation(error, 'slug')) {
+      throw new ConflictAppException({ field: 'slug' }, 'projects');
+    }
+    if (isUniqueViolation(error, 'key')) {
+      throw new ConflictAppException({ field: 'key' }, 'projects');
+    }
   }
 
   findProjectIdBySlug(slug: string): Promise<string> {

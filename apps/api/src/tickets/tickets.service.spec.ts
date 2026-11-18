@@ -804,6 +804,7 @@ describe('TicketsService', () => {
         mockUserPrincipal,
         undefined,
       );
+      expect(mockTransitionsService.executeTransitionPublic.mock.calls[0]).toHaveLength(5);
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
       // Permissions P1 (US-003): the edge key of the requested status is checked first.
       expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
@@ -813,6 +814,36 @@ describe('TicketsService', () => {
         mockUserPrincipal,
       );
       // No direct status write through the repo
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+    });
+
+    it('US-002 AC-3: forwards a supplied gated edge key to the transition', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockTicket, status: TicketStatus.IN_PROGRESS },
+      });
+      const options = { gatedEdgeKey: 'ticket.transition.start' };
+
+      await service.update('koda', 'KODA-1', { status: TicketStatus.IN_PROGRESS }, mockUserPrincipal, options);
+
+      expect(mockTransitionsService.executeTransitionPublic.mock.calls[0]).toHaveLength(6);
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda', 'KODA-1', TicketStatus.IN_PROGRESS, mockUserPrincipal, undefined, options,
+      );
+    });
+
+    it('US-002 AC-11: live pre-check refusal prevents transition and field writes', async () => {
+      const liveTicket = { ...mockTicket, status: TicketStatus.VERIFY_FIX };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(liveTicket);
+      mockTransitionsService.assertTransitionAllowed.mockRejectedValue(new ForbiddenAppException({}, 'permissions'));
+
+      await expect(service.update(
+        'koda', 'KODA-1', { title: 'must not write', status: TicketStatus.IN_PROGRESS }, mockUserPrincipal,
+        { gatedEdgeKey: 'ticket.transition.start' },
+      )).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
       expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
     });
 

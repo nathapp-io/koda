@@ -11,6 +11,7 @@ import type { RunnerCapabilities, BashMode, RuleOverrideAssign } from '../common
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import type { ThreadAssign } from '../common/thread-jobs';
 import { PROJECT_CODE_LIMITS, THREAD_LIMITS } from '../common/thread-jobs';
+import { reviewFeature } from '../common/review-jobs';
 import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assistant/actions/outcome-delivery';
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import { handoffRecordOf } from '../common/handoff-record';
@@ -208,6 +209,20 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findActiveJobId(repoId: string, feature: string): Promise<string | null> {
     const row = await this.db.fleetJob.findFirst({
       where: { repoId, feature, state: { in: [...ACTIVE_STATES] } },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
+  async findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null> {
+    const row = await this.db.fleetJob.findFirst({
+      where: {
+        repoId,
+        command: FleetJobKind.REVIEW,
+        feature: reviewFeature(prNumber),
+        createdAt: { gte: from, lte: to },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: { id: true },
     });
     return row?.id ?? null;

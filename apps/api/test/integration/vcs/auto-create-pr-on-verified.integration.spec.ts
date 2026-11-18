@@ -150,6 +150,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       fetchIssue: vi.fn(),
       testConnection: vi.fn(),
       getDefaultBranch: vi.fn(),
+      findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
       createPullRequest: vi.fn(),
     };
 
@@ -388,6 +389,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         fetchIssue: vi.fn(),
         testConnection: vi.fn(),
         getDefaultBranch: vi.fn().mockResolvedValue('main'),
+        findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
         createPullRequest: vi.fn(),
       };
 

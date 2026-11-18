@@ -31,7 +31,7 @@ const payload = (over: Partial<FleetJobRecord> = {}): FixFollowUpPayload =>
   buildFixFollowUpPayload(fixJob(over), 22, HEAD_SHA);
 
 const claimRow = (over: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord => ({
-  id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: HEAD_SHA, jobId: null, outcome: 'pending',
+  id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: HEAD_SHA, jobId: null, outcome: 'pending', followUpEventId: null,
   createdAt: new Date(0), updatedAt: new Date(0), ...over,
 });
 
@@ -48,13 +48,24 @@ function createSubscriber() {
   const writeReasons: (BookkeepingReason | undefined)[] = [];
   const reviews = {
     findPrincipalAccess: vi.fn(async () => ({ exists: true, disabled: false })),
-    insertPending: vi.fn(async (): Promise<FleetPrReviewRecord | null> => {
+    findHead: vi.fn<() => Promise<FleetPrReviewRecord | null>>().mockResolvedValue(null),
+    insertPending: vi.fn(async (_repoId: string, _pr: number, _sha: string, followUpEventId: string): Promise<FleetPrReviewRecord | null> => {
       writeReasons.push(currentBookkeepingReason());
-      return claimRow();
+      return claimRow({ followUpEventId });
     }),
     markDispatched: vi.fn(async (): Promise<void> => {
       writeReasons.push(currentBookkeepingReason());
     }),
+    /**
+     * Review B4 (fix round 2): the claim link now runs inside the job insert's transaction (the fence), never after
+     * the commit, so a stale-claim sweep cannot delete the claim between the job and its link.
+     */
+    markDispatchedIfPending: vi.fn(async (_claimId: string, _jobId: string): Promise<boolean> => {
+      writeReasons.push(currentBookkeepingReason());
+      return true;
+    }),
+    markFailed: vi.fn(async (): Promise<void> => undefined),
+    remove: vi.fn(async (_id: string): Promise<void> => undefined),
   };
 
   /** The action context each `dispatch` call ran in, read from inside the call itself. */
@@ -64,9 +75,11 @@ function createSubscriber() {
       _actorId: string,
       _projectId: string,
       _dto: { command?: string },
-      _opts?: { auditKey?: string },
+      opts?: { auditKey?: string; fence?: (jobId: string) => Promise<void> },
     ): Promise<{ job: { id: string } }> => {
       contexts.push(currentContext());
+      // The real `FleetJobsService.dispatch` runs the fence inside the job insert's transaction.
+      if (opts?.fence !== undefined) await opts.fence('rev-1');
       return { job: { id: 'rev-1' } };
     }),
   };
@@ -162,7 +175,7 @@ describe('FixFollowUpSubscriber', () => {
 
     await subscriber.handle(payload());
 
-    expect(reviews.insertPending).toHaveBeenCalledExactlyOnceWith('r1', 22, HEAD_SHA);
+    expect(reviews.insertPending).toHaveBeenCalledExactlyOnceWith('r1', 22, HEAD_SHA, 'fix-1:3:fix-follow-up');
   });
 
   it('AC-5: dispatches the follow-up REVIEW with the payload values and the new audit key', async () => {
@@ -174,7 +187,7 @@ describe('FixFollowUpSubscriber', () => {
       'u1',
       'p1',
       { command: 'REVIEW', repoId: 'r1', prNumber: 22, profiles: ['balanced', 'security'], maxCostUsd: 1.25 },
-      { auditKey: 'system.pr-fix.follow-up' },
+      expect.objectContaining({ auditKey: 'system.pr-fix.follow-up', fence: expect.any(Function) }),
     );
   });
 
@@ -194,12 +207,128 @@ describe('FixFollowUpSubscriber', () => {
     expect(contexts[0]?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
   });
 
-  it('AC-8: records the review job on the claim', async () => {
+  it('AC-8: links the review job to the claim inside the dispatch (the fence), never after it', async () => {
     const { subscriber, reviews }: Harness = createSubscriber();
 
     await subscriber.handle(payload());
 
-    expect(reviews.markDispatched).toHaveBeenCalledExactlyOnceWith('claim-1', 'rev-1');
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledExactlyOnceWith('claim-1', 'rev-1');
+    expect(reviews.markDispatched).not.toHaveBeenCalled();
+  });
+
+  it('records a claim_lost skip when another delivery has already linked the review', async () => {
+    const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
+    reviews.markDispatchedIfPending.mockResolvedValue(false);
+    reviews.findHead.mockResolvedValue(claimRow({
+      followUpEventId: 'fix-1:3:fix-follow-up', outcome: 'dispatched', jobId: 'winner',
+    }));
+
+    await expect(subscriber.handle(payload())).resolves.toBeUndefined();
+
+    expect(jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(reviews.markFailed).not.toHaveBeenCalled();
+    expect(audits).toEqual([{
+      input: {
+        key: 'system.pr-fix.follow-up',
+        resourceType: 'fleet-job',
+        resourceId: 'fix-1',
+        projectId: 'p1',
+        summary: 'follow-up review skipped: claim_lost',
+      },
+      inTransaction: true,
+    }]);
+  });
+
+  it('retries when an expired delivery removes the shared claim before the current delivery fences it', async () => {
+    const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
+    const event = payload();
+    let claim: FleetPrReviewRecord | null = null;
+    let nextClaim = 0;
+    const committed: string[] = [];
+    reviews.insertPending.mockImplementation(async (_repo, _pr, _sha, followUpEventId) => {
+      if (claim !== null) return null;
+      claim = claimRow({ id: `claim-${++nextClaim}`, followUpEventId });
+      return claim;
+    });
+    reviews.findHead.mockImplementation(async () => claim);
+    reviews.remove.mockImplementation(async (id) => {
+      if (claim?.id === id && claim.outcome === 'pending' && claim.jobId === null) claim = null;
+    });
+    reviews.markDispatchedIfPending.mockImplementation(async (id, jobId) => {
+      if (claim?.id !== id || claim.outcome !== 'pending' || claim.jobId !== null) return false;
+      claim = { ...claim, outcome: 'dispatched', jobId };
+      return true;
+    });
+
+    let startExpired!: () => void;
+    const expiredStarted = new Promise<void>((resolve) => { startExpired = resolve; });
+    let finishExpired!: () => void;
+    const expiredMayFail = new Promise<void>((resolve) => { finishExpired = resolve; });
+    jobs.dispatch.mockImplementationOnce(async () => {
+      startExpired();
+      await expiredMayFail;
+      throw new Error('expired delivery dispatch failed');
+    });
+    const expired = subscriber.handle(event);
+    await expiredStarted;
+
+    jobs.dispatch.mockImplementation(async (_actor, _project, _dto, opts) => {
+      finishExpired();
+      await expired;
+      await opts?.fence?.('rev-1');
+      committed.push('rev-1');
+      return { job: { id: 'rev-1' } };
+    });
+
+    await expect(subscriber.handle(event)).rejects.toMatchObject({ name: 'ReviewClaimLostError' });
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledExactlyOnceWith('claim-1', 'rev-1');
+    expect(claim).toBeNull();
+    expect(committed).toEqual([]);
+    expect(audits.map(({ input }) => input.summary)).toEqual(['follow-up review skipped: dispatch_error']);
+
+    await expect(subscriber.handle(event)).resolves.toBeUndefined();
+    expect(committed).toEqual(['rev-1']);
+    expect(claim).toMatchObject({ id: 'claim-2', outcome: 'dispatched', jobId: 'rev-1' });
+  });
+
+  it('rethrows the original fence failure and resumes the same claim on redelivery', async () => {
+    const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
+    const linkFailure = new Error('link db down');
+    const event = payload();
+    const committed: { id: string; command?: string }[] = [];
+    let claim: FleetPrReviewRecord | null = null;
+    reviews.insertPending.mockImplementation(async (_repo, _pr, _sha, followUpEventId) => {
+      if (claim !== null) return null;
+      claim = claimRow({ followUpEventId });
+      return claim;
+    });
+    reviews.findHead.mockImplementation(async () => claim);
+    reviews.markDispatchedIfPending
+      .mockRejectedValueOnce(linkFailure)
+      .mockImplementation(async (claimId, jobId) => {
+        if (claim?.id !== claimId || claim.outcome !== 'pending' || claim.jobId !== null) return false;
+        claim = { ...claim, jobId, outcome: 'dispatched' };
+        return true;
+      });
+    jobs.dispatch.mockImplementation(async (_actor, _project, dto, opts) => {
+      await opts?.fence?.('rev-1');
+      committed.push({ id: 'rev-1', command: dto.command });
+      return { job: { id: 'rev-1' } };
+    });
+
+    await expect(subscriber.handle(event)).rejects.toBe(linkFailure);
+    expect(committed).toEqual([]);
+    expect(audits).toEqual([]);
+
+    // Another FIX attempt must not resume the first attempt's pending claim.
+    await subscriber.handle({ ...event, leaseEpoch: event.leaseEpoch + 1 });
+    expect(jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(audits[0]?.input.summary).toBe('follow-up review skipped: head_already_claimed');
+
+    await subscriber.handle(event);
+    expect(committed).toEqual([{ id: 'rev-1', command: 'REVIEW' }]);
+    expect(claim).toMatchObject({ id: 'claim-1', jobId: 'rev-1', outcome: 'dispatched' });
+    expect(audits[1]?.input.summary).toBe('follow-up review dispatched: rev-1');
   });
 
   it('AC-9: writes one audit entry on the FIX job, inside a transaction', async () => {
@@ -237,9 +366,9 @@ describe('FixFollowUpSubscriber', () => {
     await expect(subscriber.handle(payload())).rejects.toThrow('db down');
   });
 
-  it('AC-14: a mark that rejects with a database error after a dispatch makes the handler reject', async () => {
+  it('AC-14: a claim link that rejects with a database error inside the dispatch makes the handler reject', async () => {
     const { subscriber, reviews, jobs }: Harness = createSubscriber();
-    reviews.markDispatched.mockRejectedValue(new Error('db down'));
+    reviews.markDispatchedIfPending.mockRejectedValue(new Error('db down'));
 
     await expect(subscriber.handle(payload())).rejects.toThrow('db down');
     expect(jobs.dispatch).toHaveBeenCalledTimes(1);

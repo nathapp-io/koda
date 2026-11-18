@@ -154,6 +154,22 @@ describe('Token Encryption Utility', () => {
       expect(() => decryptToken(invalidCiphertext, masterKey)).toThrow();
     });
 
+    it('rejects a 12-byte auth tag before decrypting (review US-004)', () => {
+      const segments = encryptToken(plaintext, masterKey).split(':');
+      const shortTag = segments[1].slice(0, 24); // 12 bytes of hex
+      const ciphertext = [segments[0], shortTag, segments[2]].join(':');
+
+      expect(() => decryptToken(ciphertext, masterKey)).toThrow(
+        'Invalid ciphertext format: auth tag must be 16 bytes',
+      );
+    });
+
+    it('round-trips unmodified encryptToken output with the matching key (review US-004)', () => {
+      const encrypted = encryptToken(plaintext, masterKey);
+
+      expect(decryptToken(encrypted, masterKey)).toBe(plaintext);
+    });
+
     it('works with empty string plaintext', () => {
       const encrypted = encryptToken('', masterKey);
       const decrypted = decryptToken(encrypted, masterKey);

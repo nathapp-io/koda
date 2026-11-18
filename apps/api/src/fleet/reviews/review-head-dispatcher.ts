@@ -6,6 +6,9 @@ import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import type { OpenPullRequest } from '../git-broker/github-app-client';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { exceptionResponse } from './dispatch-error';
+import { reviewClaimFence } from './review-claim-fence';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 import type { FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import {
   FLEET_PR_REVIEW_REPOSITORY,
@@ -16,7 +19,10 @@ import {
 /** What one repo's pass needs: the pass time, one poll interval, and the calls it may still make (spec call 9). */
 export interface DispatchRepoOptions {
   now: Date;
-  /** `prReviewPollMs`: a `pending` row older than this is a claim a dead pass left behind (spec call 8). */
+  /**
+   * `prReviewPollMs`: a `pending` row older than this is a claim a dead pass left behind (spec call 8). It also
+   * bounds the stale claim's job lookup window (US-006).
+   */
   pollMs: number;
   /** Dispatch calls this repo may still make, the pass's `prReviewMaxDispatch` accounting for earlier repos. */
   remaining: number;
@@ -60,7 +66,7 @@ export class ReviewHeadDispatcher {
 
     for (const pr of ordered) {
       if (skips(repo, pr)) continue;
-      if (!(await this.headIsOpen(repo, pr, staleBefore))) continue;
+      if (!(await this.headIsOpen(repo, pr, staleBefore, opts.pollMs))) continue;
       if (calls >= opts.remaining) break;
       const pending = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.insertPending(repo.id, pr.number, pr.headSha));
       if (pending === null) continue;
@@ -76,29 +82,49 @@ export class ReviewHeadDispatcher {
   /**
    * Call 6: a `dispatched` or `failed:` row settles the head for good; a `pending` row still inside one poll
    * interval belongs to a running pass. An older one is a claim whose pass died between insert and dispatch
-   * (call 8), so it is removed and the head is handled as new.
+   * (call 8): US-006 first looks for the job that pass may already have created, and only removes the claim
+   * when none is found.
    */
-  private async headIsOpen(repo: FleetRepoRecord, pr: OpenPullRequest, staleBefore: number): Promise<boolean> {
+  private async headIsOpen(repo: FleetRepoRecord, pr: OpenPullRequest, staleBefore: number, pollMs: number): Promise<boolean> {
     const row = await this.reviews.findHead(repo.id, pr.number, pr.headSha);
-    return row === null || (await this.reopenStaleClaim(row, staleBefore));
-  }
-
-  private async reopenStaleClaim(row: FleetPrReviewRecord, staleBefore: number): Promise<boolean> {
-    if (row.outcome !== PENDING) return false;
-    if (row.createdAt.getTime() >= staleBefore) return false;
-    await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(row.id));
-    return true;
+    return row === null || (await this.reopenStaleClaim(row, staleBefore, pollMs));
   }
 
   /**
-   * Call 5 and, on success, the job link: the review is dispatched on the enabler's behalf, then the claim
-   * records its job. Retryable failures remove the claim; permanent failures settle it as failed.
-   * Returns true only when a shared project budget pause should stop this repo's pass.
+   * US-006: a job created inside the claim's dispatch window is this head's job (the pass dispatches within
+   * seconds of its insert), so the claim is linked to it and the head is settled. The link is conditional, so
+   * a claim another pass settled or removed in the meantime is left alone and no job is dispatched twice.
+   * A lookup that fails leaves the claim as it is for this pass: the PR is skipped, not unclaimed.
+   *
+   * The removal is conditional for the same reason: another stale-claim path can link a job between this
+   * lookup and the delete, and an unconditional delete would drop that freshly settled claim and let the head
+   * be dispatched again. Only a removal this pass actually made reopens the head.
+   */
+  private async reopenStaleClaim(row: FleetPrReviewRecord, staleBefore: number, pollMs: number): Promise<boolean> {
+    if (row.outcome !== PENDING) return false;
+    if (row.createdAt.getTime() >= staleBefore) return false;
+    let jobId: string | null;
+    try {
+      jobId = await this.jobs.findReviewJobIdBetween(row.repoId, row.prNumber, row.createdAt, new Date(row.createdAt.getTime() + pollMs));
+    } catch (error) {
+      this.logger.warn(`Review job lookup failed for repo ${row.repoId} PR ${row.prNumber}: ${error instanceof Error ? error.constructor.name : 'UnknownError'}`);
+      return false;
+    }
+    if (jobId !== null) {
+      await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatchedIfPending(row.id, jobId));
+      return false;
+    }
+    return await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.removeStalePending(row.id, new Date(staleBefore)));
+  }
+
+  /**
+   * Call 5 and, on success, the job link: the review is dispatched on the enabler's behalf, and the claim records
+   * its job inside that same insert transaction (the fence). Retryable failures remove the claim; permanent
+   * failures settle it as failed. Returns true only when a shared project budget pause should stop this repo's pass.
    */
   private async dispatch(actorId: string, repo: FleetRepoRecord, pr: OpenPullRequest, pending: FleetPrReviewRecord): Promise<boolean> {
-    let result: Awaited<ReturnType<FleetJobsService['dispatch']>>;
     try {
-      result = await this.jobs.dispatch(
+      await this.jobs.dispatch(
         actorId,
         repo.projectId,
         {
@@ -108,19 +134,29 @@ export class ReviewHeadDispatcher {
           profiles: repo.autoReviewProfiles,
           maxCostUsd: Number(repo.autoReviewMaxCostUsd),
         },
-        { auditKey: 'system.pr-review.dispatch' },
+        {
+          auditKey: 'system.pr-review.dispatch',
+          // Review B4: the claim is fenced on the insert. A stale-claim sweep reads its job lookup before this
+          // insert commits, so its conditional delete can land between the lookup and here; when it does, the
+          // claim is gone and this fence loses, rolling the job back rather than leaving a job no claim owns.
+          // When this fence wins, the claim is `dispatched` with this job id in the same commit, so that sweep's
+          // delete matches no row and cannot drop it.
+          fence: reviewClaimFence(this.reviews, pending.id),
+        },
       );
     } catch (error) {
+      if (error instanceof ReviewClaimLostError) return false;
+      if (error instanceof ReviewClaimFenceError) throw error.cause;
       if (error instanceof BudgetPausedException) {
         await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
         return true;
       }
-      if (error instanceof ConflictAppException && getExceptionResponse(error).prefix === 'fleet.jobs') {
+      if (error instanceof ConflictAppException && exceptionResponse(error).prefix === 'fleet.jobs') {
         await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
         return false;
       }
       if (error instanceof ValidationAppException || error instanceof NotFoundAppException || error instanceof FleetDispatchException) {
-        const response = getExceptionResponse(error);
+        const response = exceptionResponse(error);
         const reason = error instanceof ValidationAppException && typeof response.args?.reason === 'string'
           ? response.args.reason
           : error.constructor.name;
@@ -131,15 +167,8 @@ export class ReviewHeadDispatcher {
       await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
       return false;
     }
-    await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatched(pending.id, result.job.id));
     return false;
   }
-}
-
-function getExceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> } {
-  const response: unknown = (error as Error & { getResponse: () => unknown }).getResponse();
-  if (typeof response !== 'object' || response === null) return {};
-  return response as { prefix?: string; args?: Record<string, unknown> };
 }
 
 /** Call 5: exclude drafts, forks/deleted heads and PRs predating auto-review enablement. */

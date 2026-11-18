@@ -1,4 +1,5 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { Prisma } from '../generated/prisma/client';
 import { TicketLinksService } from './ticket-links.service';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkDomain } from './domain/ticket-link.domain';
@@ -22,6 +23,7 @@ describe('TicketLinksService', () => {
 
   const mockPermissions = { can: vi.fn() };
   const mockAudit = {
+    isInTransaction: vi.fn(() => false),
     record: vi.fn(async () => undefined),
     audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()),
   };
@@ -56,6 +58,8 @@ describe('TicketLinksService', () => {
   };
 
   beforeEach(() => {
+    mockAudit.isInTransaction.mockReset().mockReturnValue(false);
+    mockAudit.audited.mockReset().mockImplementation(async <T>(fn: () => Promise<T>) => fn());
     service = new TicketLinksService(
       mockTicketLinkRepo as unknown as ConstructorParameters<typeof TicketLinksService>[0],
       mockPermissions as unknown as PermissionService,
@@ -91,6 +95,62 @@ describe('TicketLinksService', () => {
   });
 
   describe('create', () => {
+    const uniqueUrlViolation = () => new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: 'test', meta: { target: ['url'] },
+    });
+
+    it('AC-1: returns the winning link after an audited URL conflict', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValueOnce(null).mockResolvedValueOnce(mockLink);
+      mockAudit.audited.mockImplementation(async (fn) => fn());
+      mockTicketLinkRepo.createLink.mockRejectedValue(uniqueUrlViolation());
+
+      const result = await service.create('koda', 'KODA-1', { url: mockLink.url });
+
+      expect(result.status).toBe(200);
+      expectLinkDto(result.link, mockLink);
+      expect(mockTicketLinkRepo.findLinkByUrl).toHaveBeenCalledTimes(2);
+      expect(mockTicketLinkRepo.findLinkByUrl).toHaveBeenLastCalledWith('ticket-123', mockLink.url);
+    });
+
+    it('AC-2: propagates the original URL conflict when the recovery lookup is empty', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockAudit.audited.mockImplementation(async (fn) => fn());
+      const error = uniqueUrlViolation();
+      mockTicketLinkRepo.createLink.mockRejectedValue(error);
+
+      await expect(service.create('koda', 'KODA-1', { url: mockLink.url })).rejects.toBe(error);
+      expect(mockTicketLinkRepo.findLinkByUrl).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not recover a URL conflict while the caller transaction remains active', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockAudit.isInTransaction.mockReturnValue(true);
+      mockAudit.audited.mockImplementation(async (fn) => fn());
+      const error = uniqueUrlViolation();
+      mockTicketLinkRepo.createLink.mockRejectedValue(error);
+
+      await expect(service.create('koda', 'KODA-1', { url: mockLink.url })).rejects.toBe(error);
+      expect(mockTicketLinkRepo.findLinkByUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-3/AC-4: propagates unrelated audited errors without another URL lookup', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockAudit.audited.mockImplementation(async (fn) => fn());
+      const error = new Error('audit failed');
+      mockTicketLinkRepo.createLink.mockRejectedValue(error);
+
+      await expect(service.create('koda', 'KODA-1', { url: mockLink.url })).rejects.toBe(error);
+      expect(mockTicketLinkRepo.findLinkByUrl).toHaveBeenCalledTimes(1);
+    });
+
     it('creates a new link for a GitHub PR URL and returns status 201', async () => {
       const dto: CreateTicketLinkDto = {
         url: 'https://github.com/owner/repo/pull/1',

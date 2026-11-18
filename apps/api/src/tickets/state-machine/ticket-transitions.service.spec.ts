@@ -956,6 +956,53 @@ describe('TicketTransitionsService', () => {
       );
     });
 
+    it('US-002 AC-4/5: stale gated edge wins over denied live-edge permission without writing', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue({ ...mockTicket, status: TicketStatus.VERIFY_FIX });
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+      const fields = vi.fn();
+
+      await expect(service.executeTransitionPublic(
+        'koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal(), fields,
+        { gatedEdgeKey: 'ticket.transition.start' },
+      )).rejects.toMatchObject({ status: HttpStatus.CONFLICT, response: 'Ticket state changed concurrently' });
+      expect(fields).not.toHaveBeenCalled();
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+    });
+
+    it('US-002 AC-6: a matching gated edge uses the loaded status in the conditional write', async () => {
+      mockExecuteTransitionInternalPath();
+
+      await service.executeTransitionPublic(
+        'koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeAdminUserPrincipal(), undefined,
+        { gatedEdgeKey: 'ticket.transition.start' },
+      );
+
+      expect(mockTicketRepo.updateTicketStatusIf).toHaveBeenCalledWith(
+        'ticket-123', TicketStatus.CREATED, TicketStatus.IN_PROGRESS,
+      );
+    });
+
+    it('US-002 AC-7a: explicit null rejects when the loaded status transition has an edge', async () => {
+      mockExecuteTransitionInternalPath();
+      await expect(service.executeTransitionPublic(
+        'koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeAdminUserPrincipal(), undefined,
+        { gatedEdgeKey: null },
+      )).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
+
+    it('US-002 AC-7b: explicit null permits an unkeyed pair to reach transition validation', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      await expect(service.executeTransitionPublic(
+        'koda', 'KODA-1', TicketStatus.CLOSED, makeDeveloperAgentPrincipal(), undefined,
+        { gatedEdgeKey: null },
+      )).rejects.toMatchObject({ httpStatus: 400 });
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
+
     it('M2: a pair with no edge key skips the check and validateTransition answers (400)', async () => {
       mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
@@ -1329,6 +1376,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
     const createdPr = { number: 555, url: 'https://github.com/acme/widgets/pull/555' };
     const provider = {
       getDefaultBranch: vi.fn().mockResolvedValue('main'),
+      findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
       createPullRequest: vi.fn().mockResolvedValue(createdPr),
     };
     (createVcsProvider as Mock).mockReturnValue(provider);
@@ -1389,6 +1437,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
   it('skips the classic PR when fleet already owns the ticket (#231)', async () => {
     const provider = {
       getDefaultBranch: vi.fn().mockResolvedValue('main'),
+      findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
       createPullRequest: vi.fn().mockResolvedValue({ number: 999, url: 'https://github.com/acme/widgets/pull/999' }),
     };
     (createVcsProvider as Mock).mockReturnValue(provider);

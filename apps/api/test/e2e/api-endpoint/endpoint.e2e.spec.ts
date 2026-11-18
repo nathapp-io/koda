@@ -1235,6 +1235,26 @@ describeIntegration('API Integration Tests', () => {
       }
     });
 
+    it('DELETE workflow comment returns 409 without deleting it or creating a request', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const ticket = await prismaClient().ticket.findFirstOrThrow({ where: { projectId: project.id } });
+      const workflow = await prismaClient().comment.create({
+        data: { ticketId: ticket.id, body: 'workflow evidence', type: 'FIX_REPORT', authorAgentId: agentId },
+      });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.delete.own', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const requestsBefore = await prismaClient().approvalRequest.count();
+
+      await request(httpServer).delete(`/api/comments/${workflow.id}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(409);
+
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
+      const retained = await prismaClient().comment.findUniqueOrThrow({ where: { id: workflow.id } });
+      expect(retained.deletedAt).toBeNull();
+      expect(retained.body).toBe('workflow evidence');
+    });
+
     it('AC-10 (US-010): an agent deletes its own comment with exactly 202', async () => {
       const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
       await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.delete.own', 'project.read'], project.id);
@@ -6884,6 +6904,11 @@ describeIntegration('VCS manual issue sync lifecycle', () => {
     expect(data(await post().expect(200))).toMatchObject({ issuesSynced: 1, issuesSkipped: 0, tickets: [{ title: 'Issue 8' }] });
     await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
     await post().expect(404);
+  });
+  it('Review f-a8a4b124: a rejected full import answers 500 and imports nothing', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockRejectedValue(new Error('Invalid next page in Link header'));
+    await post().expect(500);
+    expect(await fixtureDb(app).ticket.count({ where: { project: { slug } } })).toBe(0);
   });
 });
 

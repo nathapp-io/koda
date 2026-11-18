@@ -1,12 +1,15 @@
-import type { ExecutionContext } from '@nestjs/common';
+import type { ExecutionContext, MessageEvent } from '@nestjs/common';
+import type { Observable } from 'rxjs';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../generated/prisma/client';
 import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
+import type { JwtAuthProvider } from '../../auth/jwt-auth.provider';
 import type { ILiveConfig } from '../../config/live.config';
 import { LiveStreamRegistry } from '../../live/live-stream-registry';
+import type { ThreadEventBus } from '../../live/thread-event-bus';
 import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
-import { ThreadEventsGuard } from './thread-events.controller';
+import { ThreadEventsController, ThreadEventsGuard } from './thread-events.controller';
 
 /** A JWT the auth guard has already verified: only the payload the stream reads matters here. */
 const token = (payload: Record<string, unknown>): string =>
@@ -84,5 +87,89 @@ describe('ThreadEventsGuard (US-002)', () => {
   it('still refuses a key holder without a JWT with 403 live', async () => {
     await expect(guard.canActivate(context(request()))).rejects.toMatchObject({ prefix: 'live', httpStatus: 403 });
     expect(streams.activeFor('u')).toBe(0);
+  });
+});
+
+/**
+ * US-008: the thread stream re-check used to confirm project membership only, so a member whose
+ * `thread.read` was revoked kept receiving events. `stillAllowed` now also asks the key the guard
+ * checked when the stream opened, and a denial or a rejected decision closes the stream.
+ */
+describe('ThreadEventsController.events re-checks thread.read (US-008)', () => {
+  const dev: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'dev@koda.test' };
+  const fresh = { ...dev, revoked: false };
+  const jwtPayload = { sub: 'u', exp: 1_800_000_000 };
+  let access: { assertProjectMembership: ReturnType<typeof vi.fn> };
+  let can: ReturnType<typeof vi.fn>;
+  let getPrincipal: ReturnType<typeof vi.fn>;
+  let streams: LiveStreamRegistry;
+  let controller: ThreadEventsController;
+
+  const request = (): { params: { slug: string; id: string }; user: UserPrincipal; threadEvents: { projectId: string; jwtPayload: Record<string, unknown> } } => ({
+    params: { slug: 'p1', id: 't1' }, user: dev, threadEvents: { projectId: 'proj-1', jwtPayload },
+  });
+
+  /** Subscribe to the stream the controller built and count what a client would see. */
+  const openStream = async (): Promise<{ done: () => boolean; pings: () => number }> => {
+    const stream = await controller.events('t1', dev, request());
+    let completed = false;
+    let pings = 0;
+    (stream as Observable<MessageEvent>).subscribe({
+      next: (event) => { if (event.type === 'ping') pings += 1; },
+      complete: () => { completed = true; },
+    });
+    return { done: () => completed, pings: () => pings };
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    access = { assertProjectMembership: vi.fn(async () => ({ role: 'VIEWER' })) };
+    can = vi.fn(async () => ({ allowed: true, reason: 'granted' }));
+    getPrincipal = vi.fn(async () => fresh);
+    streams = new LiveStreamRegistry();
+    streams.tryAcquire('u', 2);
+    controller = new ThreadEventsController(
+      access as unknown as ProjectAccessService,
+      { subscribe: () => () => undefined, publish: () => undefined } as unknown as ThreadEventBus,
+      streams,
+      { getPrincipal } as unknown as JwtAuthProvider,
+      { heartbeatMs: 10, maxStreamsPerUser: 2 } as ILiveConfig,
+      { can } as unknown as PermissionService,
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('AC-1: completes the stream when a member no longer holds thread.read', async () => {
+    can.mockResolvedValue({ allowed: false, reason: 'no-grant' });
+    const stream = await openStream();
+
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(stream.done()).toBe(true);
+    expect(access.assertProjectMembership).toHaveBeenCalledWith('proj-1', fresh);
+    expect(can).toHaveBeenCalledWith(fresh, 'thread.read', { projectId: 'proj-1' });
+  });
+
+  it('AC-2: keeps the stream open for a member who still holds thread.read', async () => {
+    const stream = await openStream();
+
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(stream.done()).toBe(false);
+    expect(stream.pings()).toBeGreaterThan(0);
+    expect(can).toHaveBeenCalledWith(fresh, 'thread.read', { projectId: 'proj-1' });
+  });
+
+  it('AC-3: completes the stream when the thread.read check rejects, rather than rejecting', async () => {
+    can.mockRejectedValue(new Error('permission store down'));
+    const stream = await openStream();
+
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(stream.done()).toBe(true);
+    expect(can).toHaveBeenCalledWith(fresh, 'thread.read', { projectId: 'proj-1' });
   });
 });

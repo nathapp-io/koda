@@ -106,7 +106,13 @@ export class VcsSyncService {
   }
 
   /**
-   * Perform a full sync of all issues from the provider
+   * Perform a full sync of all issues from the provider.
+   *
+   * The immediate manual sync. Review f-ee6758e4: a failed fetch propagates instead of being folded
+   * into `errors`, which the caller discarded — that made a rejected GitLab issue continuation look
+   * like a successful empty import, while the deferred path (`VcsManualSync.prepareSyncAll`) rejected
+   * with the same failure. Individual issue writes stay best-effort (`isolate`), so their failures are
+   * still listed in `errors` instead of aborting the batch (AC-29).
    */
   async fullSync(
     project: { id: string; key: string },
@@ -118,15 +124,10 @@ export class VcsSyncService {
     createdTickets: Array<{ id: string; number: number; title: string }>;
     errors: string[];
   }> {
-    try {
-      const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
-      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
-      const { issues } = await provider.fetchIssues();
-      return await this.syncIssues(project, this.filterByAllowedAuthors(issues, connection.allowedAuthors), connection, 'vcs.sync.all', { isolate: true });
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      return { issuesSynced: 0, issuesSkipped: 0, createdTickets: [], errors: [`Sync failed: ${errorMsg}`] };
-    }
+    const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
+    const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
+    const { issues } = await provider.fetchIssues();
+    return this.syncIssues(project, this.filterByAllowedAuthors(issues, connection.allowedAuthors), connection, 'vcs.sync.all', { isolate: true });
   }
 
   /** Deferred callers propagate the first failure so the enclosing transaction rolls back. */

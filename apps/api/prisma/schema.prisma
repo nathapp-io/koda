@@ -937,14 +937,15 @@ model FleetRepoRuleOverride {
 /// same head from both dispatching, and the record of what became of it. `outcome` is `pending`,
 /// `dispatched` (with `jobId`) or `failed:<reason>`; a dispatched or failed head is never dispatched again.
 model FleetPrReview {
-  id        String   @id @default(cuid())
-  repoId    String
-  prNumber  Int
-  headSha   String
-  jobId     String?
-  outcome   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(cuid())
+  repoId          String
+  prNumber        Int
+  headSha         String
+  jobId           String?
+  outcome         String
+  followUpEventId String?  // only this FIX attempt may resume a pending follow-up claim
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   repo FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
 

@@ -4,6 +4,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { HeadClaim } from '../reviews/fleet-review-claim.service';
+import { ReviewClaimFenceError, ReviewClaimLostError } from '../reviews/review-claim-errors';
 import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
 import { buildStepDispatch } from './flow-step-dispatch';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
@@ -102,20 +103,32 @@ function build(opts: Options = {}) {
     inTransaction = true;
     try { return await fn(); } finally { inTransaction = false; }
   }) };
-  const dispatch = vi.fn(async () => {
+  /** Review B4: the real dispatch runs the caller's claim fence inside its insert transaction. */
+  const dispatch = vi.fn(async (
+    _actorId: string,
+    _projectId: string,
+    _body: unknown,
+    opts?: { fence?: (jobId: string) => Promise<void> },
+  ) => {
     expect(inTransaction).toBe(false);
+    await opts?.fence?.('j3');
     return { job: { id: 'j3' } };
   });
   const adoptForFlow = vi.fn(async () => {
     expect(inTransaction).toBe(true);
     return true;
   });
+  const markDispatched = vi.fn(async () => undefined);
   const reviews = {
     claimHead: vi.fn(async (): Promise<HeadClaim> => {
       expect(inTransaction).toBe(false);
       return opts.claim ?? { kind: 'claimed', claimId: 'c1' };
     }),
-    markDispatched: vi.fn(async () => undefined),
+    markDispatched,
+    /** Review B4: the claim's fence, which the dispatch runs inside its insert transaction. */
+    fence: vi.fn((claimId: string) => async (jobId: string) => {
+      await markDispatched(claimId, jobId);
+    }),
     release: vi.fn(async () => { order.push('release'); }),
   };
   const service = new FleetFlowAdvanceService(
@@ -162,6 +175,8 @@ describe('FleetFlowAdvanceService.advance, REVIEW through the head claim', () =>
 
     expect(h.dispatch).toHaveBeenCalledWith('u1', 'p1', h.reviewBody(), {
       flowId: 'flow-1', flowStep: 'REVIEW', flowFeatureId: 'feature-1', auditKey: 'system.flow.advance',
+      // Review B4: the claim link rides the job insert.
+      fence: expect.any(Function),
     });
     expect(h.reviews.claimHead.mock.invocationCallOrder[0])
       .toBeLessThan(h.dispatch.mock.invocationCallOrder[0]);
@@ -259,6 +274,36 @@ describe('FleetFlowAdvanceService.advance, REVIEW through the head claim', () =>
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'dispatch_refused', NOW, 'REVIEW: failed:repo gone');
     expect(h.dispatch).not.toHaveBeenCalled();
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'flow.stopped' }));
+  });
+
+  /**
+   * Review B4: the fence runs inside the insert, so a lost claim means the insert rolled back and no job exists. The
+   * pass must not release the claim (another pass removed it) nor refuse the dispatch: the next pass adopts the
+   * job that removed it.
+   */
+  it('leaves a lost claim to the pass that settled it, releasing and refusing nothing', async () => {
+    const h = build({ claim: { kind: 'claimed', claimId: 'c1' } });
+    h.dispatch.mockImplementation(async () => {
+      throw new ReviewClaimLostError();
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.reviews.release).not.toHaveBeenCalled();
+    expect(h.flows.stop).not.toHaveBeenCalled();
+    expect(h.steps.markStep).not.toHaveBeenCalled();
+    expect(h.activity.record).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a failed fence write as the error it was', async () => {
+    const h = build({ claim: { kind: 'claimed', claimId: 'c1' } });
+    const failure = new Error('connection lost');
+    h.dispatch.mockImplementation(async () => {
+      throw new ReviewClaimFenceError(failure);
+    });
+
+    await expect(h.service.advance('flow-1', NOW)).rejects.toBe(failure);
+    expect(h.reviews.release).not.toHaveBeenCalled();
   });
 
   it('AC-11: releases the claim before stopping on a conflict', async () => {

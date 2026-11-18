@@ -26,6 +26,11 @@ export class AuditRecorder {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
+  /** Whether the current async context already owns a transaction. */
+  isInTransaction(): boolean {
+    return this.txManager.isInTransaction();
+  }
+
   /**
    * Runs `fn` in one transaction and records the entries its result describes, in that transaction.
    * For a write that owns no transaction of its own; a method that already runs `txManager.run`

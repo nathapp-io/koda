@@ -60,12 +60,16 @@ export class EnrollmentService {
     const runner = await this.txManager.run(async () => {
       const enrollment = await this.repo.consumeEnrollment(tokenHash, now);
       if (!enrollment) throw new AuthException({}, 'fleet.enroll');
+      // US-008 (owner ruling 2026-11-18): the enrollment's labels are final. A runner may not widen
+      // what the operator granted by claiming labels in its body; those are reported as ignored.
+      const labels = uniqueSorted(enrollment.labels);
+      const ignoredLabels = uniqueSorted(body.labels.filter((label) => !labels.includes(label)));
       const created = await this.repo.createRunner({
         name: body.name,
         apiKeyHash,
         os: body.os,
         arch: body.arch,
-        labels: uniqueSorted([...enrollment.labels, ...body.labels]),
+        labels,
         capabilities,
         daemonVersion: body.daemonVersion,
         protocolVersion: body.protocolVersion,
@@ -77,7 +81,7 @@ export class EnrollmentService {
       await this.repo.linkEnrollment(enrollment.id, created.id);
       await this.activity.record({
         actorType: 'RUNNER', actorId: created.id, action: 'runner.enrolled', entityType: 'runner', entityId: created.id,
-        responsibleUserId: enrollment.createdById, payload: { name: created.name, labels: created.labels, enrollmentId: enrollment.id },
+        responsibleUserId: enrollment.createdById, payload: { name: created.name, labels: created.labels, enrollmentId: enrollment.id, ignoredLabels },
       });
       await runWithActionContext({ actor: { type: 'RUNNER', id: created.id }, origin: 'runner' }, () =>
         this.audit.record({

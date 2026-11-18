@@ -10,6 +10,7 @@ import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { PermissionService } from '../permissions/permission.service';
 import type { PrincipalRef } from '../permissions/permissions.types';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { isUniqueViolation } from '../common/utils/prisma-errors';
 
 export interface CreateTicketLinkResult {
   status: 200 | 201;
@@ -104,23 +105,30 @@ export class TicketLinksService {
 
     const { provider, externalRef } = detectProvider(dto.url);
 
-    const link = await this.audit.audited(
-      () => this.repo.createLink({
-        ticketId: ticket.id,
-        url: dto.url,
-        provider,
-        externalRef,
-        linkType: this.inferLinkType(dto.url, dto.linkType),
-        createdByUserId: createdBy?.type === 'USER' ? createdBy.id : null,
-        createdByAgentId: createdBy?.type === 'AGENT' ? createdBy.id : null,
-      }),
-      (created) => ({
-        key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: created.id,
-        projectId: ticket.projectId, summary: `on ${ticket.ref}`,
-      }),
-    );
+    try {
+      const link = await this.audit.audited(
+        () => this.repo.createLink({
+          ticketId: ticket.id,
+          url: dto.url,
+          provider,
+          externalRef,
+          linkType: this.inferLinkType(dto.url, dto.linkType),
+          createdByUserId: createdBy?.type === 'USER' ? createdBy.id : null,
+          createdByAgentId: createdBy?.type === 'AGENT' ? createdBy.id : null,
+        }),
+        (created) => ({
+          key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: created.id,
+          projectId: ticket.projectId, summary: `on ${ticket.ref}`,
+        }),
+      );
 
-    return { status: 201, link: TicketLinkResponseDto.from(link) };
+      return { status: 201, link: TicketLinkResponseDto.from(link) };
+    } catch (error) {
+      if (this.audit.isInTransaction() || !isUniqueViolation(error, 'url')) throw error;
+      const winner = await this.repo.findLinkByUrl(ticket.id, dto.url);
+      if (!winner) throw error;
+      return { status: 200, link: TicketLinkResponseDto.from(winner) };
+    }
   }
 
   async findByTicket(
