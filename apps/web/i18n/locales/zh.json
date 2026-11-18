@@ -1232,6 +1232,7 @@
         "queued": "决定已发送，等待会话应用。",
         "rejected": "运行器未应用该决定：{detail}",
         "rejectedNoDetail": "运行器未应用该决定。",
+        "invisible": "警告：已将 {count} 个不可见或控制字符显示为标记。",
         "retry": "再次发送"
       },
       "message": {
@@ -2892,6 +2893,7 @@
         "story": "故事",
         "feature": "功能",
         "reason": "nax 询问的原因",
+        "invisible": "警告：已将 {count} 个不可见或控制字符显示为标记。",
         "expiresIn": "若不回复，nax 将在 {time} 后拒绝。",
         "timedOut": "此请求已超时，nax 已拒绝该命令。",
         "readOnly": "你可以查看此请求，但只有项目开发者或管理员可以回答。",

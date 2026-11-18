@@ -144,6 +144,23 @@ describe('US-012 AC-6..AC-9, AC-12: ThreadApprovalCard', () => {
     m.app.unmount()
   })
 
+  test('AC-11/AC-12: reveals bidi override in the command and warns', async () => {
+    const m = mountCard({ approval: approval({ command: 'rm -rf /tmp/\u202Ex' }) })
+    await settle()
+    expect(m.textOf('thread-approval-command')).toContain('<U+202E>')
+    expect(m.textOf('thread-approval-invisible')).toBe(
+      'Warning: 1 invisible or control characters are shown as markers.',
+    )
+    m.app.unmount()
+  })
+
+  test('AC-13: does not warn when approval fields contain no invisible characters', async () => {
+    const m = mountCard()
+    await settle()
+    expect(m.byId('thread-approval-invisible')).toBeUndefined()
+    m.app.unmount()
+  })
+
   test('AC-6 (text only): a summary carrying <img src=x> renders as literal text and creates no element', async () => {
     const m = mountCard({ approval: approval({ summary: 'Delete <img src=x onerror="boom()"> now' }) })
     await settle()

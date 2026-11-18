@@ -143,6 +143,35 @@ describe('ApprovalRequestBashPanel', () => {
     expect(m.app.textOf(m.one('approval-request-bash-command'))).toBe('rm -rf build')
   })
 
+  test('AC-6/AC-7: reveals a bidi override in the command and warns', () => {
+    const m = mountPanel(bashRequest({
+      input: { jobId: 'j1', leaseEpoch: 3, naxAskId: 'ask-1', payload: { ...BASH_PAYLOAD, command: 'rm -rf /tmp/\u202Ex' } },
+    }))
+    expect(m.app.textOf(m.one('approval-request-bash-command'))).toBe('rm -rf /tmp/<U+202E>x')
+    expect(m.app.textOf(m.one('approval-request-bash-invisible'))).toBe(
+      T.t('approvals.fleet.bash.invisible', { count: 1 }),
+    )
+  })
+
+  test('AC-8: does not warn when rendered fields contain no invisible characters', () => {
+    const m = mountPanel(bashRequest())
+    expect(m.byId('approval-request-bash-invisible')).toHaveLength(0)
+  })
+
+  test('AC-9: warns for an invisible character in the reason', () => {
+    const m = mountPanel(bashRequest({
+      input: { jobId: 'j1', leaseEpoch: 3, naxAskId: 'ask-1', payload: { ...BASH_PAYLOAD, reason: 'why\u200Bnow' } },
+    }))
+    expect(m.byId('approval-request-bash-invisible')).toHaveLength(1)
+  })
+
+  test('AC-10: reveals a bidi override in raw detail when the command is empty', () => {
+    const m = mountPanel(bashRequest({
+      input: { jobId: 'j1', leaseEpoch: 3, naxAskId: 'ask-1', payload: { ...BASH_PAYLOAD, command: '', rawDetail: 'unsafe\u202E' } },
+    }))
+    expect(m.app.textOf(m.one('approval-request-bash-raw'))).toBe('unsafe<U+202E>')
+  })
+
   test('AC-4: links the job when the project slug is known, and never otherwise', () => {
     const linked = mountPanel(bashRequest(), { projectSlug: 'sandbox' })
     expect(linked.one('approval-request-bash-job').props.to).toBe('/sandbox/fleet/jobs/j1')

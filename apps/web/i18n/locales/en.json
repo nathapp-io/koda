@@ -1232,6 +1232,7 @@
         "queued": "Decision sent. Waiting for the session to apply it.",
         "rejected": "The runner did not apply the decision: {detail}",
         "rejectedNoDetail": "The runner did not apply the decision.",
+        "invisible": "Warning: {count} invisible or control characters are shown as markers.",
         "retry": "Send again"
       },
       "message": {
@@ -2892,6 +2893,7 @@
         "story": "Story",
         "feature": "Feature",
         "reason": "Why nax asks",
+        "invisible": "Warning: {count} invisible or control characters are shown as markers.",
         "expiresIn": "nax denies it in {time} unless answered.",
         "timedOut": "This ask timed out and nax has denied the command.",
         "readOnly": "You can read this ask. Only a project developer or admin can answer it.",
