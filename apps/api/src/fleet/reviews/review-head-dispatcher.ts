@@ -6,6 +6,7 @@ import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import type { OpenPullRequest } from '../git-broker/github-app-client';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { exceptionResponse } from './dispatch-error';
 import type { FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import {
   FLEET_PR_REVIEW_REPOSITORY,
@@ -139,12 +140,12 @@ export class ReviewHeadDispatcher {
         await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
         return true;
       }
-      if (error instanceof ConflictAppException && getExceptionResponse(error).prefix === 'fleet.jobs') {
+      if (error instanceof ConflictAppException && exceptionResponse(error).prefix === 'fleet.jobs') {
         await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
         return false;
       }
       if (error instanceof ValidationAppException || error instanceof NotFoundAppException || error instanceof FleetDispatchException) {
-        const response = getExceptionResponse(error);
+        const response = exceptionResponse(error);
         const reason = error instanceof ValidationAppException && typeof response.args?.reason === 'string'
           ? response.args.reason
           : error.constructor.name;
@@ -158,12 +159,6 @@ export class ReviewHeadDispatcher {
     await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatched(pending.id, result.job.id));
     return false;
   }
-}
-
-function getExceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> } {
-  const response: unknown = (error as Error & { getResponse: () => unknown }).getResponse();
-  if (typeof response !== 'object' || response === null) return {};
-  return response as { prefix?: string; args?: Record<string, unknown> };
 }
 
 /** Call 5: exclude drafts, forks/deleted heads and PRs predating auto-review enablement. */

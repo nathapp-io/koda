@@ -19,6 +19,7 @@ import {
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { FLEET_PR_REVIEW_REPOSITORY, type IFleetPrReviewRepository } from './domain/fleet-pr-review.domain';
+import { exceptionResponse } from './dispatch-error';
 
 /** The system component id: the second segment of `system.pr-fix.follow-up` (action-context rule). */
 const COMPONENT = 'pr-fix';
@@ -116,13 +117,13 @@ export class FixFollowUpSubscriber implements OnModuleInit {
         await this.recordSkip(p, 'budget_paused');
         return;
       }
-      if (error instanceof ConflictAppException && getExceptionResponse(error).prefix === 'fleet.jobs') {
+      if (error instanceof ConflictAppException && exceptionResponse(error).prefix === 'fleet.jobs') {
         await this.removeClaim(claim.id);
         await this.recordSkip(p, 'review_active');
         return;
       }
       if (error instanceof ValidationAppException || error instanceof NotFoundAppException || error instanceof FleetDispatchException) {
-        const response = getExceptionResponse(error);
+        const response = exceptionResponse(error);
         const reason = error instanceof ValidationAppException && typeof response.args?.reason === 'string'
           ? response.args.reason
           : error.constructor.name;
@@ -166,8 +167,3 @@ export class FixFollowUpSubscriber implements OnModuleInit {
   }
 }
 
-function getExceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> } {
-  const response: unknown = (error as Error & { getResponse: () => unknown }).getResponse();
-  if (typeof response !== 'object' || response === null) return {};
-  return response as { prefix?: string; args?: Record<string, unknown> };
-}
