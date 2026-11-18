@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Review 2026-11-14 API fixes (duplicate PR adoption, status PATCH race, write conflicts, auth and secret hardening, review claim recovery, memory count, workflow comments, thread stream and runner labels)
 
 ## Summary
@@ -75,8 +74,10 @@ hardening gap:
   (it was gated on `ticket.update`, not an edge). `executeTransitionInternal` compares it with
   `transitionKeyFor(ticket.status, toStatus) ?? null` for the ticket it loaded, right after loading it and before
   `assertEdgeAllowed`, validation and any write, and refuses a mismatch with the same `409` `HttpException` the
-  conditional status write throws (`Ticket state changed concurrently`). So when both apply, the `409` wins over the
-  edge `403`. The conditional write is keyed on that same loaded status, so the check and the write agree.
+  conditional status write throws (`Ticket state changed concurrently`). So inside the transition, when both apply,
+  the `409` wins over the edge `403`. On the route path `TicketsService.update` first runs its existing
+  `assertTransitionAllowed` pre-check against the live status, so a caller who lacks the live edge's key can still get
+  that `403` before the transition runs; either way the request is refused and nothing is written. The conditional write is keyed on that same loaded status, so the check and the write agree.
   A caller that passes no gated key (every caller other than the two route commands) keeps today's behaviour.
   `TicketsService.update` passes a sixth `options` argument to `executeTransitionPublic` only when its own `options`
   is defined, so existing five-argument call expectations keep holding.
@@ -105,7 +106,11 @@ hardening gap:
   (`FleetReviewClaimService.claimHead`). A lookup that throws leaves the claim as it is for this pass.
   The link is conditional, so the two stale paths cannot both act on one row: a new repository method
   `markDispatchedIfPending(id, jobId)` updates the row only while it is `pending` with no `jobId`, mirroring
-  `removeStalePending`, and reports whether it did.
+  `removeStalePending`, and reports whether it did. Both callers run it inside
+  `bookkeeping('fleet.pr-review-bookkeeping', ...)`, like every other claim write. The dispatcher threads its
+  `pollMs` from `dispatchRepo` into `headIsOpen` and `reopenStaleClaim`; the window's upper bound is
+  `new Date(row.createdAt.getTime() + pollMs)` (the claim service uses `prReviewPollMs`). A lookup that rejects in the
+  dispatcher is logged and that PR is skipped; `dispatchRepo` still resolves and goes on to the next PR.
 - **Memory count.** The page query runs first. When the page is not full, its total is exact without a count:
   `skip + rows`, provided the page has rows or is the first page. `rows` is the number of ids the page query returned,
   not the number of hydrated records (`hydrateRanked` drops a row deleted between the two queries). A full page, or an empty page past the first, still
@@ -205,7 +210,7 @@ Symbols read, unchanged: `hasPrLink`, `createTicketLink`, `buildBranchName`, `ex
 | Situation | Behaviour |
 |:--|:--|
 | `findOpenPullRequestByBranch` throws | A warning is logged; no PR is created and no link is written. |
-| A status PATCH's gated edge key differs from the live edge key | `409` `Ticket state changed concurrently`; no field or status is written. |
+| A status PATCH's gated edge key differs from the live edge key | `409` `Ticket state changed concurrently` from the transition, or the route pre-check's `403` when the caller lacks the live edge's key; no field or status is written. |
 | A ticket-link create hits a unique violation and the re-read finds the link | `200` with that link. |
 | A ticket-link create hits a unique violation and the re-read finds nothing | The original error propagates. |
 | A project create or update hits a unique violation on `slug` or `key` | `409` `ConflictAppException({ field }, 'projects')`. |
@@ -229,8 +234,11 @@ Symbols read, unchanged: `hasPrLink`, `createTicketLink`, `buildBranchName`, `ex
 - US-003 only: recovering a ticket-link or project unique violation for a caller that is already inside an outer
   transaction (the violation aborts that transaction, so the error propagates as before).
 - US-004 only: bounding how long an open SSE stream can delay `app.close()` after `SIGTERM`.
-- US-006 only: telling a manual REVIEW of the same PR, dispatched inside a stale claim's dispatch window, from that
-  claim's own job; `FleetJob` carries no head SHA, so such a job also settles the claim.
+- US-006 only: telling another REVIEW job of the same PR (a manual REVIEW, or one for a different head), dispatched
+  inside a stale claim's dispatch window, from that claim's own job; `FleetJob` carries no head SHA, so such a job also
+  settles the claim.
+- The workspace thread event stream (`workspace-thread-events.controller.ts`), whose `stillAllowed` is also
+  membership-only; only the project thread stream gains the `thread.read` re-check here.
 - US-004 only: a test that boots `main.ts`; the `enableGracefulShutdown(app)` call in `main.ts` is checked by review.
 - US-004 only: a minimum length for `VCS_ENCRYPTION_KEY` or `PROVIDER_CREDENTIAL_ENCRYPTION_KEY`; both are already
   exactly 64 hex characters.
@@ -240,12 +248,11 @@ Symbols read, unchanged: `hasPrLink`, `createTicketLink`, `buildBranchName`, `ex
 ## Stories
 
 The feature is a bundle of independent API fixes, split by area at the owner's choice (2026-11-18): this feature
-holds the API items and a second feature holds the runner, web, CI and deploy items. Nine stories keep each story
-under the 15-assertion gate.
+holds the API items and a second feature holds the runner, web, CI and deploy items. Ten stories keep each story
+under the 15-assertion gate. US-010 comes last only because it consumes US-001.
 
-**US-001: Adopt an open PR on the ticket's branch.** Workdir: `apps/api`. No dependencies.
-The providers gain `findOpenPullRequestByBranch`; `createPrForTicket` links an open PR it finds instead of creating
-one.
+**US-001: Look up an open PR by branch in the VCS providers.** Workdir: `apps/api`. No dependencies.
+`IVcsProvider`, `GitHubProvider` and `GitLabProvider` gain `findOpenPullRequestByBranch`.
 
 **US-002: Refuse a status PATCH gated on a stale edge.** Workdir: `apps/api`. No dependencies.
 The ticket route commands pass their gated edge key through `TicketsService.update` to the transition, which refuses
@@ -263,22 +270,25 @@ review repository.
 `ReviewHeadDispatcher` and `FleetReviewClaimService` consult the lookup before dropping a stale claim and link a
 found job conditionally.
 
-**US-007: Memory page count and workflow comment delete.** Workdir: `apps/api`. No dependencies.
+**US-007: Skip the memory count on a short ranked page.** Workdir: `apps/api`. No dependencies.
 
-**US-008: Thread stream re-check and enrollment labels.** Workdir: `apps/api`. No dependencies.
+**US-008: Thread stream re-check, enrollment labels and workflow comment delete.** Workdir: `apps/api`. No dependencies.
 
 **US-009: Share the dispatch exception-response helper.** Workdir: `apps/api`. Depends on US-006.
 Refactor only: both files import `exceptionResponse` and their private copies are deleted. The deletion is verified by
 `bun run --cwd apps/api type-check` and `bun run --cwd apps/api lint`.
 
+**US-010: Adopt an open PR on the ticket's branch.** Workdir: `apps/api`. Depends on US-001.
+`createPrForTicket` links an open PR `findOpenPullRequestByBranch` finds instead of creating one.
+
 ### Context Files
 
 **US-001**
-- `apps/api/src/tickets/state-machine/ticket-transitions.service.ts` — `createPrForTicket`, `createPrAfterCommit`, `verify`.
 - `apps/api/src/vcs/vcs-provider.ts` — `IVcsProvider`.
 - `apps/api/src/vcs/providers/github.provider.ts` — `listPullRequests`, `mapGitHubPrToVcsPrStatus`.
-- `apps/api/src/vcs/providers/gitlab.provider.ts` — `listPullRequests`, `mapGitLabMrToVcsPrStatus`.
-- `apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts` — the provider harness.
+- `apps/api/src/vcs/providers/gitlab.provider.ts` — `listPullRequests`, `mapGitLabMrToVcsPrStatus`, `GitLabMrStatusResponse`.
+- `apps/api/src/vcs/providers/github.provider.pagination.spec.ts` — the GitHub HTTP-client harness.
+- `apps/api/src/vcs/providers/gitlab.provider.outbound.spec.ts` — the GitLab HTTP-client harness.
 
 **US-002**
 - `apps/api/src/tickets/ticket-route.commands.ts` — `updateCommand`.
@@ -310,22 +320,28 @@ Refactor only: both files import `exceptionResponse` and their private copies ar
 - `apps/api/src/fleet/reviews/review-head-dispatcher.spec.ts` — the `createDispatcher` harness.
 
 **US-007**
-- `apps/api/src/memory/prisma-memory-item.repository.ts` — `findRankedByText`.
-- `apps/api/src/memory/memory-item-repository.spec.ts` — the `ranked` and `rawCalls` helpers.
-- `apps/api/src/comments/comments.service.ts` — `resolveCommentProject`, `assertEditable`, `delete`.
-- `apps/api/src/comments/comments.controller.ts` — the delete route.
+- `apps/api/src/memory/prisma-memory-item.repository.ts` — `findRankedByText`, `hydrateRanked`.
+- `apps/api/src/memory/memory-item-repository.spec.ts` — the `ranked`, `rankedOne` and `rawCalls` helpers.
 
 **US-008**
 - `apps/api/src/fleet/threads/thread-events.controller.ts` — `ThreadEventsGuard`, `stillAllowed`.
-- `apps/api/src/fleet/threads/thread-events.controller.spec.ts` — the guard harness.
 - `apps/api/src/fleet/runners/enrollment.service.ts` — `enroll`.
-- `apps/api/src/fleet/runners/enrollment.service.spec.ts` — the harness.
+- `apps/api/src/comments/comments.service.ts` — `resolveCommentProject`, `assertEditable`, `delete`.
+- `apps/api/src/comments/comments.controller.ts` — the delete route.
 
 **US-009**
 - `apps/api/src/fleet/reviews/review-head-dispatcher.ts` — `getExceptionResponse`.
 - `apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts` — `getExceptionResponse`, `handle`.
 
+**US-010**
+- `apps/api/src/tickets/state-machine/ticket-transitions.service.ts` — `createPrForTicket`, `createPrAfterCommit`, `verify`.
+- `apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts` — the provider harness.
+
 ### Creates
+
+**US-001**
+- `apps/api/src/vcs/providers/github.provider.branch-lookup.spec.ts` — the GitHub lookup unit tests.
+- `apps/api/src/vcs/providers/gitlab.provider.branch-lookup.spec.ts` — the GitLab lookup unit tests.
 
 **US-004**
 - `apps/api/src/common/bootstrap/graceful-shutdown.ts` — `enableGracefulShutdown`.
@@ -341,10 +357,8 @@ Refactor only: both files import `exceptionResponse` and their private copies ar
 ### Modifies
 
 **US-001**
-- `apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts` — the provider stubs at the PR-creation cases (about lines 1330 and 1390) define `createPullRequest` only; add `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)` so those cases still reach `createPullRequest`, keeping every assertion.
-- `apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts` — the provider factory (about line 87) builds a provider with `createPullRequest` only; it gains `findOpenPullRequestByBranch` resolving `null` by default (overridable through the options), so the existing "calls createPullRequest once" cases keep their assertions.
-- `apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts` — `mockVcsProvider` (about line 153) gains `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)`, so the existing creation cases keep their assertions.
-- `apps/api/src/vcs/vcs-provider.spec.ts` — its `class MockVcsProvider implements IVcsProvider` declarations no longer satisfy the interface once it gains `findOpenPullRequestByBranch`; each gains a `findOpenPullRequestByBranch` method resolving `null`, keeping every assertion.
+- `apps/api/src/vcs/vcs-provider.spec.ts` — every `implements IVcsProvider` class in it (the `MockVcsProvider` declarations and `TestProvider`, about line 547) no longer satisfies the interface once it gains `findOpenPullRequestByBranch`; each gains a `findOpenPullRequestByBranch` method resolving `null`, keeping every assertion.
+- `apps/api/src/code-intel/code-commit-outbox-handler.spec.ts` — `createMockVcsProvider(): IVcsProvider` (about line 22) returns an object literal without `findOpenPullRequestByBranch`; it gains `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)`, keeping every assertion.
 
 **US-002**
 - `apps/api/src/tickets/ticket-route.commands.spec.ts` — the status-update case (about line 116) asserts `service.update` was called exactly once with four arguments; it now expects a fifth argument `{ gatedEdgeKey: 'ticket.transition.start' }`. The plain update case (about line 176) now expects a fifth argument `{ gatedEdgeKey: null }`. Their other assertions stay.
@@ -353,7 +367,7 @@ Refactor only: both files import `exceptionResponse` and their private copies ar
 None. The services only gain a catch around their audited writes; no existing case raises a unique violation there.
 
 **US-004**
-- `apps/api/src/config/env.validation.spec.ts` — `REQUIRED` uses one-character secrets (`'s'`, `'r'`, `'k'`); "accepts real secrets in production" and the production placeholder cases now need 32-character values. Give `REQUIRED` three distinct 32-character secrets; the outside-production cases keep their assertions.
+- `apps/api/src/config/env.validation.spec.ts` — `REQUIRED` uses one-character secrets (`'s'`, `'r'`, `'k'`); "accepts real secrets in production" and the production placeholder cases now need 32-character values. Give `REQUIRED` three distinct 32-character secrets, and lengthen the production placeholder values (`'change-me-in-production'`, `'change-me'`, `'CHANGE-ME'`) to 32 or more characters that still start with `change-me`, so those cases keep failing on the placeholder rule and not the length rule; the outside-production cases keep their assertions.
 - `apps/api/src/auth/guards/combined-auth.guard.spec.ts` — gains this story's AC-1 and AC-2 cases (the agent lookup rejects); no existing case changes.
 
 **US-005**
@@ -364,20 +378,25 @@ None. The new methods are additions; existing fakes of the two repository interf
 - `apps/api/src/fleet/reviews/fleet-review-claim.service.spec.ts` — the service is constructed with `(reviews, config)`; it now takes a third `jobs` stub whose `findReviewJobIdBetween` resolves `null`, so AC-4 and AC-5 keep their stale-removal and retry assertions. The `reviews` stub gains `markDispatchedIfPending`. The module case (AC-10) keeps its provider assertion.
 
 **US-007**
-- `apps/api/src/memory/memory-item-repository.spec.ts` — the `ranked(ids, total)` helper queues three `$queryRaw` results (probe, page, count). A page that returns fewer ids than its size, on page 1 or with ids, no longer issues the count, so the helper queues the count result only when `ids.length` equals the page size or the page is empty past page 1, and these expectations change: "ranks, filters and pages in SQL, then loads the rows by id and keeps rank order" (page 2 of 5, 2 ids) now expects no `count(*)::int` call and `total: 7`; the raw-call counts at about lines 369 (3 to 2), 398 (5 to 3), 434 (`it.each`, 3 to 2) and 444 (`ranked(['mem-1'], 1)`, 3 to 2) drop by the skipped counts; the any-word cases at about lines 388-411 stop queueing the `{ total: 0 }` results for their empty first pages. Every other assertion stays.
-- `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — beside its workflow-comment PATCH case (about line 1219), gains a DELETE case: deleting a workflow comment returns `409`.
+- `apps/api/src/memory/memory-item-repository.spec.ts` — the `ranked(ids, total)` helper queues three `$queryRaw` results (probe, page, count). A page that returns fewer ids than its size, on page 1 or with ids, no longer issues the count, so the helper queues the count result only when `ids.length` equals the page size or the page is empty past page 1, and these expectations change: "ranks, filters and pages in SQL, then loads the rows by id and keeps rank order" (page 2 of 5, 2 ids) now expects no `count(*)::int` call and `total: 7`; the raw-call counts at about lines 369 (3 to 2), 398 (5 to 3), 434 (`it.each`, 3 to 2) and 444 (`ranked(['mem-1'], 1)`, 3 to 2) drop by the skipped counts; the any-word cases at about lines 388-418 (including "hydrates any-word matches in rank order", about line 414) stop queueing the `{ total: 0 }` results for their empty first pages; `rankedOne` (about line 477) answers one id on a page larger than one, so it stops queueing its `{ total: 1 }` count. Every other assertion stays.
 
 **US-008**
 - `apps/api/src/fleet/threads/thread-events.controller.spec.ts` — today it constructs only `ThreadEventsGuard`. It gains a `ThreadEventsController` describe block for this story's AC-1 to AC-3: the controller built with stubs (bus, stream registry, `JwtAuthProvider`, `ProjectAccessService`, `PermissionService`, a live config with a short `heartbeatMs`), `events()` called with an authorized request, and the returned Observable driven under fake timers, since `createLiveStream` calls `stillAllowed` on each heartbeat; a closed stream is one that completes. The existing guard cases stay.
 - `apps/api/src/fleet/runners/enrollment.service.spec.ts` — "creates the runner with merged labels and returns a kr_ key once" expects `['darwin', 'fast', 'gpu']`; it now expects the enrollment's `['darwin', 'gpu']`, and the activity payload gains `ignoredLabels: ['fast']`. Its key and return assertions stay.
 - `apps/api/test/integration/fleet/runner-enrollment.integration.spec.ts` — the enroll case (about line 76) enrolls with enrollment labels `['gpu']` and body labels `['linux']` and expects the runner `me` route to answer `labels: ['gpu', 'linux']`; it now expects `labels: ['gpu']`, keeping its other assertions.
+- `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — beside its workflow-comment PATCH case (about line 1219), gains a DELETE case: deleting a workflow comment returns `409`.
 
 **US-009**
 None. The helper behaves like the two private copies on every input they handle.
 
+**US-010**
+- `apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts` — the provider stubs at the PR-creation cases (about lines 1330 and 1390) define `createPullRequest` only; add `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)` so those cases still reach `createPullRequest`, keeping every assertion.
+- `apps/api/src/tickets/state-machine/ticket-transitions.after-commit.spec.ts` — the provider factory (about line 87) builds a provider with `createPullRequest` only; it gains `findOpenPullRequestByBranch` resolving `null` by default (overridable through the options), so the existing "calls createPullRequest once" cases keep their assertions.
+- `apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts` — `mockVcsProvider` (about line 153) gains `findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null)`, so the existing creation cases keep their assertions.
+
 ### Seams
 
-- US-001 creates `findOpenPullRequestByBranch`; `createPrForTicket` consumes it, driven through `TicketTransitionsService.verify` on a CREATED ticket (US-001 AC-6).
+- US-001 creates `findOpenPullRequestByBranch`; US-010's `createPrForTicket` consumes it, driven through `TicketTransitionsService.verify` on a CREATED ticket (US-010 AC-1).
 - US-002 adds `gatedEdgeKey`; the registered ticket route commands produce it (US-002 AC-1, AC-2), `TicketsService.update` forwards it (US-002 AC-3), and `executeTransitionPublic` consumes it (US-002 AC-4 to AC-7).
 - US-004 creates `enableGracefulShutdown`; `main.ts` consumes it (checked by review, see Out of Scope).
 - US-005 creates `FleetJobsService.findReviewJobIdBetween` and `markDispatchedIfPending`; US-006 consumes them through `ReviewHeadDispatcher.dispatchRepo` (US-006 AC-1) and `FleetReviewClaimService.claimHead` (US-006 AC-4).
@@ -392,14 +411,6 @@ None. The helper behaves like the two private copies on every input they handle.
 - AC-3 [unit] When that GitHub call answers an empty array, `GitHubProvider.findOpenPullRequestByBranch` returns `null`.
 - AC-4 [unit] `GitLabProvider.findOpenPullRequestByBranch('ACME-7-fix-login')` sends `GET {baseUrl}/merge_requests` with params `state: 'opened'` and `source_branch: 'ACME-7-fix-login'`, and returns the first merge request whose `source_project_id` equals its `target_project_id`, mapped as a `VcsPrStatus`.
 - AC-5 [unit] When GitLab answers an empty array, or only merge requests whose `source_project_id` differs from their `target_project_id`, `GitLabProvider.findOpenPullRequestByBranch` returns `null`.
-- AC-6 [unit] Verifying a CREATED ticket through `TicketTransitionsService.verify` while the provider's `findOpenPullRequestByBranch` resolves an open PR number 7 never calls `createPullRequest`.
-- AC-7 [unit] In that case `createTicketLink` is called once with `prNumber: 7`, the PR's `url`, `linkType: 'pr'` and `externalRef` `'{repoOwner}/{repoName}#7'`.
-- AC-8 [unit] An adopted PR with `draft: true` is linked with `prState: 'draft'`, and one with `draft: false` with `prState: 'open'`.
-- AC-9 [unit] An adopted PR calls `extractLinksFromPr` with the branch name `buildBranchName` returned and PR number 7.
-- AC-10 [unit] An adopted PR records no `VCS_PR_CREATED` activity.
-- AC-11 [unit] `findOpenPullRequestByBranch` is called with the branch name `buildBranchName` returns for the ticket.
-- AC-12 [unit] When `findOpenPullRequestByBranch` resolves `null`, verifying the ticket calls `createPullRequest` once, as before.
-- AC-13 [unit] When `findOpenPullRequestByBranch` rejects, verifying the ticket calls neither `createPullRequest` nor `createTicketLink`, and the verify itself still resolves.
 
 ### US-002
 
@@ -452,12 +463,13 @@ None. The helper behaves like the two private copies on every input they handle.
 ### US-006
 
 - AC-1 [unit] `ReviewHeadDispatcher.dispatchRepo` over a PR whose head row is a stale `pending` claim, with `jobs.findReviewJobIdBetween` resolving `'job-1'`, calls `findReviewJobIdBetween` with the row's `repoId`, `prNumber`, `createdAt` and `createdAt` plus `pollMs`, and calls `reviews.markDispatchedIfPending(row.id, 'job-1')`.
-- AC-2 [unit] In that case `dispatchRepo` calls neither `reviews.remove`, `reviews.insertPending` nor `jobs.dispatch`, and returns `0`, whether `markDispatchedIfPending` answers `true` or `false`.
-- AC-3 [unit] When `findReviewJobIdBetween` rejects for a stale claim, `dispatchRepo` keeps the row (no `remove`) and dispatches nothing for that PR.
+- AC-2 [unit] In that case `dispatchRepo` calls neither `reviews.remove` nor `jobs.dispatch`, and returns `0`.
+- AC-3 [unit] When `findReviewJobIdBetween` rejects for a stale claim on the first of two PRs, `dispatchRepo` resolves, keeps that row (no `remove`), and still dispatches the second PR.
 - AC-4 [unit] `FleetReviewClaimService.claimHead` on a stale `pending` row with no `jobId`, with `jobs.findReviewJobIdBetween` resolving `'job-1'` and `markDispatchedIfPending` answering `true`, returns `{ kind: 'owned', jobId: 'job-1' }` and never calls `removeStalePending`.
 - AC-5 [unit] When `markDispatchedIfPending` answers `false` and the re-read head row carries `jobId` `'job-2'`, `claimHead` returns `{ kind: 'owned', jobId: 'job-2' }`.
 - AC-6 [unit] When `findReviewJobIdBetween` resolves `null`, `claimHead` removes the stale claim and retries the insert as it does today.
 - AC-7 [unit] When `findReviewJobIdBetween` rejects, `claimHead` returns `{ kind: 'busy' }` and never calls `removeStalePending`.
+- AC-8 [unit] `claimHead` runs `markDispatchedIfPending` while `currentBookkeepingReason()` is `'fleet.pr-review-bookkeeping'`.
 
 ### US-007
 
@@ -466,11 +478,7 @@ None. The helper behaves like the two private copies on every input they handle.
 - AC-3 [unit] A ranked search whose page query returns exactly the page size issues the `count(*)` query and answers its `total`.
 - AC-4 [unit] A ranked search on page 1 whose page query returns no ids answers `total: 0` and issues no `count(*)` query.
 - AC-5 [unit] A ranked search on page 3 whose page query returns no ids issues the `count(*)` query and answers its `total`.
-- AC-6 [unit] `CommentsService.delete` on a comment whose `type` is not `GENERAL` rejects with a `409` `ConflictAppException` under prefix `comments.workflowUndeletable`.
-- AC-7 [unit] In that case the comment repository's `softDelete` is never called.
-- AC-8 [unit] `CommentsService.resolveCommentProject(id, principal, 'delete')` on a non-`GENERAL` comment rejects with the same `409` `comments.workflowUndeletable`.
-- AC-9 [unit] The comments controller's delete route on a non-`GENERAL` comment rejects with `409` before the approval gate's `run` is called.
-- AC-10 [unit] `CommentsService.delete` on a `GENERAL` comment the caller may delete calls `softDelete` once.
+- AC-6 [unit] A ranked search on page 1 of size 10 whose page query returns 3 ids, of which hydration finds only 2 rows, answers `total: 3` with 2 records.
 
 ### US-008
 
@@ -481,6 +489,10 @@ None. The helper behaves like the two private copies on every input they handle.
 - AC-5 [unit] In that case the `runner.enrolled` activity payload carries `ignoredLabels: ['fast']`.
 - AC-6 [unit] `EnrollmentService.enroll` whose body labels are all enrollment labels records `ignoredLabels: []`.
 - AC-7 [unit] `EnrollmentService.enroll` with enrollment labels `[]` and body labels `['x']` creates the runner with labels `[]`.
+- AC-8 [unit] `CommentsService.delete` on a comment whose `type` is not `GENERAL` rejects with a `409` `ConflictAppException` under prefix `comments.workflowUndeletable`, and the comment repository's `softDelete` is never called.
+- AC-9 [unit] `CommentsService.resolveCommentProject(id, principal, 'delete')` on a non-`GENERAL` comment rejects with the same `409` `comments.workflowUndeletable`.
+- AC-10 [unit] The comments controller's delete route on a non-`GENERAL` comment rejects with `409` before the approval gate's `run` is called.
+- AC-11 [unit] `CommentsService.delete` on a `GENERAL` comment the caller may delete calls `softDelete` once.
 
 ### US-009
 
@@ -489,3 +501,15 @@ None. The helper behaves like the two private copies on every input they handle.
 - AC-3 [unit] `exceptionResponse(new Error('plain'))` returns `{}`.
 - AC-4 [unit] `ReviewHeadDispatcher.dispatchRepo` whose `jobs.dispatch` rejects with `ConflictAppException({}, 'fleet.jobs')` removes the claim and dispatches nothing more for that PR, as before the refactor.
 - AC-5 [unit] `FixFollowUpSubscriber.handle` with a valid follow-up payload whose `jobs.dispatch` rejects with `ConflictAppException({}, 'fleet.jobs')` removes its claim and records the skip reason `review_active`, as before the refactor.
+
+### US-010
+
+- AC-1 [unit] Verifying a CREATED ticket through `TicketTransitionsService.verify` while the provider's `findOpenPullRequestByBranch` resolves an open PR number 7 never calls `createPullRequest`.
+- AC-2 [unit] In that case `createTicketLink` is called once with `prNumber: 7`, `linkType: 'pr'` and `externalRef` `'{repoOwner}/{repoName}#7'`.
+- AC-3 [unit] An adopted PR with `draft: true` is linked with `prState: 'draft'`, and one with `draft: false` with `prState: 'open'`.
+- AC-4 [unit] An adopted PR calls `extractLinksFromPr` with the branch name `buildBranchName` returned and PR number 7.
+- AC-5 [unit] An adopted PR records no `VCS_PR_CREATED` activity.
+- AC-6 [unit] `findOpenPullRequestByBranch` is called with the branch name `buildBranchName` returns for the ticket.
+- AC-7 [unit] When `findOpenPullRequestByBranch` resolves `null`, verifying the ticket calls `createPullRequest` once, as before.
+- AC-8 [unit] When `findOpenPullRequestByBranch` rejects, verifying the ticket calls neither `createPullRequest` nor `createTicketLink`.
+- AC-9 [unit] When `findOpenPullRequestByBranch` rejects, the verify itself still resolves.
