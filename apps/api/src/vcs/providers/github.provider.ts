@@ -284,6 +284,16 @@ export class GitHubProvider implements IVcsProvider {
     }
   }
 
+  async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
+    const response = await this.httpClient.get(`${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/pulls`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+      params: { state: 'open', head: `${this.repoOwner}:${branchName}` },
+    });
+
+    const [pullRequest] = response.data as GitHubPrStatusResponse[];
+    return pullRequest ? this.mapGitHubPrToVcsPrStatus(pullRequest) : null;
+  }
+
   async listPullRequests(state: 'open' | 'closed' | 'all' = 'open'): Promise<VcsPrStatus[]> {
     const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/pulls`;
 

@@ -51,6 +51,8 @@ interface GitLabMrStatusResponse {
   web_url: string;
   title: string;
   source_branch: string;
+  source_project_id?: number;
+  target_project_id?: number;
 }
 
 /**
@@ -238,6 +240,18 @@ export class GitLabProvider implements IVcsProvider {
       }
       throw error;
     }
+  }
+
+  async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
+    const response = await this.httpClient.get(`${this.baseUrl}/merge_requests`, {
+      headers: this.authHeaders,
+      params: { state: 'opened', source_branch: branchName },
+    });
+
+    const mergeRequest = (response.data as GitLabMrStatusResponse[]).find(
+      (mr) => mr.source_project_id !== undefined && mr.source_project_id === mr.target_project_id,
+    );
+    return mergeRequest ? this.mapGitLabMrToVcsPrStatus(mergeRequest) : null;
   }
 
   async listPullRequests(state: 'open' | 'closed' | 'all' = 'open'): Promise<VcsPrStatus[]> {

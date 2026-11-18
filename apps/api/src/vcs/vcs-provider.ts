@@ -37,6 +37,9 @@ export interface IVcsProvider {
    */
   getPullRequestStatus(prNumber: number): Promise<VcsPrStatus>;
 
+  /** Find an open pull request for a source branch in this repository. */
+  findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null>;
+
   /**
    * List pull requests
    * @param state Optional filter - 'open', 'closed', or 'all' (defaults to 'open')
