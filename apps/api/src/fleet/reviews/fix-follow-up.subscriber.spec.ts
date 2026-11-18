@@ -55,6 +55,15 @@ function createSubscriber() {
     markDispatched: vi.fn(async (): Promise<void> => {
       writeReasons.push(currentBookkeepingReason());
     }),
+    /**
+     * Review B4 (fix round 2): the claim link now runs inside the job insert's transaction (the fence), never after
+     * the commit, so a stale-claim sweep cannot delete the claim between the job and its link.
+     */
+    markDispatchedIfPending: vi.fn(async (): Promise<boolean> => {
+      writeReasons.push(currentBookkeepingReason());
+      return true;
+    }),
+    markFailed: vi.fn(async (): Promise<void> => undefined),
   };
 
   /** The action context each `dispatch` call ran in, read from inside the call itself. */
@@ -64,9 +73,11 @@ function createSubscriber() {
       _actorId: string,
       _projectId: string,
       _dto: { command?: string },
-      _opts?: { auditKey?: string },
+      opts?: { auditKey?: string; fence?: (jobId: string) => Promise<void> },
     ): Promise<{ job: { id: string } }> => {
       contexts.push(currentContext());
+      // The real `FleetJobsService.dispatch` runs the fence inside the job insert's transaction.
+      if (opts?.fence !== undefined) await opts.fence('rev-1');
       return { job: { id: 'rev-1' } };
     }),
   };
@@ -174,7 +185,7 @@ describe('FixFollowUpSubscriber', () => {
       'u1',
       'p1',
       { command: 'REVIEW', repoId: 'r1', prNumber: 22, profiles: ['balanced', 'security'], maxCostUsd: 1.25 },
-      { auditKey: 'system.pr-fix.follow-up' },
+      expect.objectContaining({ auditKey: 'system.pr-fix.follow-up', fence: expect.any(Function) }),
     );
   });
 
@@ -194,12 +205,42 @@ describe('FixFollowUpSubscriber', () => {
     expect(contexts[0]?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
   });
 
-  it('AC-8: records the review job on the claim', async () => {
+  it('AC-8: links the review job to the claim inside the dispatch (the fence), never after it', async () => {
     const { subscriber, reviews }: Harness = createSubscriber();
 
     await subscriber.handle(payload());
 
-    expect(reviews.markDispatched).toHaveBeenCalledExactlyOnceWith('claim-1', 'rev-1');
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledExactlyOnceWith('claim-1', 'rev-1');
+    expect(reviews.markDispatched).not.toHaveBeenCalled();
+  });
+
+  // Review B4 (fix round 2): a stale-claim sweep can delete the claim between the insert and the job commit. The
+  // fence loses, the insert rolls back, and the follow-up must not dispatch a second review of the head.
+  it('records a claim_lost skip when the fence loses to a stale-claim sweep', async () => {
+    const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
+    reviews.markDispatchedIfPending.mockResolvedValue(false);
+
+    await expect(subscriber.handle(payload())).resolves.toBeUndefined();
+
+    expect(jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(reviews.markFailed).not.toHaveBeenCalled();
+    expect(audits).toEqual([{
+      input: {
+        key: 'system.pr-fix.follow-up',
+        resourceType: 'fleet-job',
+        resourceId: 'fix-1',
+        projectId: 'p1',
+        summary: 'follow-up review skipped: claim_lost',
+      },
+      inTransaction: true,
+    }]);
+  });
+
+  it('rethrows the fence write failure as the original error, so the relay retries', async () => {
+    const { subscriber, reviews }: Harness = createSubscriber();
+    reviews.markDispatchedIfPending.mockRejectedValue(new Error('link db down'));
+
+    await expect(subscriber.handle(payload())).rejects.toThrow('link db down');
   });
 
   it('AC-9: writes one audit entry on the FIX job, inside a transaction', async () => {
@@ -237,9 +278,9 @@ describe('FixFollowUpSubscriber', () => {
     await expect(subscriber.handle(payload())).rejects.toThrow('db down');
   });
 
-  it('AC-14: a mark that rejects with a database error after a dispatch makes the handler reject', async () => {
+  it('AC-14: a claim link that rejects with a database error inside the dispatch makes the handler reject', async () => {
     const { subscriber, reviews, jobs }: Harness = createSubscriber();
-    reviews.markDispatched.mockRejectedValue(new Error('db down'));
+    reviews.markDispatchedIfPending.mockRejectedValue(new Error('db down'));
 
     await expect(subscriber.handle(payload())).rejects.toThrow('db down');
     expect(jobs.dispatch).toHaveBeenCalledTimes(1);

@@ -11,13 +11,18 @@ import { TicketTransitionsService } from './state-machine/ticket-transitions.ser
  *
  * `TicketTransitionsService.createPrForTicket` runs after the VERIFIED transition has committed, so a PR the forge
  * created whose `TicketLink` write failed would never be linked: the ticket is VERIFIED, the workflow has no route
- * back into it, and no other path re-runs that work. The failed write records this event instead, and the outbox
- * relay redelivers it (with its own backoff) until the handler completes — so the recovery survives a restart, not
- * just the request.
+ * back into it, and no other path re-runs that work. The call records this event *before* it touches the forge, and
+ * the outbox relay redelivers it (with its own backoff) until the handler completes — so the recovery survives a
+ * restart, not just the request.
  *
- * The handler re-runs the ticket's branch lookup, which adopts the open PR the forge already has and never creates a
- * second one. The handler succeeds when there is nothing left to link, so an adopted-elsewhere PR does not retry
- * forever.
+ * The handler re-runs the recorded repository and branch lookup, which adopts the open PR the forge already has and
+ * never creates a second one. When there is nothing left to link the handler succeeds, so a redelivery after a
+ * committed link writes nothing; a retryable failure rejects, so the relay retries this same event.
+ *
+ * Review B6 (fix round 2): the recovered link and the audit entry that records it commit in one transaction. The
+ * audit write runs *inside* the link's transaction through `onLinked`: recording it afterwards would leave a link
+ * whose audit entry never happened, and the redelivery would then find the link, answer "nothing to do", and skip the
+ * audit for good.
  */
 @Injectable()
 @SystemWriter('system.ticket-link.pr-refresh')
@@ -44,14 +49,14 @@ export class TicketPrLinkRetrySubscriber implements OnModuleInit {
     // A domain write of the system's own: the link is written as this component and the entry is recorded here, so
     // the retry is attributed to the ticket-link refresh rather than to the outbox.
     await runAsSystemWriter(this, async () => {
-      const linked = await this.transitions.retryPrLink(retry);
-      if (!linked) return;
-      await this.audit.record({
-        key: 'system.ticket-link.pr-refresh',
-        resourceType: 'ticket',
-        resourceId: retry.ticketId,
-        projectId: retry.projectId,
-        summary: 'linked the open PR of a verified ticket after a failed link write',
+      await this.transitions.retryPrLink(retry, async () => {
+        await this.audit.record({
+          key: 'system.ticket-link.pr-refresh',
+          resourceType: 'ticket',
+          resourceId: retry.ticketId,
+          projectId: retry.projectId,
+          summary: 'linked the open PR of a verified ticket after a failed link write',
+        });
       });
     });
   }

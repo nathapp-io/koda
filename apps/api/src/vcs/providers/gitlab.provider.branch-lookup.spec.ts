@@ -62,6 +62,23 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
     });
   });
 
+  // Review B3 (fix round 2): a response that advertises page two only through `Link rel="next"` is still paginated.
+  it('follows a Link rel="next" header when X-Next-Page is absent', async () => {
+    get
+      .mockResolvedValueOnce({
+        data: [fork(70)],
+        headers: { link: `<${api}/projects/acme%2Fapp/merge_requests?state=opened&page=2>; rel="next"` },
+      })
+      .mockResolvedValueOnce({ data: [sameProject(71)], headers: {} });
+
+    await expect(provider.findOpenPullRequestByBranch('ACME-7-fix-login')).resolves.toMatchObject({ number: 71 });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenLastCalledWith(`${api}/projects/acme%2Fapp/merge_requests`, {
+      headers: { 'PRIVATE-TOKEN': 'token' },
+      params: { state: 'opened', source_branch: 'ACME-7-fix-login', per_page: 100, page: 2 },
+    });
+  });
+
   it('returns null only once every page has been scanned', async () => {
     get
       .mockResolvedValueOnce({ data: [fork(70)], headers: { 'x-next-page': '2' } })

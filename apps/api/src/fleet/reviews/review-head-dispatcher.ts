@@ -7,6 +7,7 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import type { OpenPullRequest } from '../git-broker/github-app-client';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { exceptionResponse } from './dispatch-error';
+import { reviewClaimFence } from './review-claim-fence';
 import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 import type { FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import {
@@ -140,15 +141,7 @@ export class ReviewHeadDispatcher {
           // claim is gone and this fence loses, rolling the job back rather than leaving a job no claim owns.
           // When this fence wins, the claim is `dispatched` with this job id in the same commit, so that sweep's
           // delete matches no row and cannot drop it.
-          fence: async (jobId: string) => {
-            let linked: boolean;
-            try {
-              linked = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatchedIfPending(pending.id, jobId));
-            } catch (error) {
-              throw new ReviewClaimFenceError(error);
-            }
-            if (!linked) throw new ReviewClaimLostError();
-          },
+          fence: reviewClaimFence(this.reviews, pending.id),
         },
       );
     } catch (error) {

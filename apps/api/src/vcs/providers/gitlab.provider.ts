@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, MAX_MR_LOOKUP_PAGES, inclusiveSince, laterOf, nextPageNumber } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, MAX_MR_LOOKUP_PAGES, inclusiveSince, laterOf, nextPageFromLink, nextPageNumber } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -247,6 +247,9 @@ export class GitLabProvider implements IVcsProvider {
    * first page ahead of the same-project one. Every page is scanned until a same-project request is found or GitLab
    * reports no next page; a scan that reaches MAX_MR_LOOKUP_PAGES throws, because an unfinished scan is not proof
    * that the branch has no open merge request (the caller reads `null` as permission to create one).
+   *
+   * The next page comes from `X-Next-Page`, or from a `Link rel="next"` header when a proxy dropped the GitLab
+   * header (fix round 2): the page number is requested from the configured endpoint, never from the header's URL.
    */
   async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
     let page: number | null = 1;
@@ -268,7 +271,7 @@ export class GitLabProvider implements IVcsProvider {
       );
       if (mergeRequest) return this.mapGitLabMrToVcsPrStatus(mergeRequest);
 
-      page = nextPageNumber(response.headers?.['x-next-page']);
+      page = nextPageNumber(response.headers?.['x-next-page']) ?? nextPageFromLink(response.headers?.['link']);
     }
 
     return null;

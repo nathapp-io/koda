@@ -21,6 +21,30 @@ describe('classic auto-PR link retry payload', () => {
     expect(parseTicketPrLinkRetryPayload(payload)).toEqual(payload);
   });
 
+  // Review B2 (fix round 2): the intent records the repository and branch it works on, so its retry adopts that
+  // branch's PR after the ticket title or the project's connection moved.
+  it('carries the recorded forge target and branch', () => {
+    const target = { provider: 'github', repoOwner: 'acme', repoName: 'widgets', branchName: 'KODA-7-fix-login' };
+
+    expect(ticketPrLinkRetryPayload({ id: 'proj-1', key: 'KODA' }, 'ticket-1', target)).toEqual({
+      projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1', ...target,
+    });
+    expect(parseTicketPrLinkRetryPayload(
+      ticketPrLinkRetryPayload({ id: 'proj-1', key: 'KODA' }, 'ticket-1', target),
+    )).toEqual({ projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1', ...target });
+  });
+
+  it('parses a payload recorded before the intent carried a target', () => {
+    expect(parseTicketPrLinkRetryPayload({ projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1' }))
+      .toEqual({ projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1' });
+  });
+
+  it('drops a half-recorded target instead of reading it', () => {
+    expect(parseTicketPrLinkRetryPayload({
+      projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1', repoOwner: 'acme', repoName: 'widgets',
+    })).toEqual({ projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1' });
+  });
+
   it.each([
     ['null', null],
     ['a string', 'ticket-1'],

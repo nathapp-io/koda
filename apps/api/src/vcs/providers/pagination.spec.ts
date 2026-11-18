@@ -1,4 +1,4 @@
-import { inclusiveSince, laterOf, nextLinkUrl, nextPageNumber, sameOrigin } from './pagination';
+import { inclusiveSince, laterOf, nextLinkUrl, nextPageFromLink, nextPageNumber, sameOrigin } from './pagination';
 
 describe('pagination helpers (M10)', () => {
   it('reads rel="next" from a Link header', () => {
@@ -17,6 +17,18 @@ describe('pagination helpers (M10)', () => {
 
   it.each([['3', 3], ['', null], [undefined, null], ['0', null], ['abc', null]])('X-Next-Page %j → %j', (header, expected) => {
     expect(nextPageNumber(header)).toBe(expected);
+  });
+
+  // Review B3 (fix round 2): a proxy can drop X-Next-Page, leaving only the standard Link header.
+  it.each([
+    ['<https://gitlab.example/api/v4/projects/1/merge_requests?page=2>; rel="next"', 2],
+    ['<https://gitlab.example/api/v4/projects/1/merge_requests?page=2>; rel="prev", <https://gitlab.example/api/v4/projects/1/merge_requests?page=3>; rel="next"', 3],
+    ['<https://gitlab.example/api/v4/projects/1/merge_requests?page=2>; rel="prev"', null],
+    ['<https://gitlab.example/api/v4/projects/1/merge_requests?after=cursor>; rel="next"', null],
+    ['not a link', null],
+    [undefined, null],
+  ])('Link %j → next page %j', (header, expected) => {
+    expect(nextPageFromLink(header)).toBe(expected);
   });
 
   it('keeps the later of two timestamps and ignores bad input', () => {

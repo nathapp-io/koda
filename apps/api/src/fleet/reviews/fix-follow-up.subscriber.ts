@@ -20,6 +20,8 @@ import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { FLEET_PR_REVIEW_REPOSITORY, type IFleetPrReviewRepository } from './domain/fleet-pr-review.domain';
 import { exceptionResponse } from './dispatch-error';
+import { reviewClaimFence } from './review-claim-fence';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 
 /** The system component id: the second segment of `system.pr-fix.follow-up` (action-context rule). */
 const COMPONENT = 'pr-fix';
@@ -109,9 +111,24 @@ export class FixFollowUpSubscriber implements OnModuleInit {
           profiles: p.profiles,
           maxCostUsd: Number(p.maxCostUsd),
         },
-        { auditKey: 'system.pr-fix.follow-up' },
+        {
+          auditKey: 'system.pr-fix.follow-up',
+          // Review B4 (fix round 2): the same transactional fence the auto-review paths use. The claim link is
+          // written inside the job insert's transaction, so a stale-claim sweep cannot delete this claim between
+          // the job commit and a later link write: whichever write reaches the claim row first settles it.
+          fence: reviewClaimFence(this.reviews, claim.id),
+        },
       ));
     } catch (error) {
+      // The fence lost: the insert rolled back and the claim belongs to another pass (a stale-claim sweep removed
+      // it, or another pass settled it), so no review job exists for this delivery.
+      if (error instanceof ReviewClaimLostError) {
+        await this.recordSkip(p, 'claim_lost');
+        return;
+      }
+      // The fence's own write failed: the insert rolled back with it, and the failure is a database problem, so the
+      // relay must redeliver this event.
+      if (error instanceof ReviewClaimFenceError) throw error.cause;
       if (error instanceof BudgetPausedException) {
         await this.removeClaim(claim.id);
         await this.recordSkip(p, 'budget_paused');
@@ -136,11 +153,6 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       await this.recordSkip(p, 'dispatch_error');
       return;
     }
-
-    await bookkeeping(
-      'fleet.pr-review-bookkeeping',
-      () => this.reviews.markDispatched(claim.id, job.id),
-    );
 
     // The entry on the FIX job is the link between the two jobs; `record` requires a transaction.
     await this.txManager.run(() => this.audit.record({

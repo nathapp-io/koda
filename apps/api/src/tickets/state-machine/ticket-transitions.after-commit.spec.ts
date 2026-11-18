@@ -67,6 +67,8 @@ interface BuildOptions {
   createTicketLink?: Mock;
   /** Review B2: the retry path reads the ticket by id. */
   findByTicketId?: Mock;
+  /** Review B2 (fix round 2): the intent's own write, which a case can make fail. */
+  record?: Mock;
 }
 
 function build(options: BuildOptions = {}) {
@@ -100,11 +102,35 @@ function build(options: BuildOptions = {}) {
   const vcsConnectionService = { getFullByProject: vi.fn().mockResolvedValue(connection) };
   const vcsLinkExtractorService = { extractLinksFromPr: vi.fn().mockResolvedValue(undefined) };
   const afterCommit = new AfterCommitService();
-  const outboxService = { record: vi.fn().mockResolvedValue(undefined) };
+  /** Review B2 (fix round 2): what the intent recorded, and in what order relative to the forge calls. */
+  const order: string[] = [];
+  const record = options.record ?? vi.fn().mockResolvedValue(undefined);
+  const outboxService = {
+    record: vi.fn(async (event: unknown) => {
+      order.push('intent');
+      return record(event);
+    }),
+  };
+
+  /** The transaction the retry writes the link in; `tx.runs` and `tx.inTx` are what a case reads. */
+  const tx = { runs: 0, inTx: false };
+  const txManager = {
+    run: vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+      tx.runs += 1;
+      tx.inTx = true;
+      try {
+        return await fn();
+      } finally {
+        tx.inTx = false;
+      }
+    }),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => tx.inTx),
+  };
 
   const service = new TicketTransitionsService(
     repo as never,
-    { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) } as never,
+    txManager as never,
     { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
     mockAuditRecorder as never,
     afterCommit,
@@ -118,7 +144,7 @@ function build(options: BuildOptions = {}) {
     outboxService as never,
   );
 
-  return { service, repo, provider, ragService, vcsConnectionService, vcsLinkExtractorService, afterCommit, outboxService };
+  return { service, repo, provider, ragService, vcsConnectionService, vcsLinkExtractorService, afterCommit, outboxService, order, tx };
 }
 
 describe('TicketTransitionsService — post-commit effects (US-006)', () => {
@@ -421,6 +447,10 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
   /**
    * Review B2: the link write runs after the VERIFIED transition committed, and the workflow has no route back into
    * VERIFIED — so a forge PR that exists with no link is recovered by a durable retry, not by a second verify.
+   *
+   * Fix round 2: the recovery intent is recorded *before* the forge call (a PR exists as soon as the forge answers,
+   * and the process can die before the link write), it carries the repository and branch the call works on, and a
+   * retryable failure rejects so the relay redelivers the same event instead of starting a new one.
    */
   describe('review B2: a failed link write leaves a durable retry', () => {
     const createdPr = {
@@ -434,23 +464,62 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
       mergeSha: null,
       title: 'Fix login redirect',
     };
+    /** `buildBranchName('KODA', 7, 'Fix login redirect')`. */
+    const BRANCH = 'koda/KODA-7/fix-login-redirect';
+    const INTENT = {
+      projectId: 'proj-1',
+      projectKey: 'KODA',
+      ticketId: 'ticket-1',
+      provider: 'github',
+      repoOwner: 'acme',
+      repoName: 'widgets',
+      branchName: BRANCH,
+    };
 
     const linkFailure = () => vi.fn()
       .mockRejectedValueOnce(new Error('insert failed'))
       .mockResolvedValue({ id: 'link-1' });
 
-    it('records the retry on the outbox when the link write fails after the PR was created', async () => {
-      const { service, provider, outboxService } = build({ createTicketLink: linkFailure() });
+    it('records the recovery intent before the forge call, with the repository and branch', async () => {
+      const { service, provider, outboxService, order } = build();
+      provider.findOpenPullRequestByBranch.mockImplementation(async () => {
+        order.push('lookup');
+        return null;
+      });
+      provider.createPullRequest.mockImplementation(async () => {
+        order.push('create');
+        return createdPr;
+      });
 
       await service.verify('koda', 'KODA-7', 'Verified', principal);
 
-      expect(provider.createPullRequest).toHaveBeenCalledTimes(1);
-      expect(outboxService.record).toHaveBeenCalledTimes(1);
-      expect(outboxService.record).toHaveBeenCalledWith({
+      expect(outboxService.record).toHaveBeenCalledExactlyOnceWith({
         type: 'ticket_pr_link_retry',
-        payload: { projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1' },
+        payload: INTENT,
         metadata: { projectId: 'proj-1' },
       });
+      // The intent exists before anything the forge can answer, so a crash after the PR still leaves the recovery.
+      expect(order).toEqual(['intent', 'lookup', 'create']);
+    });
+
+    it('creates no PR when the intent cannot be recorded', async () => {
+      const { service, repo, provider } = build({ record: vi.fn().mockRejectedValue(new Error('outbox down')) });
+
+      await expect(service.verify('koda', 'KODA-7', 'Verified', principal))
+        .resolves.toMatchObject({ ticket: { status: TicketStatus.VERIFIED } });
+
+      expect(provider.createPullRequest).not.toHaveBeenCalled();
+      expect(repo.createTicketLink).not.toHaveBeenCalled();
+    });
+
+    it('keeps the intent in place when the forge lookup fails, so the retry looks again', async () => {
+      const { service, outboxService } = build({
+        findOpenPullRequestByBranch: vi.fn().mockRejectedValue(new Error('GitHub API error')),
+      });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(outboxService.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ payload: INTENT }));
     });
 
     it('links the same PR on the retry without creating another', async () => {
@@ -460,9 +529,9 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
       const { service, repo, provider, outboxService } = build({ createTicketLink, findOpenPullRequestByBranch });
 
       await service.verify('koda', 'KODA-7', 'Verified', principal);
-      const retry = outboxService.record.mock.calls[0]?.[0] as { payload: unknown };
+      const retry = outboxService.record.mock.calls[0]?.[0] as { payload: never };
 
-      await expect(service.retryPrLink(retry.payload as never)).resolves.toBe(true);
+      await expect(service.retryPrLink(retry.payload)).resolves.toBe(true);
 
       expect(provider.createPullRequest).toHaveBeenCalledTimes(1);
       expect(repo.createTicketLink).toHaveBeenCalledTimes(2);
@@ -471,22 +540,82 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
       }));
     });
 
-    it('adopts only: a retry with no open PR creates none', async () => {
+    it('adopts the recorded branch, not one rebuilt from a ticket title that changed since', async () => {
+      const findOpenPullRequestByBranch = vi.fn().mockResolvedValue(createdPr);
+      const { service, repo } = build({
+        // The ticket's title moved on after the intent was recorded, so `buildBranchName` no longer matches the PR.
+        findByTicketId: vi.fn().mockResolvedValue({ ...createdTicket(), title: 'Renamed later' }),
+        findOpenPullRequestByBranch,
+      });
+
+      await expect(service.retryPrLink(INTENT)).resolves.toBe(true);
+
+      expect(findOpenPullRequestByBranch).toHaveBeenCalledExactlyOnceWith(BRANCH);
+      expect(repo.createTicketLink).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 42, url: createdPr.url }));
+    });
+
+    it('uses the recorded repository, not the connection as it is now', async () => {
+      const { service } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr) });
+
+      await service.retryPrLink({ ...INTENT, repoOwner: 'fork', repoName: 'widgets-fork' });
+
+      expect((createVcsProvider as Mock).mock.calls.at(-1)?.[1]).toMatchObject({
+        repoUrl: 'https://github.com/fork/widgets-fork',
+      });
+    });
+
+    it('rejects when the branch has no open PR yet, so the relay retries the same event', async () => {
       const { service, provider } = build();
 
-      await expect(service.retryPrLink({
-        projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1',
-      })).resolves.toBe(false);
-
+      await expect(service.retryPrLink(INTENT)).rejects.toThrow(`no open PR on branch '${BRANCH}'`);
       expect(provider.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the forge lookup fails, so the relay retries the same event', async () => {
+      const { service } = build({ findOpenPullRequestByBranch: vi.fn().mockRejectedValue(new Error('GitHub API error')) });
+
+      await expect(service.retryPrLink(INTENT)).rejects.toThrow('GitHub API error');
+    });
+
+    it('rejects when the link write fails instead of recording a second event', async () => {
+      const { service, outboxService } = build({
+        createTicketLink: vi.fn().mockRejectedValue(new Error('insert failed')),
+        findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr),
+      });
+
+      await expect(service.retryPrLink(INTENT)).rejects.toThrow('insert failed');
+      expect(outboxService.record).not.toHaveBeenCalled();
+    });
+
+    it('commits the recovered link and the caller audit entry in one transaction', async () => {
+      const harness = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr) });
+      const seen: string[] = [];
+      harness.repo.createTicketLink.mockImplementation(async () => {
+        seen.push(`link:${String(harness.tx.inTx)}`);
+        return { id: 'link-1' };
+      });
+      const onLinked = vi.fn(async () => {
+        seen.push(`audit:${String(harness.tx.inTx)}`);
+      });
+
+      await expect(harness.service.retryPrLink(INTENT, onLinked)).resolves.toBe(true);
+
+      expect(seen).toEqual(['link:true', 'audit:true']);
+      expect(onLinked).toHaveBeenCalledTimes(1);
+      expect(harness.tx.runs).toBe(1);
+    });
+
+    it('rejects when the caller audit write fails, so the link does not commit alone', async () => {
+      const { service } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr) });
+
+      await expect(service.retryPrLink(INTENT, vi.fn().mockRejectedValue(new Error('audit db down'))))
+        .rejects.toThrow('audit db down');
     });
 
     it('writes nothing for a ticket that already carries a PR link', async () => {
       const { service, repo } = build({ hasPrLink: vi.fn().mockResolvedValue(true) });
 
-      await expect(service.retryPrLink({
-        projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1',
-      })).resolves.toBe(false);
+      await expect(service.retryPrLink(INTENT)).resolves.toBe(false);
 
       expect(repo.createTicketLink).not.toHaveBeenCalled();
     });
@@ -494,9 +623,7 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
     it('ignores a retry whose ticket belongs to another project', async () => {
       const { service, provider } = build();
 
-      await expect(service.retryPrLink({
-        projectId: 'other-project', projectKey: 'KODA', ticketId: 'ticket-1',
-      })).resolves.toBe(false);
+      await expect(service.retryPrLink({ ...INTENT, projectId: 'other-project' })).resolves.toBe(false);
 
       expect(provider.findOpenPullRequestByBranch).not.toHaveBeenCalled();
     });

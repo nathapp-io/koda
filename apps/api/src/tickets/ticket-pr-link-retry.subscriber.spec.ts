@@ -1,23 +1,74 @@
 import { Logger } from '@nestjs/common';
 import { currentAuditScope } from '../action-context/audit-coverage';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { TICKET_PR_LINK_RETRY } from '../vcs/ticket-pr-link';
 import { TicketPrLinkRetrySubscriber } from './ticket-pr-link-retry.subscriber';
 
 /**
- * Review B2: the outbox handler of a failed classic auto-PR link write. It runs the ticket's adopt-only retry inside
- * this component's writer scope and records the recovered link; a stray payload is skipped, never fatal.
+ * Review B2: the outbox handler of a recovered classic auto-PR link. It runs the ticket's retry inside this
+ * component's writer scope and records the recovered link; a stray payload is skipped, never fatal.
+ *
+ * Fix round 2 (B6): the audit entry is written by the *real* `AuditRecorder` inside the transaction that writes the
+ * link, so the two commit together. Recording it after the link committed left a link whose entry never happened,
+ * and the redelivery then found the link, answered "nothing to do" and skipped the audit for good.
  */
 describe('TicketPrLinkRetrySubscriber', () => {
   const payload = { projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1' };
 
+  interface Recorded {
+    action: string;
+    resourceId: string;
+    inTransaction: boolean;
+    projectId: unknown;
+  }
+
   const build = (linked = true) => {
     const registry = { register: vi.fn() };
-    const transitions = { retryPrLink: vi.fn().mockResolvedValue(linked) };
-    const audit = { record: vi.fn().mockResolvedValue(undefined) };
-    const subscriber = new TicketPrLinkRetrySubscriber(registry as never, transitions as never, audit as never);
+
+    /** The transaction the transitions service opens around the link write; the audit entry must run inside it. */
+    const tx = { inTx: false, runs: 0 };
+    const txManager = {
+      run: vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+        tx.runs += 1;
+        tx.inTx = true;
+        try {
+          return await fn();
+        } finally {
+          tx.inTx = false;
+        }
+      }),
+      getClient: vi.fn(),
+      isInTransaction: vi.fn(() => tx.inTx),
+    };
+
+    const recorded: Recorded[] = [];
+    const storage = {
+      record: vi.fn(async (entry: { action: string; resourceId: string; metadata: { projectId: unknown } }) => {
+        recorded.push({
+          action: entry.action,
+          resourceId: entry.resourceId,
+          projectId: entry.metadata.projectId,
+          inTransaction: tx.inTx,
+        });
+      }),
+    };
+    const audit = new AuditRecorder(storage as never, txManager as never);
+
+    /** What the real service does: the link and the caller's `onLinked` in one `txManager.run`. */
+    const transitions = {
+      retryPrLink: vi.fn(async (_payload: unknown, onLinked?: () => Promise<void>) => {
+        if (!linked) return false;
+        await txManager.run(async () => {
+          if (onLinked !== undefined) await onLinked();
+        });
+        return true;
+      }),
+    };
+
+    const subscriber = new TicketPrLinkRetrySubscriber(registry as never, transitions as never, audit);
     subscriber.onModuleInit();
     const handler = registry.register.mock.calls[0]?.[1] as (payload: unknown) => Promise<void>;
-    return { registry, transitions, audit, handler };
+    return { registry, transitions, audit, handler, recorded, tx, txManager };
   };
 
   afterEach(() => {
@@ -30,26 +81,43 @@ describe('TicketPrLinkRetrySubscriber', () => {
     expect(registry.register).toHaveBeenCalledWith(TICKET_PR_LINK_RETRY, expect.any(Function));
   });
 
-  it('runs the adopt-only retry for the payload ticket', async () => {
+  it('runs the retry for the payload ticket', async () => {
     const { handler, transitions } = build();
 
     await handler(payload);
 
-    expect(transitions.retryPrLink).toHaveBeenCalledWith(payload);
+    expect(transitions.retryPrLink).toHaveBeenCalledWith(payload, expect.any(Function));
   });
 
-  it('records the recovered link under the ticket-link refresh key', async () => {
-    const { handler, audit } = build(true);
+  it('records the recovered link under the ticket-link refresh key, inside the link transaction', async () => {
+    const { handler, recorded } = build(true);
 
     await handler(payload);
 
-    expect(audit.record).toHaveBeenCalledWith({
-      key: 'system.ticket-link.pr-refresh',
-      resourceType: 'ticket',
+    expect(recorded).toEqual([{
+      action: 'system.ticket-link.pr-refresh',
       resourceId: 'ticket-1',
       projectId: 'proj-1',
-      summary: 'linked the open PR of a verified ticket after a failed link write',
+      inTransaction: true,
+    }]);
+  });
+
+  it('does not append a second audit entry on a redelivery that found nothing to link', async () => {
+    const { handler, recorded } = build(false);
+
+    await handler(payload);
+
+    expect(recorded).toEqual([]);
+  });
+
+  it('rejects when the audit write fails, so the link does not commit without it', async () => {
+    const { handler, txManager } = build(true);
+    // A failed audit entry aborts the transaction the link write ran in, which is what makes the relay retry it.
+    vi.spyOn(txManager, 'run').mockImplementation(async () => {
+      throw new Error('audit db down');
     });
+
+    await expect(handler(payload)).rejects.toThrow('audit db down');
   });
 
   it('runs its write inside the subscriber writer scope', async () => {
@@ -64,14 +132,6 @@ describe('TicketPrLinkRetrySubscriber', () => {
     await handler(payload);
 
     expect(surface).toBe('writer:TicketPrLinkRetrySubscriber');
-  });
-
-  it('records nothing when the retry linked no PR', async () => {
-    const { handler, audit } = build(false);
-
-    await handler(payload);
-
-    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('skips a payload without ids and warns instead of failing the relay', async () => {

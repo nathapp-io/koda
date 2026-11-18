@@ -14,6 +14,7 @@ import {
   TICKET_PR_LINK_RETRY,
   ticketPrLinkRetryPayload,
   type TicketPrLinkRetryPayload,
+  type TicketPrLinkTarget,
 } from '../../vcs/ticket-pr-link';
 import { providerForConnection } from '../../vcs/provider-for-connection';
 import { VcsLinkExtractorService } from '../../vcs/vcs-link-extractor.service';
@@ -284,13 +285,15 @@ export class TicketTransitionsService {
    * Fire-and-forget: create a GitHub PR when ticket transitions to VERIFIED.
    * Only runs when VCS connection exists and VcsConnectionService/TicketLinksService are available.
    *
-   * `adoptOnly` is the retry path (review B2): it links the open PR the forge already holds and never creates one, so
-   * a retry cannot open a second PR. Answers whether a `pr` link was written.
+   * Review B2 (fix round 2): the recovery intent is recorded *before* the forge call. This runs after the VERIFIED
+   * transition committed, so it has no second chance — a forge PR whose link write never happens (the insert fails,
+   * or the process dies between the two) leaves the ticket VERIFIED with no route back into it. The recorded event
+   * carries the repository and branch this call targets, so its retry adopts that branch's PR even after the ticket
+   * title, and so `buildBranchName`, changed. Answers whether a `pr` link was written.
    */
   private async createPrForTicket(
     project: { id: string; key: string },
     ticket: TicketDomain,
-    options: { adoptOnly?: boolean } = {},
   ): Promise<boolean> {
     const vcsService = this.vcsConnectionService;
     const vcsLinkExtractor = this.vcsLinkExtractorService;
@@ -353,10 +356,25 @@ export class TicketTransitionsService {
       const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
       const prBody = ticket.description ?? '';
 
+      // Review B2 (fix round 2): the intent is durable before the forge can create anything, and it records the
+      // branch and repository this call works on — a retry must not re-derive either from a ticket or a connection
+      // that may have moved since.
+      if (this.outboxService) {
+        const recorded = await this.recordPrLinkIntent(project, ticket, {
+          provider: connection.provider,
+          repoOwner: connection.repoOwner,
+          repoName: connection.repoName,
+          branchName,
+        });
+        // Nothing would ever link a PR this call creates, and the ticket cannot re-enter VERIFIED: fail closed.
+        if (!recorded) return false;
+      }
+
       let existingPr: Awaited<ReturnType<typeof provider.findOpenPullRequestByBranch>>;
       try {
         existingPr = await provider.findOpenPullRequestByBranch(branchName);
       } catch (err) {
+        // The intent recorded above is left in place: the retry looks again, and adopts a PR if one exists.
         this.logger.warn(
           `[vcs] Open PR lookup failed for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -367,13 +385,6 @@ export class TicketTransitionsService {
       let created = false;
       if (existingPr) {
         pr = existingPr;
-      } else if (options.adoptOnly) {
-        // Review B2: the retry only adopts. A branch with no open PR is left alone rather than given a second PR
-        // the ticket's transition never asked for.
-        this.logger.debug(
-          `[vcs] No open PR to adopt for ticket ${projectKey}-${ticket.number}`,
-        );
-        return false;
       } else {
         try {
           // BUG-13: create the PR first and persist the TicketLink only on
@@ -408,12 +419,11 @@ export class TicketTransitionsService {
           linkType: 'pr',
         });
       } catch (err) {
-        // Review B2: the PR exists but the link does not, and the ticket is already VERIFIED with no way back into
-        // it, so nothing else would ever re-run this. Record a durable retry that adopts this PR by branch.
+        // Review B2: the PR exists but the link does not. The intent recorded before the forge call is what recovers
+        // it: the relay redelivers that event until its handler links the PR.
         this.logger.warn(
           `[vcs] Failed to link PR #${pr.number} for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
         );
-        await this.requestPrLinkRetry(project, ticket);
         return false;
       }
       if (created) {
@@ -440,38 +450,130 @@ export class TicketTransitionsService {
   }
 
   /**
-   * Review B2: a forge PR created (or adopted) whose link write failed. The ticket is already VERIFIED and the
-   * workflow has no route back into VERIFIED, so no later transition re-runs this work. The retry is recorded on the
-   * outbox instead: the row is durable across this process, and the relay redelivers it until the handler links the
-   * PR — adopting the one the forge already has, never opening a second.
+   * Review B2 (fix round 2): the durable recovery intent, recorded before the forge call so a PR the forge creates
+   * (or a human opened) is never left without its link. Answers whether it was recorded; a failure means the caller
+   * must not create a PR nothing would link. Without the outbox dependency there is no durable retry, which is the
+   * pre-B2 behaviour and is kept for the tests and integrations that construct this service without one.
    */
-  private async requestPrLinkRetry(
+  private async recordPrLinkIntent(
     project: { id: string; key: string },
     ticket: TicketDomain,
-  ): Promise<void> {
-    if (!this.outboxService) return;
+    target: TicketPrLinkTarget,
+  ): Promise<boolean> {
     try {
-      await this.outboxService.record({
+      await this.outboxService?.record({
         type: TICKET_PR_LINK_RETRY,
-        payload: ticketPrLinkRetryPayload(project, ticket.id),
+        payload: ticketPrLinkRetryPayload(project, ticket.id, target),
         metadata: { projectId: project.id },
       });
+      return true;
     } catch (err) {
       this.logger.error(
-        `[vcs] Failed to schedule the PR link retry for ticket ${ticket.id}: ${err instanceof Error ? err.message : String(err)}`,
+        `[vcs] Failed to record the PR link recovery intent for ticket ${ticket.id}: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return false;
     }
   }
 
   /**
-   * Review B2: the retry handler's entry point. Links the open PR of a VERIFIED ticket whose link write failed,
-   * without repeating the transition. Idempotent: a ticket that already has a `pr` link is skipped, and only an open
-   * PR on the ticket's branch is adopted (never a newly created one). Answers whether a link was written.
+   * Review B2: the retry handler's entry point. Links the open PR of a VERIFIED ticket, without repeating the
+   * transition, using the repository and branch recorded with the intent — never the ticket's current title or the
+   * connection as it is now, either of which can have moved since. Never creates a PR.
+   *
+   * Answers whether a link was written this call. `false` is the event's success: the ticket is gone, or it already
+   * carries a `pr` link, so a redelivery after a committed link writes nothing. A retryable failure rejects instead
+   * (the forge lookup, the link write, the caller's audit write): the relay redelivers this same event with its own
+   * backoff, which is the retry — a fresh event would restart that budget.
+   *
+   * `onLinked` runs inside the link write's transaction, so the recovered link and its audit entry commit together:
+   * a link whose audit entry did not commit must not survive to make the redelivery skip the audit for good.
    */
-  async retryPrLink(payload: TicketPrLinkRetryPayload): Promise<boolean> {
+  async retryPrLink(payload: TicketPrLinkRetryPayload, onLinked?: () => Promise<void>): Promise<boolean> {
     const ticket = await this.ticketRepo.findTicketById(payload.ticketId);
     if (!ticket || ticket.deletedAt !== null || ticket.projectId !== payload.projectId) return false;
-    return this.createPrForTicket({ id: payload.projectId, key: payload.projectKey }, ticket, { adoptOnly: true });
+
+    const vcsService = this.vcsConnectionService;
+    const vcsLinkExtractor = this.vcsLinkExtractorService;
+    const vcsConfig = this.vcsConfig;
+    if (!vcsService || !vcsLinkExtractor || !vcsConfig) return false;
+    const encryptionKey = vcsConfig.encryptionKey;
+    if (!encryptionKey) return false;
+
+    // The link already exists: this event's work is done, and a throw here would retry it forever.
+    if (await this.ticketRepo.hasPrLink(ticket.id)) return false;
+
+    let connection: Awaited<ReturnType<typeof vcsService.getFullByProject>>;
+    try {
+      connection = await vcsService.getFullByProject(payload.projectId);
+    } catch (err) {
+      // A project with no VCS connection will not grow one by being retried; anything else is retryable.
+      if (err instanceof NotFoundAppException) {
+        this.logger.warn(`[vcs] PR link retry for ticket ${ticket.id} found no VCS connection`);
+        return false;
+      }
+      throw err;
+    }
+    if (!connection.isActive) return false;
+
+    const target = {
+      provider: payload.provider ?? connection.provider,
+      repoOwner: payload.repoOwner ?? connection.repoOwner,
+      repoName: payload.repoName ?? connection.repoName,
+    };
+    // A payload recorded before the intent carried its target (a row already queued at deploy time) falls back to
+    // the values the classic path used then.
+    const branchName = payload.branchName ?? buildBranchName(payload.projectKey, ticket.number, ticket.title);
+    const token = decryptToken(connection.encryptedToken, encryptionKey);
+    const provider = providerForConnection(target, token, vcsConfig);
+
+    const pr = await provider.findOpenPullRequestByBranch(branchName);
+    if (pr === null) {
+      // Not final: the pass that recorded the intent may still be creating this PR, and the relay backs off.
+      throw new Error(
+        `no open PR on branch '${branchName}' of ${target.repoOwner}/${target.repoName} yet`,
+      );
+    }
+
+    const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
+    await this.txManager.run(async () => {
+      await repo.createTicketLink({
+        ticketId: ticket.id,
+        url: pr.url,
+        provider: target.provider,
+        externalRef: `${target.repoOwner}/${target.repoName}#${pr.number}`,
+        prNumber: pr.number,
+        prState: pr.draft ? 'draft' : 'open',
+        prUpdatedAt: new Date(),
+        linkType: 'pr',
+      });
+      if (onLinked) await onLinked();
+    });
+
+    // Best-effort, after the link committed: the PR link is the recovery, and a failing branch/commit scan must not
+    // make the relay redo a link it already has. Only when the recorded repository is still the connection's, since
+    // the extractor builds its links from the connection.
+    if (
+      target.provider === connection.provider
+      && target.repoOwner === connection.repoOwner
+      && target.repoName === connection.repoName
+    ) {
+      try {
+        await vcsLinkExtractor.extractLinksFromPr(
+          { id: payload.projectId, key: payload.projectKey },
+          { id: ticket.id, number: ticket.number, externalVcsId: null },
+          connection,
+          encryptionKey,
+          branchName,
+          pr.number,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[vcs] Link extraction failed for the recovered PR #${pr.number} of ticket ${ticket.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return true;
   }
 
 

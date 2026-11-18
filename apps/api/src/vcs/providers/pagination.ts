@@ -36,6 +36,25 @@ export function inclusiveSince(cursor: Date): string {
   return new Date(cursor.getTime() - 1000).toISOString();
 }
 
+/**
+ * Review B3 (fix round 2): the page number a `Link` header advertises for `rel="next"`, or null.
+ *
+ * GitLab answers `X-Next-Page` on its own pagination, but a proxy in front of it can rewrite the headers so only
+ * the standard `Link` header survives. A response that advertises another page is not proof that the branch has no
+ * same-project merge request, so the next page is requested from the configured endpoint — never from the URL the
+ * header names, so the token never travels to a host the header chose.
+ */
+export function nextPageFromLink(linkHeader: string | undefined): number | null {
+  const next = nextLinkUrl(linkHeader);
+  if (next === null) return null;
+  try {
+    const page = Number.parseInt(new URL(next).searchParams.get('page') ?? '', 10);
+    return Number.isInteger(page) && page > 0 ? page : null;
+  } catch {
+    return null;
+  }
+}
+
 /** GitLab's `X-Next-Page` header as a page number; empty or invalid means no next page. */
 export function nextPageNumber(header: string | undefined): number | null {
   const page = Number.parseInt(header ?? '', 10);
