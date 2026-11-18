@@ -724,10 +724,11 @@ export class TicketTransitionsService {
     toStatus: TicketStatus,
     principal: KodaPrincipal,
     fields?: TransitionFieldPatch,
+    options?: { gatedEdgeKey?: string | null },
   ): Promise<TransitionResult> {
     // Permissions P1 (US-003): no route key check here — the route declares its own key and
     // `executeTransitionInternal` checks the ticket's current-status edge, for every caller.
-    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal, fields);
+    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal, fields, options);
   }
 
   /**
@@ -745,7 +746,7 @@ export class TicketTransitionsService {
     commentBody: string | undefined,
     principal: KodaPrincipal,
     fields?: TransitionFieldPatch,
-    options: { skipEdgeCheck?: boolean } = {},
+    options: { skipEdgeCheck?: boolean; gatedEdgeKey?: string | null } = {},
   ): Promise<TransitionResult> {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
@@ -755,6 +756,13 @@ export class TicketTransitionsService {
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
+    }
+
+    // Reject a status PATCH whose route approval was bound to a different edge than the loaded ticket.
+    // This must precede authorization so a stale edge returns 409 even when the caller lacks the live key.
+    if (options.gatedEdgeKey !== undefined &&
+      options.gatedEdgeKey !== (transitionKeyFor(ticket.status as TicketStatus, toStatus) ?? null)) {
+      throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
     }
 
     // Permissions P1 (US-003): the edge check, before validation and before any write, so a refused

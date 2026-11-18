@@ -83,7 +83,9 @@ export class TicketRouteCommands implements OnModuleInit {
       },
       run: async (principal, input) => {
         if (recheckUpdate) await this.assertMayUpdate(principal, input.slug, input.ref);
-        return this.service.update(input.slug, input.ref, input.patch, principal);
+        return this.service.update(input.slug, input.ref, input.patch, principal, {
+          gatedEdgeKey: recheckUpdate ? key : null,
+        });
       },
       toResult: (result) => result,
     }, this.loader);

@@ -284,6 +284,7 @@ export class TicketsService {
     ref: string,
     updateTicketDto: UpdateTicketDto,
     principal: KodaPrincipal,
+    options?: { gatedEdgeKey?: string | null },
   ) {
     // M2: status changes are routed through the transition state machine
     // (TRANSITION validation + activity row + webhook) instead of a direct
@@ -312,6 +313,7 @@ export class TicketsService {
         status,
         principal,
         fields,
+        ...(options === undefined ? [] : [options]),
       );
       return result.ticket;
     }
