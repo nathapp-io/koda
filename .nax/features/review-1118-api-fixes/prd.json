@@ -3,7 +3,7 @@
   "feature": "review-1118-api-fixes",
   "branchName": "feat/review-1118-api-fixes",
   "createdAt": "2026-11-18T08:17:05.546Z",
-  "updatedAt": "2026-11-18T08:39:02.273Z",
+  "updatedAt": "2026-11-18T08:46:23.365Z",
   "userStories": [
     {
       "id": "US-001",
@@ -145,14 +145,17 @@
         "concurrency"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Maps existing database constraints to existing outcomes at two service transaction boundaries with a shared matcher."
+        "reasoning": "Maps existing database constraints to existing outcomes at two service transaction boundaries with a shared matcher.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/ticket-links/ticket-links.service.ts",
@@ -165,7 +168,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1f62ca99ccb0c66455a377c0b76372a91b26d0f3"
     },
     {
       "id": "US-004",
