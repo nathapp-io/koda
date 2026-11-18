@@ -660,6 +660,124 @@ describe('failures before the process runs', () => {
 });
 
 describe('cancel while running', () => {
+  test('AC-1: a job spawned here is terminated immediately on cancellation', async () => {
+    const b = build();
+    b.ex.onTick = (n) => { if (n === 1) b.run.requestCancel(); if (n >= 2) b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+  });
+
+  test('AC-2: pending cancellation does not signal a readopted process with other identity', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    b.ex.processIdentity = async () => 'other';
+    await b.run.start('watch');
+    expect(b.ex.killed).toEqual([]);
+  });
+
+  test('AC-3: pending cancellation sends TERM once identity confirms the readopted process', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    const killsAtIdentityCheck: number[] = [];
+    b.ex.processIdentity = async () => { killsAtIdentityCheck.push(b.ex.killed.length); return 'ours'; };
+    b.ex.onKill = () => undefined;
+    b.ex.onTick = (n) => { if (n >= 2) b.ex.alive = false; };
+    await b.run.start('watch');
+    expect(killsAtIdentityCheck).toEqual([0]);
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+  });
+
+  test('AC-4: unknown identity ticks with a pending cancel send no signal', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    b.ex.processIdentity = async () => 'unknown';
+    b.ex.onKill = () => undefined;
+    b.ex.onTick = (n) => { if (n >= 3) b.ex.alive = false; };
+    await b.run.start('watch');
+    expect(b.ex.killed).toEqual([]);
+  });
+
+  test('AC-5: a later ours identity tick sends TERM after unknown ticks', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    const identities = ['unknown', 'unknown', 'ours'] as const;
+    let checks = 0;
+    b.ex.processIdentity = async () => identities[checks++] ?? 'ours';
+    b.ex.onKill = () => undefined;
+    const signalsAtUnknownTicks: number[] = [];
+    b.ex.onTick = (n) => { if (n === 1 || n === 2) signalsAtUnknownTicks.push(b.ex.killed.length); if (n >= 4) b.ex.alive = false; };
+    await b.run.start('watch');
+    expect(signalsAtUnknownTicks).toEqual([0, 0]);
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+    expect(checks).toBe(3);
+  });
+
+  test('AC-6: readopted live process receives KILL after TERM grace when identity remains ours', async () => {
+    const b = build('RUN', 'j1', { killGraceMs: 2_000 });
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    const killsAtIdentityCheck: number[] = [];
+    b.ex.processIdentity = async () => { killsAtIdentityCheck.push(b.ex.killed.length); return 'ours'; };
+    b.ex.onKill = (signal) => { if (signal === 'SIGKILL') b.ex.alive = false; };
+    await b.run.start('watch');
+    expect(killsAtIdentityCheck[0]).toBe(0);
+    expect(killsAtIdentityCheck.slice(1).every((count) => count >= 1)).toBe(true);
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }, { pgid: 4242, signal: 'SIGKILL' }]);
+  });
+
+  test('AC-7: identity changing to other suppresses escalation', async () => {
+    const b = build('RUN', 'j1', { killGraceMs: 2_000 });
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    let checks = 0;
+    const killsAtIdentityCheck: number[] = [];
+    b.ex.processIdentity = async () => { killsAtIdentityCheck.push(b.ex.killed.length); return checks++ === 0 ? 'ours' : 'other'; };
+    b.ex.onKill = () => undefined;
+    await b.run.start('watch');
+    expect(killsAtIdentityCheck).toEqual([0, 1]);
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+  });
+
+  test('AC-8: unknown identity after TERM suppresses escalation', async () => {
+    const b = build('RUN', 'j1', { killGraceMs: 2_000 });
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    b.ex.processIdentity = async () => 'unknown';
+    b.ex.onKill = () => undefined;
+    b.ex.onTick = (n) => { if (n >= 4) b.ex.alive = false; };
+    await b.run.start('watch');
+    expect(b.ex.killed).toEqual([]);
+  });
+
+  test('AC-9: cancellation during readopted watch sends no signal before the next tick', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.processIdentity = async () => 'other';
+    const signalsAtCancel: number[] = [];
+    b.ex.onTick = (n) => { if (n === 1) { b.run.requestCancel(); signalsAtCancel.push(b.ex.killed.length); } };
+    await b.run.start('watch');
+    expect(signalsAtCancel).toEqual([0]);
+    expect(b.ex.killed).toEqual([]);
+  });
+
+  test('AC-10: cancellation during readopted watch sends TERM on the next ours tick', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.processIdentity = async () => 'ours';
+    b.ex.onKill = () => undefined;
+    b.ex.onTick = (n) => {
+      if (n === 1) b.run.requestCancel();
+      if (n >= 2) b.ex.alive = false;
+    };
+    await b.run.start('watch');
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+  });
   test('SIGTERM to the group, then the normal flow ends CANCELLED through UPLOADING with the partial bundle', async () => {
     const b = build();
     b.ex.status = { run: { id: 'r', status: 'crashed' } };       // nax writes crashed on SIGTERM
