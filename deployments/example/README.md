@@ -25,13 +25,22 @@ Benefits:
 ```bash
 KODA_VERSION=v0.4.0
 POSTGRES_PASSWORD=replace-this   # required: only A-Z, a-z, 0-9, ., _, ~, -; deploy.sh refuses other characters
-JWT_SECRET=replace-this-with-openssl-rand-hex-32          # required: openssl rand -hex 32 (at least 32 characters)
-JWT_REFRESH_SECRET=replace-this-with-openssl-rand-hex-33  # required, must differ from JWT_SECRET
-API_KEY_SECRET=replace-this-with-openssl-rand-hex-32      # required (at least 32 characters)
+JWT_SECRET=change-me-jwt-secret              # required: set a real secret of at least 32 characters
+JWT_REFRESH_SECRET=change-me-refresh-secret  # required: at least 32 characters, must differ from JWT_SECRET
+API_KEY_SECRET=change-me-api-key-secret      # required: set a real secret of at least 32 characters
 ```
 
-The three secrets have no defaults: compose refuses to start without them, and the production image refuses a
-value starting with `change-me` (the placeholders in `.env.example`) or one shorter than 32 characters. Tokens
+The three values above are placeholders, not secrets: the production image refuses any value starting with
+`change-me`, and refuses one shorter than 32 characters, so this example cannot boot unchanged. Replace all three
+with independent secrets before deploying, for example:
+
+```bash
+openssl rand -hex 32   # JWT_SECRET
+openssl rand -hex 32   # JWT_REFRESH_SECRET (must differ from JWT_SECRET)
+openssl rand -hex 32   # API_KEY_SECRET
+```
+
+The three secrets have no defaults: compose refuses to start without them. Tokens
 default to a 15-minute access JWT and a 7-day refresh JWT (`JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`); the web
 refreshes the session on its own.
 

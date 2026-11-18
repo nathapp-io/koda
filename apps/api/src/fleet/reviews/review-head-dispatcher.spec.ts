@@ -92,8 +92,17 @@ function createReviews(rows: readonly FleetPrReviewRecord[] = []) {
 type Reviews = ReturnType<typeof createReviews>;
 
 function createDispatcher(reviews: Reviews = createReviews()) {
+  /** Review B4: the real dispatch runs the fence inside its insert transaction; the stub runs it too. */
   const jobs = {
-    dispatch: vi.fn().mockResolvedValue({ job: { id: 'j1' } }),
+    dispatch: vi.fn(async (
+      _actorId: string,
+      _projectId: string,
+      _dto: unknown,
+      opts?: { fence?: (jobId: string) => Promise<void> },
+    ) => {
+      await opts?.fence?.('j1');
+      return { job: { id: 'j1' } };
+    }),
     findReviewJobIdBetween: vi.fn().mockResolvedValue(null),
   };
   const dispatcher = new ReviewHeadDispatcher(reviews as never, jobs as never);
@@ -121,7 +130,7 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
       'u1',
       'p1',
       { command: 'REVIEW', repoId: 'r1', prNumber: 7, profiles: ['native-ds'], maxCostUsd: 1 },
-      { auditKey: 'system.pr-review.dispatch' },
+      { auditKey: 'system.pr-review.dispatch', fence: expect.any(Function) },
     );
   });
 
@@ -129,7 +138,7 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
     const { dispatcher, reviews } = createDispatcher();
 
     expect(await run(dispatcher, [pullRequest()])).toBe(1);
-    expect(reviews.markDispatched).toHaveBeenCalledWith('row-1', 'j1');
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledWith('row-1', 'j1');
     expect(reviews.state.rows[0]).toMatchObject({ headSha: 'aaa', outcome: 'dispatched', jobId: 'j1' });
   });
 
@@ -233,7 +242,7 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
 
     await run(dispatcher, [pullRequest()]);
 
-    expect(reviews.state.writes.map((write: RecordedWrite) => write.call)).toEqual(['removeStalePending', 'insertPending', 'markDispatched']);
+    expect(reviews.state.writes.map((write: RecordedWrite) => write.call)).toEqual(['removeStalePending', 'insertPending', 'markDispatchedIfPending']);
     expect(reviews.state.writes.map((write: RecordedWrite) => write.reason))
       .toEqual(['fleet.pr-review-bookkeeping', 'fleet.pr-review-bookkeeping', 'fleet.pr-review-bookkeeping']);
   });
@@ -275,7 +284,7 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
 
   it('keeps an attempt counted when the bookkeeping after it throws, so the run rejects with the count already told', async () => {
     const { dispatcher, reviews } = createDispatcher();
-    reviews.markDispatched.mockRejectedValue(new Error('bookkeeping boom'));
+    reviews.markDispatchedIfPending.mockRejectedValue(new Error('bookkeeping boom'));
     const onAttempt = vi.fn();
 
     await expect(run(dispatcher, [pullRequest()], { onAttempt })).rejects.toThrow('bookkeeping boom');
@@ -288,6 +297,44 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
 
     expect(await run(dispatcher, [pullRequest()], { onAttempt })).toBe(0);
     expect(onAttempt).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Review B4: the claim link is written inside the job insert's transaction, so a stale-claim sweep cannot remove
+   * the claim between the insert and its link. A fence that loses the claim must not settle it as failed or remove
+   * it: the row is already gone or settled by whoever won.
+   */
+  describe('claim fence (review B4)', () => {
+    it('links the claim from inside the dispatch transaction', async () => {
+      const { dispatcher, reviews, jobs } = createDispatcher();
+
+      await run(dispatcher, [pullRequest()]);
+
+      const opts = jobs.dispatch.mock.calls[0]?.[3] as { fence: (jobId: string) => Promise<void> };
+      expect(typeof opts.fence).toBe('function');
+      expect(reviews.markDispatchedIfPending).toHaveBeenCalledWith('row-1', 'j1');
+      expect(reviews.state.writes.map((write: RecordedWrite) => write.call)).toContain('markDispatchedIfPending');
+    });
+
+    it('leaves a lost claim alone instead of removing or failing it', async () => {
+      const { dispatcher, reviews } = createDispatcher();
+      // A stale-claim sweep won the race: the row is no longer pending, so the conditional link changes nothing.
+      reviews.markDispatchedIfPending.mockResolvedValue(false);
+
+      await run(dispatcher, [pullRequest()]);
+
+      expect(reviews.remove).not.toHaveBeenCalled();
+      expect(reviews.markFailed).not.toHaveBeenCalled();
+    });
+
+    it('does not roll the claim back when the fence wins', async () => {
+      const { dispatcher, reviews } = createDispatcher();
+
+      await run(dispatcher, [pullRequest()]);
+
+      expect(reviews.removeStalePending).not.toHaveBeenCalled();
+      expect(reviews.state.rows[0]).toMatchObject({ outcome: 'dispatched', jobId: 'j1' });
+    });
   });
 });
 

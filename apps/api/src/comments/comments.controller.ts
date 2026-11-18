@@ -148,6 +148,7 @@ export class CommentsController {
   @ApiResponse({ status: 204, description: 'Comment deleted' })
   @ApiResponse({ status: 403, description: 'comment.delete is missing, or the comment is someone else\'s and only comment.delete.own is held' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
+  @ApiResponse({ status: 409, description: 'Workflow comments cannot be deleted' })
   async deleteFromHttp(
     @Param('id') id: string,
     @Principal() principal: KodaPrincipal,

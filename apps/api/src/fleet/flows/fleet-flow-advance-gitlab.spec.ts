@@ -66,7 +66,12 @@ function build(options: { state?: FleetFlowRecord['state']; merged?: boolean; st
     txManager as never, { dispatch: vi.fn(async () => ({ job: { id: 'review-job' } })), adoptForFlow: vi.fn(async () => true) } as never,
     { effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch'])) } as never,
     { reaskLocked: vi.fn() } as never, github as never,
-    { claimHead: vi.fn(async () => ({ kind: 'claimed', claimId: 'claim' })), markDispatched: vi.fn(), release: vi.fn() } as never,
+    {
+      claimHead: vi.fn(async () => ({ kind: 'claimed', claimId: 'claim' })), markDispatched: vi.fn(),
+      // Review B4: the claim's fence, run inside the job insert.
+      fence: () => async () => undefined,
+      release: vi.fn(),
+    } as never,
     testFleetConfig(), { apply: vi.fn(), applyPrdEdits: vi.fn() } as never, outbox as never,
     { ruledItemIds: vi.fn(async () => []), createForFlow: vi.fn(), commentRefused: vi.fn() } as never,
     gitlabCredentials as never, gitlab as never,

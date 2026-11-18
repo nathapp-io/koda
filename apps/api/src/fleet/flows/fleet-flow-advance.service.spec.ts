@@ -170,6 +170,8 @@ function build(opts: HarnessOptions = {}) {
       return opts.claim ?? { kind: 'claimed', claimId: 'c1' };
     }),
     markDispatched: vi.fn<FleetReviewClaimService['markDispatched']>(async () => undefined),
+    /** Review B4: the claim's fence, run inside the job insert. */
+    fence: vi.fn<FleetReviewClaimService['fence']>(() => async () => undefined),
     release: vi.fn<FleetReviewClaimService['release']>(async () => undefined),
   };
   const permissions = {

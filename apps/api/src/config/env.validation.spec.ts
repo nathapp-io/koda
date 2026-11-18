@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { validate } from './env.validation';
 
 const REQUIRED = {
@@ -103,5 +105,26 @@ describe('env validation', () => {
 
   it('accepts empty SMTP_URL / EMAIL_FROM / WEB_PUBLIC_URL as "email off" (S4b review I1)', () => {
     expect(() => validate({ ...REQUIRED, SMTP_URL: '', EMAIL_FROM: '', WEB_PUBLIC_URL: '' })).not.toThrow();
+  });
+
+  /**
+   * Review B1: the deployment example documents the three secrets as copy-paste `.env` lines. A placeholder that
+   * passed validation would let an operator boot a public deployment with a documented secret, so every value the
+   * README shows must be one production validation refuses.
+   */
+  describe('the deployment example cannot boot unchanged (review B1)', () => {
+    const readme = readFileSync(join(__dirname, '../../../../deployments/example/README.md'), 'utf8');
+    const documented = (key: string): string => {
+      const match = new RegExp(`^${key}=([^\\s#]+)`, 'm').exec(readme);
+      if (!match) throw new Error(`deployments/example/README.md documents no ${key}`);
+      return match[1];
+    };
+
+    it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET', 'API_KEY_SECRET'] as const)(
+      'names a %s production validation refuses',
+      (key) => {
+        expect(() => validate({ ...REQUIRED, ENV_NAME: 'production', [key]: documented(key) })).toThrow(key);
+      },
+    );
   });
 });

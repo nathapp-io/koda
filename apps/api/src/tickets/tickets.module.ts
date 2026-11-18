@@ -5,6 +5,7 @@ import { Module } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import { TicketPrLinkRetrySubscriber } from './ticket-pr-link-retry.subscriber';
 import { PrismaTicketsRepository } from './prisma-tickets.repository';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { RagModule } from '../rag/rag.module';
@@ -25,6 +26,7 @@ import { AuthModule } from '../auth/auth.module';
     { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
     TicketsService,
     TicketTransitionsService,
+    TicketPrLinkRetrySubscriber,
   ],
   exports: [TicketsService, TicketTransitionsService],
 })

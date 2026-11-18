@@ -63,6 +63,10 @@ interface BuildOptions {
   indexDocument?: Mock;
   createPullRequest?: Mock;
   findOpenPullRequestByBranch?: Mock;
+  /** Review B2: the PR link write, which a case can make fail. */
+  createTicketLink?: Mock;
+  /** Review B2: the retry path reads the ticket by id. */
+  findByTicketId?: Mock;
 }
 
 function build(options: BuildOptions = {}) {
@@ -75,7 +79,8 @@ function build(options: BuildOptions = {}) {
     updateTicketStatusIf: vi.fn().mockImplementation(async (_id: string, _from: string, to: string) => ({ ...ticket, status: to })),
     createComment: vi.fn().mockResolvedValue({ id: 'comment-1' }),
     createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity-1' }),
-    createTicketLink: vi.fn().mockResolvedValue({ id: 'link-1' }),
+    createTicketLink: options.createTicketLink ?? vi.fn().mockResolvedValue({ id: 'link-1' }),
+    findTicketById: options.findByTicketId ?? vi.fn().mockResolvedValue(ticket),
     findTicketWithComments: vi.fn().mockResolvedValue({ ...ticket, comments: [], deletedAt: null }),
     hasFleetOwnership: vi.fn().mockResolvedValue(false),
     hasPrLink: options.hasPrLink ?? vi.fn().mockResolvedValue(false),
@@ -95,6 +100,7 @@ function build(options: BuildOptions = {}) {
   const vcsConnectionService = { getFullByProject: vi.fn().mockResolvedValue(connection) };
   const vcsLinkExtractorService = { extractLinksFromPr: vi.fn().mockResolvedValue(undefined) };
   const afterCommit = new AfterCommitService();
+  const outboxService = { record: vi.fn().mockResolvedValue(undefined) };
 
   const service = new TicketTransitionsService(
     repo as never,
@@ -108,9 +114,11 @@ function build(options: BuildOptions = {}) {
     { create: vi.fn() } as never,
     vcsLinkExtractorService as never,
     { encryptionKey: 'k'.repeat(64) } as never,
+    undefined,
+    outboxService as never,
   );
 
-  return { service, repo, provider, ragService, vcsConnectionService, vcsLinkExtractorService, afterCommit };
+  return { service, repo, provider, ragService, vcsConnectionService, vcsLinkExtractorService, afterCommit, outboxService };
 }
 
 describe('TicketTransitionsService — post-commit effects (US-006)', () => {
@@ -407,6 +415,90 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
       await service.verify('koda', 'KODA-7', 'Verified', principal);
 
       expect(warn.mock.calls[0]?.[0]).toContain('Failed to create PR for ticket KODA-7: GitHub API error');
+    });
+  });
+
+  /**
+   * Review B2: the link write runs after the VERIFIED transition committed, and the workflow has no route back into
+   * VERIFIED — so a forge PR that exists with no link is recovered by a durable retry, not by a second verify.
+   */
+  describe('review B2: a failed link write leaves a durable retry', () => {
+    const createdPr = {
+      number: 42,
+      url: 'https://github.com/acme/widgets/pull/42',
+      state: 'open',
+      draft: true,
+      merged: false,
+      mergedAt: null,
+      mergedBy: null,
+      mergeSha: null,
+      title: 'Fix login redirect',
+    };
+
+    const linkFailure = () => vi.fn()
+      .mockRejectedValueOnce(new Error('insert failed'))
+      .mockResolvedValue({ id: 'link-1' });
+
+    it('records the retry on the outbox when the link write fails after the PR was created', async () => {
+      const { service, provider, outboxService } = build({ createTicketLink: linkFailure() });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(provider.createPullRequest).toHaveBeenCalledTimes(1);
+      expect(outboxService.record).toHaveBeenCalledTimes(1);
+      expect(outboxService.record).toHaveBeenCalledWith({
+        type: 'ticket_pr_link_retry',
+        payload: { projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1' },
+        metadata: { projectId: 'proj-1' },
+      });
+    });
+
+    it('links the same PR on the retry without creating another', async () => {
+      const createTicketLink = linkFailure();
+      // The verify creates PR 42 (nothing open yet); the retry finds it.
+      const findOpenPullRequestByBranch = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(createdPr);
+      const { service, repo, provider, outboxService } = build({ createTicketLink, findOpenPullRequestByBranch });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+      const retry = outboxService.record.mock.calls[0]?.[0] as { payload: unknown };
+
+      await expect(service.retryPrLink(retry.payload as never)).resolves.toBe(true);
+
+      expect(provider.createPullRequest).toHaveBeenCalledTimes(1);
+      expect(repo.createTicketLink).toHaveBeenCalledTimes(2);
+      expect(repo.createTicketLink).toHaveBeenLastCalledWith(expect.objectContaining({
+        prNumber: 42, externalRef: 'acme/widgets#42', linkType: 'pr',
+      }));
+    });
+
+    it('adopts only: a retry with no open PR creates none', async () => {
+      const { service, provider } = build();
+
+      await expect(service.retryPrLink({
+        projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1',
+      })).resolves.toBe(false);
+
+      expect(provider.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing for a ticket that already carries a PR link', async () => {
+      const { service, repo } = build({ hasPrLink: vi.fn().mockResolvedValue(true) });
+
+      await expect(service.retryPrLink({
+        projectId: 'proj-1', projectKey: 'KODA', ticketId: 'ticket-1',
+      })).resolves.toBe(false);
+
+      expect(repo.createTicketLink).not.toHaveBeenCalled();
+    });
+
+    it('ignores a retry whose ticket belongs to another project', async () => {
+      const { service, provider } = build();
+
+      await expect(service.retryPrLink({
+        projectId: 'other-project', projectKey: 'KODA', ticketId: 'ticket-1',
+      })).resolves.toBe(false);
+
+      expect(provider.findOpenPullRequestByBranch).not.toHaveBeenCalled();
     });
   });
 });

@@ -44,6 +44,7 @@ import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { FleetFlowPublishListener } from '../fleet/flows/fleet-flow-publish.listener';
 import { FleetFlowTicker } from '../fleet/flows/fleet-flow.ticker';
 import { FleetFlowStopTicketSubscriber } from '../fleet/flows/fleet-flow-stop-ticket.subscriber';
+import { TicketPrLinkRetrySubscriber } from '../tickets/ticket-pr-link-retry.subscriber';
 
 const writers = new Map<Function, string>([
   [EmailDispatcher, 'system.email.dispatch'],
@@ -92,6 +93,8 @@ const writers = new Map<Function, string>([
   [FleetFlowPublishListener, 'system.flow.respec'],
   [FleetFlowTicker, 'system.flow.advance'],
   [FleetFlowStopTicketSubscriber, 'system.flow.ticket'],
+  // Review B2: the durable retry of a classic auto-PR link write after the forge PR exists.
+  [TicketPrLinkRetrySubscriber, 'system.ticket-link.pr-refresh'],
 ]);
 
 const reflector = new Reflector();
@@ -116,7 +119,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(43);
+    expect(writers).toHaveLength(44);
     expect(actual).toEqual(expected);
   });
 

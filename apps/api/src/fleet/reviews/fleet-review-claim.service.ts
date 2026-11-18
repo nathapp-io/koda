@@ -3,6 +3,7 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { FLEET_PR_REVIEW_REPOSITORY, type IFleetPrReviewRepository } from './domain/fleet-pr-review.domain';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 
 export type HeadClaim =
   | { kind: 'claimed'; claimId: string }
@@ -64,6 +65,23 @@ export class FleetReviewClaimService {
 
   markDispatched(claimId: string, jobId: string): Promise<void> {
     return bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatched(claimId, jobId));
+  }
+
+  /**
+   * Review B4: the fence to pass into the dispatch that creates this claim's REVIEW job. The link is written inside
+   * that insert's transaction, so a stale-claim sweep either removes the claim first — this fence then loses and the
+   * insert rolls back — or finds the claim already dispatched and cannot drop it.
+   */
+  fence(claimId: string): (jobId: string) => Promise<void> {
+    return async (jobId: string) => {
+      let linked: boolean;
+      try {
+        linked = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatchedIfPending(claimId, jobId));
+      } catch (error) {
+        throw new ReviewClaimFenceError(error);
+      }
+      if (!linked) throw new ReviewClaimLostError();
+    };
   }
 
   release(claimId: string): Promise<void> {

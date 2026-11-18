@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextPageNumber } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, MAX_MR_LOOKUP_PAGES, inclusiveSince, laterOf, nextPageNumber } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -242,16 +242,36 @@ export class GitLabProvider implements IVcsProvider {
     }
   }
 
+  /**
+   * Review B3: GitLab pages open merge requests in its own order, so a fork's request on the branch can fill the
+   * first page ahead of the same-project one. Every page is scanned until a same-project request is found or GitLab
+   * reports no next page; a scan that reaches MAX_MR_LOOKUP_PAGES throws, because an unfinished scan is not proof
+   * that the branch has no open merge request (the caller reads `null` as permission to create one).
+   */
   async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
-    const response = await this.httpClient.get(`${this.baseUrl}/merge_requests`, {
-      headers: this.authHeaders,
-      params: { state: 'opened', source_branch: branchName },
-    });
+    let page: number | null = 1;
 
-    const mergeRequest = (response.data as GitLabMrStatusResponse[]).find(
-      (mr) => mr.source_project_id !== undefined && mr.source_project_id === mr.target_project_id,
-    );
-    return mergeRequest ? this.mapGitLabMrToVcsPrStatus(mergeRequest) : null;
+    for (let pages = 0; page !== null; pages++) {
+      if (pages >= MAX_MR_LOOKUP_PAGES) {
+        throw new Error(
+          `GitLab merge request lookup for branch '${branchName}' reached ${MAX_MR_LOOKUP_PAGES} pages without settling`,
+        );
+      }
+
+      const response = await this.httpClient.get(`${this.baseUrl}/merge_requests`, {
+        headers: this.authHeaders,
+        params: { state: 'opened', source_branch: branchName, per_page: ISSUES_PER_PAGE, page },
+      });
+
+      const mergeRequest = (response.data as GitLabMrStatusResponse[]).find(
+        (mr) => mr.source_project_id !== undefined && mr.source_project_id === mr.target_project_id,
+      );
+      if (mergeRequest) return this.mapGitLabMrToVcsPrStatus(mergeRequest);
+
+      page = nextPageNumber(response.headers?.['x-next-page']);
+    }
+
+    return null;
   }
 
   async listPullRequests(state: 'open' | 'closed' | 'all' = 'open'): Promise<VcsPrStatus[]> {

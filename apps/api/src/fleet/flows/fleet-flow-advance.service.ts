@@ -7,6 +7,7 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { ReviewClaimFenceError, ReviewClaimLostError } from '../reviews/review-claim-errors';
 import { buildStepDispatch } from './flow-step-dispatch';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
@@ -460,17 +461,20 @@ export class FleetFlowAdvanceService {
 
     let jobId: string;
     try {
-      jobId = await this.dispatchStep(pass);
+      // Review B4: the claim link is written inside the job insert's transaction, so a stale-claim sweep cannot
+      // remove this pending claim between the insert and its link, and a sweep that wins leaves no job behind.
+      jobId = await this.dispatchStep(pass, undefined, this.reviews.fence(claim.claimId));
     } catch (error) {
+      // A claim another pass removed or settled: its job is the head's, and the next pass adopts it. Nothing was
+      // created here, so there is nothing to release or refuse.
+      if (error instanceof ReviewClaimLostError) return;
+      if (error instanceof ReviewClaimFenceError) throw error.cause;
       // The claim is ours and the dispatch failed: release it so a later pass can retry this head,
       // then handle the error exactly as the other steps do.
       await this.reviews.release(claim.claimId);
       await this.refuseDispatch(flow, feature, 'REVIEW', error, now);
       return;
     }
-    // Link the claim before the record phase: the job exists now, so a record that skips still leaves a
-    // head whose claim points at it, and the next pass adopts instead of dispatching again.
-    await this.reviews.markDispatched(claim.claimId, jobId);
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
       if (!current) return;
@@ -497,8 +501,17 @@ export class FleetFlowAdvanceService {
     });
   }
 
-  /** The exact body for the step the decision chose, dispatched for the flow's creator outside a transaction. */
-  private async dispatchStep(pass: DispatchPass<DispatchAction>, handoff?: HandoffRecordFile[]): Promise<string> {
+  /**
+   * The exact body for the step the decision chose, dispatched for the flow's creator outside a transaction.
+   *
+   * `fence` (review B4) is the review claim's conditional link: it runs inside the insert's transaction and throws
+   * when the claim is no longer this pass's, which rolls the insert back.
+   */
+  private async dispatchStep(
+    pass: DispatchPass<DispatchAction>,
+    handoff?: HandoffRecordFile[],
+    fence?: (jobId: string) => Promise<void>,
+  ): Promise<string> {
     const { flow, feature, action, plan } = pass;
     const setSpecPaths = action.step === 'SPEC_REVIEW' ? this.setSpecPaths(flow) : undefined;
     const body = buildStepDispatch({
@@ -517,6 +530,7 @@ export class FleetFlowAdvanceService {
       flowId: flow.id, flowStep: action.step, flowFeatureId: feature.id, auditKey: 'system.flow.advance',
       // US-006: only a handoff RUN carries the record. Every other dispatch omits the key entirely.
       ...(handoff !== undefined ? { handoff } : {}),
+      ...(fence !== undefined ? { fence } : {}),
     });
     return result.job.id;
   }

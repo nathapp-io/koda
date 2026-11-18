@@ -5838,6 +5838,9 @@
           },
           "404": {
             "description": "Comment not found"
+          },
+          "409": {
+            "description": "Workflow comments cannot be deleted"
           }
         },
         "security": [

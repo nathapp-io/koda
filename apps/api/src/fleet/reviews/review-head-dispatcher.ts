@@ -7,6 +7,7 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import type { OpenPullRequest } from '../git-broker/github-app-client';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { exceptionResponse } from './dispatch-error';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 import type { FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import {
   FLEET_PR_REVIEW_REPOSITORY,
@@ -116,14 +117,13 @@ export class ReviewHeadDispatcher {
   }
 
   /**
-   * Call 5 and, on success, the job link: the review is dispatched on the enabler's behalf, then the claim
-   * records its job. Retryable failures remove the claim; permanent failures settle it as failed.
-   * Returns true only when a shared project budget pause should stop this repo's pass.
+   * Call 5 and, on success, the job link: the review is dispatched on the enabler's behalf, and the claim records
+   * its job inside that same insert transaction (the fence). Retryable failures remove the claim; permanent
+   * failures settle it as failed. Returns true only when a shared project budget pause should stop this repo's pass.
    */
   private async dispatch(actorId: string, repo: FleetRepoRecord, pr: OpenPullRequest, pending: FleetPrReviewRecord): Promise<boolean> {
-    let result: Awaited<ReturnType<FleetJobsService['dispatch']>>;
     try {
-      result = await this.jobs.dispatch(
+      await this.jobs.dispatch(
         actorId,
         repo.projectId,
         {
@@ -133,9 +133,27 @@ export class ReviewHeadDispatcher {
           profiles: repo.autoReviewProfiles,
           maxCostUsd: Number(repo.autoReviewMaxCostUsd),
         },
-        { auditKey: 'system.pr-review.dispatch' },
+        {
+          auditKey: 'system.pr-review.dispatch',
+          // Review B4: the claim is fenced on the insert. A stale-claim sweep reads its job lookup before this
+          // insert commits, so its conditional delete can land between the lookup and here; when it does, the
+          // claim is gone and this fence loses, rolling the job back rather than leaving a job no claim owns.
+          // When this fence wins, the claim is `dispatched` with this job id in the same commit, so that sweep's
+          // delete matches no row and cannot drop it.
+          fence: async (jobId: string) => {
+            let linked: boolean;
+            try {
+              linked = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatchedIfPending(pending.id, jobId));
+            } catch (error) {
+              throw new ReviewClaimFenceError(error);
+            }
+            if (!linked) throw new ReviewClaimLostError();
+          },
+        },
       );
     } catch (error) {
+      if (error instanceof ReviewClaimLostError) return false;
+      if (error instanceof ReviewClaimFenceError) throw error.cause;
       if (error instanceof BudgetPausedException) {
         await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
         return true;
@@ -156,7 +174,6 @@ export class ReviewHeadDispatcher {
       await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
       return false;
     }
-    await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatched(pending.id, result.job.id));
     return false;
   }
 }

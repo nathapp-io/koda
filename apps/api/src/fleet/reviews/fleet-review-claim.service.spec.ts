@@ -3,6 +3,7 @@ import { type FleetPrReviewRecord, type IFleetPrReviewRepository } from './domai
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { FleetReviewsModule } from './fleet-reviews.module';
 import { FleetReviewEventsService } from './fleet-review-events.service';
+import { ReviewClaimFenceError, ReviewClaimLostError } from './review-claim-errors';
 
 describe('FleetReviewClaimService', () => {
   const now = new Date('2026-01-01T12:00:00.000Z');
@@ -171,6 +172,44 @@ describe('FleetReviewClaimService', () => {
       await service.claimHead('repo-1', 12, 'h1', now);
 
       expect(reason).toBe('fleet.pr-review-bookkeeping');
+    });
+  });
+
+  /**
+   * Review B4: the claim link rides the job insert, so a stale-claim sweep interleaved with a live pass either finds
+   * the claim already dispatched (it cannot delete it) or has already removed it (the insert rolls back).
+   */
+  describe('review B4: the dispatch fence', () => {
+    it('links the claim with the inserted job id', async () => {
+      await service.fence('claim-1')('job-1');
+
+      expect(repository.markDispatchedIfPending).toHaveBeenCalledWith('claim-1', 'job-1');
+    });
+
+    it('runs the link in fleet.pr-review-bookkeeping', async () => {
+      let reason: string | undefined;
+      vi.mocked(repository.markDispatchedIfPending).mockImplementation(async () => {
+        reason = currentBookkeepingReason();
+        return true;
+      });
+
+      await service.fence('claim-1')('job-1');
+
+      expect(reason).toBe('fleet.pr-review-bookkeeping');
+    });
+
+    it('reports a lost claim when the conditional link changes nothing', async () => {
+      vi.mocked(repository.markDispatchedIfPending).mockResolvedValue(false);
+
+      await expect(service.fence('claim-1')('job-1')).rejects.toBeInstanceOf(ReviewClaimLostError);
+    });
+
+    it('propagates a failed link write as a fence failure, not as a lost claim', async () => {
+      const failure = new Error('connection lost');
+      vi.mocked(repository.markDispatchedIfPending).mockRejectedValue(failure);
+
+      await expect(service.fence('claim-1')('job-1')).rejects.toThrow(ReviewClaimFenceError);
+      await expect(service.fence('claim-1')('job-1')).rejects.toMatchObject({ cause: failure });
     });
   });
 });

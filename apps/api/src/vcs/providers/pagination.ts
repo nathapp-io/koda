@@ -4,6 +4,14 @@ export const ISSUES_PER_PAGE = 100;
 /** M10: pages fetched per poll. A capped poll resumes from its cursor on the next tick. */
 export const MAX_ISSUE_PAGES = 10;
 
+/**
+ * Review B3: pages the GitLab open-merge-request lookup scans for a same-project request. GitLab pages merge
+ * requests in its own order, so a fork's request can fill a page ahead of the same-project one. A scan that
+ * reaches this bound is a lookup failure (the caller must not read it as "no open MR"), so the bound is generous
+ * but finite.
+ */
+export const MAX_MR_LOOKUP_PAGES = 10;
+
 /** The rel="next" URL from a GitHub `Link` header, or null. */
 export function nextLinkUrl(linkHeader: string | undefined): string | null {
   if (!linkHeader) return null;
