@@ -60,6 +60,14 @@ export class PrismaFleetPrReviewRepository
     await this.db.fleetPrReview.update({ where: { id }, data: { outcome: 'dispatched', jobId } });
   }
 
+  async markDispatchedIfPending(id: string, jobId: string): Promise<boolean> {
+    const result = await this.db.fleetPrReview.updateMany({
+      where: { id, outcome: 'pending', jobId: null },
+      data: { outcome: 'dispatched', jobId },
+    });
+    return result.count === 1;
+  }
+
   async markFailed(id: string, outcome: string): Promise<void> {
     await this.db.fleetPrReview.update({ where: { id }, data: { outcome } });
   }

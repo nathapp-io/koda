@@ -177,6 +177,10 @@ export class FleetJobsService {
     });
   }
 
+  async findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null> {
+    return await this.repo.findReviewJobIdBetween(repoId, prNumber, from, to);
+  }
+
   /**
    * US-004: links an already-created job to a flow step, for a job dispatched before its flow was known.
    * The repository's conditional update is the whole rule: a job whose `flowId` is already set — by this flow's own

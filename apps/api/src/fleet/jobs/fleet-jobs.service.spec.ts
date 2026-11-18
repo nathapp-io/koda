@@ -52,6 +52,14 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
     );
   });
 
+  it('US-005 AC-9: findReviewJobIdBetween delegates to the repository', async () => {
+    const from = new Date('2026-01-01T00:00:00.000Z');
+    const to = new Date('2026-01-01T00:01:00.000Z');
+    repo.findReviewJobIdBetween = vi.fn().mockResolvedValue('review-job');
+    await expect(service.findReviewJobIdBetween('repo-1', 12, from, to)).resolves.toBe('review-job');
+    expect(repo.findReviewJobIdBetween).toHaveBeenCalledWith('repo-1', 12, from, to);
+  });
+
   it('US-003 AC-11: requesterOf scopes the lookup to the project', async () => {
     repo.findById.mockResolvedValue({ ...jobA, id: 'j1', projectId: 'p1', requestedById: 'a1' });
     expect(await service.requesterOf('p1', 'j1')).toBe('a1');

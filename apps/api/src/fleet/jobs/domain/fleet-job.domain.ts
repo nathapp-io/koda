@@ -421,6 +421,8 @@ export interface IFleetJobRepository {
   /** @throws DuplicateActiveJobError */
   createJob(data: NewFleetJob): Promise<FleetJobRecord>;
   findActiveJobId(repoId: string, feature: string): Promise<string | null>;
+  /** Oldest REVIEW job for this PR feature created within the inclusive claim-dispatch window. */
+  findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null>;
   /** Lock a thread row and return whether it has no active jobs; call inside the dispatch transaction. */
   lockIdleThread(threadId: string): Promise<boolean>;
   findById(id: string): Promise<FleetJobRecord | null>;
