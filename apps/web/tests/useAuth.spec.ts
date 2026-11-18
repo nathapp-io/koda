@@ -26,6 +26,7 @@ interface CookieCall {
 
 function makeFakeEnv() {
   const userRef = ref<unknown>(null)
+  const unavailableRef = ref(false)
   const navigateToMock = jest.fn()
   const cookieCalls: CookieCall[] = []
   const stateCalls: Array<{ key: string }> = []
@@ -38,6 +39,7 @@ function makeFakeEnv() {
   const fakeState = <T>(key: string, init?: () => T): { value: T } => {
     stateCalls.push({ key })
     if (key === 'koda_user') return userRef as { value: T }
+    if (key === 'koda_session_unavailable') return unavailableRef as { value: T }
     return ref(typeof init === 'function' ? init() : null) as { value: T }
   }
 
@@ -52,6 +54,7 @@ function makeFakeEnv() {
 
   return {
     userRef,
+    unavailableRef,
     fetchMock,
     fakeCookie,
     fakeState,
@@ -200,6 +203,47 @@ describe('AC-6: fetchUser() returns false when /api/auth/me returns no user', ()
     const result = await mod.useAuth().fetchUser()
     expect(result).toBe(false)
     expect(env.userRef.value).toBeNull()
+  })
+})
+
+describe('US-004: unavailable auth probes preserve and recover session state', () => {
+  test('AC-7/8/9: preserves user and marks session unavailable on 503', async () => {
+    const env = makeFakeEnv()
+    const existing = { id: '1', email: 'a@b.com' }
+    env.userRef.value = existing
+    const originalUser = env.userRef.value
+    env.fetchMock.mockRejectedValueOnce(Object.assign(new Error('Unavailable'), { statusCode: 503 }))
+    applyNuxtGlobals(env)
+    const auth = loadAuth().useAuth()
+    expect(await auth.fetchUser()).toBe(false)
+    expect(env.userRef.value).toBe(originalUser)
+    expect(env.unavailableRef.value).toBe(true)
+  })
+
+  test('AC-10: unauthorized result clears unavailable state', async () => {
+    const env = makeFakeEnv()
+    env.unavailableRef.value = true
+    env.fetchMock.mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { statusCode: 401 }))
+    applyNuxtGlobals(env)
+    await loadAuth().useAuth().fetchUser()
+    expect(env.unavailableRef.value).toBe(false)
+  })
+
+  test('AC-11: successful probe clears unavailable state', async () => {
+    const env = makeFakeEnv()
+    env.unavailableRef.value = true
+    env.fetchMock.mockResolvedValueOnce({ user: { id: '2', email: 'b@b.com' } })
+    applyNuxtGlobals(env)
+    await loadAuth().useAuth().fetchUser()
+    expect(env.unavailableRef.value).toBe(false)
+  })
+
+  test('AC-12: successful login clears unavailable state', async () => {
+    const env = makeFakeEnv()
+    env.unavailableRef.value = true
+    applyNuxtGlobals(env)
+    await loadAuth().useAuth().login({ email: 'a@b.com', password: 'secret' })
+    expect(env.unavailableRef.value).toBe(false)
   })
 })
 
