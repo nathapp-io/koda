@@ -25,6 +25,12 @@ function setup(errors: unknown[] = []) {
     markDispatchedIfPending: vi.fn(async () => true),
     markFailed: vi.fn(async (id: string, outcome: string) => { const pending = [...rows.values()].find((item) => item.id === id); if (pending) pending.outcome = outcome; }),
     remove: vi.fn(async (id: string) => { for (const [key, item] of rows) if (item.id === id) rows.delete(key); }),
+    removeStalePending: vi.fn(async (id: string, staleBefore: Date) => {
+      const pending = [...rows.values()].find((item) => item.id === id);
+      if (!pending || pending.outcome !== 'pending' || pending.jobId !== null || pending.createdAt.getTime() >= staleBefore.getTime()) return false;
+      for (const [key, item] of rows) if (item.id === id) rows.delete(key);
+      return true;
+    }),
   };
   const jobs = { dispatch: vi.fn(async () => {
     const error = errors.shift();

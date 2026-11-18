@@ -92,6 +92,10 @@ export class ReviewHeadDispatcher {
    * seconds of its insert), so the claim is linked to it and the head is settled. The link is conditional, so
    * a claim another pass settled or removed in the meantime is left alone and no job is dispatched twice.
    * A lookup that fails leaves the claim as it is for this pass: the PR is skipped, not unclaimed.
+   *
+   * The removal is conditional for the same reason: another stale-claim path can link a job between this
+   * lookup and the delete, and an unconditional delete would drop that freshly settled claim and let the head
+   * be dispatched again. Only a removal this pass actually made reopens the head.
    */
   private async reopenStaleClaim(row: FleetPrReviewRecord, staleBefore: number, pollMs: number): Promise<boolean> {
     if (row.outcome !== PENDING) return false;
@@ -107,8 +111,7 @@ export class ReviewHeadDispatcher {
       await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatchedIfPending(row.id, jobId));
       return false;
     }
-    await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(row.id));
-    return true;
+    return await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.removeStalePending(row.id, new Date(staleBefore)));
   }
 
   /**

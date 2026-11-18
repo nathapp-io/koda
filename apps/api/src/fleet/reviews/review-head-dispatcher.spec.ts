@@ -27,7 +27,7 @@ const reviewRow = (over: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord
   createdAt: NOW, updatedAt: NOW, ...over,
 });
 
-type WriteCall = 'insertPending' | 'markDispatched' | 'markDispatchedIfPending' | 'markFailed' | 'remove';
+type WriteCall = 'insertPending' | 'markDispatched' | 'markDispatchedIfPending' | 'markFailed' | 'remove' | 'removeStalePending';
 
 interface RecordedWrite {
   call: WriteCall;
@@ -76,6 +76,14 @@ function createReviews(rows: readonly FleetPrReviewRecord[] = []) {
     remove: vi.fn(async (id: string) => {
       note('remove');
       state.rows = state.rows.filter((r) => r.id !== id);
+    }),
+    /** The atomic stale removal: only an old, still-pending claim with no job is deleted. */
+    removeStalePending: vi.fn(async (id: string, staleBefore: Date) => {
+      note('removeStalePending');
+      const row = find(id);
+      if (!row || row.outcome !== 'pending' || row.jobId !== null || row.createdAt.getTime() >= staleBefore.getTime()) return false;
+      state.rows = state.rows.filter((r) => r.id !== id);
+      return true;
     }),
     findPrincipalAccess: vi.fn(),
   };
@@ -189,7 +197,7 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
     const { dispatcher, reviews, jobs } = createDispatcher(createReviews([stale]));
 
     expect(await run(dispatcher, [pullRequest()])).toBe(1);
-    expect(reviews.remove).toHaveBeenCalledWith('row-1');
+    expect(reviews.removeStalePending).toHaveBeenCalledWith('row-1', new Date(NOW.getTime() - POLL_MS));
     expect(jobs.dispatch).toHaveBeenCalledTimes(1);
   });
 
@@ -225,7 +233,7 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
 
     await run(dispatcher, [pullRequest()]);
 
-    expect(reviews.state.writes.map((write: RecordedWrite) => write.call)).toEqual(['remove', 'insertPending', 'markDispatched']);
+    expect(reviews.state.writes.map((write: RecordedWrite) => write.call)).toEqual(['removeStalePending', 'insertPending', 'markDispatched']);
     expect(reviews.state.writes.map((write: RecordedWrite) => write.reason))
       .toEqual(['fleet.pr-review-bookkeeping', 'fleet.pr-review-bookkeeping', 'fleet.pr-review-bookkeeping']);
   });
@@ -360,5 +368,36 @@ describe('ReviewHeadDispatcher stale claim recovery', () => {
     expect(reviews.markDispatchedIfPending).toHaveBeenCalledWith('row-1', 'job-1');
     expect(reviews.remove).not.toHaveBeenCalled();
     expect(jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  /**
+   * F1: the removal must be conditional too. Another stale-claim path (the flow's claim service) can link a job
+   * between this lookup and the removal; an unconditional delete would drop that freshly settled claim and let the
+   * head be dispatched a second time.
+   */
+  it('US-006 F1: reopens no head when the conditional removal loses a race to another claim path', async () => {
+    const { dispatcher, reviews, jobs } = createDispatcher(createReviews([staleRow()]));
+    // The lookup still says "no job"; another path settles the claim before this pass removes it.
+    jobs.findReviewJobIdBetween.mockResolvedValue(null);
+    reviews.removeStalePending.mockResolvedValue(false);
+
+    expect(await run(dispatcher, [pullRequest()])).toBe(0);
+    expect(reviews.removeStalePending).toHaveBeenCalledWith('row-1', new Date(NOW.getTime() - POLL_MS));
+    expect(reviews.remove).not.toHaveBeenCalled();
+    expect(jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-006 F1: keeps the row another path already settled and does not insert a second claim', async () => {
+    const { dispatcher, reviews } = createDispatcher(createReviews([staleRow()]));
+    reviews.removeStalePending.mockImplementation(async (id: string) => {
+      // Simulate the interleaving: the row is settled with a job before this pass's conditional delete runs.
+      const row = reviews.state.rows.find((item) => item.id === id);
+      if (row) Object.assign(row, { outcome: 'dispatched', jobId: 'job-9' });
+      return false;
+    });
+
+    expect(await run(dispatcher, [pullRequest()])).toBe(0);
+    expect(reviews.state.rows[0]).toMatchObject({ outcome: 'dispatched', jobId: 'job-9' });
+    expect(reviews.insertPending).not.toHaveBeenCalled();
   });
 });
