@@ -1,7 +1,7 @@
-import { ExecutionContext, Inject, Injectable, Logger } from '@nestjs/common';
+import { ExecutionContext, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY, JwtAuthGuard } from '@nathapp/nestjs-auth';
-import { AuthException } from '@nathapp/nestjs-common';
+import { AppException, AuthException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { AgentAuthProvider } from '../agent-auth.provider';
 import { PrismaAuthRepository } from '../prisma-auth.repository';
@@ -55,6 +55,15 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     } catch (e: unknown) {
       const error = e instanceof Error ? e.message : String(e);
       this.combinedLogger.error(`API key error: ${error}`);
+      // Review US-004: only a lookup failure lands here. A key that matches no agent, an OFFLINE agent and
+      // a JWT-shaped bearer all return false above. Answer 503 rather than falling through to a JWT 401 so an
+      // agent whose key is valid does not read a database blip as "your key was revoked".
+      throw new AppException(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        {},
+        'auth.keyLookupUnavailable',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
     // Fall back to JWT

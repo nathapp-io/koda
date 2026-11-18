@@ -4,6 +4,7 @@ import { AppModule } from './app.module';
 import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 import { APP_CFG, IAppConfig } from './config/app.config';
 import { FastifyRuntimePlugin } from './common/bootstrap/fastify-runtime.plugin';
+import { enableGracefulShutdown } from './common/bootstrap/graceful-shutdown';
 import { createFastifyAdapter } from './common/fastify-adapter';
 import { TRUSTED_PROXIES } from './common/trusted-proxies';
 
@@ -32,6 +33,10 @@ async function bootstrap() {
   // because NestJS compiles route handlers (capturing guards) during init().
   const combinedGuard = app.get(CombinedAuthGuard);
   app.setJwtAuthGuard(combinedGuard);
+
+  // Review US-004: register the SIGTERM/SIGINT hooks so a container stop closes the server instead of
+  // killing it mid-request. Registered before init() so no request is served without a shutdown path.
+  enableGracefulShutdown(app);
 
   await app.useServerSecurityConfig();
 

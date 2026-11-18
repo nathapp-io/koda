@@ -25,14 +25,15 @@ Benefits:
 ```bash
 KODA_VERSION=v0.4.0
 POSTGRES_PASSWORD=replace-this   # required: only A-Z, a-z, 0-9, ., _, ~, -; deploy.sh refuses other characters
-JWT_SECRET=replace-this          # required: openssl rand -hex 32
-JWT_REFRESH_SECRET=replace-this  # required, must differ from JWT_SECRET
-API_KEY_SECRET=replace-this      # required
+JWT_SECRET=replace-this-with-openssl-rand-hex-32          # required: openssl rand -hex 32 (at least 32 characters)
+JWT_REFRESH_SECRET=replace-this-with-openssl-rand-hex-33  # required, must differ from JWT_SECRET
+API_KEY_SECRET=replace-this-with-openssl-rand-hex-32      # required (at least 32 characters)
 ```
 
 The three secrets have no defaults: compose refuses to start without them, and the production image refuses a
-value starting with `change-me` (the placeholders in `.env.example`). Tokens default to a 15-minute access JWT
-and a 7-day refresh JWT (`JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`); the web refreshes the session on its own.
+value starting with `change-me` (the placeholders in `.env.example`) or one shorter than 32 characters. Tokens
+default to a 15-minute access JWT and a 7-day refresh JWT (`JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`); the web
+refreshes the session on its own.
 
 ### Network exposure
 

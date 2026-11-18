@@ -2,7 +2,7 @@ import type { Mocked } from 'vitest';
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
-import { AuthException } from '@nathapp/nestjs-common';
+import { AppException, AuthException } from '@nathapp/nestjs-common';
 import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
 import { CombinedAuthGuard } from './combined-auth.guard';
 import { RUNNER_ROUTE_KEY } from './runner-route.decorator';
@@ -191,6 +191,49 @@ describe('CombinedAuthGuard', () => {
 
       await guard.canActivate(ctx);
 
+      expect(jwtCanActivate).toHaveBeenCalled();
+    });
+  });
+
+  describe('API key lookup outage (review US-004)', () => {
+    const outage = () => new Error('connection terminated unexpectedly');
+
+    it('answers 503 auth.keyLookupUnavailable when findAgentByKeyHash rejects', async () => {
+      const authRepo = makeAuthRepo(null);
+      authRepo.findAgentByKeyHash.mockRejectedValueOnce(outage());
+      const guard = new CombinedAuthGuard(makeReflector(false), authRepo, makeConfig(), makeAgentAuthProvider());
+
+      const caught = await guard.canActivate(buildContext(buildRequest('Bearer not-a-jwt'))).catch((error: unknown) => error);
+
+      expect(caught).toBeInstanceOf(AppException);
+      expect((caught as AppException).getStatus()).toBe(503);
+      expect((caught as AppException).prefix).toBe('auth.keyLookupUnavailable');
+      expect((caught as AppException).prefix?.startsWith('auth.keyLookupUnavailable')).toBe(true);
+    });
+
+    it('never calls the JWT path when findAgentByKeyHash rejects', async () => {
+      const authRepo = makeAuthRepo(null);
+      authRepo.findAgentByKeyHash.mockRejectedValueOnce(outage());
+      const guard = new CombinedAuthGuard(makeReflector(false), authRepo, makeConfig(), makeAgentAuthProvider());
+      const jwtCanActivate = vi
+        .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
+        .mockResolvedValue(true);
+
+      await expect(guard.canActivate(buildContext(buildRequest('Bearer not-a-jwt')))).rejects.toBeInstanceOf(AppException);
+
+      expect(jwtCanActivate).not.toHaveBeenCalled();
+    });
+
+    it('still falls back to JWT when findAgentByKeyHash resolves null', async () => {
+      const authRepo = makeAuthRepo(null);
+      const guard = new CombinedAuthGuard(makeReflector(false), authRepo, makeConfig(), makeAgentAuthProvider());
+      const jwtCanActivate = vi
+        .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
+        .mockResolvedValue(true);
+
+      await expect(guard.canActivate(buildContext(buildRequest('Bearer not-a-jwt')))).resolves.toBe(true);
+
+      expect(authRepo.findAgentByKeyHash).toHaveBeenCalled();
       expect(jwtCanActivate).toHaveBeenCalled();
     });
   });
