@@ -3,7 +3,7 @@
   "feature": "review-1118-runner-web-ci",
   "branchName": "feat/review-1118-runner-web-ci",
   "createdAt": "2026-11-18T15:42:51.446Z",
-  "updatedAt": "2026-11-18T17:01:50.131Z",
+  "updatedAt": "2026-11-18T17:10:20.780Z",
   "userStories": [
     {
       "id": "US-001",
@@ -363,14 +363,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The pure text transform, two existing Vue components, and locale entries fit existing Jest harnesses; presentation changes but authorization rules and approval submissions do not."
+        "reasoning": "The pure text transform, two existing Vue components, and locale entries fit existing Jest harnesses; presentation changes but authorization rules and approval submissions do not.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/approvals/ApprovalRequestBashPanel.vue",
@@ -401,7 +404,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "89421e57ed0d7063f92b312b696d7f83c24e1d67"
     },
     {
       "id": "US-007",
