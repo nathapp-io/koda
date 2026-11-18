@@ -3055,5 +3055,14 @@
         "deleted": "Approval policy deleted."
       }
     }
+  },
+  "errorPage": {
+    "unavailable": {
+      "title": "Koda is unavailable",
+      "body": "We could not verify your session. Please try again."
+    },
+    "generic": { "title": "Something went wrong ({{statusCode}})" },
+    "retry": "Try again",
+    "home": "Go to home"
   }
 }

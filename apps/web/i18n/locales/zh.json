@@ -3055,5 +3055,14 @@
         "deleted": "审批策略已删除。"
       }
     }
+  },
+  "errorPage": {
+    "unavailable": {
+      "title": "Koda 暂时无法使用",
+      "body": "无法验证您的会话，请重试。"
+    },
+    "generic": { "title": "发生错误（{{statusCode}}）" },
+    "retry": "重试",
+    "home": "返回首页"
   }
 }
