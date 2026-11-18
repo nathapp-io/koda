@@ -3,7 +3,7 @@
   "feature": "review-1118-api-fixes",
   "branchName": "feat/review-1118-api-fixes",
   "createdAt": "2026-11-18T08:17:05.546Z",
-  "updatedAt": "2026-11-18T08:46:23.365Z",
+  "updatedAt": "2026-11-18T08:59:35.988Z",
   "userStories": [
     {
       "id": "US-001",
@@ -198,14 +198,17 @@
         "bootstrap"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Touches global auth failure handling, production configuration, cryptographic validation and lifecycle wiring; strict isolation is required for auth, secrets and cryptography."
+        "reasoning": "Touches global auth failure handling, production configuration, cryptographic validation and lifecycle wiring; strict isolation is required for auth, secrets and cryptography.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/auth/guards/combined-auth.guard.ts",
@@ -232,7 +235,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1eea4b97741eca976a3db5f38e2742c13915913d"
     },
     {
       "id": "US-005",
