@@ -17,7 +17,21 @@ function retryTarget(): string {
 }
 
 function retry() {
-  window.location.assign(retryTarget())
+  const target = retryTarget()
+  const destination = new URL(target, window.location.href)
+  // B4: `location.assign` is only a document navigation when the destination differs in its path or query. A
+  // destination that matches the current path and query — the recorded redirect of a deep link that carried a
+  // fragment — is a same-document fragment navigation: the browser updates the URL and scrolls, but no request is
+  // made and the route guard never runs again, so the outage page would sit there. Write the destination fragment
+  // onto the current entry, then reload the document so the guard probes the session from scratch.
+  if (destination.pathname === window.location.pathname && destination.search === window.location.search) {
+    if (destination.href !== window.location.href) {
+      window.history.replaceState(window.history.state, '', destination.href)
+    }
+    window.location.reload()
+    return
+  }
+  window.location.assign(target)
 }
 
 function goHome() {

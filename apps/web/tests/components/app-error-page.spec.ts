@@ -23,12 +23,30 @@ describe('AppErrorPage', () => {
   const globals = { useI18n: () => ({ t: (key: string, params?: unknown) => params ? `${key} ${JSON.stringify(params)}` : key }) }
   const scope = globalThis as unknown as Record<string, unknown>
   let assign: ReturnType<typeof jest.fn>
+  let reload: ReturnType<typeof jest.fn>
+  let replaceState: ReturnType<typeof jest.fn>
   let previousWindow: unknown
+
+  /** A stand-in for `window` showing `href` as the current document URL. */
+  function standOn(href: string) {
+    const url = new URL(href)
+    scope.window = {
+      location: { href: url.href, pathname: url.pathname, search: url.search, hash: url.hash, assign, reload },
+      history: { state: null, replaceState },
+    }
+  }
+
+  function click(selector: string, mounted: { one: (selector: string) => { props: Record<string, unknown> } | undefined }) {
+    const handler = mounted.one(selector)?.props.onClick as (() => void) | undefined
+    handler?.()
+  }
 
   beforeEach(() => {
     assign = jest.fn()
+    reload = jest.fn()
+    replaceState = jest.fn()
     previousWindow = scope.window
-    scope.window = { location: { assign } }
+    standOn('https://koda.test/login')
   })
 
   afterEach(() => {
@@ -46,19 +64,51 @@ describe('AppErrorPage', () => {
     const mounted = mountSfc(webFile('components', 'AppErrorPage.vue'), { props: { error: { statusCode: 503, data: { redirect: '/projects/acme' } } }, globals: { ...globals, clearError } })
     const button = mounted.one('[data-testid="error-page-retry"]')
     expect(button).toBeDefined()
-    ;(button?.props.onClick as (() => void) | undefined)?.()
+    click('[data-testid="error-page-retry"]', mounted)
     // A router replace to the current URL is dropped without re-running the guard, so the retry must reload.
     expect(assign).toHaveBeenCalledWith('/projects/acme')
+    expect(reload).not.toHaveBeenCalled()
     expect(clearError).not.toHaveBeenCalled()
+    mounted.unmount()
+  })
+  it('B4 retry reloads the document when the destination matches the current path and query', () => {
+    // `location.assign('/agents#staff')` while standing on `/agents` is a same-document fragment
+    // navigation: the browser changes the URL without re-running the guard, so the outage page would
+    // come back with no new `/api/auth/me` probe.
+    standOn('https://koda.test/agents')
+    const mounted = mountSfc(webFile('components', 'AppErrorPage.vue'), { props: { error: { statusCode: 503, data: { redirect: '/agents#staff' } } }, globals })
+    click('[data-testid="error-page-retry"]', mounted)
+    expect(replaceState).toHaveBeenCalledWith(null, '', 'https://koda.test/agents#staff')
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(assign).not.toHaveBeenCalled()
+    mounted.unmount()
+  })
+  it('B4 retry keeps the destination fragment when only the fragment differs', () => {
+    standOn('https://koda.test/agents#sla')
+    const mounted = mountSfc(webFile('components', 'AppErrorPage.vue'), { props: { error: { statusCode: 503, data: { redirect: '/agents#staff' } } }, globals })
+    click('[data-testid="error-page-retry"]', mounted)
+    expect(replaceState).toHaveBeenCalledWith(null, '', 'https://koda.test/agents#staff')
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(assign).not.toHaveBeenCalled()
+    mounted.unmount()
+  })
+  it('B4 retry reloads in place for the exact current URL', () => {
+    standOn('https://koda.test/agents')
+    const mounted = mountSfc(webFile('components', 'AppErrorPage.vue'), { props: { error: { statusCode: 503, data: { redirect: '/agents' } } }, globals })
+    click('[data-testid="error-page-retry"]', mounted)
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(replaceState).not.toHaveBeenCalled()
+    expect(assign).not.toHaveBeenCalled()
     mounted.unmount()
   })
   it('post-review B4: retry never follows a redirect off this site', () => {
     for (const redirect of ['//evil.test/x', 'https://evil.test/x', '/\\evil.test/x']) {
       const mounted = mountSfc(webFile('components', 'AppErrorPage.vue'), { props: { error: { statusCode: 503, data: { redirect } } }, globals })
-      ;(mounted.one('[data-testid="error-page-retry"]')?.props.onClick as (() => void) | undefined)?.()
+      click('[data-testid="error-page-retry"]', mounted)
       mounted.unmount()
     }
     expect(assign.mock.calls.map(([target]) => target)).toEqual(['/', '/', '/'])
+    expect(reload).not.toHaveBeenCalled()
   })
   it('AC-10 generic error renders translated title', () => {
     const mounted = mountSfc(webFile('components', 'AppErrorPage.vue'), { props: { error: { statusCode: 404 } }, globals })
