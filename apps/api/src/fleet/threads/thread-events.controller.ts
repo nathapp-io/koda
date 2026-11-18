@@ -74,6 +74,7 @@ export class ThreadEventsController {
     private readonly streams: LiveStreamRegistry,
     private readonly jwtAuth: JwtAuthProvider,
     @Inject(LIVE_CFG) private readonly config: ILiveConfig,
+    private readonly permissions: PermissionService,
   ) {}
 
   @Sse()
@@ -102,7 +103,10 @@ export class ThreadEventsController {
         if (fresh.revoked) return false;
         try {
           await this.access.assertProjectMembership(projectId, fresh);
-          return true;
+          // US-008: membership alone is not the grant that opened the stream — the route key was.
+          // A denied (or failing) decision closes the stream instead of keeping a revoked reader live.
+          const decision = await this.permissions.can(fresh, 'thread.read', { projectId });
+          return decision.allowed;
         } catch {
           return false;
         }

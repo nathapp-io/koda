@@ -74,18 +74,57 @@ describe('EnrollmentService', () => {
     expect(capturedActor).toEqual({ type: 'RUNNER', id: 'r1' });
   });
 
-  it('creates the runner with merged labels and returns a kr_ key once', async () => {
+  it('creates the runner with the enrollment labels and returns a kr_ key once', async () => {
     repo.consumeEnrollment.mockResolvedValue({ id: 'e1', labels: ['gpu', 'darwin'], createdById: 'u1' });
     repo.createRunner.mockImplementation(async (d) => ({ id: 'r1', ...d }));
     const result = await service.enroll(body as never);
     expect(result.apiKey).toMatch(/^kr_[0-9a-f]{64}$/);
     expect(result.runnerId).toBe('r1');
     const data = repo.createRunner.mock.calls[0][0];
-    expect(data.labels).toEqual(['darwin', 'fast', 'gpu']);
+    expect(data.labels).toEqual(['darwin', 'gpu']);
     expect(data.apiKeyHash).not.toContain(result.apiKey);
     expect(data.bootedAt).toBeInstanceOf(Date);
     expect(data.bootedAt).toEqual(data.lastSeenAt);
     expect(repo.linkEnrollment).toHaveBeenCalledWith('e1', 'r1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorType: 'RUNNER', actorId: 'r1', action: 'runner.enrolled', responsibleUserId: 'u1' }));
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'runner.enrolled',
+      payload: expect.objectContaining({ labels: ['darwin', 'gpu'], ignoredLabels: ['fast'] }),
+    }));
+  });
+
+  // US-008 (owner ruling 2026-11-18): the enrollment's labels are final. A runner's body labels are
+  // reported as ignored instead of widening what the operator granted.
+  it('AC-5: records the body labels the enrollment does not carry as ignoredLabels', async () => {
+    repo.consumeEnrollment.mockResolvedValue({ id: 'e1', labels: ['gpu', 'darwin'], createdById: 'u1' });
+    repo.createRunner.mockImplementation(async (d) => ({ id: 'r1', ...d }));
+
+    await service.enroll(body as never);
+
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'runner.enrolled',
+      payload: { name: 'mac-1', labels: ['darwin', 'gpu'], enrollmentId: 'e1', ignoredLabels: ['fast'] },
+    }));
+  });
+
+  it('AC-6: records ignoredLabels [] when every body label is an enrollment label', async () => {
+    repo.consumeEnrollment.mockResolvedValue({ id: 'e1', labels: ['fast', 'darwin', 'gpu'], createdById: 'u1' });
+    repo.createRunner.mockImplementation(async (d) => ({ id: 'r1', ...d }));
+
+    await service.enroll(body as never);
+
+    const payload = activity.record.mock.calls[0][0].payload;
+    expect(payload.labels).toEqual(['darwin', 'fast', 'gpu']);
+    expect(payload.ignoredLabels).toEqual([]);
+  });
+
+  it('AC-7: creates the runner with no labels when the enrollment grants none', async () => {
+    repo.consumeEnrollment.mockResolvedValue({ id: 'e1', labels: [], createdById: 'u1' });
+    repo.createRunner.mockImplementation(async (d) => ({ id: 'r1', ...d }));
+
+    await service.enroll(body as never);
+
+    expect(repo.createRunner.mock.calls[0][0].labels).toEqual([]);
+    expect(activity.record.mock.calls[0][0].payload.ignoredLabels).toEqual(['darwin', 'fast']);
   });
 });

@@ -1,7 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
+import { ITransactionManager } from '@nathapp/nestjs-data';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
+import { PrismaCommentRepository } from './prisma-comment.repository';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
+import { TicketEventService } from '../events/ticket-event.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
@@ -160,7 +166,7 @@ describe('CommentsController', () => {
 
     await expect(controller.deleteFromHttp('c1', mockMemberUser)).resolves.toBeUndefined();
 
-    expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockMemberUser);
+    expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockMemberUser, 'delete');
     expect(mockRouteGate.run).toHaveBeenCalledExactlyOnceWith({
       key: 'comment.delete', variant: 'rest:comments.delete', projectId: 'project-1', input: { id: 'c1' },
     });
@@ -570,5 +576,79 @@ describe('CommentsController', () => {
         expect(result.type).toBe(commentType);
       }
     });
+  });
+});
+
+/**
+ * US-008: deleting a workflow comment is refused with 409 before the approval gate, mirroring the
+ * PATCH refusal, so no delete request (and no approval request) is opened for evidence rows.
+ * The controller is constructed with a real CommentsService so the refusal comes from the code
+ * path the HTTP route uses.
+ */
+describe('CommentsController delete refuses workflow comments (US-008)', () => {
+  const principal = {
+    actorType: 'user' as const, id: 'user-123', role: 'MEMBER' as const, email: 'member@example.com',
+    blacklisted: false, revoked: false, authorities: ['MEMBER'],
+  };
+  const ownership = {
+    project: { id: 'p1', slug: 'koda', key: 'KODA', deletedAt: null },
+    ticket: { id: 't1', deletedAt: null },
+  };
+
+  const makeController = (comment: Record<string, unknown>) => {
+    const repo = {
+      findOwningProjectAndTicket: vi.fn(async () => ({ ...ownership, comment })),
+      softDelete: vi.fn(async () => undefined),
+    };
+    const service = new CommentsService(
+      repo as unknown as PrismaCommentRepository,
+      { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService,
+      { run: async <T>(fn: () => Promise<T>) => fn() } as unknown as ITransactionManager,
+      {} as TicketEventService,
+      {} as NathappOutboxService,
+      { resolveMembership: vi.fn(async () => 'DEVELOPER') } as unknown as ProjectAccessService,
+      {
+        record: vi.fn(async () => undefined),
+        audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()),
+      } as unknown as AuditRecorder,
+    );
+    const routeGate = { run: vi.fn(async () => ({ status: 'executed', result: null })) };
+    return {
+      controller: new CommentsController(service, routeGate as unknown as ApprovalRouteGate),
+      routeGate,
+      repo,
+    };
+  };
+
+  const workflowComment = { id: 'c1', type: 'FIX_REPORT', authorUserId: 'user-123', authorAgentId: null };
+
+  it('AC-11: rejects deleting a non-GENERAL comment with 409 comments.workflowUndeletable', async () => {
+    const { controller } = makeController(workflowComment);
+
+    const error = await controller.deleteFromHttp('c1', principal).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ConflictAppException);
+    expect(error).toMatchObject({ prefix: 'comments.workflowUndeletable', httpStatus: 409 });
+  });
+
+  it('AC-12: never opens the approval gate for a workflow comment', async () => {
+    const { controller, routeGate, repo } = makeController(workflowComment);
+
+    await expect(controller.deleteFromHttp('c1', principal)).rejects.toBeInstanceOf(ConflictAppException);
+
+    expect(routeGate.run).not.toHaveBeenCalled();
+    expect(repo.softDelete).not.toHaveBeenCalled();
+  });
+
+  it('still gates and deletes an authorized GENERAL comment', async () => {
+    const { controller, routeGate, repo } = makeController({ ...workflowComment, type: 'GENERAL' });
+
+    await expect(controller.deleteFromHttp('c1', principal)).resolves.toBeUndefined();
+
+    expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'comment.delete', variant: 'rest:comments.delete', projectId: 'p1', input: { id: 'c1' },
+    });
+    expect(routeGate.run.mock.calls[0]).toBeDefined();
+    expect(repo.softDelete).not.toHaveBeenCalled();
   });
 });

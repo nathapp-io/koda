@@ -4,6 +4,9 @@
   "workflowImmutable": {
     "409": "Workflow comments cannot be edited"
   },
+  "workflowUndeletable": {
+    "409": "Workflow comments cannot be deleted"
+  },
   "404": "Comment not found",
   "-2": "Validation error",
   "40003": "Access denied"

@@ -53,18 +53,26 @@ export class CommentsService {
   async resolveCommentProject(
     commentId: string,
     principal: KodaPrincipal,
-    operation?: 'update',
+    operation?: 'update' | 'delete',
   ): Promise<string> {
     const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
-    // Reject impossible edits before the REST approval gate checks keys or opens
+    // Reject impossible mutations before the REST approval gate checks keys or opens
     // a request. Membership still comes first to conceal comments from outsiders.
     if (operation === 'update') this.assertEditable(comment);
+    if (operation === 'delete') this.assertDeletable(comment);
     return projectId;
   }
 
   private assertEditable(comment: CommentDomain): void {
     if (comment.type !== CommentType.GENERAL) {
       throw new ConflictAppException({}, 'comments.workflowImmutable');
+    }
+  }
+
+  /** US-008: a workflow comment is evidence, so it is never deleted either. */
+  private assertDeletable(comment: CommentDomain): void {
+    if (comment.type !== CommentType.GENERAL) {
+      throw new ConflictAppException({}, 'comments.workflowUndeletable');
     }
   }
 
@@ -257,6 +265,9 @@ export class CommentsService {
     // US-005: a project admin holds `comment.delete`; every other role is held to
     // `comment.delete.own` and refused on someone else's comment.
     const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
+    // US-008: the service refuses a workflow comment too, so the approval command path (which
+    // calls `delete` directly) cannot remove evidence the HTTP gate would have refused.
+    this.assertDeletable(comment);
     await this.assertCommentKey(principal, 'comment.delete', projectId, comment);
 
     await this.audit.audited(

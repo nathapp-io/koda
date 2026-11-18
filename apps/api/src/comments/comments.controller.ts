@@ -152,7 +152,7 @@ export class CommentsController {
     @Param('id') id: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    const projectId = await this.commentsService.resolveCommentProject(id, principal);
+    const projectId = await this.commentsService.resolveCommentProject(id, principal, 'delete');
     const outcome = await this.routeGate.run<null>({
       key: 'comment.delete',
       variant: COMMENT_ROUTE_VARIANTS.delete,
