@@ -442,6 +442,9 @@ export class JobRun {
       const row = this.mustRow();
       const alive = row.pid !== null && this.deps.executor.isAlive(row.pid);
       const identity = alive && !this.spawnedHere ? await this.deps.executor.processIdentity(row) : 'ours';
+      // A halt (abandon, daemon stop) that lands while the probe is in flight must win: the stop contract says a
+      // halted run signals nothing, so it is re-read before the journal and before any SIGTERM/SIGKILL.
+      if (this.halted) return;
       if (!alive || identity === 'other') {
         const chained = await this.chainFixStep(row, this.spawnedHere);
         if (this.halted) return;

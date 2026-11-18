@@ -2,8 +2,22 @@
 const props = defineProps<{ error: { statusCode: number; data?: { redirect?: string } | null } }>()
 const { t } = useI18n()
 
+/**
+ * Review-1118 US-005 post-review: the retry must ask the API again. A protected route's outage page comes from Nuxt's
+ * forced initial middleware pass, which leaves the failed URL as the current route; `clearError({ redirect })` is then
+ * a duplicate router push that Vue Router drops without re-running the guard, so the same page would come back without
+ * a fresh `/api/auth/me` probe. A document navigation clears the error state and runs the guard from scratch.
+ */
+function retryTarget(): string {
+  const redirect = props.error.data?.redirect
+  // Only a local absolute path: the retry navigates the document itself, and a browser reads `//host` as another
+  // origin and `\` as `/`, so anything else would be an open redirect.
+  const localPath = /^\/[^\s\\]*$/.test(redirect ?? '') && !redirect?.startsWith('//')
+  return localPath && redirect !== undefined ? redirect : '/'
+}
+
 function retry() {
-  clearError({ redirect: props.error.data?.redirect ?? '/' })
+  window.location.assign(retryTarget())
 }
 
 function goHome() {

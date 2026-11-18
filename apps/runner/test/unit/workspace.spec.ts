@@ -49,6 +49,27 @@ describe('assertCloneUrl', () => {
   test.each(['ext::sh -c id', 'git://x/a.git', 'ssh://git@x/a.git', '/local/path', '', 'file:///a b.git', '-file:///x.git'])('rejects %j even with the option', (u) => {
     expect(() => assertCloneUrl(u, { allowLocalCloneUrls: true })).toThrow(PathError);
   });
+  test.each([
+    'https:/github.com/a/b.git',                     // one slash: git reads a local path
+    'https:github.com:a/b.git',                      // git reads an ssh-style remote on host `https`
+    'https:///github.com/a/b.git',                   // empty authority: git and WHATWG disagree on the host
+    'https://github.com\\@evil.test/a/b.git',         // WHATWG host github.com; git dials evil.test
+    'https://github.com/a/b\\c.git',
+  ])('post-review B1: rejects %j, which git would read as another transport or host', (u) => {
+    expect(() => assertCloneUrl(u)).toThrow(new PathError('invalid cloneUrl'));
+    expect(() => assertCloneUrl(u, { allowLocalCloneUrls: true })).toThrow(new PathError('invalid cloneUrl'));
+  });
+  test('post-review B1: keeps the canonical https form the API sends', () => {
+    for (const u of [
+      'https://github.com/acme/app.git',
+      'https://gitlab.example.test:8443/group/app.git',
+      'https://GitHub.com/acme/app.git',
+      'https://gitlab.example.test/group/%E9%A1%B9%E7%9B%AE.git',
+      'https://gitlab.example.test/group/项目.git',         // a forge may hand back an unencoded path; only the host is policy
+    ]) {
+      expect(() => assertCloneUrl(u)).not.toThrow();
+    }
+  });
 });
 
 describe('ensureClone', () => {
@@ -66,6 +87,18 @@ describe('ensureClone', () => {
     expect(git.calls.filter(({ args }) => args[0] === 'clone').map(({ args, options }) => [args, options.fileProtocol])).toEqual([
       [['clone', '--', 'https://github.com/acme/app.git', repoDir], 'never'],
     ]);
+  });
+  test('post-review B1: the clone carries the https-only transport allow-list', async () => {
+    const git = recordingGit();
+    const repoDir = join(await tmp.make('ws'), 'w', 'r');
+    await ensureClone(git, { repoDir, cloneUrl: 'https://github.com/acme/app.git', identity });
+    expect(git.calls.filter(({ args }) => args[0] === 'clone').map(({ options }) => options.env)).toEqual([{ GIT_ALLOW_PROTOCOL: 'https' }]);
+  });
+  test('post-review B1: the clone admits the local transports only with the option', async () => {
+    const git = recordingGit();
+    const repoDir = join(await tmp.make('ws'), 'w', 'r');
+    await ensureClone(git, { repoDir, cloneUrl: 'file:///tmp/x.git', identity, allowLocalCloneUrls: true });
+    expect(git.calls.filter(({ args }) => args[0] === 'clone').map(({ options }) => options.env)).toEqual([{ GIT_ALLOW_PROTOCOL: 'http:https:file' }]);
   });
   test('AC-8: with the option a real git leaves a clone of a local origin', async () => {
     const base = await tmp.make('ws');
@@ -120,6 +153,11 @@ describe('cleanWorkspace (design §2 step 2)', () => {
     expect(git.calls.filter(({ args }) => args[0] === 'fetch').map(({ args, options }) => [args, options.fileProtocol])).toEqual([
       [['fetch', '--prune', 'origin'], 'never'],
     ]);
+  });
+  test('post-review B1: the fetch carries the https-only transport allow-list', async () => {
+    const git = recordingGit();
+    await cleanWorkspace(git, '/work/acme/app');
+    expect(git.calls.filter(({ args }) => args[0] === 'fetch').map(({ options }) => options.env)).toEqual([{ GIT_ALLOW_PROTOCOL: 'https' }]);
   });
   test('with the option the fetch is allowed a local transport', async () => {
     const git = recordingGit();

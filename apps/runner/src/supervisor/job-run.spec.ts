@@ -789,6 +789,26 @@ describe('cancel while running', () => {
     await b.run.start('watch');
     expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
   });
+  test('post-review B3: a halt during the identity probe signals nothing even when the probe answers ours', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
+    let probed = false;
+    let answer: (identity: 'ours') => void = () => undefined;
+    b.ex.processIdentity = () => {
+      probed = true;
+      return new Promise((resolve) => { answer = resolve; });
+    };
+    b.ex.onKill = () => undefined;
+    const started = b.run.start('watch');
+    await waitFor(() => probed);
+    b.run.halt();                     // the daemon stops while the probe is still in flight
+    answer('ours');                   // ... and the process turns out to be ours
+    await started;
+    expect(b.ex.killed).toEqual([]);
+    expect(b.journal.getJob('j1', 1)?.doneAt).toBeNull();
+  });
+
   test('SIGTERM to the group, then the normal flow ends CANCELLED through UPLOADING with the partial bundle', async () => {
     const b = build();
     b.ex.status = { run: { id: 'r', status: 'crashed' } };       // nax writes crashed on SIGTERM

@@ -95,6 +95,29 @@ describe('AGENT result', () => {
     expect(line.length).toBeLessThanOrEqual(300);
   });
 
+  test('post-review B2: a line past the read bound is dropped whole instead of leaking a cut credential', async () => {
+    // The credential opens in the first 4,000 characters and closes after them: a prefix cut could not be redacted.
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `${'x'.repeat(200)} https://x-access-token:ghs_${'S'.repeat(3_900)}@github.com/o/r.git\n`);
+    expect(await readAgentResult(dir)).toEqual({ ok: false });
+  });
+
+  test('post-review B2: a line of 4,000 characters is still read and sanitized whole', async () => {
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `${'x'.repeat(3_960)} token=SECRETVALUE123456\n`);
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    const line = failure.ok ? '' : failure.stderrLine ?? '';
+    expect(line).not.toContain('SECRETVALUE');
+    expect(line.length).toBeLessThanOrEqual(300);
+  });
+
+  test('post-review B2: a line that sanitization empties has no detail', async () => {
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `\u001b[31m\u0007\u0000\u001b[0m\n`);
+    expect(await readAgentResult(dir)).toEqual({ ok: false });
+  });
+
   test('AC-5 retains only the UTF-8 output tail at the output bound', () => {
     const output = 'a'.repeat(20_000);
     const fitted = fitAgentResult({ ...sample, output });

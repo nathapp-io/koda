@@ -28,6 +28,9 @@ describe('parseAssign (D30)', () => {
     ['a repo name with a slash', { ...assignFor(), repo: { ...assignFor().repo, name: 'a/b' } }, 'repo name'],
     ['an ext:: clone url', { ...assignFor(), repo: { ...assignFor().repo, cloneUrl: 'ext::sh -c id' } }, 'cloneUrl'],
     ['an option-shaped clone url', { ...assignFor(), repo: { ...assignFor().repo, cloneUrl: '--upload-pack=x' } }, 'cloneUrl'],
+    // post-review B1: WHATWG parses these as https, git reads them as a local path or an ssh-style remote.
+    ['an https url without its authority separator', { ...assignFor(), repo: { ...assignFor().repo, cloneUrl: 'https:/github.com/acme/app.git' } }, 'cloneUrl'],
+    ['an https url whose backslash moves the host', { ...assignFor(), repo: { ...assignFor().repo, cloneUrl: 'https://github.com\\@evil.test/acme/app.git' } }, 'cloneUrl'],
     ['an empty default branch', { ...assignFor(), repo: { ...assignFor().repo, defaultBranch: '' } }, 'defaultBranch'],
     ['a feature with a slash', { ...assignFor(), feature: 'a/b' }, 'feature'],
     ['a PLAN without planFrom', { ...assignFor('PLAN'), planFrom: null }, 'planFrom'],
