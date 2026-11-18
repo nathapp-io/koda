@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { Mock } from 'vitest';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { AfterCommitService } from '../../permissions/after-commit.service';
-import { TicketStatus } from '../../common/enums';
+import { ActivityType, TicketStatus } from '../../common/enums';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
 
@@ -62,6 +62,7 @@ interface BuildOptions {
   hasPrLink?: Mock;
   indexDocument?: Mock;
   createPullRequest?: Mock;
+  findOpenPullRequestByBranch?: Mock;
 }
 
 function build(options: BuildOptions = {}) {
@@ -84,6 +85,7 @@ function build(options: BuildOptions = {}) {
 
   const provider = {
     getDefaultBranch: vi.fn().mockResolvedValue('main'),
+    findOpenPullRequestByBranch: options.findOpenPullRequestByBranch ?? vi.fn().mockResolvedValue(null),
     createPullRequest: options.createPullRequest
       ?? vi.fn().mockResolvedValue({ number: 42, url: 'https://github.com/acme/widgets/pull/42' }),
   };
@@ -108,7 +110,7 @@ function build(options: BuildOptions = {}) {
     { encryptionKey: 'k'.repeat(64) } as never,
   );
 
-  return { service, repo, provider, ragService, vcsConnectionService, afterCommit };
+  return { service, repo, provider, ragService, vcsConnectionService, vcsLinkExtractorService, afterCommit };
 }
 
 describe('TicketTransitionsService — post-commit effects (US-006)', () => {
@@ -211,6 +213,136 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
 
       expect(result.ticket.status).toBe(TicketStatus.CLOSED);
       expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('US-010: adopt an existing open PR by branch', () => {
+    const adoptedPr = {
+      number: 7,
+      url: 'https://github.com/acme/widgets/pull/7',
+      state: 'open',
+      draft: false,
+      merged: false,
+      mergedAt: null,
+      mergedBy: null,
+      mergeSha: null,
+      title: 'Existing change',
+    };
+
+    it('AC-1: adopts PR 7 without creating another PR', async () => {
+      const { service, provider } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(adoptedPr) });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(provider.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('AC-2: stores the adopted PR link with its repository reference', async () => {
+      const { service, repo } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(adoptedPr) });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(repo.createTicketLink).toHaveBeenCalledTimes(1);
+      expect(repo.createTicketLink).toHaveBeenCalledWith(expect.objectContaining({
+        url: adoptedPr.url,
+        provider: 'github',
+        externalRef: 'acme/widgets#7',
+        prNumber: 7,
+        linkType: 'pr',
+      }));
+    });
+
+    it.each([
+      [true, 'draft'],
+      [false, 'open'],
+    ] as const)('AC-3: maps draft=%s to prState=%s', async (draft, prState) => {
+      const { service, repo } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue({ ...adoptedPr, draft }) });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(repo.createTicketLink).toHaveBeenCalledWith(expect.objectContaining({ prState }));
+    });
+
+    it('AC-4: extracts links using the ticket branch and adopted PR number', async () => {
+      const { service, vcsLinkExtractorService } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(adoptedPr) });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(vcsLinkExtractorService.extractLinksFromPr).toHaveBeenCalledWith(
+        PROJECT,
+        expect.anything(),
+        connection,
+        'k'.repeat(64),
+        'koda/KODA-7/fix-login-redirect',
+        7,
+      );
+    });
+
+    it('AC-5: does not record VCS_PR_CREATED for an adopted PR', async () => {
+      const { service, repo } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(adoptedPr) });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(repo.createTicketActivity).not.toHaveBeenCalledWith(expect.objectContaining({ action: ActivityType.VCS_PR_CREATED }));
+    });
+
+    it('AC-6: searches using the generated ticket branch', async () => {
+      const findOpenPullRequestByBranch = vi.fn().mockResolvedValue(adoptedPr);
+      const { service, provider } = build({ findOpenPullRequestByBranch });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(provider.findOpenPullRequestByBranch).toHaveBeenCalledWith('koda/KODA-7/fix-login-redirect');
+    });
+
+    it('AC-7: falls back to creation when lookup resolves null', async () => {
+      const { service, provider } = build();
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(provider.createPullRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-8a: lookup rejection does not create a PR', async () => {
+      const { service, provider } = build({
+        findOpenPullRequestByBranch: vi.fn().mockRejectedValue(new Error('lookup unavailable')),
+      });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(provider.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('AC-8b: lookup rejection does not create a ticket link', async () => {
+      const { service, repo } = build({
+        findOpenPullRequestByBranch: vi.fn().mockRejectedValue(new Error('lookup unavailable')),
+      });
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(repo.createTicketLink).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: verify resolves despite lookup rejection', async () => {
+      const { service } = build({
+        findOpenPullRequestByBranch: vi.fn().mockRejectedValue(new Error('lookup unavailable')),
+      });
+
+      await expect(service.verify('koda', 'KODA-7', 'Verified', principal)).resolves.toMatchObject({
+        ticket: { status: TicketStatus.VERIFIED },
+      });
+    });
+
+    it('AC-10: lookup rejection logs a warning', async () => {
+      const { service } = build({
+        findOpenPullRequestByBranch: vi.fn().mockRejectedValue(new Error('lookup unavailable')),
+      });
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      warn.mockClear();
+
+      await service.verify('koda', 'KODA-7', 'Verified', principal);
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Open PR lookup failed'));
     });
   });
 

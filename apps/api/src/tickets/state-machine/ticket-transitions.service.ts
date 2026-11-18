@@ -329,7 +329,6 @@ export class TicketTransitionsService {
       return;
     }
 
-    let createdPrNumber: number | undefined;
     const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
 
     try {
@@ -343,51 +342,66 @@ export class TicketTransitionsService {
       const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
       const prBody = ticket.description ?? '';
 
+      let existingPr: Awaited<ReturnType<typeof provider.findOpenPullRequestByBranch>>;
       try {
-        // BUG-13: create the PR first and persist the TicketLink only on
-        // success. The old flow wrote a `.../pulls/pending` placeholder
-        // before creating the PR, leaving a dead link behind whenever the
-        // provider call failed.
-        const pr = await provider.createPullRequest({
-          title: prTitle,
-          body: prBody,
-          branchName,
-          baseBranch,
-          draft: true,
-        });
-        createdPrNumber = pr.number;
-        await repo.createTicketLink({
-          ticketId,
-          url: pr.url,
-          provider: connection.provider,
-          externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
-          prNumber: pr.number,
-          prState: 'draft',
-          prUpdatedAt: new Date(),
-          linkType: 'pr',
-        });
+        existingPr = await provider.findOpenPullRequestByBranch(branchName);
+      } catch (err) {
+        this.logger.warn(
+          `[vcs] Open PR lookup failed for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
+
+      let pr: { number: number; url: string; draft: boolean };
+      let created = false;
+      if (existingPr) {
+        pr = existingPr;
+      } else {
+        try {
+          // BUG-13: create the PR first and persist the TicketLink only on
+          // success. The old flow wrote a `.../pulls/pending` placeholder
+          // before creating the PR, leaving a dead link behind whenever the
+          // provider call failed.
+          pr = await provider.createPullRequest({
+            title: prTitle,
+            body: prBody,
+            branchName,
+            baseBranch,
+            draft: true,
+          });
+          created = true;
+        } catch (err) {
+          this.logger.warn(
+            `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          return;
+        }
+      }
+
+      await repo.createTicketLink({
+        ticketId,
+        url: pr.url,
+        provider: connection.provider,
+        externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+        prNumber: pr.number,
+        prState: created || pr.draft ? 'draft' : 'open',
+        prUpdatedAt: new Date(),
+        linkType: 'pr',
+      });
+      if (created) {
         await repo.createTicketActivity({
           ticketId,
           action: ActivityType.VCS_PR_CREATED,
         });
-        // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
-        if (createdPrNumber === undefined) {
-          // Defensive: never fall back to /pulls/0 if this chain is refactored.
-          return;
-        }
-        await vcsLinkExtractor.extractLinksFromPr(
-          project,
-          { id: ticket.id, number: ticket.number, externalVcsId: null },
-          connection,
-          encryptionKey,
-          branchName,
-          createdPrNumber,
-        );
-      } catch (err) {
-        this.logger.warn(
-          `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
-        );
       }
+      await vcsLinkExtractor.extractLinksFromPr(
+        project,
+        { id: ticket.id, number: ticket.number, externalVcsId: null },
+        connection,
+        encryptionKey,
+        branchName,
+        pr.number,
+      );
     } catch (err) {
       this.logger.warn(
         `[vcs] Failed to initiate PR creation for ticket in project ${projectId}: ${err instanceof Error ? err.message : String(err)}`,

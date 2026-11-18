@@ -1376,6 +1376,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
     const createdPr = { number: 555, url: 'https://github.com/acme/widgets/pull/555' };
     const provider = {
       getDefaultBranch: vi.fn().mockResolvedValue('main'),
+      findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
       createPullRequest: vi.fn().mockResolvedValue(createdPr),
     };
     (createVcsProvider as Mock).mockReturnValue(provider);
@@ -1436,6 +1437,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
   it('skips the classic PR when fleet already owns the ticket (#231)', async () => {
     const provider = {
       getDefaultBranch: vi.fn().mockResolvedValue('main'),
+      findOpenPullRequestByBranch: vi.fn().mockResolvedValue(null),
       createPullRequest: vi.fn().mockResolvedValue({ number: 999, url: 'https://github.com/acme/widgets/pull/999' }),
     };
     (createVcsProvider as Mock).mockReturnValue(provider);
