@@ -22,6 +22,7 @@ function setup(errors: unknown[] = []) {
     findHead: vi.fn(async (_repo: string, n: number, sha: string) => rows.get(`${n}:${sha}`) ?? null),
     insertPending: vi.fn(async (_repo: string, n: number, sha: string) => { const pending = row(n, sha); rows.set(`${n}:${sha}`, pending); return pending; }),
     markDispatched: vi.fn(async () => undefined),
+    markDispatchedIfPending: vi.fn(async () => true),
     markFailed: vi.fn(async (id: string, outcome: string) => { const pending = [...rows.values()].find((item) => item.id === id); if (pending) pending.outcome = outcome; }),
     remove: vi.fn(async (id: string) => { for (const [key, item] of rows) if (item.id === id) rows.delete(key); }),
   };
@@ -29,7 +30,7 @@ function setup(errors: unknown[] = []) {
     const error = errors.shift();
     if (error) throw error;
     return { job: { id: 'j1' } };
-  }) };
+  }), findReviewJobIdBetween: vi.fn(async () => null) };
   const dispatcher = new ReviewHeadDispatcher(reviews as never, jobs as never);
   return { dispatcher, reviews, jobs, rows };
 }

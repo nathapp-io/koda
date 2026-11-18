@@ -27,7 +27,7 @@ const reviewRow = (over: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord
   createdAt: NOW, updatedAt: NOW, ...over,
 });
 
-type WriteCall = 'insertPending' | 'markDispatched' | 'markFailed' | 'remove';
+type WriteCall = 'insertPending' | 'markDispatched' | 'markDispatchedIfPending' | 'markFailed' | 'remove';
 
 interface RecordedWrite {
   call: WriteCall;
@@ -61,6 +61,13 @@ function createReviews(rows: readonly FleetPrReviewRecord[] = []) {
       const row = find(id);
       if (row) Object.assign(row, { outcome: 'dispatched', jobId });
     }),
+    markDispatchedIfPending: vi.fn(async (id: string, jobId: string) => {
+      note('markDispatchedIfPending');
+      const row = find(id);
+      if (!row || row.outcome !== 'pending' || row.jobId !== null) return false;
+      Object.assign(row, { outcome: 'dispatched', jobId });
+      return true;
+    }),
     markFailed: vi.fn(async (id: string, outcome: string) => {
       note('markFailed');
       const row = find(id);
@@ -77,7 +84,10 @@ function createReviews(rows: readonly FleetPrReviewRecord[] = []) {
 type Reviews = ReturnType<typeof createReviews>;
 
 function createDispatcher(reviews: Reviews = createReviews()) {
-  const jobs = { dispatch: vi.fn().mockResolvedValue({ job: { id: 'j1' } }) };
+  const jobs = {
+    dispatch: vi.fn().mockResolvedValue({ job: { id: 'j1' } }),
+    findReviewJobIdBetween: vi.fn().mockResolvedValue(null),
+  };
   const dispatcher = new ReviewHeadDispatcher(reviews as never, jobs as never);
   return { dispatcher, reviews, jobs };
 }
@@ -270,5 +280,85 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
 
     expect(await run(dispatcher, [pullRequest()], { onAttempt })).toBe(0);
     expect(onAttempt).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * US-006: a stale pending claim whose pass already created a job. The head was dispatched, so the claim is
+ * recovered by linking that job instead of being removed and dispatched a second time.
+ */
+describe('ReviewHeadDispatcher stale claim recovery', () => {
+  const staleRow = (over: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord =>
+    reviewRow({ createdAt: new Date(NOW.getTime() - 10 * MINUTE), ...over });
+
+  it('US-006 AC-1a: looks for a job inside the stale claim dispatch window', async () => {
+    const stale = staleRow();
+    const { dispatcher, jobs } = createDispatcher(createReviews([stale]));
+    jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+
+    await run(dispatcher, [pullRequest()]);
+
+    expect(jobs.findReviewJobIdBetween).toHaveBeenCalledWith(
+      'r1', 7, stale.createdAt, new Date(stale.createdAt.getTime() + POLL_MS),
+    );
+  });
+
+  it('US-006 AC-1b: links the found job to the stale claim', async () => {
+    const { dispatcher, reviews, jobs } = createDispatcher(createReviews([staleRow()]));
+    jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+
+    await run(dispatcher, [pullRequest()]);
+
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledWith('row-1', 'job-1');
+    expect(reviews.state.rows[0]).toMatchObject({ outcome: 'dispatched', jobId: 'job-1' });
+  });
+
+  it('US-006 AC-2a: neither removes the claim nor dispatches when a job is found', async () => {
+    const { dispatcher, reviews, jobs } = createDispatcher(createReviews([staleRow()]));
+    jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+
+    await run(dispatcher, [pullRequest()]);
+
+    expect(reviews.remove).not.toHaveBeenCalled();
+    expect(jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-006 AC-2b: resolves to zero dispatch calls when a job is found', async () => {
+    const { dispatcher, jobs } = createDispatcher(createReviews([staleRow()]));
+    jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+
+    expect(await run(dispatcher, [pullRequest()])).toBe(0);
+  });
+
+  it('US-006 AC-3a: skips only the PR whose lookup failed and dispatches the next one', async () => {
+    const stale = staleRow({ prNumber: 3, headSha: 's3' });
+    const { dispatcher, jobs } = createDispatcher(createReviews([stale]));
+    jobs.findReviewJobIdBetween.mockRejectedValue(new Error('lookup boom'));
+
+    expect(await run(dispatcher, [pullRequest({ number: 3, headSha: 's3' }), pullRequest({ number: 5, headSha: 's5' })])).toBe(1);
+    expect(jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(jobs.dispatch.mock.calls[0]?.[2]).toMatchObject({ prNumber: 5 });
+  });
+
+  it('US-006 AC-3b: keeps the claim whose lookup failed', async () => {
+    const stale = staleRow({ prNumber: 3, headSha: 's3' });
+    const { dispatcher, reviews, jobs } = createDispatcher(createReviews([stale]));
+    jobs.findReviewJobIdBetween.mockRejectedValue(new Error('lookup boom'));
+
+    await run(dispatcher, [pullRequest({ number: 3, headSha: 's3' }), pullRequest({ number: 5, headSha: 's5' })]);
+
+    expect(reviews.state.rows.map((row) => row.id)).toContain('row-1');
+    expect(reviews.remove).not.toHaveBeenCalledWith('row-1');
+  });
+
+  it('US-006 AC-9: leaves the claim alone when the conditional link changes nothing', async () => {
+    const { dispatcher, reviews, jobs } = createDispatcher(createReviews([staleRow()]));
+    jobs.findReviewJobIdBetween.mockResolvedValue('job-1');
+    reviews.markDispatchedIfPending.mockResolvedValue(false);
+
+    expect(await run(dispatcher, [pullRequest()])).toBe(0);
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledWith('row-1', 'job-1');
+    expect(reviews.remove).not.toHaveBeenCalled();
+    expect(jobs.dispatch).not.toHaveBeenCalled();
   });
 });

@@ -16,7 +16,10 @@ import {
 /** What one repo's pass needs: the pass time, one poll interval, and the calls it may still make (spec call 9). */
 export interface DispatchRepoOptions {
   now: Date;
-  /** `prReviewPollMs`: a `pending` row older than this is a claim a dead pass left behind (spec call 8). */
+  /**
+   * `prReviewPollMs`: a `pending` row older than this is a claim a dead pass left behind (spec call 8). It also
+   * bounds the stale claim's job lookup window (US-006).
+   */
   pollMs: number;
   /** Dispatch calls this repo may still make, the pass's `prReviewMaxDispatch` accounting for earlier repos. */
   remaining: number;
@@ -60,7 +63,7 @@ export class ReviewHeadDispatcher {
 
     for (const pr of ordered) {
       if (skips(repo, pr)) continue;
-      if (!(await this.headIsOpen(repo, pr, staleBefore))) continue;
+      if (!(await this.headIsOpen(repo, pr, staleBefore, opts.pollMs))) continue;
       if (calls >= opts.remaining) break;
       const pending = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.insertPending(repo.id, pr.number, pr.headSha));
       if (pending === null) continue;
@@ -76,16 +79,34 @@ export class ReviewHeadDispatcher {
   /**
    * Call 6: a `dispatched` or `failed:` row settles the head for good; a `pending` row still inside one poll
    * interval belongs to a running pass. An older one is a claim whose pass died between insert and dispatch
-   * (call 8), so it is removed and the head is handled as new.
+   * (call 8): US-006 first looks for the job that pass may already have created, and only removes the claim
+   * when none is found.
    */
-  private async headIsOpen(repo: FleetRepoRecord, pr: OpenPullRequest, staleBefore: number): Promise<boolean> {
+  private async headIsOpen(repo: FleetRepoRecord, pr: OpenPullRequest, staleBefore: number, pollMs: number): Promise<boolean> {
     const row = await this.reviews.findHead(repo.id, pr.number, pr.headSha);
-    return row === null || (await this.reopenStaleClaim(row, staleBefore));
+    return row === null || (await this.reopenStaleClaim(row, staleBefore, pollMs));
   }
 
-  private async reopenStaleClaim(row: FleetPrReviewRecord, staleBefore: number): Promise<boolean> {
+  /**
+   * US-006: a job created inside the claim's dispatch window is this head's job (the pass dispatches within
+   * seconds of its insert), so the claim is linked to it and the head is settled. The link is conditional, so
+   * a claim another pass settled or removed in the meantime is left alone and no job is dispatched twice.
+   * A lookup that fails leaves the claim as it is for this pass: the PR is skipped, not unclaimed.
+   */
+  private async reopenStaleClaim(row: FleetPrReviewRecord, staleBefore: number, pollMs: number): Promise<boolean> {
     if (row.outcome !== PENDING) return false;
     if (row.createdAt.getTime() >= staleBefore) return false;
+    let jobId: string | null;
+    try {
+      jobId = await this.jobs.findReviewJobIdBetween(row.repoId, row.prNumber, row.createdAt, new Date(row.createdAt.getTime() + pollMs));
+    } catch (error) {
+      this.logger.warn(`Review job lookup failed for repo ${row.repoId} PR ${row.prNumber}: ${error instanceof Error ? error.constructor.name : 'UnknownError'}`);
+      return false;
+    }
+    if (jobId !== null) {
+      await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatchedIfPending(row.id, jobId));
+      return false;
+    }
     await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(row.id));
     return true;
   }
