@@ -1,6 +1,6 @@
 import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type HandoffAssign, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type RuleOverrideAssign, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
 import { validateHandoffRecord } from '../executor/handoff-record';
-import { assertCloneUrl } from '../executor/workspace';
+import { assertCloneUrl, type CloneUrlPolicy } from '../executor/workspace';
 import { COST_RE, isValidBotLogin, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
 import { cleanAgentAssign } from './agent-assign';
@@ -263,8 +263,12 @@ function cleanHandoff(v: unknown): HandoffAssign | null {
  * D30: the server is trusted to deliver, not to be well formed. Every field that reaches a path, an argv or git config
  * is re-validated, and only the validated fields are copied. `ref` is only bounded here: an odd ref becomes a fixed
  * `checkout:` reason in prepare, not a rejected command.
+ *
+ * review-1118 US-001: `options.allowLocalCloneUrls` is the injected test-only policy that admits an `http:` or
+ * `file:` clone URL. Absent (production), the clone URL must be `https:`.
  */
-export function parseAssign(command: FleetCommandOut): ParsedAssign {
+export function parseAssign(command: FleetCommandOut, options: CloneUrlPolicy = {}): ParsedAssign {
+  const allowLocalCloneUrls = options.allowLocalCloneUrls === true;
   const p = command.payload as unknown;
   if (!isObj(p)) return bad('payload');
   if (p['jobId'] !== command.jobId || !checked(() => assertSegment('jobId', p['jobId']))) return bad('jobId');
@@ -278,7 +282,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!isObj(repo) || (repo['provider'] !== 'github' && repo['provider'] !== 'gitlab')) return bad('repo');
   if (!checked(() => assertOwner(repo['owner']))) return bad('owner');
   if (!checked(() => assertSegment('repo', repo['name']))) return bad('repo name');
-  if (!text(repo['cloneUrl'], 2_000) || !checked(() => assertCloneUrl(repo['cloneUrl'] as string))) return bad('cloneUrl');
+  if (!text(repo['cloneUrl'], 2_000) || !checked(() => assertCloneUrl(repo['cloneUrl'] as string, { allowLocalCloneUrls }))) return bad('cloneUrl');
   if (!plain(repo['defaultBranch'], 255)) return bad('defaultBranch');
   if (!plain(p['ref'], 255)) return bad('ref');
   if (!checked(() => assertFeature(p['feature']))) return bad('feature');

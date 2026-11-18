@@ -51,7 +51,8 @@ async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'AGENT' = 'RUN
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
   const log = createMemoryLogger();
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo });
+  // review-1118 US-001: the fixture's origin is a `file://` path, so this world needs the test-only clone policy.
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo, allowLocalCloneUrls: true });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
 
@@ -85,6 +86,7 @@ describe('HostExecutor AGENT spawn (fleet-agent-job US-008)', () => {
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS,
       spawnNax: (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => { calls.push({ argv, options }); return HANDLE; },
+      allowLocalCloneUrls: true,   // review-1118 US-001: the world's origin is a `file://` path
     };
     const ex = new HostExecutor(deps);
     await mkdir(w.row.jobDir, { recursive: true });
@@ -420,6 +422,7 @@ describe('HostExecutor rule override (fleet #370 US-009)', () => {
     const ex = new HostExecutor({
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS, spawnNax: () => ({ pid: 4242, pgid: 4242 }),
+      allowLocalCloneUrls: true,   // review-1118 US-001: the world's origin is a `file://` path
     });
     expect(await ex.prepare(w.row)).toEqual({ ok: true, branch: null });
     const costDir = join(w.row.jobDir, 'nax-out', 'cost');
@@ -672,8 +675,44 @@ describe('HostExecutor PLAN', () => {
     };
     const journal = Journal.open(':memory:');
     const row = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/bare', jobDir: jobDirFor(workspaceRoot, 'cjob2') }).row;
-    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS });
+    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS, allowLocalCloneUrls: true });
     expect(await ex.prepare(row)).toEqual({ ok: false, reason: 'no .nax dir' });
+  });
+});
+
+/**
+ * review-1118 US-001: `HostExecutor.prepareWorkspace` refuses a local or plain-http clone URL unless the deps carry
+ * the test-only `allowLocalCloneUrls`, and the clone/fetch then refuse the file transport too.
+ */
+describe('HostExecutor clone URL policy (US-001)', () => {
+  const repoDirOf = (w: { workspaceRoot: string }): string => join(w.workspaceRoot, 'acme', 'app');
+  /** A git over the real one that records every argv, so "no git call at all" can be asserted, not inferred. */
+  const recordingOver = (real: ReturnType<typeof createGit>, calls: string[][]) => ({
+    run: (args: readonly string[], options: Parameters<typeof real.run>[1]) => { calls.push([...args]); return real.run(args, options); },
+    ok: (args: readonly string[], options: Parameters<typeof real.ok>[1]) => { calls.push([...args]); return real.ok(args, options); },
+  });
+
+  test('AC-12: a local origin with the option unset is refused before any git call', async () => {
+    const w = await world('RUN');
+    const calls: string[][] = [];
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: recordingOver(createGit(), calls),
+      log: w.log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+    });
+    expect(await ex.prepare(w.row)).toEqual({ ok: false, reason: 'workspace: invalid cloneUrl' });
+    expect(calls.filter((args) => args[0] === 'clone')).toEqual([]);
+    await expect(stat(repoDirOf(w))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('AC-13: the same RUN job with allowLocalCloneUrls clones from its local origin', async () => {
+    const w = await world('RUN');
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(),
+      log: w.log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+      allowLocalCloneUrls: true,
+    });
+    expect(await ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    expect((await stat(join(repoDirOf(w), '.git'))).isDirectory()).toBe(true);
   });
 });
 
@@ -864,6 +903,7 @@ describe('HostExecutor handoff RUN (flow-handoff US-007)', () => {
     const ex = new HostExecutor({
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+      allowLocalCloneUrls: true,   // review-1118 US-001: the world's origin is a `file://` path
       spawnNax: (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => {
         calls.push({ argv, options });
         atSpawn.push({
@@ -915,6 +955,7 @@ describe('HostExecutor handoff RUN (flow-handoff US-007)', () => {
     const ex = new HostExecutor({
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+      allowLocalCloneUrls: true,   // review-1118 US-001: the world's origin is a `file://` path
       spawnNax: (argv: readonly string[]): SpawnHandle => { calls.push({ argv }); return { pid: 4242, pgid: 4242 }; },
     });
     expect((await ex.prepare(w.row)).ok).toBe(true);
@@ -983,6 +1024,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     const ex = new HostExecutor({
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS, spawnNax,
+      allowLocalCloneUrls: true,   // review-1118 US-001: the world's origin is a `file://` path
     });
     await mkdir(w.row.jobDir, { recursive: true });
     return { ...w, row, calls, freshCalls, ex, tokenPath };
@@ -1433,6 +1475,7 @@ describe('HostExecutor provider-key socket (US-009)', () => {
     const ex = new HostExecutor({
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials: credentials ?? provider().credentials, approvals: NO_APPROVALS,
+      allowLocalCloneUrls: true,   // review-1118 US-001: the world's origin is a `file://` path
       spawnNax: (argv, options) => { calls.push({ argv, options }); return HANDLE; },
     });
     await mkdir(w.row.jobDir, { recursive: true });

@@ -52,6 +52,7 @@ async function world(command: 'CONFIG_EDIT' | 'CONFIG_DRIFT', files: Record<stri
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'naxhome') }, git: git ?? createGit(), log: createMemoryLogger(),
     nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
     ...(processInfo ? { processInfo: processInfo(join(workspaceRoot, 'acme', 'app')) } : {}),
+    allowLocalCloneUrls: true,   // review-1118 US-001: the fixture origin is a `file://` path
   });
   const repoDir = join(workspaceRoot, 'acme', 'app');
   const blob = (path: string) => sh(origin.dir, 'rev-parse', `main:${path}`);
@@ -429,6 +430,7 @@ describe('config job provider-key socket (US-009)', () => {
     const ex = new HostExecutor({
       config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'naxhome') }, git: createGit(), log: createMemoryLogger(),
       nowMs: () => Date.now(), sleep: async () => undefined, credentials, approvals: NO_APPROVALS,
+      allowLocalCloneUrls: true,   // review-1118 US-001: the fixture origin is a `file://` path
     });
     const dump = join(base, 'nax-env.json');
     const steps: string[] = [];

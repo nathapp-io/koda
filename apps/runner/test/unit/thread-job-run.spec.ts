@@ -44,6 +44,8 @@ function setup(overrides: {
   skillsResult?: { ok: true } | { ok: false; reason: string };
   openResult?: { ok: true; session: AgentSession; resumed: boolean } | { ok: false; reason: string };
   thread?: Partial<ThreadAssign>;
+  /** review-1118 US-001: the daemon's test-only clone-URL policy, as a host dep. */
+  allowLocalCloneUrls?: boolean;
 } = {}) {
   const journal = Journal.open(':memory:');
   const assign = assignFor('THREAD', {
@@ -78,6 +80,8 @@ function setup(overrides: {
       return overrides.skillsResult ?? { ok: true as const };
     },
     skillOrigin: 'file:///fixture/skills',
+    // review-1118 US-001: absent, the field stays off the host, as a production daemon leaves it.
+    ...(overrides.allowLocalCloneUrls === undefined ? {} : { allowLocalCloneUrls: overrides.allowLocalCloneUrls }),
   };
   const logs = {
     register(input: Record<string, unknown>) { observations.registered = input; },
@@ -164,6 +168,24 @@ describe('ThreadJobRun preparation (US-003)', () => {
     const run = context.makeRun(); const starting = run.start('prepare');
     await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING'); run.halt(); await starting;
     expect(context.observations.skills).toMatchObject({ skillsRoot: join(homeDir, 'skills'), skills: [skill] });
+    context.journal.close();
+  });
+
+  test('US-001 AC-14: the host\'s allowLocalCloneUrls reaches the worktree prepare input', async () => {
+    const context = setup({ allowLocalCloneUrls: true });
+    await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
+    const run = context.makeRun(); const starting = run.start('prepare');
+    await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING'); run.halt(); await starting;
+    expect(context.observations.prepare).toMatchObject({ allowLocalCloneUrls: true });
+    context.journal.close();
+  });
+
+  test('US-001 AC-14: without the host option the prepare input says so, so the clone stays https-only', async () => {
+    const context = setup();
+    await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
+    const run = context.makeRun(); const starting = run.start('prepare');
+    await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING'); run.halt(); await starting;
+    expect(context.observations.prepare).toMatchObject({ allowLocalCloneUrls: false });
     context.journal.close();
   });
 

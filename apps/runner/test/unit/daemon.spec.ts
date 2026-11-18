@@ -361,6 +361,61 @@ describe('startDaemon', () => {
   });
 });
 
+/**
+ * review-1118 US-001: the ASSIGN's `repo.cloneUrl` is the server's word about where the runner clones; `http:` and
+ * `file:` are admitted only by the test-only `allowLocalCloneUrls`, which the CLI never sets.
+ */
+describe('startDaemon, clone URL policy (US-001)', () => {
+  /** A unix socket path is at most 100 bytes, so the socket dir sits directly in $TMPDIR (as daemon-thread.spec.ts does). */
+  const shortDirs: string[] = [];
+  const shortSocketDir = async (): Promise<string> => {
+    const dir = await mkdtemp(join(tmpdir(), 'x'));
+    shortDirs.push(dir);
+    return dir;
+  };
+  afterAll(async () => { await Promise.all(shortDirs.map((dir) => rm(dir, { recursive: true, force: true }))); });
+
+  /** An ASSIGN whose clone URL is a local path: refused unless the daemon was started with the test-only option. */
+  const localAssign = (): FleetCommandOut => ({
+    commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1,
+    payload: assignFor('RUN', { repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'file:///tmp/x.git' } }),
+  });
+  const ackFor = (server: FakeServer, commandId: string) =>
+    server.syncs.flatMap((sync) => sync.commandAcks).find((ack) => ack.commandId === commandId);
+
+  test('AC-10: an ASSIGN with a file:// cloneUrl is rejected as invalid cloneUrl, with no job row', async () => {
+    const server = fakeServer();
+    const s = await setup(server, { socketDir: await shortSocketDir() });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    try {
+      await waitFor(() => server.syncs.length >= 1);
+      server.queue.push(localAssign());
+      await waitFor(() => ackFor(server, 'c1') !== undefined);
+      expect(ackFor(server, 'c1')).toEqual({ commandId: 'c1', leaseEpoch: 1, result: 'rejected', detail: 'invalid cloneUrl' });
+      expect(daemon.journal.getJob('j1', 1)).toBeNull();
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('AC-11: the same ASSIGN is accepted when the daemon is started for tests with allowLocalCloneUrls', async () => {
+    const server = fakeServer();
+    const s = await setup(server, { socketDir: await shortSocketDir() });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, allowLocalCloneUrls: true, executorFactory: () => s.ex });
+    try {
+      await waitFor(() => server.syncs.length >= 1);
+      server.queue.push(localAssign());
+      await waitFor(() => ackFor(server, 'c1') !== undefined);
+      expect(ackFor(server, 'c1')).toEqual({ commandId: 'c1', leaseEpoch: 1, result: 'ok' });
+      expect(daemon.journal.getJob('j1', 1)).not.toBeNull();
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+});
+
 describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
   /** A socket dir short enough for a unix socket path wherever $TMPDIR is; removed with the file's other temps. */
   const shortDirs: string[] = [];

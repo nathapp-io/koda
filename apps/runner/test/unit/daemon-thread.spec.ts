@@ -116,6 +116,8 @@ async function fixture() {
     selfCommand: [process.execPath, join(import.meta.dir, '../../src/main.ts')],
     tuning: { syncMinGapMs: 10, statusPollMs: 10, pruneIntervalMs: 50 },
     threadSessions: sessions,
+    // review-1118 US-001: this fixture's origin is a `file://` path, so the thread clone needs the test-only policy.
+    allowLocalCloneUrls: true,
     ...over,
   });
   /** A THREAD assign for the fixture's own `file://` clone: no network leaves the machine. */

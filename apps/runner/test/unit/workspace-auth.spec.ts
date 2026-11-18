@@ -18,6 +18,8 @@ afterAll(() => tmp.cleanup());
 const g = createGit();
 const identity = { name: 'koda-fleet[bot]', email: 'bot@koda.test' };
 const MAIN = join(import.meta.dir, '..', '..', 'src', 'main.ts');
+/** review-1118 US-001: this world's origin is a loopback HTTP git front, so clone and fetch need the test-only policy. */
+const LOCAL_ORIGIN = { allowLocalCloneUrls: true };
 /** Not `sh()`: it trims, which would drop the leading empty entry. */
 const helperList = async (repoDir: string): Promise<string[]> =>
   (await g.ok(['config', '--local', '--get-all', 'credential.helper'], { cwd: repoDir })).split('\n').slice(0, -1);
@@ -44,7 +46,7 @@ describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86,
   test('clone authenticates through the helper and leaves the helper list ["", helper] in the clone', async () => {
     const w = await world();
     try {
-      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
+      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper, ...LOCAL_ORIGIN });
       expect(await helperList(w.repoDir)).toEqual(['', w.helper]);
       expect(w.http.requests.some((r) => r.authorized && r.path.includes('git-upload-pack'))).toBe(true);
     } finally {
@@ -54,7 +56,7 @@ describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86,
   test('D89: without a helper the clone fails as `git auth failed`', async () => {
     const w = await world();
     try {
-      const error = await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity }).catch((e: unknown) => e);
+      const error = await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, ...LOCAL_ORIGIN }).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(GitError);
       expect(reasonFromError(error)).toBe(NO_CREDENTIALS_REASON);
       expect(NO_CREDENTIALS_REASON).toBe('git auth failed');
@@ -65,9 +67,9 @@ describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86,
   test('fetch authenticates with the helper and fails without it', async () => {
     const w = await world();
     try {
-      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
-      await cleanWorkspace(g, w.repoDir, w.helper);
-      await expect(cleanWorkspace(g, w.repoDir)).rejects.toBeInstanceOf(GitError);   // the runner's own offline calls clear the helper list
+      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper, ...LOCAL_ORIGIN });
+      await cleanWorkspace(g, w.repoDir, w.helper, LOCAL_ORIGIN);
+      await expect(cleanWorkspace(g, w.repoDir, null, LOCAL_ORIGIN)).rejects.toBeInstanceOf(GitError);   // the runner's own offline calls clear the helper list
     } finally {
       await w.close();
     }
@@ -75,7 +77,7 @@ describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86,
   test('D85: the clone\'s own config authenticates plain git, and its empty entry silences a global helper that would answer', async () => {
     const w = await world();
     try {
-      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
+      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper, ...LOCAL_ORIGIN });
       const globalConfig = join(w.root, 'global.gitconfig');
       await writeFile(globalConfig, '[credential]\n\thelper = "!f() { echo username=x-access-token; echo password=wrong; }; f"\n');
       const before = w.http.requests.length;
@@ -91,7 +93,7 @@ describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86,
   test('configureRepoHelper replaces any earlier helper entries', async () => {
     const w = await world();
     try {
-      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
+      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper, ...LOCAL_ORIGIN });
       await sh(w.repoDir, 'config', '--local', '--add', 'credential.helper', '!echo stale');
       await configureRepoHelper(g, w.repoDir, w.helper);
       expect(await helperList(w.repoDir)).toEqual(['', w.helper]);
@@ -102,7 +104,7 @@ describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86,
   test('the PLAN push authenticates through the helper; without it the reason is `git auth failed` and it is not retried', async () => {
     const w = await world();
     try {
-      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
+      await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper, ...LOCAL_ORIGIN });
       const refSha = await sh(w.repoDir, 'rev-parse', 'HEAD');
       await sh(w.repoDir, 'checkout', '-q', '--detach', refSha);
       const dir = join(w.repoDir, '.nax', 'features', 'f');

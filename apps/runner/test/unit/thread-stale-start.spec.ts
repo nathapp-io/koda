@@ -30,6 +30,8 @@ const prepare = (): Promise<ThreadWorktreeResult> => prepareThreadWorktree({
   threadId,
   baseRef: 'main',
   feature,
+  // review-1118 US-001: the origin is a `file://` path, so the thread clone needs the test-only policy.
+  allowLocalCloneUrls: true,
 });
 
 beforeEach(async () => {

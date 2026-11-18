@@ -91,6 +91,11 @@ export interface ThreadHostDeps {
    * Absent, the session keeps the kind's own tools and reaches no koda data.
    */
   readonly kodaTools?: KodaToolCaller;
+  /**
+   * review-1118 US-001: test-only. Passed to the worktree prepare, which hands it to `ensureClone`, so a spec's
+   * `file://` origin can be cloned. Production leaves it unset: a thread clones over https only.
+   */
+  readonly allowLocalCloneUrls?: boolean;
 }
 
 export interface ThreadRunTuning {
@@ -545,6 +550,7 @@ export class ThreadJobRun {
         threadId: thread.threadId,
         baseRef: row.assign.ref,
         feature: thread.feature,
+        allowLocalCloneUrls: this.deps.host.allowLocalCloneUrls === true,
       });
     } finally {
       // Step 3: the socket and the shims go whatever the worktree step returned. A release that fails must not

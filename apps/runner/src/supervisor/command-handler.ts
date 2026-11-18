@@ -15,6 +15,11 @@ export interface CommandHandlerDeps {
   readonly log: Logger;
   readonly now: Now;
   readonly approvals: Pick<ApprovalRelay, 'answer'>;
+  /**
+   * review-1118 US-001: test-only. It admits an `http:` or `file:` clone URL in an ASSIGN; production
+   * (`DaemonOptions` unset by `main.ts` and `commands/run.ts`) keeps every job on `https:`.
+   */
+  readonly allowLocalCloneUrls?: boolean;
 }
 
 type Outcome = { result: 'ok' | 'rejected'; detail?: string };
@@ -115,7 +120,7 @@ export class CommandHandler {
 
   private async assign(command: FleetCommandOut): Promise<Outcome> {
     const { journal, supervisor, workspaceRoot } = this.deps;
-    const parsed = parseAssign(command);
+    const parsed = parseAssign(command, { allowLocalCloneUrls: this.deps.allowLocalCloneUrls === true });
     if (!parsed.ok) {
       const outcome: Outcome = { result: 'rejected', detail: parsed.detail };
       this.record(command, outcome);

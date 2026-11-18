@@ -61,6 +61,11 @@ export interface HostExecutorDeps {
   readonly processInfo?: ProcessInfo;
   /** US-006: the nax start; unset runs the module's `spawnNax`. A spec records argv and env without a process. */
   readonly spawnNax?: (argv: readonly string[], options: SpawnNaxOptions) => SpawnHandle;
+  /**
+   * review-1118 US-001: test-only. This world's clone and fetch admit a local or plain-http origin; production
+   * leaves it unset, so `ensureClone` refuses such a URL before any git call and the clone refuses the file transport.
+   */
+  readonly allowLocalCloneUrls?: boolean;
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
@@ -107,9 +112,10 @@ export class HostExecutor implements JobExecutor {
     const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: cancelled });
     if (!acquired.ok) return acquired.cancelled ? CANCELLED : { ok: false, reason: acquired.reason };
     const { helper } = acquired.credentials;
-    await ensureClone(this.deps.git, { repoDir, cloneUrl: job.assign.repo.cloneUrl, identity: job.assign.gitIdentity, credentialHelper: helper });
+    const local = { allowLocalCloneUrls: this.deps.allowLocalCloneUrls === true };
+    await ensureClone(this.deps.git, { repoDir, cloneUrl: job.assign.repo.cloneUrl, identity: job.assign.gitIdentity, credentialHelper: helper, ...local });
     if (cancelled()) return CANCELLED;
-    await cleanWorkspace(this.deps.git, repoDir, helper);
+    await cleanWorkspace(this.deps.git, repoDir, helper, local);
     if (cancelled()) return CANCELLED;
     return { ok: true, repoDir, jobDir, outDir };
   }
