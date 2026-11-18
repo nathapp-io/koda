@@ -574,6 +574,21 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
       expect(repo.createTicketLink).not.toHaveBeenCalled();
     });
 
+    it('links the PR after a case-only GitHub reconnect', async () => {
+      const { service, repo, provider, vcsConnectionService } = build({
+        findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr),
+      });
+      vcsConnectionService.getFullByProject.mockResolvedValue({ ...connection, encryptedToken: 'rotated-token' });
+
+      await expect(service.retryPrLink({ ...INTENT, repoOwner: 'Acme', repoName: 'Widgets' })).resolves.toBe(true);
+
+      expect(decryptToken).toHaveBeenCalledExactlyOnceWith('rotated-token', expect.any(String));
+      expect(provider.findOpenPullRequestByBranch).toHaveBeenCalledExactlyOnceWith(BRANCH);
+      expect(repo.createTicketLink).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        provider: 'github', externalRef: 'acme/widgets#42', url: createdPr.url,
+      }));
+    });
+
     it('rejects while disconnected or inactive and links the PR after reconnecting to the recorded repo', async () => {
       const { service, repo, provider, vcsConnectionService, outboxService } = build({
         findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr),

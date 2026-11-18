@@ -12,14 +12,19 @@ export const MAX_ISSUE_PAGES = 10;
  */
 export const MAX_MR_LOOKUP_PAGES = 10;
 
-/** The rel="next" URL from a GitHub `Link` header, or null. */
+/** The first rel="next" URL from a `Link` header, or null. */
 export function nextLinkUrl(linkHeader: string | undefined): string | null {
-  if (!linkHeader) return null;
+  for (const target of nextLinkUrls(linkHeader)) return target;
+  return null;
+}
+
+function* nextLinkUrls(linkHeader: string | undefined): Generator<string, void> {
+  if (!linkHeader) return;
   // Commas can also occur inside the target URI or a quoted parameter.
   for (const [, target, params] of linkHeader.matchAll(/(?:^|,)\s*<([^<>]*)>((?:[^<>,"]|"(?:[^"\\]|\\.)*")*)/g)) {
     for (const [, name, quoted, token] of params.matchAll(/;\s*([^\s=;]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s;]+)))?/g)) {
       if (name.toLowerCase() !== 'rel') continue;
-      if ((quoted ?? token ?? '').toLowerCase().split(/\s+/).includes('next')) return target;
+      if ((quoted ?? token ?? '').toLowerCase().split(/\s+/).includes('next')) yield target;
       break; // Ignore duplicate rel parameters on the same link.
     }
   }
@@ -38,23 +43,41 @@ export function inclusiveSince(cursor: Date): string {
   return new Date(cursor.getTime() - 1000).toISOString();
 }
 
-/**
- * Review B3 (fix round 2): the page number a `Link` header advertises for `rel="next"`, or null.
- *
- * GitLab answers `X-Next-Page` on its own pagination, but a proxy in front of it can rewrite the headers so only
- * the standard `Link` header survives. A response that advertises another page is not proof that the branch has no
- * same-project merge request, so the next page is requested from the configured endpoint — never from the URL the
- * header names, so the token never travels to a host the header chose.
- */
+/** Page advertised by `rel="next"`, or null if no next link is present. */
 export function nextPageFromLink(linkHeader: string | undefined, endpoint: string): number | null {
-  const next = nextLinkUrl(linkHeader);
-  if (next === null) return null;
+  let advertised: number | null = null;
+  for (const next of nextLinkUrls(linkHeader)) {
+    const pages = URL.parse(next, endpoint)?.searchParams.getAll('page');
+    const page = pages?.length === 1 ? nextPageNumber(pages[0]) : null;
+    if (page === null || (advertised !== null && advertised !== page)) {
+      throw new Error('Invalid next page in Link header');
+    }
+    advertised = page;
+  }
+  return advertised;
+}
 
-  const url = URL.parse(next, endpoint);
-  const pages = url?.searchParams.getAll('page');
-  const page = pages?.length === 1 ? nextPageNumber(pages[0]) : null;
-  if (page === null) throw new Error('Invalid next page in Link header');
-  return page;
+/**
+ * Both GitLab continuation headers, when present, must name the immediate next offset page.
+ * A blank X-Next-Page is not a page number; proxies can leave only the Link. Return only the
+ * validated number so callers always use their configured endpoint, never the link's host or filters.
+ */
+export function nextGitLabPage(
+  headers: Record<string, string> | undefined,
+  endpoint: string,
+  currentPage: number,
+): number | null {
+  const next = currentPage + 1;
+  const pageHeader = headers?.['x-next-page']?.trim();
+  const fromHeader = nextPageNumber(pageHeader);
+  if (pageHeader && fromHeader !== next) {
+    throw new Error('Invalid next page in X-Next-Page header: expected the next offset page');
+  }
+  const fromLink = nextPageFromLink(headers?.['link'], endpoint);
+  if (fromLink !== null && fromLink !== next) {
+    throw new Error('Invalid next page in Link header: expected the next offset page');
+  }
+  return fromHeader ?? fromLink;
 }
 
 /** Parse a positive decimal page number without accepting partial numbers or overflow. */

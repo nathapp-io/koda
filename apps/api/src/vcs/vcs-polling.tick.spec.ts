@@ -13,6 +13,7 @@ import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import type { VcsSyncService } from './vcs-sync.service';
 import type { VcsPrSyncService } from './vcs-pr-sync.service';
 import type { IVcsConfig } from '../config/vcs.config';
+import { GitLabProvider } from './providers/gitlab.provider';
 
 vi.mock('./factory', () => ({ createVcsProvider: vi.fn() }));
 vi.mock('../common/utils/encryption.util', () => ({ decryptToken: vi.fn().mockReturnValue('plain') }));
@@ -231,6 +232,48 @@ describe('VcsPollingService tick (M10)', () => {
 
     expect(repo.updateVcsConnectionLastSynced).toHaveBeenCalledWith('conn-1', cursor);
     expect(repo.createVcsSyncLog).toHaveBeenCalledWith(expect.not.objectContaining({ errorMessage: expect.anything() }));
+  });
+
+  describe('GitLab issue pagination', () => {
+    const gitlab = connection({ provider: 'gitlab', lastSyncedAt: new Date('2026-09-20T00:00:00Z') });
+    const gitlabIssue = (iid: number, updatedAt: string) => ({
+      iid, title: `Issue ${iid}`, description: null, author: { username: 'dev' }, labels: [],
+      web_url: `https://gitlab.com/o/r/-/issues/${iid}`, created_at: updatedAt, updated_at: updatedAt,
+    });
+    let get: Mock;
+
+    beforeEach(() => {
+      get = vi.fn();
+      vi.mocked(createVcsProvider).mockReturnValue(new GitLabProvider('o', 'r', 'plain', { get, post: vi.fn() }));
+      repo.findVcsConnectionById.mockResolvedValue(gitlab);
+      service.schedulePolling(gitlab);
+    });
+
+    it('imports the second page when GitLab sends only a next Link', async () => {
+      get
+        .mockResolvedValueOnce({ data: [gitlabIssue(1, '2026-09-21T00:00:00Z')], headers: { link: '<?page=2>; rel="next"' } })
+        .mockResolvedValueOnce({ data: [gitlabIssue(2, '2026-09-22T00:00:00Z')] });
+
+      await tick();
+
+      expect(sync.syncIssue.mock.calls.map(([, imported]) => imported.number)).toEqual([1, 2]);
+      expect(repo.updateVcsConnectionLastSynced).toHaveBeenCalledExactlyOnceWith(gitlab.id, new Date('2026-09-22T00:00:00Z'));
+    });
+
+    it.each([
+      { link: '<?after=cursor>; rel="next"' },
+      { 'x-next-page': '2junk' },
+    ])('keeps the cursor and logs an unusable continuation: %j', async (headers) => {
+      get.mockResolvedValueOnce({ data: [gitlabIssue(1, '2026-09-21T00:00:00Z')], headers });
+
+      await tick();
+
+      expect(repo.updateVcsConnectionLastSynced).not.toHaveBeenCalled();
+      expect(sync.syncIssue).not.toHaveBeenCalled();
+      expect(repo.createVcsSyncLog).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        vcsConnectionId: gitlab.id, issuesSynced: 0, errorMessage: expect.stringContaining('Invalid next page'),
+      }));
+    });
   });
 
   it('keeps the old cursor when nothing came back', async () => {

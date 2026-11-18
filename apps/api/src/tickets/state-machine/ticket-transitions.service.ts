@@ -518,10 +518,15 @@ export class TicketTransitionsService {
 
     // Legacy intents may omit the target. When present, it must match the credential's repository before
     // any authenticated call. The provider also selects the API origin, which is configured globally per forge.
+    // GitHub owner/name are case-insensitive. Keep GitLab's namespace and project path exact.
+    const repoPartMatches = (recorded: string | undefined, current: string): boolean =>
+      recorded === undefined || (connection.provider === 'github'
+        ? recorded.toLowerCase() === current.toLowerCase()
+        : recorded === current);
     if (
       (payload.provider ?? connection.provider) !== connection.provider
-      || (payload.repoOwner ?? connection.repoOwner) !== connection.repoOwner
-      || (payload.repoName ?? connection.repoName) !== connection.repoName
+      || !repoPartMatches(payload.repoOwner, connection.repoOwner)
+      || !repoPartMatches(payload.repoName, connection.repoName)
     ) {
       throw new Error(`VCS connection for ticket ${ticket.id} does not match the recorded PR repository`);
     }

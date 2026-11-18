@@ -65,6 +65,7 @@ function createSubscriber() {
       return true;
     }),
     markFailed: vi.fn(async (): Promise<void> => undefined),
+    remove: vi.fn(async (_id: string): Promise<void> => undefined),
   };
 
   /** The action context each `dispatch` call ran in, read from inside the call itself. */
@@ -215,11 +216,12 @@ describe('FixFollowUpSubscriber', () => {
     expect(reviews.markDispatched).not.toHaveBeenCalled();
   });
 
-  // Review B4 (fix round 2): a stale-claim sweep can delete the claim between the insert and the job commit. The
-  // fence loses, the insert rolls back, and the follow-up must not dispatch a second review of the head.
-  it('records a claim_lost skip when the fence loses to a stale-claim sweep', async () => {
+  it('records a claim_lost skip when another delivery has already linked the review', async () => {
     const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
     reviews.markDispatchedIfPending.mockResolvedValue(false);
+    reviews.findHead.mockResolvedValue(claimRow({
+      followUpEventId: 'fix-1:3:fix-follow-up', outcome: 'dispatched', jobId: 'winner',
+    }));
 
     await expect(subscriber.handle(payload())).resolves.toBeUndefined();
 
@@ -235,6 +237,58 @@ describe('FixFollowUpSubscriber', () => {
       },
       inTransaction: true,
     }]);
+  });
+
+  it('retries when an expired delivery removes the shared claim before the current delivery fences it', async () => {
+    const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
+    const event = payload();
+    let claim: FleetPrReviewRecord | null = null;
+    let nextClaim = 0;
+    const committed: string[] = [];
+    reviews.insertPending.mockImplementation(async (_repo, _pr, _sha, followUpEventId) => {
+      if (claim !== null) return null;
+      claim = claimRow({ id: `claim-${++nextClaim}`, followUpEventId });
+      return claim;
+    });
+    reviews.findHead.mockImplementation(async () => claim);
+    reviews.remove.mockImplementation(async (id) => {
+      if (claim?.id === id && claim.outcome === 'pending' && claim.jobId === null) claim = null;
+    });
+    reviews.markDispatchedIfPending.mockImplementation(async (id, jobId) => {
+      if (claim?.id !== id || claim.outcome !== 'pending' || claim.jobId !== null) return false;
+      claim = { ...claim, outcome: 'dispatched', jobId };
+      return true;
+    });
+
+    let startExpired!: () => void;
+    const expiredStarted = new Promise<void>((resolve) => { startExpired = resolve; });
+    let finishExpired!: () => void;
+    const expiredMayFail = new Promise<void>((resolve) => { finishExpired = resolve; });
+    jobs.dispatch.mockImplementationOnce(async () => {
+      startExpired();
+      await expiredMayFail;
+      throw new Error('expired delivery dispatch failed');
+    });
+    const expired = subscriber.handle(event);
+    await expiredStarted;
+
+    jobs.dispatch.mockImplementation(async (_actor, _project, _dto, opts) => {
+      finishExpired();
+      await expired;
+      await opts?.fence?.('rev-1');
+      committed.push('rev-1');
+      return { job: { id: 'rev-1' } };
+    });
+
+    await expect(subscriber.handle(event)).rejects.toMatchObject({ name: 'ReviewClaimLostError' });
+    expect(reviews.markDispatchedIfPending).toHaveBeenCalledExactlyOnceWith('claim-1', 'rev-1');
+    expect(claim).toBeNull();
+    expect(committed).toEqual([]);
+    expect(audits.map(({ input }) => input.summary)).toEqual(['follow-up review skipped: dispatch_error']);
+
+    await expect(subscriber.handle(event)).resolves.toBeUndefined();
+    expect(committed).toEqual(['rev-1']);
+    expect(claim).toMatchObject({ id: 'claim-2', outcome: 'dispatched', jobId: 'rev-1' });
   });
 
   it('rethrows the original fence failure and resumes the same claim on redelivery', async () => {

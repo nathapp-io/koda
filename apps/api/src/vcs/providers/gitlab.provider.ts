@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, MAX_MR_LOOKUP_PAGES, inclusiveSince, laterOf, nextPageFromLink, nextPageNumber } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, MAX_MR_LOOKUP_PAGES, inclusiveSince, laterOf, nextGitLabPage } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -111,12 +111,13 @@ export class GitLabProvider implements IVcsProvider {
       per_page: ISSUES_PER_PAGE,
       ...(since ? { updated_after: inclusiveSince(since) } : {}),
     };
+    const endpoint = `${this.baseUrl}/issues`;
     const issues: VcsIssue[] = [];
     let cursor: Date | null = null;
     let page: number | null = 1;
 
     for (let pages = 0; page !== null && pages < MAX_ISSUE_PAGES; pages++) {
-      const response = await this.httpClient.get(`${this.baseUrl}/issues`, {
+      const response = await this.httpClient.get(endpoint, {
         headers: this.authHeaders,
         params: { ...baseParams, page },
       });
@@ -124,7 +125,7 @@ export class GitLabProvider implements IVcsProvider {
         cursor = laterOf(cursor, item.updated_at);
         issues.push(this.mapGitLabIssueToVcsIssue(item));
       }
-      page = nextPageNumber(response.headers?.['x-next-page']);
+      page = nextGitLabPage(response.headers, endpoint, page);
     }
 
     return { issues, cursor, capped: page !== null };
@@ -248,8 +249,7 @@ export class GitLabProvider implements IVcsProvider {
    * reports no next page; a scan that reaches MAX_MR_LOOKUP_PAGES throws, because an unfinished scan is not proof
    * that the branch has no open merge request (the caller reads `null` as permission to create one).
    *
-   * The next page comes from `X-Next-Page`, or from a `Link rel="next"` header when a proxy dropped the GitLab
-   * header (fix round 2): the page number is requested from the configured endpoint, never from the header's URL.
+   * Continuation uses the same offset validation as issue polling and never follows the Link URL itself.
    */
   async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
     const endpoint = `${this.baseUrl}/merge_requests`;
@@ -272,11 +272,7 @@ export class GitLabProvider implements IVcsProvider {
       );
       if (mergeRequest) return this.mapGitLabMrToVcsPrStatus(mergeRequest);
 
-      const nextPageHeader = response.headers?.['x-next-page'];
-      page = nextPageNumber(nextPageHeader) ?? nextPageFromLink(response.headers?.['link'], endpoint);
-      if (page === null && nextPageHeader?.trim()) {
-        throw new Error('Invalid next page in X-Next-Page header');
-      }
+      page = nextGitLabPage(response.headers, endpoint, page);
     }
 
     return null;

@@ -18,7 +18,7 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
     source_branch: 'ACME-7-fix-login', source_project_id: 1, target_project_id: 1,
   });
 
-  beforeEach(() => get.mockReset());
+  beforeEach(() => { get.mockReset(); });
 
   it('AC-4: requests opened merge requests for the source branch', async () => {
     get.mockResolvedValue({ data: [] });
@@ -92,6 +92,25 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { 'x-next-page': '3', link: '<?page=2>; rel="next"' },
+    { 'x-next-page': '2', link: '<?page=3>; rel="next"' },
+    { 'x-next-page': '3' },
+    { link: '<?page=3>; rel="next"' },
+    { 'x-next-page': '1' },
+    { 'x-next-page': '2junk', link: '<?page=2>; rel="next"' },
+    { 'x-next-page': '2', link: '<?after=cursor>; rel="next"' },
+  ])('rejects conflicting, invalid, or non-sequential page hints: %j', async (headers) => {
+    get.mockImplementation(async (_url: string, { params }: { params: { page: number } }) => {
+      if (params.page === 1) return { data: [fork(70)], headers };
+      // Page two has the MR that jumping to page three would miss.
+      return { data: params.page === 2 ? [sameProject(71)] : [] };
+    });
+
+    await expect(provider.findOpenPullRequestByBranch('ACME-7-fix-login')).rejects.toThrow('Invalid next page');
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
   it('returns null only once every page has been scanned', async () => {
     get
       .mockResolvedValueOnce({ data: [fork(70)], headers: { 'x-next-page': '2' } })
@@ -102,7 +121,9 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
   });
 
   it('rejects instead of answering null when the scan reaches its page bound', async () => {
-    get.mockResolvedValue({ data: [fork(70)], headers: { 'x-next-page': '2' } });
+    get.mockImplementation(async (_url: string, { params }: { params: { page: number } }) => ({
+      data: [fork(70)], headers: { 'x-next-page': String(params.page + 1) },
+    }));
 
     await expect(provider.findOpenPullRequestByBranch('ACME-7-fix-login')).rejects.toThrow(
       `reached ${MAX_MR_LOOKUP_PAGES} pages`,

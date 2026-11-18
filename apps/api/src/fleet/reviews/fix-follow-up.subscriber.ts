@@ -127,9 +127,13 @@ export class FixFollowUpSubscriber implements OnModuleInit {
         },
       ));
     } catch (error) {
-      // The fence lost: the insert rolled back and the claim belongs to another pass (a stale-claim sweep removed
-      // it, or another pass settled it), so no review job exists for this delivery.
       if (error instanceof ReviewClaimLostError) {
+        // The job insert rolled back. An expired delivery or the stale-claim sweep may have removed
+        // the shared claim, so acknowledge only if the head is still settled or owned by a different event.
+        const head = await this.reviews.findHead(p.repoId, p.prNumber, p.headSha);
+        if (head === null || (head.followUpEventId === eventId && head.outcome === 'pending' && head.jobId === null)) {
+          throw error;
+        }
         await this.recordSkip(p, 'claim_lost');
         return;
       }

@@ -41,6 +41,7 @@ describe('pagination helpers (M10)', () => {
     '<?page=2junk>; rel="next"',
     '<?page=9007199254740992>; rel="next"',
     '<?page=2&page=3>; rel="next"',
+    '<?page=2>; rel="next", <?page=3>; rel="next"',
   ])('rejects an unusable next link: %s', (header) => {
     expect(() => nextPageFromLink(header, endpoint)).toThrow('Invalid next page');
   });
