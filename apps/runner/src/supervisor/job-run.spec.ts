@@ -746,11 +746,15 @@ describe('cancel while running', () => {
     const b = build('RUN', 'j1', { killGraceMs: 2_000 });
     b.ex.alive = true;
     b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: b.time.now().toISOString() });
-    b.ex.processIdentity = async () => 'unknown';
+    const identities = ['ours', 'unknown', 'unknown'] as const;
+    let checks = 0;
+    b.ex.processIdentity = async () => identities[checks++] ?? 'unknown';
     b.ex.onKill = () => undefined;
     b.ex.onTick = (n) => { if (n >= 4) b.ex.alive = false; };
     await b.run.start('watch');
-    expect(b.ex.killed).toEqual([]);
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+    expect(b.ex.killed.some((kill) => kill.signal === 'SIGKILL')).toBe(false);
+    expect(checks).toBe(3);
   });
 
   test('AC-9: cancellation during readopted watch sends no signal before the next tick', async () => {
