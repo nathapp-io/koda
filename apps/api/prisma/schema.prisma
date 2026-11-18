@@ -1217,6 +1217,7 @@ model FleetJob {
   configResult       Json? // S3 §3 (D475): ConfigJobResult mirrored from snapshots; null for nax jobs
   agentInput         Json? // US-003: an AGENT job's dispatch input { name, task, model?, modelAliases?, timeoutSec? }; immutable
   agentResult        Json? // US-003: an AGENT job's latest attempt result; cleared on requeue
+  handoff            Json? // US-003: a handoff RUN job's record (the chat run's result.json and ledger.md), sent with the ASSIGN
   threadId           String? // S5a: the ChatThread a THREAD job serves
   flowId             String?
   flowStep           String?
@@ -1385,6 +1386,8 @@ model FleetFlowFeature {
   answers        Json? // FlowAnswer[]: the human answers, bound to questionsJobId
   answeredById   String?
   answeredAt    DateTime?
+  handoff      Boolean @default(false) // US-003: the feature was handed over from a chat run
+  handoffRecord Json? // US-003: the handoff record (the run's result.json and ledger.md); read only for the RUN dispatch
 
   flow FleetFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
 

@@ -27,6 +27,7 @@ import { runConfigJob } from './config-job/config-job';
 import { AGENT_TASK_FILE, removeAgentTask, writeAgentTask } from './agent-job/agent-task-file';
 import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
+import { handoffRunIds, restoreHandoffRecord } from './handoff-restore';
 import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
 import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
@@ -122,6 +123,12 @@ export class HostExecutor implements JobExecutor {
       const { assign } = job;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
+      // flow-handoff US-007: the record of the chat run the flow took over lives in a git-excluded folder, so it
+      // travels with the assignment and is restored into the checkout before nax starts. The restore replaces the
+      // whole workflow folder: `clean -ffd` keeps git-ignored files, so earlier jobs' run directories survive there.
+      if (assign.command === 'RUN' && assign.handoff !== undefined) {
+        await restoreHandoffRecord(repoDir, assign.feature, assign.handoff.record);
+      }
       const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(job, repoDir, { isCancelled: cancelled });   // D104
       if (cancelled()) return CANCELLED;   // #406: a retried check may have waited across a cancel
       if (mismatch !== null) return { ok: false, reason: mismatch };
@@ -136,7 +143,10 @@ export class HostExecutor implements JobExecutor {
       // fleet #370 (US-009): the repo's rule override is materialized into the job directory and named in the
       // profile, so every nax command this job runs (run, plan, bot review, bot fix, agents run) gets it.
       const ruleContext = assign.ruleOverride === undefined ? undefined : await materializeRuleOverride(jobDir, assign.ruleOverride);
-      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd, modelAliases, ruleContext);
+      // flow-handoff US-007: a handoff RUN publishes the PR under koda's own forge identity. The job profile
+      // deep-merges after the repo config, so this key wins whatever the repo's own `workflow.publish` says.
+      const publishPr = assign.command === 'RUN' && assign.handoff !== undefined;
+      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd, modelAliases, ruleContext, publishPr);
       return { ok: true, branch: checkout.branch };
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
@@ -457,7 +467,9 @@ export class HostExecutor implements JobExecutor {
   async readWorkflowResult(job: JobRow): Promise<WorkflowResult | null> {
     try {
       const { repoDir } = this.dirs(job);
-      const found = await findWorkflowResult(featureDirFor(repoDir, job.assign.feature), Date.parse(job.createdAt));
+      // flow-handoff US-007: the restored handoff record is the sender's result, never this job's own. The run ids
+      // come from the persisted assign, so a daemon restart cannot lose them.
+      const found = await findWorkflowResult(featureDirFor(repoDir, job.assign.feature), Date.parse(job.createdAt), handoffRunIds(job.assign));
       return found?.result ?? null;
     } catch {
       return null;
@@ -477,7 +489,9 @@ export class HostExecutor implements JobExecutor {
   async collectBundle(job: JobRow): Promise<BundleFile> {
     const { repoDir, jobDir } = this.dirs(job);
     if (job.command === 'PLAN') await stashPlanOutputs(repoDir, jobDir, job.assign.feature);
-    if (job.command === 'RUN') await stashWorkflowOutputs(repoDir, jobDir, job.assign.feature, Date.parse(job.createdAt));
+    // flow-handoff US-007: the restored record is excluded from the stash, so the bundle never carries the sender's
+    // result as this job's own.
+    if (job.command === 'RUN') await stashWorkflowOutputs(repoDir, jobDir, job.assign.feature, Date.parse(job.createdAt), handoffRunIds(job.assign));
     return buildBundle({ jobDir, command: job.command });
   }
 

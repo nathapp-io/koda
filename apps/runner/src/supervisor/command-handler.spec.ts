@@ -106,6 +106,16 @@ describe('ASSIGN', () => {
     expect(b.ex.calls).toEqual([]);
     expect((await b.handler.handle([bad]))[0]).toEqual(ack);
   });
+  test('flow-handoff US-007: a malformed handoff is rejected before the supervisor begins the job', async () => {
+    const b = build();
+    const record = [{ runId: '..', file: 'result.json', mtimeMs: 1, content: '{}' }];
+    const bad: FleetCommandOut = { ...assignCmd('c11'), payload: { ...assignFor(), handoff: { record } } as never };
+    const [ack] = await b.handler.handle([bad]);
+    expect(ack).toEqual({ commandId: 'c11', leaseEpoch: 1, result: 'rejected', detail: 'invalid handoff' });
+    expect(b.journal.getJob('j1', 1)).toBeNull();
+    expect(b.ex.calls).toEqual([]);
+    expect(b.journal.getCommand('c11')).toMatchObject({ result: 'rejected', detail: 'invalid handoff' });
+  });
 });
 
 describe('CANCEL, ABANDON, READOPT and unknown types', () => {

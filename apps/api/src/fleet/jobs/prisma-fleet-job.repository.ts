@@ -13,6 +13,7 @@ import type { ThreadAssign } from '../common/thread-jobs';
 import { PROJECT_CODE_LIMITS, THREAD_LIMITS } from '../common/thread-jobs';
 import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assistant/actions/outcome-delivery';
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
+import { handoffRecordOf } from '../common/handoff-record';
 import type { ConfigJobResult } from '../common/config-jobs';
 import type { FlowStep } from '../flows/flow-steps';
 import {
@@ -76,6 +77,8 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   // US-003: both agent columns are unconstrained JSON, so they are mapped through their shape guards.
   agentInput: agentInputOf(r.agentInput),
   agentResult: agentResultOf(r.agentResult),
+  // US-003: the handoff record is unconstrained JSON too, so it is mapped through its shape guard.
+  handoff: handoffRecordOf(r.handoff),
   // US-008: the summary of the rule override this job was assigned, through its own shape guard.
   ruleOverride: toRuleOverrideSummary(r.ruleOverride),
 });
@@ -170,7 +173,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
-    const { reviewDecisions, prRulings, agentInput, ...rest } = data;
+    const { reviewDecisions, prRulings, agentInput, handoff, ...rest } = data;
     try {
       // US-002: a job with no requester type in its input was requested by a user (every caller before agents could dispatch).
       return toJob(await this.db.fleetJob.create({
@@ -178,6 +181,8 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
           ...rest, requestedByType: data.requestedByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd),
           // US-003: an absent agent input is SQL null, so a non-AGENT job keeps the column empty (as it does for its result).
           agentInput: agentInput == null ? Prisma.DbNull : (agentInput as unknown as Prisma.InputJsonValue),
+          // US-003: a handoff RUN job's record; a job without one keeps the column empty.
+          handoff: handoff == null ? Prisma.DbNull : (handoff as unknown as Prisma.InputJsonValue),
           ...(prRulings !== undefined ? { prRulings: prRulings === null ? Prisma.DbNull : (prRulings as unknown as Prisma.InputJsonValue) } : {}),
           ...(reviewDecisions !== undefined ? { reviewDecisions: reviewDecisions === null ? Prisma.DbNull : (reviewDecisions as unknown as Prisma.InputJsonValue) } : {}),
         },

@@ -1,10 +1,26 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { AGENT_RESULT_LIMITS, APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES, FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
+import {
+  AGENT_RESULT_LIMITS,
+  APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES,
+  FLEET_PROTOCOL_VERSION,
+  HANDOFF_MAX_RUNS as PACKAGE_HANDOFF_MAX_RUNS,
+  HANDOFF_RECORD_FILES as PACKAGE_HANDOFF_RECORD_FILES,
+  HANDOFF_RECORD_MAX_BYTES as PACKAGE_HANDOFF_RECORD_MAX_BYTES,
+  HANDOFF_RUN_ID_RE as PACKAGE_HANDOFF_RUN_ID_RE,
+  isStorableRecordText as PACKAGE_IS_STORABLE_RECORD_TEXT,
+} from '@nathapp/fleet-protocol';
 import type { FleetCommandTypeName, FleetJobKindName, FleetJobStateName } from '@nathapp/fleet-protocol';
 import { APPROVAL_TEXT_MAX_BYTES, DEFAULT_APPROVAL_TIMEOUT_SEC, SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
 import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
 import { AGENT_RESULT_LIMITS as API_AGENT_RESULT_LIMITS } from './agent-jobs';
+import { isStorableRecordText } from './handoff-record';
+import {
+  HANDOFF_MAX_RUNS,
+  HANDOFF_RECORD_FILES,
+  HANDOFF_RECORD_MAX_BYTES,
+  HANDOFF_RUN_ID_RE,
+} from '../flows/flow-handoff-input';
 
 const SRC = join(__dirname, '..', '..');
 
@@ -36,6 +52,36 @@ describe('fleet protocol', () => {
   it('keeps the local approval text cap equal to the package (the API image does not ship the package)', () => {
     expect(APPROVAL_TEXT_MAX_BYTES).toBe(PACKAGE_APPROVAL_TEXT_MAX_BYTES);
     expect(DEFAULT_APPROVAL_TIMEOUT_SEC).toBe(600);
+  });
+
+  // US-003 (AC-1): the handoff limits live in the package, because the runner enforces them too.
+  // The API image does not ship the package, so the API keeps its own copies: they must not drift.
+  it('pins the API handoff limits to the protocol package', () => {
+    expect(HANDOFF_MAX_RUNS).toBe(PACKAGE_HANDOFF_MAX_RUNS);
+    expect(HANDOFF_RECORD_MAX_BYTES).toBe(PACKAGE_HANDOFF_RECORD_MAX_BYTES);
+    expect(HANDOFF_RUN_ID_RE.source).toBe(PACKAGE_HANDOFF_RUN_ID_RE.source);
+    expect(HANDOFF_RUN_ID_RE.flags).toBe(PACKAGE_HANDOFF_RUN_ID_RE.flags);
+    expect([...HANDOFF_RECORD_FILES]).toEqual([...PACKAGE_HANDOFF_RECORD_FILES]);
+  });
+
+  // The rule that decides whether a record file's text can be stored at all is part of the contract:
+  // the API stores the record in JSONB columns and the runner writes it to the checkout, and neither
+  // can hold a NUL or an unpaired surrogate. The API keeps its own copy (the image does not ship the
+  // package), so the two must answer alike.
+  it('pins the API record text rule to the protocol package', () => {
+    const samples = [
+      '',
+      'plain text',
+      'a surrogate pair: 🚀',
+      `a NUL: ${String.fromCharCode(0)}`,
+      `a high surrogate: ${String.fromCharCode(0xd800)}`,
+      `a low surrogate: ${String.fromCharCode(0xdc00)}`,
+      `a pair: ${String.fromCharCode(0xd83d, 0xde80)}`,
+      `a high surrogate then a low one: ${String.fromCharCode(0xd800, 0xdc00)}`,
+    ];
+    for (const sample of samples) {
+      expect(isStorableRecordText(sample)).toBe(PACKAGE_IS_STORABLE_RECORD_TEXT(sample));
+    }
   });
 
   // The production image never ships packages/ (apps/api/Dockerfile final stage),

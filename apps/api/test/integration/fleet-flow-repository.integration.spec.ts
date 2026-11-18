@@ -3,6 +3,7 @@ import { resetDb } from '../helpers/reset-db';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { PrismaClient } from '../../src/generated/prisma/client';
 import { createPgAdapter } from '../../src/prisma/pg-adapter';
 import { seedFleetBase } from '../helpers/fleet-fixtures';
@@ -12,6 +13,12 @@ import { FlowTransitionError } from '../../src/fleet/flows/domain/fleet-flow.dom
 import { FLOW_CALL_TEXT_MAX, flowQuestions } from '../../src/fleet/flows/flow-calls';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
+
+/** US-003: the record a handoff carries: the two files of one run. */
+const handoffRecord: HandoffRecordFile[] = [
+  { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1}' },
+  { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger' },
+];
 
 describeDb('PrismaFleetFlowRepository', () => {
   let module: TestingModule;
@@ -287,5 +294,107 @@ describeDb('PrismaFleetFlowRepository', () => {
     const [row] = await prisma.$queryRaw<Array<{ questions: string }>>`
       SELECT "questions"::text AS questions FROM "FleetFlowFeature" WHERE "id" = ${flow.features[0].id}`;
     expect(row?.questions).not.toContain('\\ud83d');
+  });
+
+  // ---- US-003: the handoff record and the branch lookup ----
+
+  it('US-003 AC-2: stores the handoff record on the first feature and reads it back', async () => {
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    expect(await repo.findHandoffRecord(flow.features[0].id)).toEqual(handoffRecord);
+  });
+
+  it('US-003: a record with multi-byte text survives the JSONB column unchanged', async () => {
+    // The record holds the chat run's own files: their bytes are stored as they are, so the
+    // runner restores exactly what the chain produced.
+    const record: HandoffRecordFile[] = [
+      { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1,"note":"shipped 🚀"}' },
+      { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger\n"quoted" \\ backslash\ttab\n' },
+    ];
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record },
+    });
+    expect(await repo.findHandoffRecord(flow.features[0].id)).toEqual(record);
+  });
+
+  it('US-003: the JSONB column refuses the text the parser refuses', async () => {
+    // The boundary the API's parser guards: JSONB cannot hold a NUL or an unpaired surrogate, so
+    // the create parser refuses such a record before it reaches a column.
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    const unstorable = (content: string) => [{ runId: 'run-1', file: 'result.json', mtimeMs: 1, content }];
+    for (const content of [`a${String.fromCharCode(0)}b`, `a${String.fromCharCode(0xd800)}b`]) {
+      await expect(prisma.fleetFlowFeature.update({
+        where: { id: flow.features[0].id },
+        data: { handoffRecord: unstorable(content) as never },
+      })).rejects.toThrow(/json|Unicode escape sequence/i);
+    }
+  });
+
+  it('US-003 AC-3: marks the first feature of a handoff flow', async () => {
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    expect((await repo.findById(flow.id))?.features[0].handoff).toBe(true);
+  });
+
+  it('US-003 AC-4: never loads the handoff record with the flow', async () => {
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    // The row holds the record; the flow read must not carry it.
+    const row = await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: flow.features[0].id } });
+    expect(row.handoffRecord).toEqual(handoffRecord);
+    expect((await repo.findById(flow.id))?.features[0]).not.toHaveProperty('handoffRecord');
+  });
+
+  it('US-003 AC-5: create does not return the handoff record either', async () => {
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    const row = await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: flow.features[0].id } });
+    expect(row.handoffRecord).toEqual(handoffRecord);
+    expect(flow.features[0]).not.toHaveProperty('handoffRecord');
+  });
+
+  it('US-003 AC-6: a flow without a handoff has no handoff feature', async () => {
+    const flow = await createFlow({ features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }] });
+    expect((await repo.findById(flow.id))?.features.map((feature) => feature.handoff)).toEqual([false]);
+  });
+
+  it('US-003 AC-7: finds the live flow of a branch whatever its sha', async () => {
+    const flow = await createFlow({ branch: 'handoff/branch', specSha: 'sha-of-the-flow' });
+    await prisma.fleetFlow.update({ where: { id: flow.id }, data: { state: 'RUNNING' } });
+    expect(await repo.findLiveForBranch(repoId, 'handoff/branch')).toMatchObject({
+      id: flow.id, state: 'RUNNING', specSha: 'sha-of-the-flow',
+    });
+  });
+
+  it('US-003 AC-8: has no live flow for a branch whose only flow is completed', async () => {
+    const flow = await createFlow({ branch: 'done/branch' });
+    await prisma.fleetFlow.update({ where: { id: flow.id }, data: { state: 'COMPLETED' } });
+    expect(await repo.findLiveForBranch(repoId, 'done/branch')).toBeNull();
+  });
+
+  it('US-003 AC-12: has no handoff record for a feature that does not exist', async () => {
+    expect(await repo.findHandoffRecord('missing-feature')).toBeNull();
+  });
+
+  it('US-003 AC-13: reads back the flow it created', async () => {
+    const flow = await createFlow({
+      features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }],
+      handoff: { record: handoffRecord },
+    });
+    const row = await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: flow.features[0].id } });
+    expect(row.handoffRecord).toEqual(handoffRecord);
+    expect(await repo.findById(flow.id)).toEqual(flow);
   });
 });

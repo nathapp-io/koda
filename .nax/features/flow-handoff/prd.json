@@ -1,0 +1,499 @@
+{
+  "project": "koda",
+  "feature": "flow-handoff",
+  "branchName": "feat/flow-handoff-koda",
+  "createdAt": "2026-11-17T13:25:19.162Z",
+  "updatedAt": "2026-11-17T16:07:15.479Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Parse the handoff body and bounded record shape",
+      "description": "**Goal** — Add the stable handoff input parser and share existing top-level flow validation without changing spec-form behavior.\n\n**Motivation** — The record lives in `.nax/features/<feature>/workflow/<runId>/` (`result.json`, `ledger.md`), which is git-excluded, so it must travel with the request.\n\n**Approach** — `POST /api/fleet/flows` (the existing nax-entry create) accepts a second body form. A body carries either `features` (the existing spec form, unchanged) or `handoff` (this form), never both. `remoteUrl`, `branch`, `roles` and `costCapUsd` stay top-level, exactly as in the spec form:\n```json\n{\n  \"remoteUrl\": \"https://github.com/acme/widgets\",\n  \"branch\": \"feat/chat-layout-overflow\",\n  \"roles\": { \"reviewer\": \"acp:claude\", \"supervisor\": \"acp:claude\" },\n  \"costCapUsd\": \"5\",\n  \"handoff\": {\n    \"feature\": \"chat-layout-overflow\",\n    \"headSha\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"record\": [\n      { \"runId\": \"8bd38595-ffbf-4092-89d0-f1ebbf375786\", \"file\": \"result.json\", \"mtimeMs\": 1763370000000, \"content\": \"{...}\" },\n      { \"runId\": \"8bd38595-ffbf-4092-89d0-f1ebbf375786\", \"file\": \"ledger.md\", \"mtimeMs\": 1763370000000, \"content\": \"...\" }\n    ]\n  }\n}\n```\n- `record` holds every run directory of the feature's `workflow/` folder that has a `result.json`: earlier runs carry story records and ledger items that `--publish-only` still reads (`collectStoryRecords`, `collectLedgerItems` walk every run directory, newest first by `result.json` mtime).\n- `file` is `result.json` or `ledger.md`. `content` is the file's UTF-8 text. `mtimeMs` is the file's mtime on the sender's machine, an integer from 0 to `8640000000000000` (the Date range `utimes` accepts); the runner restores it, so nax's newest-first order is the sender's order.\n- `headSha` is 40 lowercase hex characters.\n- `remoteUrl`, `branch`, `roles` and `costCapUsd` follow exactly the rules `parseFlowInput` applies to the spec form. The implementation extracts those checks from `flow-input.ts` into one shared helper both parsers call.\n\n`NormalizedHandoffFlowInput` keeps the input's shape: `{ remoteUrl, branch, roles, costCapUsd, handoff: { feature, headSha, record } }`. `parseFlowHandoffInput` is therefore idempotent: parsing its own output returns an equal object. This is what lets the approval command re-parse the stored body, as the spec form does today.\n\nLimits. The values live in `packages/fleet-protocol/src/index.ts` (the runner imports them). The API image does not ship that package at runtime (it imports it type-only, see `apps/api/src/fleet/common/protocol.spec.ts`), so `apps/api/src/fleet/flows/flow-handoff-input.ts` keeps its own copies and a spec pins them equal to the protocol's:\n- `HANDOFF_MAX_RUNS = 20` distinct run ids.\n- `HANDOFF_RECORD_MAX_BYTES = 524288`: the sum of the UTF-8 byte lengths of every `content`. Fastify's default 1 MiB body limit applies (no `bodyLimit` override); a body over it is refused with 413 before the handler, which the nax sender avoids by enforcing the same content cap.\n- `HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/` (a path segment; nax run ids are UUIDs). Two entries whose run ids are equal ignoring case and whose `file` is the same are duplicates, and two run ids equal ignoring case but spelled differently are refused, because a macOS runner's filesystem folds case.\n- `HANDOFF_RECORD_FILES = ['result.json', 'ledger.md']`.\n\nParser errors are `ValidationAppException({ reason }, 'fleet.flowInput')` naming the property, as `parseFlowInput` does.\n\n**Scope** — In: new parser/type/limit copies, body-form exclusivity, entry/file/byte/run-count/mtime validation, shared top-level validation extracted into a reusable exported helper in the existing flow-input.ts, new co-located unit spec. Out: newest-run publishability and PRD reader (US-002), protocol exports/pinning/persistence (US-003), endpoint/approval integration (US-004/005), runner parsing/restoration (US-007). Validating the record's truth beyond its shape and the newest run's publish preconditions, including any feature name recorded inside `result.json`; the record gets the same trust as the specs `nax-flow__send` sends today.\n\n**Interface** — `parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput`; `NormalizedHandoffFlowInput` keeps `{ remoteUrl, branch, roles, costCapUsd, handoff: { feature, headSha, record } }`. US-002 extends this parser's content rules; a publishable record must already survive this story unchanged.",
+      "acceptanceCriteria": [
+        "[unit] parseFlowHandoffInput called with a body holding remoteUrl, branch: 'feat/x', roles, costCapUsd: '5' and a handoff with one run whose result.json is { schemaVersion: 1, featureWorkflow: { step: 'done', outcome: 'pushed', head: <headSha> } } returns an object deep-equal to { remoteUrl, branch: 'feat/x', roles, costCapUsd: '5', handoff: { feature, headSha, record } } with record in input order.",
+        "[unit] parseFlowHandoffInput called with its own return value returns an object deep-equal to that value.",
+        "[unit] parseFlowHandoffInput called with a body that has both a features array and a handoff object throws ValidationAppException with key fleet.flowInput and reason handoff.",
+        "[unit] parseFlowHandoffInput called with a handoff value that is a string throws ValidationAppException with reason handoff.",
+        "[unit] parseFlowHandoffInput called with handoff.feature of -bad throws ValidationAppException with reason handoff.feature.",
+        "[unit] parseFlowHandoffInput called with handoff.headSha of ABCDEF0123456789ABCDEF0123456789ABCDEF01 (uppercase) throws ValidationAppException with reason handoff.headSha.",
+        "[unit] parseFlowHandoffInput called with an empty handoff.record array throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a record entry whose file is branch-review.json throws ValidationAppException with reason handoff.record.0.file.",
+        "[unit] parseFlowHandoffInput called with a record entry whose runId is ../x throws ValidationAppException with reason handoff.record.0.runId.",
+        "[unit] parseFlowHandoffInput called with a record entry whose mtimeMs is 1.5 throws ValidationAppException with reason handoff.record.0.mtimeMs.",
+        "[unit] parseFlowHandoffInput called with a record entry whose content is the number 5 throws ValidationAppException with reason handoff.record.0.content.",
+        "[unit] parseFlowHandoffInput called with entries Run-A/result.json and run-a/ledger.md throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with record entries spanning 21 distinct run ids throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with record contents whose UTF-8 byte lengths sum to HANDOFF_RECORD_MAX_BYTES + 1 throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a handoff body whose costCapUsd is 0 throws ValidationAppException with reason costCapUsd, the reason parseFlowInput gives for that value."
+      ],
+      "tags": [
+        "api",
+        "flow-handoff",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Bounded pure validation plus a shared-helper extraction across a few files; no permission or credential mechanism changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/fleet/flows/flow-remote-url.ts",
+        "apps/api/src/fleet/jobs/dispatch-input.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-handoff-input.ts",
+        "apps/api/src/fleet/flows/flow-handoff-input.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseFlowHandoffInput preserves a 128-character runId matching HANDOFF_RUN_ID_RE.",
+        "parseFlowHandoffInput accepts record content exactly at HANDOFF_RECORD_MAX_BYTES measured as UTF-8 bytes.",
+        "[unit] parseFlowHandoffInput called with two entries for the same runId and file throws ValidationAppException with key fleet.flowInput and reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with mtimeMs below 0 or above 8640000000000000 throws ValidationAppException with reason handoff.record.0.mtimeMs.",
+        "[unit] parseFlowInput(body, 'NAX') after shared-helper extraction returns { features: [{ feature: 'x', specPath: 'docs/spec.md', dependsOn: [] }], roles, costCapUsd: '5', remoteUrl, branch: 'feat/x', specSha } when body contains feature x with specPath './docs/spec.md', omitted dependsOn, valid roles/remoteUrl/specSha and numeric costCapUsd: 5, preserving the existing spec-form normalization.",
+        "[unit] parseFlowInput(body, 'THREAD') after shared-helper extraction returns { features: [{ feature: 'x', specPath: 'docs/spec.md', dependsOn: [] }], roles, costCapUsd: '5' } for feature x with specPath './docs/spec.md', omitted dependsOn, valid roles and numeric costCapUsd: 5, without requiring remoteUrl, branch or specSha, preserving the existing THREAD-form behavior."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e0de7fc8fcf7c0ae01da8f935d7aa84904e0fc13"
+    },
+    {
+      "id": "US-002",
+      "title": "Validate the newest publishable run and read handoff PRDs",
+      "description": "**Goal** — Extend the handoff parser with newest-run publishability and expose nax-compatible PRD readiness reading.\n\n**Motivation** — nax already has the mechanism: a run with `workflow.publish` set to `push` or `none` ends with outcome `pushed` or `local-only`, and `nax run -f <feature> --publish-only` publishes it later from its record when the record's `head` equals HEAD and no PRD story is pending (nax `packages/nax/src/workflow/publish-only.ts`, `packages/nax/src/cli/publish-only-refusal.ts`).\n\n**Approach** — The **newest run** is the run whose `result.json` entry has the largest `mtimeMs`; two `result.json` entries with the same largest `mtimeMs` are refused, so \"newest\" is never ambiguous. Its `result.json` parses as a JSON object with `schemaVersion: 1` and a `featureWorkflow` object whose `step` is `\"done\"`, whose `outcome` is `\"pushed\"` or `\"local-only\"`, and whose `head` equals `handoff.headSha`. These are `publishOnlyStart`'s own preconditions.\n\n`record` holds every run directory of the feature's `workflow/` folder that has a `result.json`: earlier runs carry story records and ledger items that `--publish-only` still reads (`collectStoryRecords`, `collectLedgerItems` walk every run directory, newest first by `result.json` mtime).\n\nIn `apps/api/src/fleet/flows/flow-handoff-input.ts`: `parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput`, the type `NormalizedHandoffFlowInput`, the four limit copies, and `readHandoffPrd(text: string): { branchName: string | null; pendingStoryIds: string[] } | null` (null when the text is not a JSON object with a `userStories` array). A story is pending by nax's own rule (`isPendingStory`, nax `packages/nax/src/prd/index.ts`): `passes` is not true and `status` is none of `passed`, `failed`, `skipped`, `blocked`, `paused`, `regression-failed`, `decomposed`. Parser errors are `ValidationAppException({ reason }, 'fleet.flowInput')` naming the property, as `parseFlowInput` does.\n\nA run id with ledger.md but no result.json is refused with reason handoff.record. Only the newest run's content is checked for publishability; older draft records remain available for ledger/story collection. Preserve normalized shape, order and idempotence established in US-001.\n\n**Scope** — In: content validation and PRD reader in the upstream parser and its existing unit spec. Out: shape/shared-validator work already delivered by US-001, persistence/protocol (US-003), forge fetches and HTTP error mapping (US-004/005), runner execution (US-007). Validating the record's truth beyond its shape and the newest run's publish preconditions, including any feature name recorded inside `result.json`; the record gets the same trust as the specs `nax-flow__send` sends today.\n\n**Interface** — `parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput`; `readHandoffPrd(text: string): { branchName: string | null; pendingStoryIds: string[] } | null`.",
+      "acceptanceCriteria": [
+        "[unit] parseFlowHandoffInput called with a run id that has a ledger.md entry but no result.json entry throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with two result.json entries sharing the largest mtimeMs throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a newest-run result.json whose content is not valid JSON throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a newest-run result.json whose schemaVersion is 2 throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a newest-run featureWorkflow.step of publish throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a newest-run featureWorkflow.outcome of draft throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a newest-run featureWorkflow.head different from handoff.headSha throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with an older run whose result.json has outcome draft and a newer run (larger mtimeMs) with outcome local-only returns a normalized input, because only the newest run is checked.",
+        "[unit] readHandoffPrd called with a PRD whose branchName is feat/x and whose stories are one { status: 'passed' }, one { status: 'failed' } and one { status: 'pending', passes: false } with id US-003 returns { branchName: 'feat/x', pendingStoryIds: ['US-003'] }.",
+        "[unit] readHandoffPrd called with a PRD that has no branchName returns an object whose branchName is null.",
+        "[unit] readHandoffPrd called with the text not json returns null.",
+        "[unit] parseFlowHandoffInput called with a newest-run result.json that is not a JSON object, lacks schemaVersion: 1 or lacks a featureWorkflow object throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with a newest-run featureWorkflow.outcome of ready throws ValidationAppException with reason handoff.record.",
+        "[unit] parseFlowHandoffInput called with its normalized output for a publishable pushed handoff returns a deep-equal object after newest-run validation is added, preserving US-001's approval-replay idempotence."
+      ],
+      "tags": [
+        "api",
+        "flow-handoff",
+        "validation",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure JSON parsing and deterministic newest-run/pending-story rules in an existing parser and unit spec.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-handoff-input.ts",
+        "apps/api/src/fleet/flows/flow-handoff-input.spec.ts",
+        "apps/api/src/fleet/flows/flow-input.ts"
+      ],
+      "suggestedCriteria": [
+        "readHandoffPrd returns no pendingStoryIds for stories with passes:true regardless of their status.",
+        "readHandoffPrd returns no pendingStoryIds for passed, failed, skipped, blocked, paused, regression-failed and decomposed stories when passes is not true.",
+        "readHandoffPrd returns null for a JSON array or an object without a userStories array.",
+        "parseFlowHandoffInput accepts tied older result.json mtimes when the largest result.json mtime is unique."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0cae4b428485237eab38792191ad72d5dd71cca2"
+    },
+    {
+      "id": "US-003",
+      "title": "Persist handoff records and extend the assignment protocol",
+      "description": "**Goal** — Add additive storage and protocol contracts while keeping large records out of ordinary flow reads and approval details.\n\n**Motivation** — The record lives in `.nax/features/<feature>/workflow/<runId>/` (`result.json`, `ledger.md`), which is git-excluded, so it must travel with the request.\n\n**Approach** — Storage:\n- `FleetFlowFeature` gains `handoff Boolean @default(false)` and `handoffRecord Json?`. Every flow read the repository returns (`create`, `findById`, `lockById`, `findPage`, `findLiveForThread`, `findLiveForSpec`, `findLiveForBranch`) loads features with `omit: { handoffRecord: true }` (Prisma 7.10 supports `omit` without a preview flag), and `toFeature` / `toDomain` are typed against the omitted row. So the record is never re-read on every advance tick and never reaches `FleetFlowFeatureDto.from` or the approval details, and `expect(await repo.findById(id)).toEqual(created)` keeps holding.\n- A new repository method `IFleetFlowRepository.findHandoffRecord(featureId): Promise<HandoffRecordFile[] | null>` reads the record for the RUN dispatch only.\n- `FleetFlowFeatureRecord` gains an optional `handoff?: boolean` (the repository always sets it). `CreateFleetFlow` gains an optional `handoff?: { record: HandoffRecordFile[] }` that the repository writes onto the flow's first feature (`handoff: true`, `handoffRecord: record`). `CreateFlowInput.handoff` is the single carrier from the route to the repository; feature inputs never carry the record.\n- `FleetJob` gains `handoff Json?`. `FleetJobRecord` and `NewFleetJob` (`jobs/domain/fleet-job.domain.ts`) gain an optional `handoff?: HandoffRecordFile[] | null`, typed with the protocol's `HandoffRecordFile` (no import from `flows/` into `jobs/`). `createJob` (`jobs/prisma-fleet-job.repository.ts`) writes it as `Prisma.InputJsonValue`, and `Prisma.DbNull` when absent, as it writes `agentInput`; `toJob` maps it back.\n- The record is stored on the approval request input, the flow feature and the RUN job, and sent once in the ASSIGN payload: at most four copies of at most 512 KiB, accepted. The approval request's stored `input` is readable to whoever can read that approval, the same exposure as any create body.\n\n`AssignPayload` (`packages/fleet-protocol/src/index.ts`). Target: gains `handoff?: HandoffAssign` with `HandoffAssign = { record: HandoffRecordFile[] }` and `HandoffRecordFile = { runId: string; file: 'result.json' | 'ledger.md'; mtimeMs: number; content: string }`, plus the four limit constants.\n\nLimits. The values live in `packages/fleet-protocol/src/index.ts` (the runner imports them). The API image does not ship that package at runtime (it imports it type-only, see `apps/api/src/fleet/common/protocol.spec.ts`), so `apps/api/src/fleet/flows/flow-handoff-input.ts` keeps its own copies and a spec pins them equal to the protocol's:\n- `HANDOFF_MAX_RUNS = 20` distinct run ids.\n- `HANDOFF_RECORD_MAX_BYTES = 524288`: the sum of the UTF-8 byte lengths of every `content`. Fastify's default 1 MiB body limit applies (no `bodyLimit` override); a body over it is refused with 413 before the handler, which the nax sender avoids by enforcing the same content cap.\n- `HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/` (a path segment; nax run ids are UUIDs). Two entries whose run ids are equal ignoring case and whose `file` is the same are duplicates, and two run ids equal ignoring case but spelled differently are refused, because a macOS runner's filesystem folds case.\n- `HANDOFF_RECORD_FILES = ['result.json', 'ledger.md']`.\n\n`FleetFlowStartCommand.details` (`fleet-flow-start.command.ts`). Baseline: returns `features: flow.features`. Target: returns each feature mapped explicitly to `{ feature, specPath, dependsOn, handoff }`.\n\nAdd `IFleetFlowRepository.findLiveForBranch(repoId, branch)` with the existing live-state definition, independent of specSha. Ship the three columns in one migration and regenerate the Prisma client. Extend existing repository integration specs, protocol.spec.ts for parity and fleet-flow-start.command.spec.ts for projected details; the invariant is that approval details never carry handoffRecord.\n\n**Scope** — In: protocol exports, schema/migration, repository/domain mapping, lazy record lookup, branch lookup and approval-detail projection. Out: CreateFlowInput/service carrier and branch-busy use (US-004), route/approval variant (US-004/005), RUN decision/dispatch/payload emission (US-006), runner implementation (US-007). Clearing the stored record from the flow feature, the job or the approval request after the flow ends.\n\n**Interface** — `IFleetFlowRepository.findHandoffRecord(featureId): Promise<HandoffRecordFile[] | null>`; `IFleetFlowRepository.findLiveForBranch(repoId, branch)`; `handoff?: boolean`; `handoff?: { record: HandoffRecordFile[] }`; `handoff?: HandoffRecordFile[] | null`; `HandoffAssign = { record: HandoffRecordFile[] }`; `HandoffRecordFile = { runId: string; file: 'result.json' | 'ledger.md'; mtimeMs: number; content: string }`.",
+      "acceptanceCriteria": [
+        "[unit] The API copies of HANDOFF_MAX_RUNS, HANDOFF_RECORD_MAX_BYTES, HANDOFF_RUN_ID_RE and HANDOFF_RECORD_FILES in flow-handoff-input.ts equal the constants exported by @nathapp/fleet-protocol.",
+        "[integration] PrismaFleetFlowRepository.create with handoff: { record }, followed by findHandoffRecord on the created flow's first feature, returns a list equal to the record.",
+        "[integration] PrismaFleetFlowRepository.findById on a flow created with handoff: { record } returns a first feature whose handoff is true.",
+        "[integration] PrismaFleetFlowRepository.findById on a flow created with handoff: { record } returns a first feature that has no handoffRecord key.",
+        "[integration] PrismaFleetFlowRepository.create with handoff: { record } returns a flow whose first feature has no handoffRecord key.",
+        "[integration] PrismaFleetFlowRepository.findById on a flow created without handoff returns features whose handoff is false.",
+        "[integration] PrismaFleetFlowRepository.findLiveForBranch(repoId, branch) returns the RUNNING flow on that repo and branch even when its specSha differs from a caller's previously held specSha; only repoId and branch are passed to the method.",
+        "[integration] PrismaFleetFlowRepository.findLiveForBranch(repoId, branch) returns null when the only flow on that repo and branch is COMPLETED.",
+        "[integration] The job repository's createJob with handoff set to a record, followed by findById, returns a job whose handoff equals the record.",
+        "[integration] The job repository's createJob without handoff, followed by findById, returns a job whose handoff is null.",
+        "[unit] FleetFlowStartCommand.details for a request on a handoff flow returns features whose first entry equals { feature, specPath, dependsOn: [], handoff: true }.",
+        "[integration] PrismaFleetFlowRepository.findHandoffRecord(featureId) returns null when featureId does not exist.",
+        "[integration] PrismaFleetFlowRepository.findById returns a flow deep-equal to the value returned by create for the same handoff flow, preserving the existing create/read equality despite the omitted record."
+      ],
+      "tags": [
+        "api",
+        "flow-handoff",
+        "prisma",
+        "protocol",
+        "runner"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-package protocol and additive database migration spanning flow/job repositories, omitted-row typing and approval-detail data projection; no access-control changes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/common/protocol.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261217090000_fleet_flow_handoff/migration.sql"
+      ],
+      "suggestedCriteria": [
+        "PrismaFleetFlowRepository.findPage, lockById, findLiveForThread, findLiveForSpec and findLiveForBranch return features without handoffRecord keys.",
+        "FleetFlowStartCommand.details returns no handoffRecord key even when the supplied repository fixture contains one.",
+        "PrismaFleetFlowRepository.findHandoffRecord returns null for a non-handoff feature or missing feature."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-start.command.spec.ts",
+          "reason": "its `details` assertion may pin `features` as the repository's feature objects; `details` now maps each feature to `{ feature, specPath, dependsOn, handoff }`, so the expectation becomes that mapped shape, and the invariant is that the approval details never carry `handoffRecord`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d7b591d8858a33c7d26d09182263c2ebb5a9be2f"
+    },
+    {
+      "id": "US-004",
+      "title": "Create approval-gated GitHub handoff flows",
+      "description": "**Goal** — Accept the handoff form on the existing NAX create route, verify GitHub state and persist a pending flow under branch-wide exclusion.\n\n**Motivation** — The owner ruled (2026-11-17) that the chain hands the feature over **before** publishing (approach A) and uploads its run record with the request (transport T1).\n\n**Approach** — `FleetFlowsController.create` (`fleet-flows.controller.ts`). Baseline: parses with `parseFlowInput(body, 'NAX')`, checks the spec files at `specSha`, and maps `RepoCheckException` inline in its `catch`. Target: the inline mapping is extracted into one private method both forms call unchanged; when the body has a `handoff` key the route parses with `parseFlowHandoffInput(body)`, runs the handoff checks below, then opens the route gate with the variant `NAX_HANDOFF_FLOW_CREATE_VARIANT` and `input: { projectId, repoId, body: <normalized> }`; a body without `handoff` keeps the baseline path exactly.\n\nCreate checks for the handoff form (in order):\n1. Body parse (`parseFlowHandoffInput`): 400 `fleet.flowInput` naming the property.\n2. Repo resolution, project reach and `fleet.flow.create` permission: exactly as the spec form today.\n3. `branch` equal to the repo's `defaultBranch`: 400 `fleet.flowInput` reason `branch`.\n4. Forge reads with one read credential (GitHub: `mintThreadReadToken`; GitLab: the `read` credential):\n   - branch head differs from `handoff.headSha`: 409 `fleet.flows.handoffHeadMoved`;\n   - `.nax/features/<feature>/prd.json` absent at the head, or not readable by `readHandoffPrd`: 422 `fleet.flows.prdMissing` with `{ path }`;\n   - that PRD's `branchName` is null or differs from `branch`: 422 `fleet.flows.handoffBranchMismatch` (the runner checks out `prd.branchName`, so a mismatch would publish a different branch than the flow guards);\n   - a pending story in that PRD: 422 `fleet.flows.handoffStoriesPending` with `{ storyIds }`;\n   - an open PR from the same repository (GitHub `headRepoFullName` equal to the repo's `owner/name`; GitLab merge requests listed for the project) whose `headSha` equals `handoff.headSha`: 409 `fleet.flows.handoffPrOpen` with `{ prNumber }`. The listing reads one page of 100.\n   - A forge failure maps through the extracted mapping exactly as the spec form maps it (`forgeUnavailable` 503, `repoNotConnected`, `gitlabNotConnected`, `branchNotFound`). Every read fails closed: no flow is created.\n5. Route gate with `NAX_HANDOFF_FLOW_CREATE_VARIANT`, then `FleetFlowsService.create` with `entry: 'NAX'`, `specSha: headSha`, one feature `{ feature, specPath: '.nax/features/<feature>/spec.md', dependsOn: [] }`, `handoff: { record }`, and the live-branch refusal `fleet.flows.branchBusy`.\n\nThe flow is created `PENDING` with the `fleet.flow.start` ask, as every nax-entry flow is; nothing billed starts before approval. New API i18n keys (`apps/api/src/i18n/{en,zh}`): `fleet.flows.handoffHeadMoved`, `fleet.flows.prdMissing`, `fleet.flows.handoffBranchMismatch`, `fleet.flows.handoffStoriesPending`, `fleet.flows.handoffPrOpen`, `fleet.flows.branchBusy`.\n\n`GitHubAppClient.mintThreadReadToken` (contents, pull_requests and metadata read), `.getBranchHead`, `.getFile`, `.listOpenPullRequests` (`apps/api/src/fleet/git-broker/github-app-client.ts`; `OpenPullRequest` carries `number`, `headSha` and `headRepoFullName`, and the listing reads one page of 100). `mintReadOnlyToken` cannot list pull requests, so the handoff form never uses it.\n\n`CreateFlowInput` (`fleet-flows.service.ts`). Target: gains `handoff?: { record: HandoffRecordFile[] }`.\n\n`FleetFlowsService.lockNaxEntry`. Baseline: refuses a live flow on `(repoId, branch, specSha)` with `fleet.flows.duplicate`. Target: for a handoff, refuses a live flow on `(repoId, branch)` whatever its sha, with `ConflictAppException({ flowId }, 'fleet.flows.branchBusy')`, through a new repository method `IFleetFlowRepository.findLiveForBranch(repoId, branch)`.\n\nPass the single CreateFlowInput.handoff carrier into repository creation; feature inputs never carry the record. This story also registers `NAX_HANDOFF_FLOW_CREATE_VARIANT = 'rest:fleet-nax-handoff-flow.create'` in `FlowRouteCommands.onModuleInit` (`flow-route.commands.ts`): its `parse` runs `parseFlowHandoffInput` on the stored `body` (the normalized object) and its `run` calls `FleetFlowsService.create` with `entry: 'NAX'`, `specSha: body.handoff.headSha` and `handoff: { record: body.handoff.record }`. The endpoint acceptance criteria run through that real registered command, never a fake gate. Extend endpoint coverage using real persistence and stubbed forge reads.\n\n**Scope** — In: handoff branch routing, shared forge-error mapping, GitHub checks, service carrier/branch refusal and six bilingual keys. Out: GitLab handoff implementation, registered approval command and OpenAPI regeneration (US-005), storage internals (US-003), RUN dispatch (US-006). Adopting a draft PR that was already published from chat by another account; this feature refuses that case with `fleet.flows.handoffPrOpen`. A handoff from a fork or for a repository other than the registered `FleetRepo`. Open-PR detection beyond the first page of 100 open PRs on GitHub, and telling apart two branches that share the same head commit.\n\n**Interface** — `CreateFlowInput.handoff?: { record: HandoffRecordFile[] }`; `NAX_HANDOFF_FLOW_CREATE_VARIANT = 'rest:fleet-nax-handoff-flow.create'`; gate input `{ projectId, repoId, body: <normalized> }`; `ConflictAppException({ flowId }, 'fleet.flows.branchBusy')`.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/fleet/flows with a valid handoff body for a GitHub repo, where the stubbed forge reports the branch head equal to headSha, a prd.json at the head whose branchName equals branch with no pending story, and no open PR, stores a flow whose { state, entry, specSha } equals { state: 'PENDING', entry: 'NAX', specSha: headSha }.",
+        "[integration] The flow stored by that valid GitHub handoff create has one feature equal on { feature, specPath, dependsOn, handoff } to { feature: handoff.feature, specPath: '.nax/features/<feature>/spec.md', dependsOn: [], handoff: true }.",
+        "[integration] The valid GitHub handoff create mints its GitHub token with GitHubAppClient.mintThreadReadToken and never calls mintReadOnlyToken.",
+        "[integration] The response body of the valid GitHub handoff create carries no handoffRecord key on any feature.",
+        "[integration] POST /api/fleet/flows with a handoff body whose branch equals the repo's defaultBranch returns 400 with reason branch.",
+        "[integration] POST /api/fleet/flows with a handoff body when the stubbed GitHubAppClient.getBranchHead returns a sha different from headSha returns 409 fleet.flows.handoffHeadMoved.",
+        "[integration] POST /api/fleet/flows with a handoff body when the stubbed GitHubAppClient.getFile returns null for .nax/features/<feature>/prd.json returns 422 fleet.flows.prdMissing with path equal to that file.",
+        "[integration] POST /api/fleet/flows with a handoff body when the prd.json at the head has branchName feat/other returns 422 fleet.flows.handoffBranchMismatch.",
+        "[integration] POST /api/fleet/flows with a handoff body when the prd.json at the head has story US-002 with status pending and passes: false returns 422 fleet.flows.handoffStoriesPending with storyIds: ['US-002'].",
+        "[integration] POST /api/fleet/flows with a handoff body when the stubbed GitHubAppClient.listOpenPullRequests returns a pull request with number: 42, headSha equal to handoff.headSha and headRepoFullName equal to the repo's owner/name returns 409 fleet.flows.handoffPrOpen with prNumber: 42.",
+        "[integration] POST /api/fleet/flows with a handoff body when the stubbed GitHubAppClient.listOpenPullRequests throws RepoCheckException('provider_error') returns 503 fleet.flows.forgeUnavailable.",
+        "[integration] After the refused handoff creates in the preceding 400, 409, 422 and 503 cases, each starting with no flow for that repo and branch, the repository still holds no flow for that repo and branch.",
+        "[integration] POST /api/fleet/flows with a handoff body while a RUNNING flow already exists on the same repo and branch with a different specSha returns 409 fleet.flows.branchBusy with that flow's id.",
+        "[integration] POST /api/fleet/flows with the existing spec-form body (with features and specSha, no handoff) still stores a PENDING flow whose features have handoff: false.",
+        "[unit] Each of fleet.flows.handoffHeadMoved, fleet.flows.prdMissing, fleet.flows.handoffBranchMismatch, fleet.flows.handoffStoriesPending, fleet.flows.handoffPrOpen and fleet.flows.branchBusy resolves to a translated message in both the en and zh API locales."
+      ],
+      "tags": [
+        "api",
+        "flow-handoff",
+        "github",
+        "security",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Provider credential use, reachable-project permission enforcement and approval-gated creation are security-sensitive; branch-lock concurrency and shared error mapping add integration risk.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/flow-handoff-input.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.ts"
+      ],
+      "suggestedCriteria": [
+        "POST /api/fleet/flows ignores an open GitHub pull request at handoff.headSha when headRepoFullName belongs to a fork.",
+        "POST /api/fleet/flows with an inaccessible repository project returns the existing 404 fleet.flows.repoNotFound before reading the forge.",
+        "POST /api/fleet/flows without fleet.flow.create permission returns the existing forbidden response before reading the forge.",
+        "Concurrent handoff creates on the same repo and branch persist at most one live flow.",
+        "POST /api/fleet/flows with a request body over Fastify's default 1 MiB limit returns 413 before the handler.",
+        "[integration] POST /api/fleet/flows with both features and handoff returns 400 fleet.flowInput reason handoff before any forge read occurs.",
+        "[integration] POST /api/fleet/flows with a handoff body and an unreadable PRD at the head returns 422 fleet.flows.prdMissing with path .nax/features/<feature>/prd.json.",
+        "[integration] POST /api/fleet/flows with a handoff body and a PRD whose branchName is null returns 422 fleet.flows.handoffBranchMismatch.",
+        "[integration] POST /api/fleet/flows with a handoff body when GitHubAppClient.getBranchHead throws RepoCheckException('provider_unreachable') returns 503 fleet.flows.forgeUnavailable.",
+        "[integration] POST /api/fleet/flows with the existing spec-form body when GitHubAppClient.getBranchHead throws RepoCheckException('provider_error') still returns 503 fleet.flows.forgeUnavailable after extraction of the shared forge-error mapping."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1147b5739379943dd11281d40e757d44c14b3b8e"
+    },
+    {
+      "id": "US-005",
+      "title": "Complete GitLab handoff, approval replay and API contract generation",
+      "description": "**Goal** — Complete the handoff create path for GitLab and approval replay, and document the handoff form in the create-body API contract.\n\n**Motivation** — The owner ruled (2026-11-17) that the chain hands the feature over **before** publishing (approach A) and uploads its run record with the request (transport T1).\n\n**Approach** — `FlowRouteCommands.onModuleInit` (`flow-route.commands.ts`): US-004 registers; this story pins with its acceptance criteria `NAX_HANDOFF_FLOW_CREATE_VARIANT = 'rest:fleet-nax-handoff-flow.create'`, whose `parse` runs `parseFlowHandoffInput` on the stored `body` (the normalized object) and whose `run` calls `FleetFlowsService.create` with `entry: 'NAX'`, `specSha: body.handoff.headSha` and `handoff: { record: body.handoff.record }`.\n\n`GitLabRepoCredentials.call(repo, 'read', fn)` with `GitLabAccessChecker.getBranchHead`, `.getFile`, `.listOpenMergeRequests` (`apps/api/src/fleet/git-broker/gitlab-access-checker.ts`).\n\nCreate checks for the handoff form (in order):\n1. Body parse (`parseFlowHandoffInput`): 400 `fleet.flowInput` naming the property.\n2. Repo resolution, project reach and `fleet.flow.create` permission: exactly as the spec form today.\n3. `branch` equal to the repo's `defaultBranch`: 400 `fleet.flowInput` reason `branch`.\n4. Forge reads with one read credential (GitHub: `mintThreadReadToken`; GitLab: the `read` credential):\n   - branch head differs from `handoff.headSha`: 409 `fleet.flows.handoffHeadMoved`;\n   - `.nax/features/<feature>/prd.json` absent at the head, or not readable by `readHandoffPrd`: 422 `fleet.flows.prdMissing` with `{ path }`;\n   - that PRD's `branchName` is null or differs from `branch`: 422 `fleet.flows.handoffBranchMismatch` (the runner checks out `prd.branchName`, so a mismatch would publish a different branch than the flow guards);\n   - a pending story in that PRD: 422 `fleet.flows.handoffStoriesPending` with `{ storyIds }`;\n   - an open PR from the same repository (GitHub `headRepoFullName` equal to the repo's `owner/name`; GitLab merge requests listed for the project) whose `headSha` equals `handoff.headSha`: 409 `fleet.flows.handoffPrOpen` with `{ prNumber }`. The listing reads one page of 100.\n   - A forge failure maps through the extracted mapping exactly as the spec form maps it (`forgeUnavailable` 503, `repoNotConnected`, `gitlabNotConnected`, `branchNotFound`). Every read fails closed: no flow is created.\n5. Route gate with `NAX_HANDOFF_FLOW_CREATE_VARIANT`, then `FleetFlowsService.create` with `entry: 'NAX'`, `specSha: headSha`, one feature `{ feature, specPath: '.nax/features/<feature>/spec.md', dependsOn: [] }`, `handoff: { record }`, and the live-branch refusal `fleet.flows.branchBusy`.\n\nThe flow is created `PENDING` with the `fleet.flow.start` ask, as every nax-entry flow is; nothing billed starts before approval.\n\nThe GitLab branch of the handoff checks; `NAX_HANDOFF_FLOW_CREATE_VARIANT` in `FlowRouteCommands`; the OpenAPI body schema documents the handoff form, and `openapi.json` plus the CLI client are regenerated with `bun run generate`.\n\nUse the existing routeCommand/ActorPrincipalLoader execution path so deferred execution retains the requesting actor and permission checks. Reparse the stored normalized body, not a derived feature list, and reject empty records before service invocation. Tests replay the registry contract as command.parse(storedInput) followed by command.execute(parsedInput); malformed bodies fail during parse and never invoke the run callback. Preserve existing spec/THREAD variants. The OpenAPI body must express features/specSha versus handoff as exclusive alternatives with the same shared top-level fields, record enum/limits and lowercase SHA. Generated artifacts at repository root openapi.json and apps/cli/src/generated/ are outputs of root bun run generate, never manual edits. Use existing controller GitLab and route-command specs and real registered-command endpoint verification.\n\n**Scope** — In: GitLab handoff checks using one read credential, handoff variant parse/run registration, create-body Swagger schema and regenerated API/CLI artifacts. Out: GitHub checks/shared mapping/service carrier already owned by US-004, database protocol work (US-003), dispatch (US-006), runner (US-007). Web UI and CLI changes for handoff flows are excluded; CLI changes here are generated contract updates only. Thread-entry (`THREAD`) flows: the handoff form exists only on the nax entry.\n\n**Interface** — `NAX_HANDOFF_FLOW_CREATE_VARIANT = 'rest:fleet-nax-handoff-flow.create'`; stored input `{ projectId, repoId, body }`; `parseFlowHandoffInput(body: unknown): NormalizedHandoffFlowInput`; `GitLabRepoCredentials.call(repo, 'read', fn)`; service input `{ entry: 'NAX', specSha: body.handoff.headSha, handoff: { record: body.handoff.record } }` with resolved repo, one feature and shared branch/roles/cost.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/fleet/flows with a valid handoff body for a registered GitLab repo, with the stubbed GitLabAccessChecker.getBranchHead returning headSha, getFile returning a PRD with matching branchName and no pending story, and listOpenMergeRequests returning none, stores a PENDING flow whose first feature has handoff: true.",
+        "[integration] POST /api/fleet/flows with a handoff body for a GitLab repo when the stubbed GitLabAccessChecker.listOpenMergeRequests returns a merge request with number: 9 and headSha equal to handoff.headSha returns 409 fleet.flows.handoffPrOpen with prNumber: 9.",
+        "[integration] POST /api/fleet/flows with a handoff body for a GitLab repo when the stubbed GitLabAccessChecker.getBranchHead returns a different sha returns 409 fleet.flows.handoffHeadMoved.",
+        "[unit] Executing the approval command registered for NAX_HANDOFF_FLOW_CREATE_VARIANT with a stored input { projectId, repoId, body }, where body is a parseFlowHandoffInput result, calls FleetFlowsService.create once with entry: 'NAX', specSha equal to body.handoff.headSha and handoff equal to { record: body.handoff.record }.",
+        "[unit] Executing the approval command registered for NAX_HANDOFF_FLOW_CREATE_VARIANT with a stored body that has an empty handoff.record throws ValidationAppException with reason handoff.record and does not call FleetFlowsService.create.",
+        "[unit] Executing the existing NAX_FLOW_CREATE_VARIANT command with a stored normalized spec-form body after handoff registration still calls FleetFlowsService.create once with that body's features, roles, costCapUsd, branch and specSha plus entry: 'NAX' and repoId, with no handoff key, preserving the existing spec-form approval data flow."
+      ],
+      "tags": [
+        "api",
+        "flow-handoff",
+        "gitlab",
+        "security",
+        "approvals",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "GitLab read credentials and actor-loaded deferred approval execution are security-sensitive; generated contract changes span API, root spec and CLI outputs.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-route.commands.ts",
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/fleet/flows/fleet-flows.controller.gitlab.spec.ts",
+        "apps/api/src/fleet/flows/flow-handoff-input.ts"
+      ],
+      "suggestedCriteria": [
+        "A GitLab handoff whose listOpenMergeRequests throws RepoCheckException('provider_error') returns 503 fleet.flows.forgeUnavailable without creating a flow.",
+        "A GitLab handoff performs branch, PRD and merge-request reads with one GitLabRepoCredentials.call(repo,'read',fn) before opening the route gate.",
+        "The registered handoff command creates a PENDING flow with a fleet.flow.start request and no dispatched job when executed after fleet.flow.create approval."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` after the create body schema documents the handoff form; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated",
+          "reason": "regenerated by `bun run generate` from the exported API spec; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0d3a99e40371d28ae44ac8dbfb7b945b881703ef"
+    },
+    {
+      "id": "US-006",
+      "title": "Start handoff flows at RUN and transport the record to assignment",
+      "description": "**Goal** — Dispatch and recover a handoff feature's initial publish-only RUN while preserving all post-RUN flow decisions.\n\n**Motivation** — A chat chain that runs a feature ends with a draft PR held by open items, and koda cannot finish it: nax trusts only item-index and item-thread comments its own login wrote (`ownComments`, nax `packages/nax/src/forge/marker.ts`), so a PR the owner's account published can never be readied by koda's bot (`no nax item index on this PR`).\n\n**Approach** — Steps:\nA handoff feature skips SPEC_REVIEW, PLAN and PRD_REVIEW:\n- No job yet, flow `APPROVED` or `RUNNING`: dispatch `RUN`.\n- A handoff flow never dispatches `SPEC_REVIEW`.\n- An `APPROVED` handoff flow whose `RUN` job exists (queued at or after `approvedAt`) is recovered to `RUNNING` at step `RUN` by the advance pass, as an adopted `SPEC_REVIEW` is today.\n- Every later decision is the existing one: a finished RUN with `prNumber` and `resultSha` dispatches `REVIEW`, then `RULE` / `FIX` / complete / `WAITING_ANSWER` per #413, with one automatic RULE/FIX round. A RUN that fails stops with `step_failed`; a RUN that ends without a PR stops with `run_no_pr`.\n\n`FlowStepInput` and `decideFlowStep` (`flow-step-decision.ts`). Target: input gains an optional `handoff?: boolean` (absent means false; `decisionInput` sets it from the feature); see Steps below.\n\n`BuildStepDispatchInput` and `buildStepDispatch` (`flow-step-dispatch.ts`). Baseline: `RUN` takes its ref from the PLAN job's `resultBranch` and throws without a PLAN. Target: input gains `handoff?: boolean`; a handoff `RUN` uses `ref: flow.specSha` (the head sha) and needs no PLAN.\n\n`FleetFlowAdvanceService` (`fleet-flow-advance.service.ts`). Target: the dispatch pass of a handoff `RUN` reads the record with `findHandoffRecord`; a null record stops the flow with reason `dispatch_refused` and detail `RUN: handoff record missing` instead of dispatching; a record is passed as `handoff` in the `FleetJobsService.dispatch` options. For every other dispatch the `handoff` key is **omitted** from the options object (never `undefined` or `null`), so the existing exact-options assertions keep passing. The crash-recovery rule (`recoverable`, near line 657) also covers a handoff feature's `RUN` job queued at or after `approvedAt`, exactly as it covers an adopted `SPEC_REVIEW`.\n\n`FleetJobsService.dispatch(actorId, projectId, dto, opts)` (`jobs/fleet-jobs.service.ts`). Target: `opts` gains `handoff?: HandoffRecordFile[]`, stored on `FleetJob.handoff` only for `command: 'RUN'`. `DispatchFleetJobDto` does **not** gain the field: only a flow can dispatch a handoff RUN.\n\n`buildAssignPayload` (`jobs/assign-payload.ts`). Target: a RUN job with a non-null `handoff` adds `handoff: { record }` to the payload; every other command never does.\n\nUse the feature.handoff domain flag from US-003, its lazy findHandoffRecord and job persistence. Preserve dispatch claim, parent/flow lock order, job insert/record split, creator access and budget guards; lookup the record only for handoff RUN dispatch rather than on every tick. Keep RUN job links atomic so recovery uses the existing job rather than creating a second billed RUN. Existing exact-options tests should continue to require absence of handoff for all non-handoff dispatches. Retain ordinary failure details and ingest wait behavior; nax's refusal text remains in RUN logs. Extend the existing decision, dispatch, advance integration and assignment specs as part of implementation.\n\n**Scope** — In: initial step choice, SHA ref, lazy record dispatch/refusal, crash recovery, RUN-only job storage and assignment emission. Out: create/parser/provider/approval paths (US-001/002/004/005), schema/repository/protocol declarations (US-003), runner restoration/argv/profile/result handling (US-007). A handoff field on DispatchFleetJobDto or any public job-dispatch route is excluded. Changing REVIEW/RULE/FIX, adding a capability gate or surfacing nax refusal text in stop details is excluded.\n\n**Interface** — `FlowStepInput.handoff?: boolean`; `BuildStepDispatchInput.handoff?: boolean`; `FleetJobsService.dispatch(actorId, projectId, dto, opts)` with `opts.handoff?: HandoffRecordFile[]`; RUN assignment `handoff: { record }`.",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep with handoff: true, state APPROVED and no latest job returns { kind: 'dispatch', step: 'RUN' }.",
+        "[unit] decideFlowStep with handoff: true, state RUNNING and no latest job returns { kind: 'dispatch', step: 'RUN' }.",
+        "[unit] decideFlowStep with handoff absent, state APPROVED, a first feature and no latest job still returns a SPEC_REVIEW dispatch.",
+        "[unit] buildStepDispatch with step RUN, handoff: true and no plan returns a dispatch whose { command, ref, feature } equals { command: 'RUN', ref: flow.specSha, feature: <feature name> }.",
+        "[unit] buildStepDispatch with step RUN, no handoff and no plan throws an error whose message is RUN requires the missing PLAN job.",
+        "[integration] FleetFlowAdvanceService.advance(flowId, now) on an APPROVED handoff flow with no jobs calls the stubbed FleetJobsService.dispatch once with options whose handoff equals the record findHandoffRecord returns.",
+        "[integration] FleetFlowAdvanceService.advance(flowId, now) on the same APPROVED handoff-flow setup with no jobs and a stored record passes FleetJobsService.dispatch a dto whose command is RUN and whose ref equals the flow's specSha.",
+        "[integration] FleetFlowAdvanceService.advance(flowId, now) on an APPROVED handoff flow whose only job is a QUEUED RUN queued at or after approvedAt leaves the flow in state RUNNING.",
+        "[integration] FleetFlowAdvanceService.advance(flowId, now) on the same APPROVED handoff-flow recovery setup whose only job is a QUEUED RUN queued at or after approvedAt does not call FleetJobsService.dispatch.",
+        "[integration] FleetFlowAdvanceService.advance(flowId, now) on an APPROVED handoff flow whose findHandoffRecord returns null stops the flow with stopReason dispatch_refused.",
+        "[integration] FleetFlowAdvanceService.advance(flowId, now) on a non-handoff RUNNING flow whose next step is PLAN calls FleetJobsService.dispatch with an options object that has no handoff key.",
+        "[integration] FleetJobsService.dispatch with a REVIEW dto and opts.handoff set stores the job with handoff: null.",
+        "[unit] buildAssignPayload for a RUN job whose handoff is a record returns a payload whose handoff.record equals that record.",
+        "[unit] buildAssignPayload for a RUN job whose handoff is null returns a payload with no handoff key.",
+        "[unit] decideFlowStep with handoff: true, state RUNNING and a latest RUN job in state FAILED returns a stop action with kind stop and reason step_failed."
+      ],
+      "tags": [
+        "api",
+        "flow-handoff",
+        "workflow",
+        "dispatch",
+        "recovery"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module state-machine and dispatch changes with transaction-boundary crash reconciliation and strict optional-key compatibility; existing permission guards are retained unchanged.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/assign-payload.ts"
+      ],
+      "suggestedCriteria": [
+        "decideFlowStep for a completed handoff RUN with prNumber and resultSha dispatches REVIEW with that PR and SHA unchanged from the ordinary RUN path.",
+        "buildAssignPayload for a non-RUN job never emits a handoff key even when its supplied record has handoff data.",
+        "FleetFlowAdvanceService does not call findHandoffRecord during non-handoff dispatch or post-RUN handoff steps.",
+        "decideFlowStep does not dispatch SPEC_REVIEW when an APPROVED handoff has a current-approval RUN job.",
+        "[integration] FleetFlowAdvanceService.advance on a handoff RUN with a missing record stores stopDetail RUN: handoff record missing.",
+        "[unit] decideFlowStep with handoff: true, state RUNNING and a latest RUN job in state COMPLETED without a PR returns a stop action with reason run_no_pr once ingest is settled or the existing PR-wait timeout expires.",
+        "[integration] FleetFlowAdvanceService.advance on an APPROVED handoff flow with an inserted RUN queued at or after approvedAt but no recorded step sets the feature's currentStep to RUN, recovering a crash between the RUN insert and recordStep."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "only if an exact `dispatch` options assertion breaks: the invariant that replaces it is that a non-handoff dispatch's options object has no `handoff` key at all, and a handoff RUN's options carry `handoff` equal to the stored record."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f8ad4ca014bd6de7af08156a71732a140a0e3750"
+    },
+    {
+      "id": "US-007",
+      "title": "Restore handoff records and publish on the runner",
+      "description": "**Goal** — Make RUN assignments carrying handoff restore prior workflow files and invoke publish-only without misattributing those files as this job's result.\n\n**Motivation** — The record lives in `.nax/features/<feature>/workflow/<runId>/` (`result.json`, `ledger.md`), which is git-excluded, so it must travel with the request.\n\n**Approach** — Runner:\nFor a RUN assign with `handoff`, `HostExecutor`:\n1. checks out as for every RUN (`prepareCheckout` reads `prd.json` at the ref, which is the head sha, and checks out `prd.branchName`; a leftover local branch ahead of origin can make HEAD differ from the head sha, which `--publish-only` then refuses);\n2. calls `restoreHandoffRecord(repoDir, feature, handoff.record)` before nax starts;\n3. writes the job profile with `publishPr: true`;\n4. spawns `buildNaxArgv`, which appends `--publish-only`;\n5. reads the workflow result and stashes the workflow outputs with `excludeRunIds = handoffRunIds(assign)`, so the restored `result.json` (which qualifies by mtime when the sender's clock runs ahead of the job's creation time) is never mistaken for the publish's own result.\n\n`parseAssign` (`apps/runner/src/supervisor/assign-parser.ts`). Target: validates and keeps `handoff` on a RUN with the protocol's limits and the same entry rules as the API; `bad('handoff')` for a malformed block or a non-RUN command carrying one.\n\n`buildNaxArgv` (`apps/runner/src/executor/nax-process.ts`). Baseline RUN argv: `[...naxCommand, 'run', '--headless', '--json', '-f', feature, '--profile', chain, '--max-cost', cap]`. Target: a RUN assign with `handoff` appends `'--publish-only'`.\n\n`jobProfileContent` and `writeJobProfile` (`apps/runner/src/executor/job-profile.ts`). Target: both gain a new **last** optional positional parameter `publishPr?: boolean`; when true the profile includes `workflow: { publish: 'pr' }`. The job profile deep-merges after the repo config, so the PR is published whatever the repo's `workflow.publish` says.\n\n`findWorkflowResult(featureDir, sinceMs)` (`apps/runner/src/verdict/workflow-result.ts`). Target: gains an optional third parameter `excludeRunIds?: ReadonlySet<string>`; a run directory whose name is in it is never returned, even when its `result.json` mtime is at or after `sinceMs`.\n\n`stashWorkflowOutputs` (`apps/runner/src/executor/workflow-stash.ts`). Target: gains an optional `excludeRunIds?: ReadonlySet<string>` passed through to `findWorkflowResult`.\n\n`HostExecutor.readWorkflowResult` and `HostExecutor.collectBundle` (`apps/runner/src/executor/host-executor.ts`). Target: for a RUN assign with `handoff`, both pass `handoffRunIds(job.assign)` as `excludeRunIds` (derived from the persisted assign, never from memory, so a daemon restart cannot lose them).\n\nIn `apps/runner/src/executor/handoff-restore.ts`: `restoreHandoffRecord(repoDir: string, feature: string, record: readonly HandoffRecordFile[]): Promise<void>`, which removes `featureDirFor(repoDir, feature)/workflow` entirely (the runner's `clean -ffd` keeps git-ignored files, so earlier jobs' run directories survive in the clone), writes each file to `workflow/<runId>/<file>`, and sets each file's atime and mtime to `mtimeMs`; and `handoffRunIds(assign: AssignPayload): ReadonlySet<string>`, the distinct run ids of `assign.handoff.record`, empty when there is no handoff.\n\nLimits imported from protocol: `HANDOFF_MAX_RUNS = 20` distinct run ids; `HANDOFF_RECORD_MAX_BYTES = 524288` summed UTF-8 content bytes; `HANDOFF_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/`; `HANDOFF_RECORD_FILES = ['result.json', 'ledger.md']`. `mtimeMs` is an integer from 0 to `8640000000000000`. Two entries whose run ids are equal ignoring case and whose file is the same are duplicates; run IDs equal ignoring case but spelled differently are refused. Record must be nonempty, entries must have string content and allowlisted files, and every represented run needs result.json. Revalidate assignment entry shape/limits before any filesystem use; API owns newest-run content preconditions and nax owns final HEAD/content refusal. For parseAssign tests, put the described payload inside a FleetCommandOut ASSIGN envelope with matching jobId; the function accepts the envelope, not a bare payload. The existing command-handler.ts rejection branch must continue returning before supervisor.begin for malformed handoffs. Use featureDirFor and the protocol's run-id segment contract, not the shorter generic assertSegment limit.\n\nPreserve all non-handoff RUN behavior and all PLAN, REVIEW, FIX, AGENT, THREAD and config behavior. Add the last profile parameter without shifting existing context/model/relay/cost arguments. Apply publish overlay to raw and relay profiles. Exclusion must flow through result reading and workflow stashing on both ordinary execution and readoption. Extend existing parser, argv, profile, result and stash specs; use temporary real files and utimes for restoration and injected git/nax spawn for HostExecutor tests, never the installed nax or host credentials.\n\n**Scope** — In: runner parse/retain validation, regression verification of the existing command-handler assignment rejection path, restore helper and unit spec, argv/profile overlay, workflow result/stash exclusions and HostExecutor wiring. Out: API shape/publishability/PRD rules (US-001/002), protocol definitions/storage (US-003), create/approvals/providers (US-004/005), flow dispatch/payload producer (US-006). Do not implement the nax chat/send half, change own-login trust, add a runner capability gate, clear server-side record storage or surface nax refusal logs as flow stop detail.\n\n**Interface** — `restoreHandoffRecord(repoDir: string, feature: string, record: readonly HandoffRecordFile[]): Promise<void>`; `handoffRunIds(assign: AssignPayload): ReadonlySet<string>`; last positional parameter `publishPr?: boolean` on `jobProfileContent` / `writeJobProfile`; optional `excludeRunIds?: ReadonlySet<string>` on `findWorkflowResult` (third) and `stashWorkflowOutputs` (last); assignment `handoff?: HandoffAssign` where `HandoffAssign = { record: HandoffRecordFile[] }` and `HandoffRecordFile = { runId: string; file: 'result.json' | 'ledger.md'; mtimeMs: number; content: string }`.",
+      "acceptanceCriteria": [
+        "[unit] parseAssign with a RUN payload carrying a valid handoff block returns ok: true and an assign whose handoff.record equals the payload's record.",
+        "[unit] parseAssign with a RUN payload whose handoff record entry has runId .. returns the result of bad('handoff').",
+        "[unit] parseAssign with a RUN payload whose handoff record contents sum to HANDOFF_RECORD_MAX_BYTES + 1 UTF-8 bytes returns the result of bad('handoff').",
+        "[unit] parseAssign with a REVIEW payload carrying a handoff block returns the result of bad('handoff').",
+        "[unit] restoreHandoffRecord on a repo dir whose .nax/features/<feature>/workflow/ already holds a run directory old-run leaves no old-run directory after it returns.",
+        "[unit] restoreHandoffRecord writes each record entry's content to .nax/features/<feature>/workflow/<runId>/<file> under the repo dir.",
+        "[unit] restoreHandoffRecord sets each written file's mtime to the entry's mtimeMs.",
+        "[unit] buildNaxArgv for a RUN assign with a handoff block returns an argv whose last element is --publish-only.",
+        "[unit] buildNaxArgv for a RUN assign without a handoff block returns an argv that has no --publish-only element.",
+        "[unit] jobProfileContent('/out', 'project', undefined, undefined, undefined, undefined, true), with publishPr: true as its new last positional argument, returns an object whose workflow.publish is pr.",
+        "[unit] findWorkflowResult with excludeRunIds holding the only run directory whose result.json mtime is at or after sinceMs returns null.",
+        "[integration] HostExecutor.readWorkflowResult on a handoff RUN job whose restored run's result.json mtime is at or after the job's createdAt, with no other run directory, returns null.",
+        "[integration] HostExecutor.collectBundle on the same handoff RUN-job setup, whose only workflow run is restored and has result.json mtime at or after job.createdAt, creates no workflow folder in an initially unstashed job dir.",
+        "[integration] HostExecutor running a RUN assign with a handoff block, with git and the nax spawn stubbed, has written the record files under the checkout when it calls the spawn.",
+        "[integration] HostExecutor running the same RUN assign with a handoff block, with git and nax spawn stubbed, writes the job profile with workflow.publish equal to pr."
+      ],
+      "tags": [
+        "runner",
+        "flow-handoff",
+        "protocol",
+        "filesystem",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Assignment validation, filesystem restoration, process argv/profile integration and restart-safe output attribution cross multiple runner modules; no credential or authentication mechanism is changed.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/executor/nax-process.ts",
+        "apps/runner/src/executor/job-profile.ts",
+        "apps/runner/src/executor/workflow-stash.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/executor/handoff-restore.ts",
+        "apps/runner/src/executor/handoff-restore.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "restoreHandoffRecord sets each file's atime to the record entry's mtimeMs.",
+        "handoffRunIds returns the distinct run IDs from assign.handoff.record and an empty set when handoff is absent.",
+        "HostExecutor after restart derives restored-run exclusions from its persisted job.assign and still returns null when no new workflow result exists.",
+        "findWorkflowResult returns a non-excluded newly published run when restored results have later mtimes.",
+        "jobProfileContent without publishPr retains its existing exact output for raw and relay profiles.",
+        "parseAssign refuses case-folded run-id collisions, duplicate files, excess distinct runs and out-of-range mtimes with detail invalid handoff.",
+        "writeJobProfile with publishPr true writes workflow.publish='pr' without losing relay, cost, model aliases or rule context.",
+        "[unit] parseAssign called with an otherwise valid RUN command envelope whose payload has handoff: null returns { ok: false, detail: 'invalid handoff' }.",
+        "[unit] jobProfileContent('/out', 'project') with publishPr omitted returns exactly { outputDir: '/out', name: 'project' }, preserving the existing raw profile output.",
+        "[unit] findWorkflowResult(featureDir, sinceMs) with excludeRunIds omitted returns the newest qualifying parsed run as before, even when more than one run qualifies.",
+        "[unit] stashWorkflowOutputs(repoDir, jobDir, feature, sinceMs) with excludeRunIds omitted copies the newest qualifying result.json into jobDir/workflow/result.json as before.",
+        "[integration] Handling an ASSIGN whose otherwise valid RUN payload has handoff: null never calls the injected supervisor.begin, so the rejected malformed block cannot start nax."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b031529c6d3ac4546f90d1065f13a61ec4f979ea"
+    }
+  ],
+  "analysis": "Brownfield enhancement to the existing NAX-entry fleet flow; retain exactly US-001 through US-007 and the binding workdirs/dependencies. Navigation: codebase-memory MCP is unavailable in this session, so findings come from direct reads and targeted searches under the supplied repository root. No implementation code or generated artifacts were changed while planning. Authoritative contract is .nax/features/flow-handoff/spec.md and the supplied feature spec. The older approved design docs/superpowers/specs/2026-11-17-flow-handoff-design.md:92 describes obsolete path/content records, publishOnly and detailed refusal text; use the detailed feature spec's runId/file/mtimeMs/content, AssignPayload.handoff, existing checkout and generic stop details instead. The actual web is Nuxt per repository guidance, not the detected Next.js context; no web work is required.\n\nArchitecture and parsing (US-001/002): apps/api/src/fleet/flows/flow-input.ts:34 implements stable normalized JSON for deferred approval commands. It currently validates features before roles and cost, preserves remoteUrl as submitted while validating it through parseFlowRemoteUrl, normalizes spec paths and supplies dependsOn defaults. Shared top-level validation is at flow-input.ts:51-72: role regex, positive cost <=1000 with <=4 decimal places, supported remote URL and GIT_REF_RE. Extract those checks without changing spec/THREAD behavior or the spec form's branch collision rule. apps/api/src/fleet/jobs/dispatch-input.ts:12-14 supplies FEATURE_RE and GIT_REF_RE; feature dispatch also rejects '..' at :67, whereas runner assertFeature rejects '..' at apps/runner/src/paths/safe-segment.ts:30. Do not accidentally impose the 100-character assertSegment limit on handoff run IDs, whose contract allows 128 characters. New parser must preserve record order, count UTF-8 bytes rather than JS characters, reject case-fold collisions and duplicates, require result.json for every represented run, and select only the unique maximum result.json mtime for publishability validation. Newest featureWorkflow is distinct from the runner's verdict object; do not reuse parseWorkflowResult for this API validation. Idempotence is necessary because route commands reparse stored normalized inputs, not the original HTTP body. readHandoffPrd must mirror nax pending-story semantics including passes:true and all seven terminal statuses, rather than requiring every story to say passed.\n\nPersistence/protocol (US-003): apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:11,65,89 define feature, creation and repository contracts. apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:21-27 spreads whole Prisma rows into domain records, so filtering only DTOs is insufficient. Its create (:32-42), findById (:44), pagination (:52), live-thread (:58), live-spec (:62), and new live-branch queries must request features with omit:{handoffRecord:true}; lockById delegates to findById (:48). Transitions and other mutations return through those reads. Type both mapping functions against the omitted feature row, always map handoff to boolean, and add a dedicated findHandoffRecord read only at RUN dispatch. Preserve create/findById equality. FleetFlowFeature schema is apps/api/prisma/schema.prisma:1369 and FleetJob is :1158, with JSON precedent agentInput at :1218. One additive SQL migration adds feature.handoff default false, feature.handoffRecord nullable JSON and job.handoff nullable JSON; existing rows remain ordinary flows/jobs. Regenerate Prisma before compiling changed mappings. apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:58 maps job rows and :172-182 writes JSON with Prisma.DbNull; follow that precedent for absent handoff. Job domain types live at apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:172 onward and must reference protocol types, not flows. packages/fleet-protocol/src/index.ts:289-323 is the existing optional-block assignment contract. API production code cannot load protocol values: apps/api/src/fleet/common/protocol.spec.ts:41-47 scans production source for non-type imports; keep four local API constants and pin equality in a unit spec, with runtime constants imported only by runner/tests. Approval details currently expose flow.features directly at apps/api/src/fleet/flows/fleet-flow-start.command.ts:31-38; explicit projection replaces that, and its exact expectation at fleet-flow-start.command.spec.ts:64-69 must change. Record exposure is intentional only in stored approval input, feature storage, job storage and assignment, not normal flow DTOs (FleetFlowFeatureDto.from explicitly projects at apps/api/src/fleet/flows/dto/fleet-flow.dto.ts:79). At most four 512 KiB copies are accepted; do not introduce cleanup or a bodyLimit override.\n\nCreate/provider/approval (US-004/005): apps/api/src/fleet/flows/fleet-flows.controller.ts:76-103 currently parses specs, resolves canonical GitLab remote or GitHub identity, hides inaccessible projects, checks fleet.flow.create, and rejects missing GitHub installations. Forge reads (:107-122) precede routeGate.run (:152-156); extract RepoCheckException mapping (:123-149) unchanged and share it between forms. GitHub handoff needs one mintThreadReadToken (apps/api/src/fleet/git-broker/github-app-client.ts:119), not mintReadOnlyToken; getBranchHead is :341 and getFile is :461, returning ForgeFile with Buffer content. Decode file content as UTF-8 before readHandoffPrd. listOpenPullRequests (:268-291) returns first 100 plus headRepoFullName and already warns on page saturation. Filter same-repo head before refusing; forks do not block this handoff. GitLab listOpenMergeRequests(access,fullName) is apps/api/src/fleet/git-broker/gitlab-access-checker.ts:87-113, getBranchHead :127 and getFile :351; the handoff path should wrap all reads in one GitLabRepoCredentials.call(repo,'read',fn), unlike existing spec per-file calls, which remain unchanged. All checks fail closed and finish before gate persistence/transactions. apps/api/src/fleet/flows/flow-route.commands.ts:46-63 shows stored-body reparsing and actor reloading through routeCommand/ActorPrincipalLoader; register a separate handoff variant without weakening permissions or executing as a different actor. US-004 introduces the route's use of the new variant and US-005 supplies its registered implementation: retain this binding split and coordinate the exported constant. Injected-gate controller unit tests do not verify the real POST persistence contract: keep US-004's endpoint assertions and verify them with the real registered command after US-005 lands. This is a known cross-story validation seam in the binding decomposition, not permission to fake a passing endpoint or add a dependency/story. apps/api/src/fleet/flows/fleet-flows.service.ts:228 inserts and opens start approval in one transaction, so no billed job starts at create. lockNaxEntry (:332-351) already serializes on FleetRepo before duplicate lookup; use findLiveForBranch for handoff only, preserving exact specSha duplicate behavior for specs. Pass record through CreateFlowInput.handoff to CreateFleetFlow.handoff, never feature inputs. Translate the six keys in apps/api/src/i18n/en/fleet.json and zh/fleet.json. OpenAPI is inline @ApiBody at fleet-flows.controller.ts:62-69; document exclusive alternatives, then regenerate openapi.json and apps/cli/src/generated using root package.json:25-29 bun run generate; never edit generated files manually. US-003 crosses packages/fleet-protocol and US-005 crosses root/generated CLI, despite their binding workdir apps/api; use repository-rooted paths and root generation commands explicitly.\n\nAdvancement/dispatch (US-006): apps/api/src/fleet/flows/flow-step-decision.ts:95-122 selects SPEC_REVIEW for normal starts and recognizes adopted reviews; add optional handoff and bypass all pre-RUN steps only for handoff, including approved-with-existing-RUN handling. Preserve failed-job detail and existing RUN ingest wait/run_no_pr logic (:126-145), REVIEW/RULE/FIX and WAITING_ANSWER (:204-251). apps/api/src/fleet/flows/flow-step-dispatch.ts:74-82 currently requires PLAN.resultBranch for RUN; choose flow.specSha only when handoff. FleetFlowAdvanceService dispatchStep at apps/api/src/fleet/flows/fleet-flow-advance.service.ts:489-506 builds DTO/options outside a transaction; thread feature.handoff through builder and decisionInput (:848-887), fetch the record only on a handoff RUN, and stop with exact missing-record detail instead of dispatch. Existing recoverable logic :654-664 repairs crashes between insert and recordStep; include RUN for handoff with queuedAt>=approvedAt and avoid duplicates. Preserve claims, locks, creator access, remaining decimal budget and after-commit behavior. apps/api/src/fleet/jobs/fleet-jobs.service.ts:86 has opts, :132-147 atomically inserts flow links, and :176 publishes/places after commit. Store opts.handoff only for RUN; do not expose it in DispatchFleetJobDto. apps/api/src/fleet/jobs/assign-payload.ts:41-93 builds optional blocks and already omits absent properties; RUN+non-null record alone gets handoff:{record}. Exact-options regressions require no handoff key at all for other dispatches, not an undefined value.\n\nRunner (US-007): apps/runner/src/supervisor/assign-parser.ts:259 validates untrusted assignment and copies allowed fields only; use protocol limits and bad('handoff')={ok:false,detail:'invalid handoff'} (:17), including non-RUN blocks. apps/runner/src/executor/host-executor.ts:116-144 prepares checkout, job checks and profile before spawn. Restore only handoff RUNs after successful checkout and before spawn. Existing checkout at apps/runner/src/executor/checkout.ts:43-79 reads PRD at ref then checks out prd.branchName, retaining local-branch semantics; do not rewrite it to force HEAD or bypass nax refusal. git clean intentionally preserves ignored workflow directories, so remove the entire old workflow tree before restoration. featureDirFor at apps/runner/src/paths/safe-segment.ts:50 is the safe feature root; allow only validated run IDs and result.json/ledger.md, write UTF-8 and restore both atime/mtime. apps/runner/src/executor/nax-process.ts:25-58 builds existing RUN argv; append --publish-only only for handoff RUNs. job-profile.ts:49-75 currently ends positional parameters with context; append publishPr last to avoid breaking relay/cost/model/rule overlays and include workflow.publish='pr' in relay and raw profiles. HostExecutor also writes a FIX-step profile at :234; preserve that path unchanged. findWorkflowResult at apps/runner/src/verdict/workflow-result.ts:38-75 is newest-first with lstat, size and sinceMs gates; skip excluded directory names before selecting candidates without changing ordinary result parsing. stashWorkflowOutputs at apps/runner/src/executor/workflow-stash.ts:29-66 delegates to it and creates no output folder when no result. HostExecutor.readWorkflowResult (:457-465) and collectBundle (:477-482) must derive exclusions from job.assign, persisted in the journal, not a prepare-time memory set. This prevents a sender clock ahead of job.createdAt from being mistaken for this publish's result and survives daemon readoption. Do not add new transports, process signals, credential persistence or result-from-exit-code logic.\n\nTests and migration path: extend existing flow-input.spec.ts, flow-step-decision.spec.ts, flow-step-dispatch.spec.ts, flow-route.commands.spec.ts, fleet-flows.controller.spec.ts and fleet-flows.controller.gitlab.spec.ts, fleet-flow-start.command.spec.ts and fleet-flow-advance.service.spec.ts plus related review/rulings tests. DB round-trip precedents are apps/api/test/integration/fleet-flow-repository.integration.spec.ts:15-78 and test/integration/fleet/fleet-job-repository.integration.spec.ts; endpoint real-persistence/stub-forge precedent is apps/api/test/integration/nax-flow-entry.integration.spec.ts:21-101 (checks external reads outside transaction and no token persistence), plus test/e2e/api-endpoint/endpoint.e2e.spec.ts. Extend existing integration files where possible rather than creating test-only stories. Runner tests already exist at src/supervisor/assign-parser.spec.ts, src/executor/nax-process.spec.ts, job-profile.spec.ts, workflow-stash.spec.ts, src/verdict/workflow-result.spec.ts and test/unit/host-executor.spec.ts; add handoff-restore.spec.ts with real temporary files/utimes, injecting git/spawn for executor tests. API uses Vitest/vi, runner bun:test. DB behavior must run under test:scoped outside NAX_SANDBOXED with KODA_DB_TESTS=1; unavailable host DB is not a passing skip. Keep DB suites serial because setup resets the DB. Run generated acceptance files only in their designated locations/configs. Roll out additive migration and generated Prisma first, protocol/storage before dependent services/runner, complete both create-provider stories before endpoint release. Update runners before relying on handoff: no capability gate is added and older runners drop the block, producing run_no_pr. New optional fields/default false preserve legacy assignments/flows; no new public job field, workflow changes downstream of RUN, schema enums or UI/CLI behavior is required. Security-sensitive route permission/token and approval work uses three-session-tdd; other complex integration work uses three-session-tdd-lite. Main risks are losing parser idempotence, byte/case/path validation mismatch, exposing JSON via row spreading, altering spec-form error mapping, doing forge I/O inside transactions, dispatch duplication across crash recovery, incorrect result attribution under clock skew/restart, and prematurely advertising the two-story create integration.\n\nSecond-pass adversarial audit: all 87 numbered spec ACs remain in their original stories, at the corresponding first acceptanceCriteria positions. Enumeration checked: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-002 [1,2,3,4,5,6,7,8,9,10,11]; US-003 [1,2,3,4,5,6,7,8,9,10,11]; US-004 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-005 [1,2,3,4,5]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-007 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]. Qualifiers retained include input order and self-reparse equality, the existing costCapUsd error reason, newest-only validation despite older draft results, existing spec-form creation, normalized stored approval input, queued-at-or-after-approvedAt recovery, absent handoff keys and no-other-run clock-skew conditions. Semantic corrections: US-003/7 queries only repoId/branch, never a nonexistent SHA argument; US-004/12's no-flow postcondition applies to initially empty refusal scenarios, not deletion of the already-existing branch-busy flow; US-006/15 asserts the specified kind/reason while preserving the stop union's existing detail; US-007/10 uses a last positional boolean, not a named options object; assignment tests use FleetCommandOut envelopes and approval tests use parse then execute. The prior fake-gate integration suggestion has been removed: actual endpoint wiring is verified with the real command registration after US-005. The unnecessary invented flow-input-common.ts file has been removed; extract the helper in the existing parser module. Explicit regression ACs now protect shared NAX/THREAD normalization, parser replay after newest-run validation, repository create/read equality, legacy forge-error mapping, the existing NAX approval command and optional runner profile/result/stash signatures. Every story has negative acceptance paths: parser shape, unpublished-run content, missing/terminal repository lookup, GitHub refusals, GitLab/approval refusals, missing-record/failed-step dispatch and malformed runner assignment. All 14 failure-table rows are represented, including recovery currentStep RUN and no nax start on rejection. All 13 feature exclusions remain verbatim at top level, with nearby scope boundaries echoed. Context lists retain every spec-recommended critical file within the five-file cap and contain no current-story outputs. Seven story IDs, workdirs and binding dependency arrays are unchanged. Complexity remains medium for the pure parser stories and complex for cross-module persistence/provider/advance/runner work; strict three-session isolation remains limited to credential/permission/approval-sensitive US-004/005, with lighter strategies elsewhere. This is a document audit against direct source reads, not a claim that implementation tests or generation were run.",
+  "outOfScope": [
+    "The nax half: the chat chain's `handoff` step, a `run` step that does not publish, the `nax-flow__send` handoff form, and marking a local record as handed off. A separate nax feature delivers it, sending the wire shape in this spec.",
+    "Adopting a draft PR that was already published from chat by another account; this feature refuses that case with `fleet.flows.handoffPrOpen`.",
+    "Changing nax's own-login trust rule for item indexes and item threads.",
+    "Merging, releasing or deploying the finished PR.",
+    "A handoff from a fork or for a repository other than the registered `FleetRepo`.",
+    "A handoff field on `DispatchFleetJobDto` or any public job-dispatch route: only a flow dispatches a handoff RUN.",
+    "Validating the record's truth beyond its shape and the newest run's publish preconditions, including any feature name recorded inside `result.json`; the record gets the same trust as the specs `nax-flow__send` sends today.",
+    "Open-PR detection beyond the first page of 100 open PRs on GitHub, and telling apart two branches that share the same head commit.",
+    "Surfacing nax's own `--publish-only` refusal text in the flow's stop detail; the text stays in the RUN job's logs and the stop detail is the existing generic one.",
+    "A runner capability gate for handoff RUNs: a runner older than this feature drops the `handoff` block and runs a plain `nax run` on a PRD whose stories are all done, a no-op that ends without a PR and stops the flow with `run_no_pr`.",
+    "Web UI and CLI changes for handoff flows; they render as existing nax-entry flows.",
+    "Thread-entry (`THREAD`) flows: the handoff form exists only on the nax entry.",
+    "Clearing the stored record from the flow feature, the job or the approval request after the flow ends."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}

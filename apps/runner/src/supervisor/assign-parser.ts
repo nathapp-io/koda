@@ -1,4 +1,5 @@
-import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type RuleOverrideAssign, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type HandoffAssign, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type RuleOverrideAssign, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
+import { validateHandoffRecord } from '../executor/handoff-record';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, isValidBotLogin, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -245,6 +246,20 @@ function cleanRuleOverride(v: unknown): RuleOverrideAssign | null {
 }
 
 /**
+ * flow-handoff US-007: the record of the chat run a handoff flow took over. The record travels with the ASSIGN
+ * (the files it holds live in a git-excluded folder), so the runner re-checks its shape with the protocol's limits
+ * and the API's own entry rules before a byte of it reaches the filesystem.
+ *
+ * The check itself lives in `../executor/handoff-record`, because the restore checks the same record again before
+ * it touches the checkout.
+ */
+function cleanHandoff(v: unknown): HandoffAssign | null {
+  if (!isObj(v)) return null;
+  const record = validateHandoffRecord(v['record']);
+  return record === null ? null : { record };
+}
+
+/**
  * D30: the server is trusted to deliver, not to be well formed. Every field that reaches a path, an argv or git config
  * is re-validated, and only the validated fields are copied. `ref` is only bounded here: an odd ref becomes a fixed
  * `checkout:` reason in prepare, not a rejected command.
@@ -278,6 +293,16 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   // AC-7: an AGENT refuses a relay mode with the exact `bashMode` detail; the mode must still be a known one.
   if (isAgent && p['bashMode'] !== 'raw') return badAgentBashMode();
   if ((isPlan || isConfig || isThread || isReview) && p['bashMode'] !== 'raw') return bad('bashMode');
+  // flow-handoff US-007: the handoff record travels with a RUN only. Its refusal is checked before the other
+  // command-specific blocks, so a handoff on a command that may not carry one is always `invalid handoff`.
+  const rawHandoff = p['handoff'];
+  let handoff: HandoffAssign | undefined;
+  if (rawHandoff !== undefined) {
+    if (kind !== 'RUN') return bad('handoff');
+    const cleaned = cleanHandoff(rawHandoff);
+    if (cleaned === null) return bad('handoff');
+    handoff = cleaned;
+  }
   const rawReview = p['review'];
   let reviewDecisions: ReviewDecision[] | undefined;
   let reviewRulings: NonNullable<AssignPayload['review']>['rulings'];
@@ -354,7 +379,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
       ...(reviewRulings === undefined ? {} : { rulings: reviewRulings }),
       ...(reviewDecisions === undefined ? {} : { decisions: reviewDecisions }),
     } } : {};
-    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review, ...(agent === undefined ? {} : { agent }), ...(ruleOverride === undefined ? {} : { ruleOverride }) } };
+    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review, ...(agent === undefined ? {} : { agent }), ...(ruleOverride === undefined ? {} : { ruleOverride }), ...(handoff === undefined ? {} : { handoff }) } };
   }
   const t = p['thread'];
   if (!isObj(t)) return bad('thread');

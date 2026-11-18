@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -140,9 +141,20 @@ export class FleetFlowAdvanceService {
       await this.advanceReview(dispatchPass, now);
       return;
     }
+    // US-006 (#477): a handoff RUN takes over the chat run's record. Without it the runner would
+    // build the feature from scratch, so the flow stops instead of dispatching a second RUN.
+    let handoff: HandoffRecordFile[] | undefined;
+    if (action.step === 'RUN' && feature.handoff === true) {
+      const record = await this.flows.findHandoffRecord(feature.id);
+      if (record === null) {
+        await this.writeStop(flow, feature, 'dispatch_refused', 'RUN: handoff record missing', now);
+        return;
+      }
+      handoff = record;
+    }
     let jobId: string;
     try {
-      jobId = await this.dispatchStep(dispatchPass);
+      jobId = await this.dispatchStep(dispatchPass, handoff);
     } catch (error) {
       await this.refuseDispatch(flow, feature, action.step, error, now);
       return;
@@ -486,11 +498,13 @@ export class FleetFlowAdvanceService {
   }
 
   /** The exact body for the step the decision chose, dispatched for the flow's creator outside a transaction. */
-  private async dispatchStep(pass: DispatchPass<DispatchAction>): Promise<string> {
+  private async dispatchStep(pass: DispatchPass<DispatchAction>, handoff?: HandoffRecordFile[]): Promise<string> {
     const { flow, feature, action, plan } = pass;
     const setSpecPaths = action.step === 'SPEC_REVIEW' ? this.setSpecPaths(flow) : undefined;
     const body = buildStepDispatch({
       flow, feature, step: action.step,
+      // US-006: a handoff feature runs against the head the chat run published, not a PLAN branch.
+      ...(feature.handoff === true ? { handoff: true } : {}),
       // The set review covers every spec of the flow at once, in position order.
       ...(setSpecPaths !== undefined ? { setSpecPaths } : {}),
       // The dispatch guard supplies the remaining cap; the API config selects the review agent.
@@ -501,6 +515,8 @@ export class FleetFlowAdvanceService {
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
       // US-001: the job belongs to the flow's feature, so a later feature's jobs never answer for it.
       flowId: flow.id, flowStep: action.step, flowFeatureId: feature.id, auditKey: 'system.flow.advance',
+      // US-006: only a handoff RUN carries the record. Every other dispatch omits the key entirely.
+      ...(handoff !== undefined ? { handoff } : {}),
     });
     return result.job.id;
   }
@@ -654,8 +670,14 @@ export class FleetFlowAdvanceService {
       // The insert carries the flow link even if dispatch/record crashed. Reconcile once, then let the
       // next tick decide from RUNNING. An older approval's job must never be mistaken for this start.
       const job = latest?.job;
+      // US-006 (#477): a handoff flow's RUN is adopted like an adopted SPEC_REVIEW: a job queued at
+      // or after the approval belongs to this approval, so the flow recovers that job instead of
+      // billing a second RUN.
+      const adoptedHandoffRun = job?.flowStep === 'RUN' && feature.handoff === true
+        && current.approvedAt !== null && job.queuedAt.getTime() >= current.approvedAt.getTime();
       const recoverable = current.state === 'RUNNING' || (job?.flowStep === 'SPEC_REVIEW'
-        && current.approvedAt !== null && job.queuedAt.getTime() >= current.approvedAt.getTime());
+        && current.approvedAt !== null && job.queuedAt.getTime() >= current.approvedAt.getTime())
+        || adoptedHandoffRun;
       if (job && recoverable && (current.state === 'APPROVED'
         || feature.currentStep !== job.flowStep || feature.state !== 'RUNNING'
         || (job.flowStep === 'REVIEW' && feature.prNumber === null && input.latestJob?.prNumber != null))) {
@@ -880,6 +902,8 @@ export class FleetFlowAdvanceService {
       canApplyCalls: flow.entry === 'NAX',
       questionsJobId: feature.questionsJobId ?? null,
       answers: feature.answers ?? null,
+      // US-006 (#477): a handoff feature starts at RUN instead of at the SPEC_REVIEW.
+      ...(feature.handoff === true ? { handoff: true } : {}),
     };
   }
 

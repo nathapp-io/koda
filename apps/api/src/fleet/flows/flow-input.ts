@@ -31,6 +31,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+export interface NormalizedFlowCommonInput {
+  roles: { reviewer: string; supervisor: string };
+  costCapUsd: string;
+  remoteUrl?: string;
+  branch?: string;
+}
+
+/** Validate the fields shared by spec and handoff create bodies. */
+export function parseFlowCommonInput(body: Record<string, unknown>, requireRemote = false): NormalizedFlowCommonInput {
+  if (!isRecord(body.roles) || typeof body.roles.reviewer !== 'string' || !ROLE_RE.test(body.roles.reviewer)) fail('roles.reviewer');
+  if (!isRecord(body.roles) || typeof body.roles.supervisor !== 'string' || !ROLE_RE.test(body.roles.supervisor)) fail('roles.supervisor');
+  const costCap = body.costCapUsd;
+  if ((typeof costCap !== 'number' && typeof costCap !== 'string') || !Number.isFinite(Number(costCap)) || Number(costCap) <= 0 || Number(costCap) > 1000 || !COST_RE.test(String(costCap))) fail('costCapUsd');
+
+  const normalized: NormalizedFlowCommonInput = {
+    roles: { reviewer: body.roles.reviewer, supervisor: body.roles.supervisor },
+    costCapUsd: String(costCap),
+  };
+  if (requireRemote) {
+    if (typeof body.remoteUrl !== 'string') fail('remoteUrl');
+    try { parseFlowRemoteUrl(body.remoteUrl); } catch { fail('remoteUrl'); }
+    if (typeof body.branch !== 'string' || !GIT_REF_RE.test(body.branch)) fail('branch');
+    normalized.remoteUrl = body.remoteUrl;
+    normalized.branch = body.branch;
+  }
+  return normalized;
+}
+
 /** Parse the untrusted create body into the stable JSON shape used by flow commands. */
 export function parseFlowInput(body: unknown, entry: 'NAX'): NormalizedNaxFlowInput;
 export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowInput;
@@ -50,25 +78,14 @@ export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowI
     return { feature: name, specPath: posix.normalize(item.specPath), dependsOn: [...dependsOn] as string[] };
   });
 
-  if (!isRecord(body.roles) || typeof body.roles.reviewer !== 'string' || !ROLE_RE.test(body.roles.reviewer)) fail('roles.reviewer');
-  if (!isRecord(body.roles) || typeof body.roles.supervisor !== 'string' || !ROLE_RE.test(body.roles.supervisor)) fail('roles.supervisor');
-  const costCap = body.costCapUsd;
-  if ((typeof costCap !== 'number' && typeof costCap !== 'string') || !Number.isFinite(Number(costCap)) || Number(costCap) <= 0 || Number(costCap) > 1000 || !COST_RE.test(String(costCap))) fail('costCapUsd');
-
-  const normalized: NormalizedFlowInput = {
-    features,
-    roles: { reviewer: body.roles.reviewer, supervisor: body.roles.supervisor },
-    costCapUsd: String(costCap),
-  };
+  const common = parseFlowCommonInput(body, entry === 'NAX');
+  const normalized: NormalizedFlowInput = { features, ...common };
   if (entry === 'NAX') {
-    if (typeof body.remoteUrl !== 'string') fail('remoteUrl');
-    try { parseFlowRemoteUrl(body.remoteUrl); } catch { fail('remoteUrl'); }
-    if (typeof body.branch !== 'string' || !GIT_REF_RE.test(body.branch)) fail('branch');
-    const collisionIndex = features.findIndex((feature, index) => index > 0 && body.branch === `feat/${feature.feature}`);
+    const collisionIndex = features.findIndex((feature, index) => index > 0 && common.branch === `feat/${feature.feature}`);
     if (collisionIndex !== -1) fail(`features.${collisionIndex}.feature`);
     if (typeof body.specSha !== 'string' || !SPEC_SHA_RE.test(body.specSha)) fail('specSha');
-    normalized.remoteUrl = body.remoteUrl;
-    normalized.branch = body.branch;
+    normalized.remoteUrl = common.remoteUrl;
+    normalized.branch = common.branch;
     normalized.specSha = body.specSha;
   }
   return normalized;

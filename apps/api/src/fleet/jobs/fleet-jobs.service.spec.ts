@@ -1,4 +1,5 @@
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { FleetJobsService } from './fleet-jobs.service';
@@ -271,5 +272,43 @@ describe('review decisions dispatch snapshot', () => {
     await expect(service.dispatch('u', 'p', review)).rejects.toBe(failure);
     expect(repo.createJob).not.toHaveBeenCalled();
     expect(tx.run).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * US-006 (#477): the chat run's record travels with a handoff RUN and with nothing else. A REVIEW
+ * (or any other command) that is handed a record stores none: only a flow dispatches a handoff RUN.
+ */
+describe('handoff record on a dispatched job (US-006)', () => {
+  const record: HandoffRecordFile[] = [
+    { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1}' },
+  ];
+  const setup = () => {
+    const repo = {
+      findRepo: vi.fn().mockResolvedValue({ id: 'r', projectId: 'p', provider: 'github', defaultBranch: 'main' }),
+      createJob: vi.fn().mockImplementation(async (input: NewFleetJob) => ({ ...input, id: 'j', state: 'QUEUED', queuedAt: new Date() })),
+      appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(null),
+    };
+    const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
+    const service = new FleetJobsService(repo as never,
+      { placeJob: vi.fn().mockResolvedValue({ assigned: false, runnerId: null, misfits: [] }) } as never,
+      { record: vi.fn() } as never, { publish: vi.fn(), event: vi.fn() } as never,
+      {} as never, {} as never, { assertNotPaused: vi.fn() } as never, tx as never,
+      {} as never, { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn() } as never,
+      {} as never, {} as never, mockAuditRecorder,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never);
+    return { service, repo };
+  };
+
+  it('AC-12: a REVIEW dispatch stores no handoff record', async () => {
+    const { service, repo } = setup();
+    await service.dispatch('u', 'p', { repoId: 'r', command: 'REVIEW', prNumber: 42, maxCostUsd: 1 }, { handoff: record });
+    expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({ handoff: null }));
+  });
+
+  it('a RUN dispatch stores the handoff record', async () => {
+    const { service, repo } = setup();
+    await service.dispatch('u', 'p', { repoId: 'r', command: 'RUN', feature: 'f', maxCostUsd: 1 }, { handoff: record });
+    expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({ handoff: record }));
   });
 });

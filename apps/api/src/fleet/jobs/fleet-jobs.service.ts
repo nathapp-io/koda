@@ -5,6 +5,7 @@ import { ForbiddenAppException, NotFoundAppException, ValidationAppException } f
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { AuditRecorder, type AuditRecordInput } from '../../audit/audit-recorder.service';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -83,7 +84,7 @@ export class FleetJobsService {
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; flowFeatureId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; flowFeatureId?: string; handoff?: HandoffRecordFile[]; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     const input = normalizeDispatch(dto, repo.defaultBranch);
@@ -134,6 +135,9 @@ export class FleetJobsService {
           // US-001: the job is scoped to the flow feature it belongs to, written with the flow link: a job
           // dispatched without a flow has no feature either.
           ...(opts.flowId && opts.flowFeatureId ? { flowFeatureId: opts.flowFeatureId } : {}),
+          // US-006 (#477): the chat run's record is stored with the job that takes it over. Only a
+          // RUN carries one: every other command stores none, whatever the caller passed.
+          handoff: input.command === FleetJobKind.RUN ? (opts.handoff ?? null) : null,
         });
         await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });

@@ -1,4 +1,5 @@
 import { buildAssignPayload } from './assign-payload';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
 const NOW = new Date('2026-10-01T00:00:00.000Z');
@@ -87,6 +88,32 @@ describe('buildAssignPayload', () => {
       backend: { kind: 'native' as const }, skills: [], initialMessage: { messageId: 'm1', text: 'hello' },
     };
     expect(buildAssignPayload({ ...job, command: 'THREAD' }, repo, 'https://x/y.git', identity, thread).thread).toEqual(thread);
+  });
+});
+
+/**
+ * US-006 (#477): the chat run's record travels with the ASSIGN of the handoff RUN that takes the
+ * run over. Every other job carries none: a REVIEW of the same repo never restores a record.
+ */
+describe('handoff assign payload (US-006)', () => {
+  const record: HandoffRecordFile[] = [
+    { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1}' },
+    { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger' },
+  ];
+
+  it('AC-13: a RUN job with a handoff record carries it', () => {
+    const payload = buildAssignPayload({ ...job, command: 'RUN', handoff: record }, repo, 'https://x/y.git', identity);
+    expect(payload.handoff).toEqual({ record });
+  });
+
+  it('AC-14: a RUN job without a handoff record carries no handoff key', () => {
+    const payload = buildAssignPayload({ ...job, command: 'RUN', handoff: null }, repo, 'https://x/y.git', identity);
+    expect(payload).not.toHaveProperty('handoff');
+  });
+
+  it('a job that is not a RUN never carries a handoff record', () => {
+    const payload = buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-42', handoff: record }, repo, 'https://x/y.git', identity);
+    expect(payload).not.toHaveProperty('handoff');
   });
 });
 

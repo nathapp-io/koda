@@ -90,5 +90,8 @@ export function buildAssignPayload(
     // US-004: a flow PLAN job has no thread but does know the branch it must write, so it gets the same
     // expectation a thread PLAN sends; every other command never does.
     ...(job.command === 'PLAN' && (job.threadId || job.flowId) ? { expectBranch: job.ref } : {}),
+    // US-006 (#477): the record of the chat run a handoff RUN takes over. The runner restores it
+    // before nax starts; only a RUN carries one, and only when the job holds a record.
+    ...(job.command === 'RUN' && job.handoff != null ? { handoff: { record: job.handoff } } : {}),
   };
 }

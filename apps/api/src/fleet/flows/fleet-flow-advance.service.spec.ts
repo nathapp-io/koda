@@ -1,4 +1,5 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -90,6 +91,8 @@ interface HarnessOptions {
   creatorKeys?: ReadonlySet<string>;
   /** What the review head claim answers; `claimed` for `c1` unless a test says otherwise. */
   claim?: HeadClaim;
+  /** US-006: the record the feature's handoff stored; null when the feature has none. */
+  handoffRecord?: HandoffRecordFile[] | null;
 }
 
 function build(opts: HarnessOptions = {}) {
@@ -107,6 +110,8 @@ function build(opts: HarnessOptions = {}) {
       return opts.locked === null ? null : flow({ ...record, ...opts.locked });
     }),
     stop: vi.fn<IFleetFlowRepository['stop']>(async () => record),
+    // US-006: the handoff record is read only when a handoff RUN is dispatched.
+    findHandoffRecord: vi.fn<IFleetFlowRepository['findHandoffRecord']>(async () => opts.handoffRecord ?? null),
   };
   const steps = {
     latestJobWithIngest: vi.fn(async () => opts.snapshot ?? null),
@@ -1252,5 +1257,83 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'cost_cap', NOW, 'spent 5.0000 of cap 5.0000');
     expect(h.steps.creatorAccess).not.toHaveBeenCalled();
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * US-006 (#477): a handoff flow starts at RUN. The chat run's record travels with that RUN, so the
+ * runner can restore the run the flow takes over; without the record the flow stops instead of
+ * dispatching a RUN that would build the feature from scratch.
+ */
+describe('FleetFlowAdvanceService.advance, handoff flows (US-006)', () => {
+  const RECORD: HandoffRecordFile[] = [
+    { runId: 'run-1', file: 'result.json', mtimeMs: 1_700_000_000_000, content: '{"schemaVersion":1}' },
+    { runId: 'run-1', file: 'ledger.md', mtimeMs: 1_700_000_000_000, content: '# ledger' },
+  ];
+
+  /** An APPROVED handoff flow: one feature, the chat run's head as its spec sha. */
+  const handoffFlow = (over: Partial<FleetFlowFeatureRecord> = {}): Partial<FleetFlowRecord> =>
+    ({ features: [feature({ handoff: true, ...over })] });
+
+  it('AC-6: dispatches the handoff RUN with the stored record', async () => {
+    const h = build({ flow: handoffFlow(), handoffRecord: RECORD });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.flows.findHandoffRecord).toHaveBeenCalledWith('feature-1');
+    expect(h.jobs.dispatch.mock.calls[0]?.[3]).toMatchObject({ handoff: RECORD });
+  });
+
+  it('AC-7: dispatches a RUN against the flow spec sha', async () => {
+    const h = build({ flow: handoffFlow(), handoffRecord: RECORD });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.jobs.dispatch.mock.calls[0]?.[2]).toMatchObject({ command: 'RUN', ref: h.record.specSha });
+  });
+
+  it('AC-8: recovers an APPROVED handoff flow whose RUN is already queued', async () => {
+    const h = build({
+      flow: handoffFlow(),
+      snapshot: { job: job({ flowStep: 'RUN', command: 'RUN', state: 'QUEUED', queuedAt: new Date(APPROVED_AT.getTime() + 1_000) }), ingestSettled: false },
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'RUN', { flowState: 'RUNNING' });
+    expect(h.flows.stop).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: does not dispatch a second RUN while recovering one', async () => {
+    const h = build({
+      flow: handoffFlow(),
+      snapshot: { job: job({ flowStep: 'RUN', command: 'RUN', state: 'QUEUED', queuedAt: new Date(APPROVED_AT.getTime() + 1_000) }), ingestSettled: false },
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.flows.findHandoffRecord).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: stops with dispatch_refused when the handoff record is missing', async () => {
+    const h = build({ flow: handoffFlow(), handoffRecord: null });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.flows.findHandoffRecord).toHaveBeenCalledWith('feature-1');
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'dispatch_refused', NOW, 'RUN: handoff record missing');
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('AC-11: an ordinary dispatch carries no handoff key at all', async () => {
+    const h = planPass();
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.jobs.dispatch.mock.calls[0]?.[3]).not.toHaveProperty('handoff');
+    expect(Object.keys(h.jobs.dispatch.mock.calls[0]?.[3] ?? {})).not.toContain('handoff');
   });
 });

@@ -151,6 +151,39 @@ describe('rule override context overlay (fleet #370 US-009)', () => {
   });
 });
 
+describe('publish overlay (flow-handoff US-007)', () => {
+  let naxHome!: string;
+  beforeEach(async () => { naxHome = await tmp.make('profile-publish'); });
+  const relay = { bashMode: 'escalate' as const, approvalTimeoutSec: 90, endpoint: { url: 'http://127.0.0.1:43210/ask', secret: 'f'.repeat(64) } };
+
+  test('AC-10: publishPr true makes the profile publish the PR', () => {
+    const profile = jobProfileContent('/out', 'project', undefined, undefined, undefined, undefined, true);
+    expect(profile.workflow).toEqual({ publish: 'pr' });
+  });
+
+  test('the publish overlay reaches a relayed profile too', () => {
+    const profile = jobProfileContent('/out', 'p', relay, 2.5, undefined, undefined, true);
+    expect(profile.workflow).toEqual({ publish: 'pr' });
+    expect(profile).toMatchObject({ bot: { costLimit: 2.5 }, execution: { bashApproval: 'escalate' } });
+  });
+
+  test('a job without publishPr keeps no workflow key', () => {
+    expect('workflow' in jobProfileContent('/out', 'p')).toBe(false);
+    expect(jobProfileContent('/out', 'p')).toEqual({ outputDir: '/out', name: 'p' });
+  });
+
+  test('publishPr false keeps no workflow key', () => {
+    expect('workflow' in jobProfileContent('/out', 'p', undefined, undefined, undefined, undefined, false)).toBe(false);
+  });
+
+  test('writeJobProfile writes the publish overlay into the profile file', async () => {
+    const path = await writeJobProfile(naxHome, 'j1', '/out', 'p', undefined, undefined, undefined, undefined, true);
+    expect(JSON.parse(await readFile(path, 'utf8')).workflow).toEqual({ publish: 'pr' });
+    await writeJobProfile(naxHome, 'j1', '/out', 'p');
+    expect('workflow' in JSON.parse(await readFile(path, 'utf8'))).toBe(false);
+  });
+});
+
 describe('job profile file', () => {
   test('names and paths', () => {
     expect(jobProfileName('cabc123')).toBe('koda-job-cabc123');

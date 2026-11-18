@@ -1,4 +1,4 @@
-import type { ReviewDecision } from '@nathapp/fleet-protocol';
+import type { ReviewDecision, HandoffRecordFile } from '@nathapp/fleet-protocol';
 import type { ChatThreadKind } from '../../common/thread-jobs';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
@@ -240,6 +240,11 @@ export interface FleetJobRecord {
   agentInput?: AgentJobInput | null;
   agentResult?: AgentJobResult | null;
   /**
+   * US-003: the record of the chat run a handoff RUN took over. It is sent with the ASSIGN, so the
+   * runner can restore it; null for every other job.
+   */
+  handoff?: HandoffRecordFile[] | null;
+  /**
    * US-008 (#370): the summary of the repo rule override this job was assigned. Absent (or null) means the job
    * was assigned without one: a repo with no override, or a command that never carries one.
    */
@@ -283,6 +288,8 @@ export interface NewFleetJob {
   threadId?: string | null;
   scheduleId?: string | null;
   agentInput?: AgentJobInput | null;
+  /** US-003: a handoff RUN job's record, written with the job and sent with the ASSIGN. */
+  handoff?: HandoffRecordFile[] | null;
   /** US-004: a flow step's job carries the flow and its step from the insert, so a tick after a crash still sees it. */
   flowId?: string | null;
   flowStep?: string | null;

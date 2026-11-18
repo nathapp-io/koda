@@ -50,6 +50,10 @@ describeDb('fleet flow features migration (PG)', () => {
     );
 
     await applyMigration(scratch.db, MIGRATION);
+    // The generated client selects every FleetFlowFeature scalar, including the later handoff ones
+    // (`handoff`, `handoffRecord`), so apply their migration before the client read below; the
+    // assertions still cover only what the features migration writes.
+    await applyMigration(scratch.db, '20261217090000_fleet_flow_handoff');
   }, 120_000);
 
   afterAll(async () => {

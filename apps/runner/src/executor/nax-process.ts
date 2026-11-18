@@ -54,7 +54,12 @@ export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayloa
     ];
   }
   if (!COST_RE.test(assign.maxCostUsd)) throw new PathError('invalid maxCostUsd');
-  return [...naxCommand, 'run', '--headless', '--json', '-f', feature, '--profile', chain, '--max-cost', assign.maxCostUsd];
+  // flow-handoff US-007: a handoff RUN publishes the record the flow took over instead of running the PRD's stories
+  // again. nax's `--publish-only` reads the restored record and pushes the PR under koda's own forge identity.
+  return [
+    ...naxCommand, 'run', '--headless', '--json', '-f', feature, '--profile', chain, '--max-cost', assign.maxCostUsd,
+    ...(assign.handoff === undefined ? [] : ['--publish-only']),
+  ];
 }
 
 export function buildFixArgv(naxCommand: readonly string[], assign: AssignPayload): string[] {

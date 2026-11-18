@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { canTransitionFlow } from './flow-states';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
@@ -40,6 +41,11 @@ export interface CreateFlowInput {
   features: NormalizedFlowFeature[];
   roles: { reviewer: string; supervisor: string };
   costCapUsd: string;
+  /**
+   * US-004: the record of the chat run a handoff flow takes over. The one carrier from the route
+   * to the repository — the feature inputs never carry the record itself.
+   */
+  handoff?: { record: HandoffRecordFile[] };
 }
 
 /** The route's own facts: the project it resolved, and a clock a test can pin. */
@@ -244,6 +250,8 @@ export class FleetFlowsService {
         costCapUsd: input.costCapUsd,
         approvalMode: null,
         features: input.features,
+        // The handoff record travels with the flow, never with a feature input.
+        ...(input.handoff ? { handoff: input.handoff } : {}),
       });
 
       // The flow is either started by the tick it consumed or left waiting on the start ask; the ask
@@ -328,6 +336,9 @@ export class FleetFlowsService {
    * The nax entry: the `FleetRepo` row lock serialises creation, so two concurrent calls cannot both
    * pass the live-duplicate check on `(repoId, branch, specSha)`. A repo in another project is the
    * route's 404 — the caller reached a repo it cannot use.
+   *
+   * A handoff owns its branch: the sha it was approved with is the chat run's head, not a spec sha,
+   * so a live flow on the branch is found whatever sha it carries.
    */
   private async lockNaxEntry(input: CreateFlowInput, projectId: string): Promise<FlowTarget> {
     if (!input.repoId) throw new ValidationAppException({ reason: 'repoId' }, 'fleet.flowInput');
@@ -335,8 +346,12 @@ export class FleetFlowsService {
     if (input.specSha === undefined || !SPEC_SHA_RE.test(input.specSha)) throw new ValidationAppException({ reason: 'specSha' }, 'fleet.flowInput');
     const repo = await this.repos.lockById(input.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.flows.repoNotFound');
-    const live = await this.flows.findLiveForSpec(repo.id, input.branch, input.specSha);
-    if (live) throw new ConflictAppException({ flowId: live.id }, 'fleet.flows.duplicate');
+    const live = input.handoff
+      ? await this.flows.findLiveForBranch(repo.id, input.branch)
+      : await this.flows.findLiveForSpec(repo.id, input.branch, input.specSha);
+    if (live) {
+      throw new ConflictAppException({ flowId: live.id }, input.handoff ? 'fleet.flows.branchBusy' : 'fleet.flows.duplicate');
+    }
 
     return {
       projectId: repo.projectId,

@@ -144,4 +144,18 @@ describe('stashWorkflowOutputs (US-003)', () => {
     expect([...names]).toEqual([]);
     await expect(stat(join(jobDir, 'workflow'))).rejects.toThrow();
   });
+
+  test('flow-handoff US-007: an excluded run directory is not stashed and creates no workflow folder', async () => {
+    const { repoDir, jobDir, sinceMs } = await layout({ report: '# report\n' });
+    const names = await stashWorkflowOutputs(repoDir, jobDir, 'feat', sinceMs, new Set(['run-1']));
+    expect([...names]).toEqual([]);
+    await expect(stat(join(jobDir, 'workflow'))).rejects.toThrow();
+  });
+
+  test('flow-handoff US-007: a run that is not excluded is still stashed', async () => {
+    const { repoDir, jobDir, sinceMs } = await layout({ report: '# report\n' });
+    const names = await stashWorkflowOutputs(repoDir, jobDir, 'feat', sinceMs, new Set(['other-run']));
+    expect([...names].sort()).toEqual(['feature-report.md', 'result.json']);
+    expect(await readFile(join(jobDir, 'workflow', 'result.json'), 'utf8')).toBe(RESULT);
+  });
 });

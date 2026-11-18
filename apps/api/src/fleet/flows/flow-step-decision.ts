@@ -41,6 +41,11 @@ export interface FlowStepInput {
   rulingsJobId?: string | null;
   specReviewCount?: number;
   prdEditsJobId?: string | null;
+  /**
+   * US-006 (#477): the feature was handed over from a chat run that already planned and built it.
+   * A handoff flow skips SPEC_REVIEW, PLAN and PRD_REVIEW: it starts at RUN. Absent means false.
+   */
+  handoff?: boolean;
 }
 
 export type FlowStopReason =
@@ -88,8 +93,14 @@ function failed(job: FlowJobView): FlowStepAction {
 }
 
 export function decideFlowStep(input: FlowStepInput): FlowStepAction {
-  const { state, latestJob, firstFeature } = input;
+  const { state, latestJob, firstFeature, handoff } = input;
   if (!latestJob) {
+    // US-006 (#477): a handoff flow takes over a chat run that already planned and built the
+    // feature, so it starts at RUN. Every later decision is the ordinary one.
+    if (handoff === true) {
+      if (state === 'APPROVED' || state === 'RUNNING') return dispatch('RUN');
+      return { kind: 'wait' };
+    }
     if (state === 'APPROVED') return firstFeature ? dispatch('SPEC_REVIEW') : { kind: 'wait' };
     if (state === 'RUNNING') return dispatch(firstFeature ? 'SPEC_REVIEW' : 'PLAN');
     return { kind: 'wait' };
@@ -97,7 +108,9 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
 
   const adoptedSpecReview = latestJob.step === 'SPEC_REVIEW'
     && latestJob.queuedAt.getTime() >= input.approvedAt.getTime();
-  if (state === 'APPROVED' && firstFeature && !adoptedSpecReview) return dispatch('SPEC_REVIEW');
+  // US-006: a handoff flow never dispatches SPEC_REVIEW. Its RUN is adopted by the advance pass
+  // (like an adopted SPEC_REVIEW), so a flow that already has a job waits for that job.
+  if (handoff !== true && state === 'APPROVED' && firstFeature && !adoptedSpecReview) return dispatch('SPEC_REVIEW');
 
   if (latestJob.state === 'FAILED' || latestJob.state === 'CANCELLED' || latestJob.state === 'CRASHED') {
     return failed(latestJob);

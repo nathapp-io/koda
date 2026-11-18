@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FleetCommandOut } from '@nathapp/fleet-protocol';
+import { HANDOFF_MAX_RUNS, HANDOFF_RECORD_MAX_BYTES, type FleetCommandOut, type HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { assignFor } from '../../test/helpers/assign';
 import { parseAssign, __checked } from './assign-parser';
 import { assertOwner, PathError } from '../paths/safe-segment';
@@ -279,6 +279,108 @@ describe('parseAssign: config jobs (S3 §3)', () => {
     ['a gated bash mode', { ...assignFor('CONFIG_DRIFT'), bashMode: 'gated' }, 'bashMode'],
   ])('rejects a config job with %s', (_label, payload, detail) => {
     expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: `invalid ${detail}` });
+  });
+});
+
+describe('handoff assignment (flow-handoff US-007)', () => {
+  const RUN_ID = '8bd38595-ffbf-4092-89d0-f1ebbf375786';
+  const RECORD: HandoffRecordFile[] = [
+    { runId: RUN_ID, file: 'result.json', mtimeMs: 1763370000000, content: '{"schemaVersion":1}' },
+    { runId: RUN_ID, file: 'ledger.md', mtimeMs: 1763370000000, content: '# ledger\n' },
+  ];
+  const withHandoff = (record: unknown, over: Record<string, unknown> = {}) => ({ ...assignFor('RUN'), handoff: { record }, ...over });
+
+  test('AC-1: a RUN assign carrying a valid handoff block keeps the record', () => {
+    const parsed = parseAssign(cmd(withHandoff(RECORD)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.handoff?.record).toEqual(RECORD);
+  });
+
+  test('AC-2: a run id of .. is refused', () => {
+    expect(parseAssign(cmd(withHandoff([{ ...RECORD[0], runId: '..' }])))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('AC-3: contents over HANDOFF_RECORD_MAX_BYTES are refused', () => {
+    const record = [{ runId: 'r1', file: 'result.json', mtimeMs: 1, content: 'x'.repeat(HANDOFF_RECORD_MAX_BYTES + 1) }];
+    expect(parseAssign(cmd(withHandoff(record)))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('AC-4: a REVIEW assign never carries a handoff', () => {
+    const payload = { ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]' }, handoff: { record: RECORD } };
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('a RUN assign without a handoff keeps no handoff key', () => {
+    const parsed = parseAssign(cmd(assignFor('RUN')));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(Object.hasOwn(parsed.assign, 'handoff')).toBe(false);
+  });
+
+  test.each(['PLAN', 'THREAD', 'FIX', 'AGENT', 'CONFIG_EDIT', 'CONFIG_DRIFT'] as const)('only a RUN carries a handoff: %s is refused', (command) => {
+    const base = assignFor(command);
+    const payload = { ...base, handoff: { record: RECORD } };
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('the record is copied, not held by reference', () => {
+    const parsed = parseAssign(cmd(withHandoff(RECORD)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.handoff?.record[0]).not.toBe(RECORD[0]);
+  });
+
+  test.each([
+    ['an empty record', []],
+    ['a record that is not an array', {}],
+    ['a handoff that is not an object', 'x'],
+    ['an entry that is not an object', ['x']],
+    ['a run id with a slash', [{ ...RECORD[0], runId: 'a/b' }]],
+    ['a run id that starts with a dot', [{ ...RECORD[0], runId: '.run' }]],
+    ['a run id of 129 characters', [{ ...RECORD[0], runId: `r${'a'.repeat(128)}` }]],
+    ['a file outside the allowlist', [{ ...RECORD[0], file: 'prd.json' }]],
+    ['a content that is not a string', [{ ...RECORD[0], content: 5 }]],
+    ['a content with a NUL', [{ ...RECORD[0], content: `a${String.fromCharCode(0)}b` }]],
+    ['a content with an unpaired surrogate', [{ ...RECORD[0], content: `a${String.fromCharCode(0xd800)}b` }]],
+    ['an mtime that is not an integer', [{ ...RECORD[0], mtimeMs: 1.5 }]],
+    ['a negative mtime', [{ ...RECORD[0], mtimeMs: -1 }]],
+    ['an mtime beyond the Date range', [{ ...RECORD[0], mtimeMs: 8640000000000001 }]],
+    ['a duplicate entry', [RECORD[0], { ...RECORD[0] }]],
+    ['two spellings of one run id', [{ ...RECORD[0], runId: 'Run-A' }, { ...RECORD[1], runId: 'run-a' }]],
+    ['a ledger entry without a result.json', [{ ...RECORD[1] }]],
+    ['a record with no result.json at all', [{ ...RECORD[1] }]],
+  ])('refuses %s', (_label, record) => {
+    expect(parseAssign(cmd(withHandoff(record)))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('refuses more than HANDOFF_MAX_RUNS distinct run ids', () => {
+    const record = Array.from({ length: HANDOFF_MAX_RUNS + 1 }, (_, i) => ({ runId: `run-${i}`, file: 'result.json', mtimeMs: 1, content: '{}' }));
+    expect(parseAssign(cmd(withHandoff(record)))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('accepts exactly HANDOFF_MAX_RUNS distinct run ids', () => {
+    const record = Array.from({ length: HANDOFF_MAX_RUNS }, (_, i) => ({ runId: `run-${i}`, file: 'result.json', mtimeMs: 1, content: '{}' }));
+    const parsed = parseAssign(cmd(withHandoff(record)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.handoff?.record).toHaveLength(HANDOFF_MAX_RUNS);
+  });
+
+  test('accepts contents of exactly HANDOFF_RECORD_MAX_BYTES', () => {
+    const record = [{ runId: 'r1', file: 'result.json', mtimeMs: 1, content: 'x'.repeat(HANDOFF_RECORD_MAX_BYTES) }];
+    const parsed = parseAssign(cmd(withHandoff(record)));
+    expect(parsed.ok).toBe(true);
+  });
+
+  test('the byte sum counts UTF-8 bytes, not characters', () => {
+    // '€' is three UTF-8 bytes: two of them exceed the cap even though the string is short.
+    const content = '€'.repeat(Math.floor(HANDOFF_RECORD_MAX_BYTES / 3) + 1);
+    const record = [{ runId: 'r1', file: 'result.json', mtimeMs: 1, content }];
+    expect(new TextEncoder().encode(content).length).toBeGreaterThan(HANDOFF_RECORD_MAX_BYTES);
+    expect(parseAssign(cmd(withHandoff(record)))).toEqual({ ok: false, detail: 'invalid handoff' });
+  });
+
+  test('one run id may carry both record files', () => {
+    const parsed = parseAssign(cmd(withHandoff(RECORD)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.handoff?.record.map((entry) => entry.file)).toEqual(['result.json', 'ledger.md']);
   });
 });
 

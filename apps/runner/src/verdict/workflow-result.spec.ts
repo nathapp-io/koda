@@ -61,6 +61,31 @@ describe('findWorkflowResult (US-001)', () => {
     expect((await lstat(join(wf, 'c', 'result.json')).catch(() => null)) !== null).toBe(true);
   });
 
+  test('AC-11: an excluded run directory is never returned, even when its result is the newest', async () => {
+    const featureDir = await tmp.make('wf11');
+    const wf = join(featureDir, 'workflow');
+    await mkdir(join(wf, 'run-a'), { recursive: true });
+    await writeFile(join(wf, 'run-a', 'result.json'), JSON.stringify(validDraft('run-a')));
+    const sinceMs = Date.now();
+    await utimes(join(wf, 'run-a', 'result.json'), new Date(sinceMs + 1_000), new Date(sinceMs + 1_000));
+    expect(await findWorkflowResult(featureDir, sinceMs, new Set(['run-a']))).toBeNull();
+    expect((await findWorkflowResult(featureDir, sinceMs))?.result.runId).toBe('run-a');
+  });
+
+  test('an excluded run directory does not hide the other runs', async () => {
+    const featureDir = await tmp.make('wf11b');
+    const wf = join(featureDir, 'workflow');
+    await mkdir(join(wf, 'run-a'), { recursive: true });
+    await mkdir(join(wf, 'run-b'), { recursive: true });
+    await writeFile(join(wf, 'run-a', 'result.json'), JSON.stringify(validDraft('run-a')));
+    await writeFile(join(wf, 'run-b', 'result.json'), JSON.stringify(validDraft('run-b')));
+    const sinceMs = Date.now();
+    await utimes(join(wf, 'run-a', 'result.json'), new Date(sinceMs + 2_000), new Date(sinceMs + 2_000));
+    await utimes(join(wf, 'run-b', 'result.json'), new Date(sinceMs + 1_000), new Date(sinceMs + 1_000));
+    const found = await findWorkflowResult(featureDir, sinceMs, new Set(['run-a']));
+    expect(found?.result.runId).toBe('run-b');
+  });
+
   test('AC-15: newest verdict-less, too-large, and symlinked dir are skipped for old', async () => {
     const featureDir = await tmp.make('wf15');
     const wf = join(featureDir, 'workflow');

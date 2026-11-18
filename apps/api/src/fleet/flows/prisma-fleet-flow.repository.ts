@@ -3,12 +3,23 @@ import { Inject, Injectable } from '@nestjs/common';
 import { resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import { AbstractPrismaRepository, Paginate, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
+import type { HandoffRecordFile } from '@nathapp/fleet-protocol';
 import { Prisma, type FleetFlow as FleetFlowRow, type FleetFlowFeature as FleetFlowFeatureRow, type PrismaClient } from '../../generated/prisma/client';
 import { canTransitionFlow, FleetFlowState, isLiveFlowState } from './flow-states';
 import { FlowTransitionError, type CreateFleetFlow, type FleetFlowFeatureRecord, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
+import { handoffRecordOf } from '../common/handoff-record';
 import type { FlowAnswer, FlowQuestion } from './flow-calls';
 
 const PAGE_SIZE_MAX = 100;
+
+/**
+ * US-003: a feature row as the flow reads it. The handoff record is never loaded with the flow, so
+ * the row type leaves it out and the mapping cannot carry it into a DTO or an approval card.
+ */
+type FleetFlowFeatureReadRow = Omit<FleetFlowFeatureRow, 'handoffRecord'>;
+
+/** US-003: the flow's features, without the handoff record. */
+const FLOW_FEATURES = { orderBy: { position: 'asc' as const }, omit: { handoffRecord: true as const } };
 
 @Injectable()
 export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlowRecord, FleetFlowRow, string> implements IFleetFlowRepository {
@@ -17,11 +28,11 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
   protected modelDelegate(client: unknown): PrismaModelDelegate<FleetFlowRow, string> {
     return (client as Record<string, unknown>).fleetFlow as PrismaModelDelegate<FleetFlowRow, string>;
   }
-  protected toDomain(row: FleetFlowRow & { features?: FleetFlowFeatureRow[] }): FleetFlowRecord {
+  protected toDomain(row: FleetFlowRow & { features?: FleetFlowFeatureReadRow[] }): FleetFlowRecord {
     return { ...row, costCapUsd: row.costCapUsd.toFixed(4), spentUsd: row.spentUsd.toFixed(4), entry: row.entry as FleetFlowRecord['entry'], createdByType: row.createdByType as FleetFlowRecord['createdByType'], state: row.state as FleetFlowRecord['state'], approvalMode: row.approvalMode as FleetFlowRecord['approvalMode'], features: [...(row.features ?? [])].sort((a, b) => a.position - b.position).map((feature) => this.toFeature(feature)) };
   }
   /** The questions and the answers are JSON columns: an array when the column holds one, null when it is empty. */
-  private toFeature(row: FleetFlowFeatureRow): FleetFlowFeatureRecord {
+  private toFeature(row: FleetFlowFeatureReadRow): FleetFlowFeatureRecord {
     return { ...row, questions: jsonArray<FlowQuestion>(row.questions), answers: jsonArray<FlowAnswer>(row.answers) };
   }
   protected toPersistenceCreate(record: FleetFlowRecord) { return { ...record }; }
@@ -35,11 +46,17 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
       setSha: data.specSha,
       pinnedRunnerId: data.pinnedRunnerId ?? null, reviewerRole: data.reviewerRole, supervisorRole: data.supervisorRole,
       costCapUsd: data.costCapUsd, approvalMode: data.approvalMode ?? null,
-      features: { create: data.features.map(({ feature, specPath, dependsOn }, position) => ({ position, feature, specPath: posix.normalize(specPath), dependsOn, state: 'PENDING' })) },
-    }, include: { features: true } }));
+      features: { create: data.features.map(({ feature, specPath, dependsOn }, position) => ({
+        position, feature, specPath: posix.normalize(specPath), dependsOn, state: 'PENDING',
+        // US-003: the handoff record belongs to the flow's first feature; the read omits it again.
+        ...(position === 0 && data.handoff
+          ? { handoff: true, handoffRecord: data.handoff.record as unknown as Prisma.InputJsonValue }
+          : {}),
+      })) },
+    }, include: { features: FLOW_FEATURES } }));
   }
   async findById(id: string): Promise<FleetFlowRecord | null> {
-    const row = await this.prisma.client.fleetFlow.findUnique({ where: { id }, include: { features: { orderBy: { position: 'asc' } } } });
+    const row = await this.prisma.client.fleetFlow.findUnique({ where: { id }, include: { features: FLOW_FEATURES } });
     return row ? this.toDomain(row) : null;
   }
   async lockById(id: string): Promise<FleetFlowRecord | null> {
@@ -48,16 +65,33 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
   }
   async findPage(filters: { projectId: string; threadId?: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>> {
     const { current, size } = resolvePageOption(page, PAGE_SIZE_MAX);
-    const result = await Paginate(this.prisma.client.fleetFlow, { current, size }, { where: { projectId: filters.projectId, ...(filters.threadId ? { threadId: filters.threadId } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: { features: { orderBy: { position: 'asc' } } } });
+    const result = await Paginate(this.prisma.client.fleetFlow, { current, size }, { where: { projectId: filters.projectId, ...(filters.threadId ? { threadId: filters.threadId } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: { features: FLOW_FEATURES } });
     return result.remap((row) => this.toDomain(row));
   }
   async findLiveForThread(threadId: string): Promise<FleetFlowRecord | null> {
-    const rows = await this.prisma.client.fleetFlow.findMany({ where: { threadId, state: { notIn: [FleetFlowState.COMPLETED, FleetFlowState.STOPPED] } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, include: { features: { orderBy: { position: 'asc' } } } });
+    const rows = await this.prisma.client.fleetFlow.findMany({ where: { threadId, state: { notIn: [FleetFlowState.COMPLETED, FleetFlowState.STOPPED] } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, include: { features: FLOW_FEATURES } });
     const row = rows[0]; return row && isLiveFlowState(row.state) ? this.toDomain(row) : null;
   }
   async findLiveForSpec(repoId: string, branch: string, specSha: string): Promise<FleetFlowRecord | null> {
-    const rows = await this.prisma.client.fleetFlow.findMany({ where: { repoId, branch, specSha, state: { notIn: [FleetFlowState.COMPLETED, FleetFlowState.STOPPED] } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, include: { features: { orderBy: { position: 'asc' } } } });
+    const rows = await this.prisma.client.fleetFlow.findMany({ where: { repoId, branch, specSha, state: { notIn: [FleetFlowState.COMPLETED, FleetFlowState.STOPPED] } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, include: { features: FLOW_FEATURES } });
     const row = rows[0]; return row && isLiveFlowState(row.state) ? this.toDomain(row) : null;
+  }
+  /**
+   * US-003: the live flow on a repo and branch, whatever its spec sha. A handoff flow is found by
+   * its branch alone, so a flow whose sha a caller does not hold is still found.
+   */
+  async findLiveForBranch(repoId: string, branch: string): Promise<FleetFlowRecord | null> {
+    const rows = await this.prisma.client.fleetFlow.findMany({ where: { repoId, branch, state: { notIn: [FleetFlowState.COMPLETED, FleetFlowState.STOPPED] } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, include: { features: FLOW_FEATURES } });
+    const row = rows[0]; return row && isLiveFlowState(row.state) ? this.toDomain(row) : null;
+  }
+  /**
+   * US-003: the record a handoff feature carries. The only read of the stored record: the RUN
+   * dispatch needs it, and nothing else loads it. Null when the feature has no record (or does not
+   * exist).
+   */
+  async findHandoffRecord(featureId: string): Promise<HandoffRecordFile[] | null> {
+    const row = await this.prisma.client.fleetFlowFeature.findUnique({ where: { id: featureId }, select: { handoffRecord: true } });
+    return row ? handoffRecordOf(row.handoffRecord) : null;
   }
   private async transition(id: string, target: FleetFlowRecord['state'], data: Prisma.FleetFlowUpdateInput): Promise<FleetFlowRecord> {
     const result = await this.transactionManager.run(async () => {
