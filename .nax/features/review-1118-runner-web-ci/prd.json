@@ -1,0 +1,424 @@
+{
+  "project": "koda",
+  "feature": "review-1118-runner-web-ci",
+  "branchName": "feat/review-1118-runner-web-ci",
+  "createdAt": "2026-11-18T15:42:51.446Z",
+  "updatedAt": "2026-11-18T15:42:51.446Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Require HTTPS for job clone URLs and disable file transport",
+      "description": "**Goal** — Enforce HTTPS for primary runner job repositories and limit local clone URLs and file transport to explicit test injection.\n\n**Motivation** — A server (or anyone who can shape an ASSIGN) can point the runner's clone at a local path or a plain-HTTP remote, and the shared clone then fetches from it on every job.\n\n**Approach** — Clone URLs: `https` only; `http:` and `file:` only behind a test-only option. The option is an injected value (`allowLocalCloneUrls`) passed from `DaemonOptions` down to every consumer, default `false`, and never read from `runner.json`, a CLI flag or an environment variable.\n\nSymbols the feature reads:\n\n- `parseAssign(command: FleetCommandOut): ParsedAssign` in `apps/runner/src/supervisor/assign-parser.ts`; refusals are `{ ok: false, detail: 'invalid <what>' }` (the `bad` helper). Its `projectRepos` check already refuses a non-`https:` URL with `invalid project repos`; that check is unchanged.\n- `refreshMirror` in `apps/runner/src/thread/project-code/mirror-store.ts`: the precedent for `protocol.file.allow=<always|never>` per call. Unchanged.\n- `GitError` in `apps/runner/src/executor/git.ts`: its message names `args[0]`. The `args` of every call stay as they are, so the message and the fake gits in the specs that match `args[0] === 'clone'` keep working.\n\nSymbols the feature changes. The baseline only locates the code; the target is the interface to implement.\n\n- `GitOptions` and `createGit` in `apps/runner/src/executor/git.ts`\n  - Baseline: `GitOptions` is `{ cwd, timeoutMs?, env?, credentialHelper? }`; `createGit().run` spawns `['git', ...HARDENING_ARGS, ...helperArgs(options.credentialHelper), ...args]`.\n  - Target: `GitOptions` gains `readonly fileProtocol?: 'always' | 'never'`. When it is set, `createGit().run` spawns `['git', ...HARDENING_ARGS, '-c', 'protocol.file.allow=<value>', ...helperArgs(...), ...args]`; when unset, the argv is unchanged. `HARDENING_ARGS` itself is unchanged.\n- `assertCloneUrl`\n  - Baseline: `assertCloneUrl(url: string): void`, accepting `https:`, `http:` and `file:`.\n  - Target: `assertCloneUrl(url: string, options?: { allowLocalCloneUrls?: boolean }): void`. Accepts `https:` always; accepts `http:` and `file:` only when `options.allowLocalCloneUrls === true`; keeps the whitespace and leading-`-` refusals. Throws `PathError('invalid cloneUrl')` otherwise.\n- `parseAssign`\n  - Target: `parseAssign(command: FleetCommandOut, options?: { allowLocalCloneUrls?: boolean }): ParsedAssign`, passing the option to `assertCloneUrl` for `repo.cloneUrl`. The refusal stays `{ ok: false, detail: 'invalid cloneUrl' }`.\n- `ensureClone`\n  - Baseline: `ensureClone(git, { repoDir, cloneUrl, identity?, credentialHelper? })`.\n  - Target: the input gains `allowLocalCloneUrls?: boolean`. It is passed to `assertCloneUrl` (so a refused URL throws before any git call), and the `clone` call's options carry `fileProtocol: 'never'`, or `'always'` when `allowLocalCloneUrls === true`. The `args` stay `['clone', '--', cloneUrl, repoDir]`.\n- `cleanWorkspace`\n  - Target: `cleanWorkspace(git, repoDir, credentialHelper = null, options?: { allowLocalCloneUrls?: boolean })`. The `fetch --prune origin` call's options carry `fileProtocol: 'never'`, or `'always'` when the option is true.\n- `CommandHandlerDeps` gains `readonly allowLocalCloneUrls?: boolean`; `CommandHandler.assign` calls `parseAssign(command, { allowLocalCloneUrls: this.deps.allowLocalCloneUrls === true })`.\n- `HostExecutorDeps` gains `readonly allowLocalCloneUrls?: boolean`; `HostExecutor.prepareWorkspace` passes it to `ensureClone` and `cleanWorkspace`.\n- `ThreadHostDeps` (in `thread-job-run.ts`) and `PrepareThreadWorktreeInput` (in `thread-worktree.ts`) each gain `readonly allowLocalCloneUrls?: boolean`. `ThreadJobRun.prepare` copies the host's value into the prepare input, and `prepareThreadWorktree` passes it to `ensureClone`.\n- `DaemonOptions` gains `readonly allowLocalCloneUrls?: boolean` (doc comment: test-only). `startDaemon` passes it to `CommandHandler`, to the `HostExecutor` it builds, and to the thread host. `apps/runner/src/main.ts` and `commands/run.ts` never set it.\n\nUpdate local-origin fixtures without weakening their assertions: `workspace.spec.ts` (including the missing-origin `git clone failed` case), `checkout.spec.ts`, `plan-commit.spec.ts`, `workspace-auth.spec.ts`, `host-executor.spec.ts` (shared world and direct constructors), `host-executor-auth.spec.ts`, `config-job.spec.ts`, `job-check.spec.ts`, `thread-worktree.spec.ts`, `thread-stale-start.spec.ts`, `daemon-thread.spec.ts`, and `test/integration/harness/world.ts`. Inject at the boundary each test actually uses, including the harness's loopback HTTP origin.\n\n**Scope** — In: ASSIGN validation and job clone/fetch policy for `ensureClone` and `cleanWorkspace` and local-origin fixture compatibility. Out: Cancellation (US-002), failure reasons (US-003), the `thread-job-run.ts` split, exposing the test option through the production CLI, and `protocol.file.allow` for any other git calls, including the separate config-job checkout and thread publish calls. `HARDENING_ARGS` and `projectRepos` validation stay unchanged.\n\n**Interface** — `assertCloneUrl(url: string, options?: { allowLocalCloneUrls?: boolean }): void`; `parseAssign(command: FleetCommandOut, options?: { allowLocalCloneUrls?: boolean }): ParsedAssign`; `cleanWorkspace(git, repoDir, credentialHelper = null, options?: { allowLocalCloneUrls?: boolean })`. `ensureClone` gains `allowLocalCloneUrls?: boolean` on its input; `GitOptions` gains `readonly fileProtocol?: 'always' | 'never'`; daemon, handler, executor and thread dependencies and thread prepare inputs gain `readonly allowLocalCloneUrls?: boolean` as described above.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When assertCloneUrl('http://127.0.0.1:1234/a/b.git') is called without options, it throws a PathError with message 'invalid cloneUrl'.",
+        "AC-2 [unit] When assertCloneUrl('file:///tmp/x.git') is called without options, it throws a PathError with message 'invalid cloneUrl'.",
+        "AC-3 [unit] When assertCloneUrl('file:///tmp/x.git', { allowLocalCloneUrls: true }) is called, it returns without throwing.",
+        "AC-4 [unit] When assertCloneUrl('ssh://host/a.git', { allowLocalCloneUrls: true }) is called, it throws 'invalid cloneUrl'.",
+        "AC-5 [unit] When createGit().run(['clone', '--', <local file-URL origin>, <dir>], { cwd, fileProtocol: 'never' }) is called, it resolves with a non-zero code.",
+        "AC-6 [unit] When ensureClone receives a file-URL cloneUrl and no allowLocalCloneUrls, it rejects with PathError('invalid cloneUrl') before its recording git stub is called.",
+        "AC-7 [unit] When ensureClone receives an https: cloneUrl for a missing clone, it makes its clone call with fileProtocol: 'never'.",
+        "AC-8 [unit] When ensureClone receives allowLocalCloneUrls: true and uses real createGit() with a local file-URL origin, it leaves a clone with <repoDir>/.git.",
+        "AC-9 [unit] When cleanWorkspace(git, repoDir) runs, its fetch --prune origin call carries fileProtocol: 'never'.",
+        "AC-10 [unit] When a daemon started with startDaemon without allowLocalCloneUrls receives an ASSIGN with repo.cloneUrl 'file:///tmp/x.git', it acks { result: 'rejected', detail: 'invalid cloneUrl' }.",
+        "AC-11 [unit] When a daemon started with startDaemon({ ..., allowLocalCloneUrls: true }) receives the same ASSIGN with repo.cloneUrl 'file:///tmp/x.git', it acks result: 'ok'.",
+        "AC-12 [unit] When HostExecutor.prepare runs for a RUN job with a local origin and allowLocalCloneUrls unset in executor deps, it makes no clone call on the recording git stub.",
+        "AC-13 [unit] When HostExecutor.prepare runs for the same RUN job with allowLocalCloneUrls: true in executor deps and real createGit(), it leaves a clone at the job's repository directory.",
+        "AC-14 [unit] When a thread run has allowLocalCloneUrls: true in host deps, its injected prepareWorktree receives an input whose allowLocalCloneUrls is true."
+      ],
+      "tags": [
+        "runner",
+        "security",
+        "git"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The policy spans daemon, assignment, worktree and git execution seams with authenticated transport and credential-helper compatibility; strict isolation protects the trust boundary."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/workspace.ts",
+        "apps/runner/src/executor/git.ts",
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/daemon/daemon.ts",
+        "apps/runner/src/thread/thread-worktree.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/workspace.spec.ts",
+          "reason": "the `assertCloneUrl` `test.each` that accepts the local http URL and the file URL with no option now passes `{ allowLocalCloneUrls: true }` for those two; its `ensureClone` and `cleanWorkspace` cases that use a local origin pass `allowLocalCloneUrls: true`, including the case (about line 57) that expects `git clone failed` for a file URL to a missing path, which keeps that expectation by passing the option. No other assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/checkout.spec.ts",
+          "reason": "fixtures that clone a local origin through `ensureClone` or `cleanWorkspace` pass `allowLocalCloneUrls: true`; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/plan-commit.spec.ts",
+          "reason": "fixtures that clone a local origin through `ensureClone` or `cleanWorkspace` pass `allowLocalCloneUrls: true`; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/workspace-auth.spec.ts",
+          "reason": "fixtures that clone a local origin through `ensureClone` or `cleanWorkspace` pass `allowLocalCloneUrls: true`; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "every `HostExecutor` construction that reaches `prepare` or `prepareConfig` with a local origin (the shared `world()` helper and the direct constructions after it) passes `allowLocalCloneUrls: true` in the executor deps; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor-auth.spec.ts",
+          "reason": "`HostExecutor` constructions whose job repository is a local origin pass `allowLocalCloneUrls: true` in the executor deps; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/config-job.spec.ts",
+          "reason": "`HostExecutor` constructions whose job repository is a local origin pass `allowLocalCloneUrls: true` in the executor deps; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/job-check.spec.ts",
+          "reason": "`HostExecutor` constructions whose job repository is a local origin pass `allowLocalCloneUrls: true` in the executor deps; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-worktree.spec.ts",
+          "reason": "`prepareThreadWorktree` inputs that clone a local origin through the real git pass `allowLocalCloneUrls: true`; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-stale-start.spec.ts",
+          "reason": "`prepareThreadWorktree` inputs that clone a local origin pass `allowLocalCloneUrls: true`; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/unit/daemon-thread.spec.ts",
+          "reason": "`startDaemon` calls whose jobs clone a local origin pass `allowLocalCloneUrls: true`; no assertion changes."
+        },
+        {
+          "path": "apps/runner/test/integration/harness/world.ts",
+          "reason": "its `startDaemon` call passes `allowLocalCloneUrls: true`, because the harness's git front serves plain http on 127.0.0.1."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "suggestedCriteria": [
+        "AC-15 [unit] When allowLocalCloneUrls is off and a daemon processes an ASSIGN with an http: or file: repo.cloneUrl, no runner journal job row exists for that ASSIGN's new job ID and lease epoch."
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Check readopted process ownership before cancel signals",
+      "description": "**Goal** — Send cancel signals to a readopted job only on a live watch tick that confirms process ownership.\n\n**Motivation** — The watch loop checks `processIdentity` for a readopted job, but `requestCancel` and the watch start call `sendTerm` first, so a pid that was recycled after a runner restart can receive SIGTERM and then SIGKILL.\n\n**Approach** — Read-only symbols:\n\n- `JobExecutor.processIdentity(job): Promise<'ours' | 'other' | 'unknown'>` and `JobExecutor.kill(pgid, signal)`.\n- `killIfOurs` in `apps/runner/src/supervisor/kill-if-ours.ts`: the existing \"signal only while the pid is ours\" rule for abandon and readopt rejection.\n\n`JobRun` in `apps/runner/src/supervisor/job-run.ts`:\n\n- Baseline: the lifecycle invoked by `start(from)` computes a local `spawnedHere` (`from === 'prepare' || from === 'reprepare'`); `requestCancel`, `chainFixStep` and the start of `watchUntilExit` call `sendTerm(row)` directly; `watchUntilExit` calls `escalateKill(row)` on every live tick.\n- Target: a private instance field `spawnedHere`, default `false`, set in `start` from the same expression before `prepareAndSpawn` runs. Config jobs are unaffected: their path returns before the watch. Set `spawnedHere` before that early return as well, because `runConfig` initially journals a null `pgid` but can later journal a local subprocess via `onProcess`; a cancel must continue to signal that locally spawned group as before. For a job spawned here, signalling is unchanged. For a job not spawned here, `requestCancel` records the cancel and the watch start sees any already-recorded cancel, but neither sends a signal; the watch loop, on each tick where the job is alive and `processIdentity` (already called there for such a job) returns `ours`, calls `sendTerm` when a cancel is requested and then `escalateKill`. A tick whose identity is `unknown` sends no signal and keeps watching, as today; `other` ends the watch, as today. No extra `processIdentity` call is added per tick.\n\nIn `job-run.spec.ts` the fake's `identityUnknown` is a static flag, so a changing identity needs a `processIdentity` override (the readopt cases near line 81 do this), and a process that must outlive SIGTERM needs `onKill` set to a no-op. Existing readopt cases that report `ours` on the first live tick still see one TERM; retain their assertions.\n\n**Scope** — In: The `JobRun` cancellation and escalation path for readopted rows, using the existing watch identity probe. Out: FIX failure reason content (US-003), any new identity check for jobs spawned by this daemon, changes to config-job cancellation behavior, and changes to abandon/readopt rejection signalling.\n\n**Interface** — `JobExecutor.processIdentity(job): Promise<'ours' | 'other' | 'unknown'>` and `JobExecutor.kill(pgid, signal)` are unchanged; `JobRun` gains a private `spawnedHere` field defaulting to `false`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When requestCancel() is called for a RUNNING JobRun started with start('prepare'), exactly one SIGTERM to the job's pgid is recorded.",
+        "AC-2 [unit] When a JobRun starts with start('watch') on a RUNNING row with cancelRequestedAt set and the fake executor reports a live process with identity 'other', its killed list contains no signal.",
+        "AC-3 [unit] When that readopted watch instead reports identity 'ours', it records one SIGTERM to the row's pgid.",
+        "AC-4 [unit] When a readopted watch has a pending cancel and identity is 'unknown' for the first ticks, it records no signal during those ticks.",
+        "AC-5 [unit] When identity in the AC-4 case becomes 'ours', the next tick records one SIGTERM.",
+        "AC-6 [unit] When a readopted process received SIGTERM, outlives killGraceMs, and is still alive with identity 'ours' on a watch tick, that tick records SIGKILL.",
+        "AC-7 [unit] When a readopted process received SIGTERM and its identity turns 'other' before killGraceMs ends, no SIGKILL is recorded.",
+        "AC-8 [unit] When a readopted process received SIGTERM, killGraceMs has elapsed, and live ticks report identity 'unknown', those ticks record no SIGKILL.",
+        "AC-9 [unit] When requestCancel() is called during a readopted watch started with start('watch') and no cancel at start, it records no signal before the next watch tick.",
+        "AC-10 [unit] In the AC-9 case, when the next live tick reports identity 'ours', it records one SIGTERM.",
+        "AC-11 [unit] When requestCancel() is called for a RUNNING config JobRun started with start('prepare') whose local subprocess has a journaled pgid, the executor records SIGTERM for that pgid as before."
+      ],
+      "tags": [
+        "runner",
+        "security",
+        "process-lifecycle"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The change is confined to JobRun and reuses the existing identity probe and signal helpers; the fake clock and executor make ownership transitions and grace timing testable without new infrastructure."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/supervisor/kill-if-ours.ts",
+        "apps/runner/src/supervisor/job-run.spec.ts",
+        "apps/runner/src/executor/job-executor.ts",
+        "apps/runner/test/helpers/fake-executor.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Sanitize FIX and AGENT failure reasons before clipping",
+      "description": "**Goal** — Redact secrets and strip terminal controls from nax stderr before generating bounded FIX and AGENT failure reasons.\n\n**Motivation** — A token or URL credential printed by nax reaches the UI.\n\n**Approach** —\n\n- `sanitizeDiagnostic(text, env = process.env)` in `apps/runner/src/diagnostics.ts` (read-only): strips ANSI escapes and control characters, redacts secret env values, URL credentials, `Bearer`/`Basic` values, `token=`-style pairs and GitHub, `sk-` and bot tokens, and caps at 800 characters.\n- `HostExecutor.readFixOutcome`\n  - Baseline: `stderrLine` is the first non-empty trimmed line of `fix.stderr`, `.slice(0, 200)`.\n  - Target: that line passed through `sanitizeDiagnostic`, then `.slice(0, 200)`; an empty result is `null`.\n- `stderrLine` in `apps/runner/src/executor/agent-job/agent-result.ts`\n  - Baseline: `inspect()` stops collecting at 301 characters and returns `clip(line, 300)`, so the line is cut before anything could sanitize it.\n  - Target: `inspect()` collects up to 4,000 characters of the first non-empty line; the line is passed through `sanitizeDiagnostic` and then clipped to 300. An empty result is `undefined`.\n\nA controls-only FIX line must not displace the existing `fix not pushed` fallback. Extend reader tests with synthetic credentials, terminal formatting, and a token crossing the former AGENT clip boundary.\n\n**Scope** — In: FIX and AGENT stderr-derived failure messages. Out: Cancel signal logic (US-002), changes to the shared sanitizer, and live streaming of FIX step-2 output (FIX output stays in the bundle).\n\n**Interface** — `sanitizeDiagnostic(text, env = process.env)` stays unchanged; `HostExecutor.readFixOutcome` returns `stderrLine: null` when sanitization leaves no text, and AGENT `stderrLine` returns `undefined` in that case.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When the first non-empty fix.stderr line is 'push failed: https://x-access-token:ghs_abcdefghij@github.com/o/r.git', HostExecutor.readFixOutcome returns a stderrLine that includes '[redacted]'.",
+        "AC-2 [unit] In the AC-1 case, the returned stderrLine does not contain 'ghs_abcdefghij'.",
+        "AC-3 [unit] When the fix.stderr line contains the ANSI sequence ESC [31m, HostExecutor.readFixOutcome returns a stderrLine without that escape sequence.",
+        "AC-4 [unit] When the fix.stderr line contains 500 characters, HostExecutor.readFixOutcome returns a stderrLine of at most 200 characters.",
+        "AC-5 [unit] When the first non-empty fix.stderr line consists only of control characters, HostExecutor.readFixOutcome returns stderrLine: null.",
+        "AC-6 [unit] When readAgentResult reads an AGENT job dir with no nax.stdout result file and a nax.stderr first line 'Authorization: Bearer abc.def.ghi', it returns an ok: false result with a string stderrLine that does not contain 'abc.def.ghi'.",
+        "AC-7 [unit] When readAgentResult reads an AGENT job dir with no valid nax.stdout result and a nax.stderr first line of 290 filler characters followed by 'token=SECRETVALUE123456', its failure result has a string stderrLine with no 'SECRETVALUE'.",
+        "AC-8 [unit] When readAgentResult reads an AGENT job dir with no valid nax.stdout result and a nax.stderr first line of 1,000 printable filler characters, its failure result has a string stderrLine of at most 300 characters.",
+        "AC-9 [unit] When an uncancelled FIX job has posted its review, finished its fix step without a pushed or nothing-to-fix outcome, and its first non-empty fix.stderr line is controls-only, its FAILED state event carries reason 'fix not pushed' as before."
+      ],
+      "tags": [
+        "runner",
+        "security",
+        "diagnostics"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two readers reuse one sanitizer, but the output must not leak credentials or tokens, including at the clipping boundary."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/executor/agent-job/agent-result.ts",
+        "apps/runner/src/diagnostics.ts",
+        "apps/runner/test/unit/host-executor.spec.ts",
+        "apps/runner/src/executor/agent-job/agent-result.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Distinguish an unavailable auth probe from an ended session",
+      "description": "**Goal** — Preserve session state during auth probe outages while continuing to report definite unauthenticated outcomes.\n\n**Motivation** — A 502 during a deploy logs out every user who navigates.\n\n**Approach** —\n\n- `apps/web/server/api/auth/me.get.ts` (US-004)\n  - Baseline: no access cookie, any upstream status of 400 or more, or a body without a user all answer `{ user: null }`. A rejected `forwardToApi` (network failure) becomes Nitro's 500.\n  - Target: no access cookie, upstream `401` or `403`, or a 2xx body without a user answer `{ user: null }`. Any other upstream status of 400 or more, and a rejected `forwardToApi`, throw `createError({ statusCode: 503, statusMessage: 'Service Unavailable' })`.\n- `useAuth()` in `apps/web/composables/useAuth.ts` (US-004)\n  - Baseline: `fetchUser(): Promise<boolean>` sets `user` from `/api/auth/me` and sets it to `null` on any rejection.\n  - Target: `useAuth()` also returns `sessionUnavailable`, a `useState<boolean>('koda_session_unavailable', () => false)`. `fetchUser` keeps its boolean result. On success it sets `user` and `sessionUnavailable = false`. A rejection whose status (`errorStatus`) is `401` or `403` sets `user = null` and `sessionUnavailable = false`. Any other rejection leaves `user` unchanged, sets `sessionUnavailable = true` and returns `false`. `login`, `register` and `acceptInvite` set `sessionUnavailable = false` when they set `user`, so a flag left by an outage on `/login` never blocks the signed-in user.\n\nDo not mutate cookies when the upstream is unavailable. Add `tests/server/auth-me-route.spec.ts` following the mocked globals in the logout route spec, and extend `tests/useAuth.spec.ts` to cover recovery from an unavailable probe.\n\n**Scope** — In: Nitro `/api/auth/me` response classification and composable state/reset behavior. Out: The middleware and error UI that consume this state (US-005), raw invite token paths, and production cookie attributes or security headers.\n\n**Interface** — `fetchUser(): Promise<boolean>`; `useAuth()` also returns `sessionUnavailable`, a `useState<boolean>('koda_session_unavailable', () => false)`. The proxy emits `{ user: null }` for the specified absent/unauthenticated cases and otherwise throws `createError({ statusCode: 503, statusMessage: 'Service Unavailable' })` on upstream failure.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When /api/auth/me has an access cookie and upstream /auth/me answers 401, the handler returns { user: null }.",
+        "AC-2 [unit] When upstream /auth/me answers 403, the /api/auth/me handler returns { user: null }.",
+        "AC-3 [unit] When upstream /auth/me answers 502, the /api/auth/me handler throws an H3 error with statusCode 503.",
+        "AC-4 [unit] When upstream /auth/me answers 429, the /api/auth/me handler throws an H3 error with statusCode 503.",
+        "AC-5 [unit] When forwardToApi rejects with a network error, the /api/auth/me handler throws an H3 error with statusCode 503.",
+        "AC-6 [unit] When there is no access cookie, the /api/auth/me handler returns { user: null } without calling forwardToApi.",
+        "AC-7 [unit] When /api/auth/me rejects with statusCode 503 while user holds a user, useAuth().fetchUser() returns false.",
+        "AC-8 [unit] In the AC-7 case, user still holds the same user after fetchUser() returns.",
+        "AC-9 [unit] In the AC-7 case, sessionUnavailable is true after fetchUser() returns.",
+        "AC-10 [unit] When /api/auth/me rejects with statusCode 401 after an unavailable probe, useAuth().fetchUser() sets sessionUnavailable to false.",
+        "AC-11 [unit] When /api/auth/me resolves { user } after an unavailable probe, useAuth().fetchUser() sets sessionUnavailable to false.",
+        "AC-12 [unit] When useAuth().login(...) succeeds after an unavailable probe, it sets sessionUnavailable to false.",
+        "AC-13 [unit] When the upstream /auth/me responds with any status of 400 or more other than 401 or 403, or its request fails, /api/auth/me emits no Set-Cookie header."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "auth",
+        "session"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing server-proxy and state patterns suffice; authentication and session state require strict test isolation."
+      },
+      "contextFiles": [
+        "apps/web/server/api/auth/me.get.ts",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/server/utils/api.ts",
+        "apps/web/tests/server/logout-route.spec.ts",
+        "apps/web/tests/useAuth.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/server/auth-me-route.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Show a retryable error page on protected-route outages",
+      "description": "**Goal** — Show a localized “koda is unavailable” page with a retry action rather than redirecting to login when the auth probe is unavailable and no user is loaded.\n\n**Motivation** — A 502 during a deploy logs out every user who navigates.\n\n**Approach** —\n\n- `middleware/auth.global.ts` (US-005): after `fetchUser`, when `!auth.isAuthenticated.value` and `auth.sessionUnavailable.value` are both true and the route is not guest-only, it returns `abortNavigation(createError({ statusCode: 503, statusMessage: 'Service Unavailable', fatal: true, data: { redirect: to.fullPath } }))` instead of redirecting. Nuxt's `abortNavigation` throws the error and shows the error page only for a `fatal` error, on SSR and on a client navigation alike, so `fatal: true` is required. A guest-only route renders as today. The `/invite/` early return is unchanged.\n- New `apps/web/components/AppErrorPage.vue` (US-005) holds the page; new `apps/web/error.vue` (the Nuxt root error page, which also replaces the default page for other errors) only renders `<AppErrorPage :error=\"error\" />`. The component lives under `components/` so `tests/i18n/used-keys-exist.spec.ts` checks its keys in both locales. Its props are declared inline as `{ error: { statusCode: number; data?: { redirect?: string } | null } }` (no `#app` type import):\n  - `error.statusCode === 503`: a title and body from `errorPage.unavailable.title` and `errorPage.unavailable.body`, and a retry button (`data-testid=\"error-page-retry\"`, `errorPage.retry`) that calls `clearError({ redirect: error.data?.redirect ?? '/' })`.\n  - Any other status: a title from `errorPage.generic.title` with the status code, and a home button (`data-testid=\"error-page-home\"`, `errorPage.home`) that calls `clearError({ redirect: '/' })`.\n  - New keys go into `i18n/locales/en.json` and `i18n/locales/zh.json` under a top-level `errorPage` group.\n  - `tests/helpers/mount-sfc.ts` gains `clearError` in `NUXT_AUTO_IMPORTS`, so a test can supply it through `globals`.\n\nIn `tests/middleware/auth.spec.ts`, existing mocks gain `sessionUnavailable: ref(false)` and globals gain `abortNavigation` and `createError`; keep existing assertions. Drive the middleware through a `fetchUser` stub that sets US-004's `sessionUnavailable`; mount the component in `tests/components/app-error-page.spec.ts` to assert both actions. A definite unauthenticated probe (401/403, no access cookie, or the specified successful response with no user) still follows the existing login redirect.\n\n**Scope** — In: Protected-route outage navigation, the Nuxt error entrypoint, retry and home actions, and English/Chinese copy. Out: Proxy status mapping or session mutation (US-004), approval copy (US-006), and changing client invite token routes.\n\n**Interface** — `AppErrorPage` props: `{ error: { statusCode: number; data?: { redirect?: string } | null } }`; the middleware hands the UI `abortNavigation(createError({ statusCode: 503, statusMessage: 'Service Unavailable', fatal: true, data: { redirect: to.fullPath } }))`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When auth.global.ts handles /projects with no user and fetchUser sets sessionUnavailable to true, it calls abortNavigation with an error whose statusCode is 503.",
+        "AC-2 [unit] In the AC-1 case, the abortNavigation error has fatal: true.",
+        "AC-3 [unit] In the AC-1 case, the abortNavigation error has data.redirect equal to '/projects'.",
+        "AC-4 [unit] In the AC-1 case, navigateTo is never called.",
+        "AC-5 [unit] When auth.global.ts handles /login with no user and fetchUser sets sessionUnavailable to true, it never calls abortNavigation.",
+        "AC-6 [unit] When auth.global.ts handles /projects with a signed-in user and sessionUnavailable left true, it never calls abortNavigation.",
+        "AC-7 [unit] When auth.global.ts handles /projects with no user and fetchUser leaves sessionUnavailable false, it returns navigateTo({ path: '/login', query: { redirect: '/projects' } }).",
+        "AC-8 [unit] When AppErrorPage mounts with error { statusCode: 503 } and a translation stub that returns each key, the rendered title is 'errorPage.unavailable.title'.",
+        "AC-9 [unit] When error-page-retry is clicked on AppErrorPage mounted with error { statusCode: 503, data: { redirect: '/projects/acme' } }, it calls clearError with { redirect: '/projects/acme' }.",
+        "AC-10 [unit] When AppErrorPage mounts with error { statusCode: 404 } and a translation stub that returns each key, the rendered title is 'errorPage.generic.title'.",
+        "AC-11 [unit] When error-page-home is clicked on AppErrorPage mounted with a 404 error, it calls clearError with { redirect: '/' }."
+      ],
+      "tags": [
+        "web",
+        "auth",
+        "session",
+        "resilience",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard Nuxt middleware and error-page conventions suffice; changing a session-aware protected-route guard requires strict test isolation across the outage and login branches."
+      },
+      "contextFiles": [
+        "apps/web/middleware/auth.global.ts",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/tests/middleware/auth.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/i18n/used-keys-exist.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/AppErrorPage.vue",
+        "apps/web/error.vue",
+        "apps/web/tests/components/app-error-page.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/middleware/auth.spec.ts",
+          "reason": "the mocked `useAuth()` objects gain `sessionUnavailable: ref(false)`, and the mocked globals gain `abortNavigation` and `createError`; every existing assertion stays."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "`NUXT_AUTO_IMPORTS` gains `'clearError'`; nothing else changes."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains the `errorPage` group."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the `errorPage` group."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Reveal invisible characters in approval text",
+      "description": "**Goal** — Make invisible and control characters in the two approval views visible and warn approvers when any are present.\n\n**Motivation** — A right-to-left override or a zero-width character can make the shown command differ from the one that runs.\n\n**Approach** — New module `apps/web/lib/reveal-invisible.ts`:\n\n```ts\nexport interface RevealedText { text: string; count: number }\n\n/** Replaces each invisible or control character with a visible `<U+XXXX>` marker (uppercase hex, at least 4 digits). */\nexport function revealInvisible(input: string): RevealedText\n```\n\nThe replaced set: U+0000-U+0008, U+000B-U+001F (this includes CR, U+000D), U+007F, U+061C, U+200B-U+200F, U+202A-U+202E, U+2060-U+2064, U+2066-U+2069 and U+FEFF. Tab (U+0009) and line feed (U+000A) stay as they are. `count` is the number of characters replaced. The function takes a string only; a component never calls it with `null` or `undefined` and renders an absent field as it does today.\n\n- `ApprovalRequestBashPanel.vue` renders the fields it shows through `revealInvisible`: `command` (or `rawDetail`, which the panel shows only when `command` is empty), `reason`, `root` and `featureName`. When the sum of the counts of the rendered fields is above zero it shows a warning line (`data-testid=\"approval-request-bash-invisible\"`, key `approvals.fleet.bash.invisible` with `{ count }`).\n- `ThreadApprovalCard.vue` renders `tool`, `summary`, `command` and `reason` (each when present) through `revealInvisible`, with a warning line (`data-testid=\"thread-approval-invisible\"`, key `fleet.threads.approval.invisible` with `{ count }`).\n- Both keep rendering through `{{ }}` interpolation only (the card's B4-D1 note), never `v-html`.\n- The new strings must not contain `@`, `$` or `|` (`tests/i18n/approvals-locale-parity.spec.ts` refuses them in `approvals.*`). `tests/i18n/used-keys-exist.spec.ts` checks that both keys exist in both locales.\n\nExtend the two mounted component suites, add `tests/lib/reveal-invisible.spec.ts`, and add `'invisible'` to the `approvalKeys` list in `tests/i18n/fleet-locale-parity.spec.ts`, retaining the per-locale non-empty checks and `approve` wording assertions. Add the warning keys in `i18n/locales/en.json` and `i18n/locales/zh.json`.\n\n**Scope** — In: Display transformation, counts and localized warnings for the specified fields. Out: Outage UI and error-page locale keys (US-005); replacing U+0085, U+00AD or U+2028/U+2029; passing `stage` and `storyId` through `revealInvisible`; rejecting an approval containing invisible characters or mutating its command or payload.\n\n**Interface** — `export interface RevealedText { text: string; count: number }`; `export function revealInvisible(input: string): RevealedText`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When revealInvisible('rm -rf /tmp/\\u202Ex') runs, it returns { text: 'rm -rf /tmp/<U+202E>x', count: 1 }.",
+        "AC-2 [unit] When revealInvisible('a\\u200Bb\\u200Dc\\u2060d\\u2066e\\uFEFF') runs, it returns { text: 'a<U+200B>b<U+200D>c<U+2060>d<U+2066>e<U+FEFF>', count: 5 }.",
+        "AC-3 [unit] When revealInvisible('a\\u0007b\\u007Fc') runs, it returns { text: 'a<U+0007>b<U+007F>c', count: 2 }.",
+        "AC-4 [unit] When revealInvisible('a\\tb\\nc') runs, it returns { text: 'a\\tb\\nc', count: 0 }.",
+        "AC-5 [unit] When revealInvisible('\\u061C\\u200E\\u200F\\r') runs, it returns { text: '<U+061C><U+200E><U+200F><U+000D>', count: 4 }.",
+        "AC-6 [unit] When ApprovalRequestBashPanel mounts with a bash payload whose command is 'rm -rf /tmp/\\u202Ex', approval-request-bash-command renders 'rm -rf /tmp/<U+202E>x'.",
+        "AC-7 [unit] In the AC-6 case, the panel renders approval-request-bash-invisible.",
+        "AC-8 [unit] When ApprovalRequestBashPanel mounts with no invisible characters in any rendered field, it does not render approval-request-bash-invisible.",
+        "AC-9 [unit] When ApprovalRequestBashPanel mounts with a plain command and a reason containing \\u200B, it renders approval-request-bash-invisible.",
+        "AC-10 [unit] When ApprovalRequestBashPanel mounts with an empty command and rawDetail containing \\u202E, approval-request-bash-raw renders the '<U+202E>' marker.",
+        "AC-11 [unit] When ThreadApprovalCard mounts with an approval whose command contains \\u202E, the text of thread-approval-command contains the literal '<U+202E>' marker.",
+        "AC-12 [unit] In the AC-11 case, the card renders thread-approval-invisible.",
+        "AC-13 [unit] When ThreadApprovalCard mounts with an approval containing no invisible characters, it does not render thread-approval-invisible."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "approvals",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The pure text transform, two existing Vue components, and locale entries fit existing Jest harnesses; presentation changes but authorization rules and approval submissions do not."
+      },
+      "contextFiles": [
+        "apps/web/components/approvals/ApprovalRequestBashPanel.vue",
+        "apps/web/components/fleet/threads/ThreadApprovalCard.vue",
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/tests/components/approval-request-fleet-panels.spec.ts",
+        "apps/web/tests/components/thread-approval-card.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/reveal-invisible.ts",
+        "apps/web/tests/lib/reveal-invisible.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "the `approvalKeys` list in \"the thread page mode and approval keys cover exactly what the controls render (US-012)\" gains `'invisible'`; the per-locale non-empty checks and the `approve` wording assertions stay."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `approvals.fleet.bash.invisible` and `fleet.threads.approval.invisible`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains `approvals.fleet.bash.invisible` and `fleet.threads.approval.invisible`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Harden CI permissions, secrets, action pins and Docker context",
+      "description": "**Goal** — Apply least-privilege CI credentials, pin action versions, and exclude nested environment files from Docker build contexts.\n\n**Motivation** — `.github/workflows/ci.yml` has no `permissions:` block, gives `TURBO_TOKEN` to every job through a workflow-level `env:`, and uses tag-pinned actions.\n\n**Approach** —\n\n- `.github/workflows/ci.yml`: a top-level `permissions:` block with `contents: read`. The workflow-level `env:` that holds `TURBO_TEAM` and `TURBO_TOKEN` is removed; the two variables are set in the `env:` of each job that installs dependencies (`quality`, `test`, `integration-shards`, `runner-integration`, `e2e`, `evaluate`, `smoke`) and not in `changes` or `integration`.\n- `apps/api/test/unit/tooling/ci-integration-shards.spec.ts` slices `ci.yml` from the line `  integration-shards:` to the next `\\n  integration:` and checks the shard matrix there. Both job header lines and the `integration-shards` matrix keep their exact text.\n- Every `uses:` in `ci.yml` names a commit SHA with the version as a trailing comment. The SHAs (resolved 2026-11-18; the first three match `release.yml`):\n\n  | Action | Pin |\n  |:--|:--|\n  | `actions/checkout` | `3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1` |\n  | `actions/setup-node` | `949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0` |\n  | `oven-sh/setup-bun` | `0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0` |\n  | `actions/cache` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0` |\n  | `actions/upload-artifact` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2` |\n\n- `.dockerignore`: `**/.env` and `**/.env.*` patterns, followed by `!**/.env.example`, so that files named `.env` or matching `.env.*` anywhere in the tree stay out of the build context, except `.env.example`. The existing root rules may stay.\n\n**Scope** — In: `.github/workflows/ci.yml` and the root `.dockerignore` only. Out: Runner and web runtime changes (US-001–US-006), the deferred deploy smoke CI job, root compose password handling, production TLS/deploy settings (including `NODE_ENV=production`), and rotating or changing the values in `apps/api/.env.test`.\n\n**Interface** — Workflow configuration: `permissions:` with `contents: read`, job-scoped `env:` and `uses:` SHA pins from the table. Docker context patterns in order: `**/.env`, `**/.env.*`, `!**/.env.example`.",
+      "acceptanceCriteria": [
+        "AC-1 [review] When reviewing .github/workflows/ci.yml, the top-level permissions block has only contents: read.",
+        "AC-2 [review] When reviewing .github/workflows/ci.yml, there is no workflow-level env block; TURBO_TEAM and TURBO_TOKEN are set in the job-level env of quality, test, integration-shards, runner-integration, e2e, evaluate and smoke.",
+        "AC-3 [review] When reviewing the changes and integration jobs in .github/workflows/ci.yml, neither job sets TURBO_TEAM or TURBO_TOKEN.",
+        "AC-4 [review] When reviewing every uses: line in .github/workflows/ci.yml, each action is pinned to its 40-character commit SHA from the pin table in this story's Approach, followed by its # vX.Y.Z comment.",
+        "AC-5 [review] When reviewing .dockerignore, **/.env and **/.env.* are present and followed by !**/.env.example.",
+        "AC-6 [review] When comparing .github/workflows/ci.yml with the baseline, the literal integration-shards and integration job headers and the integration-shards matrix (shard: [1, 2, 3, 4] and shards: [4]) are unchanged, preserving the existing ci-integration-shards.spec.ts text anchors."
+      ],
+      "tags": [
+        "ci",
+        "docker",
+        "security",
+        "supply-chain"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "no-test",
+        "reasoning": "Two root configuration files use established permission, pinning, scoping and ignore conventions; no source interfaces change.",
+        "noTestJustification": "Only CI workflow and Docker build-context configuration change, with no application runtime behavior to test. Verify the configuration and unchanged shard anchors by review; retain the existing shard-matrix regression without adding or altering a test."
+      },
+      "contextFiles": [
+        ".github/workflows/ci.yml",
+        ".dockerignore",
+        ".github/workflows/release.yml",
+        "apps/api/test/unit/tooling/ci-integration-shards.spec.ts"
+      ],
+      "workdir": ".",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "This is a bug-fix and hardening bundle for the 2026-11-14 whole-repo review, checked against the spec's main reference 64fea7d27. The sibling #479 covers API fixes; no API or CLI implementation changes are needed here. The repository is a Bun/Turborepo TypeScript monorepo. The web implementation is Nuxt 4 SSR with Vue, Nitro, and Jest, not Next.js (apps/web/package.json:5, apps/web/package.json:35); runner tests use Bun. No codebase-memory tool is exposed in this session, so discovery used direct source reads and text search. No database, journal schema, fleet protocol, cookie format, or generated client migration is required. Implement US-004 before US-005; the other stories are independent, but US-001 and US-003 share host-executor.ts and host-executor.spec.ts, and US-005 and US-006 append to both locale files, so preserve sibling edits when merging.\n\nUS-001 — apps/runner/src/executor/workspace.ts:7 accepts https/http/file today; :37 validates before filesystem/git work, then clones or repoints a reused origin, and :60 fetches before doing the existing reset/clean/worktree prune. apps/runner/src/executor/git.ts:11 and :65–85 put invocation-level configuration in the spawned argv; keep the caller's subcommand at args[0] for GitError and recording stubs, and preserve credential helper ordering. apps/runner/src/supervisor/assign-parser.ts:281 validates the primary repo, whereas :143 independently restricts projectRepos. apps/runner/src/supervisor/command-handler.ts:118–128 rejects and records the ack before journal insertion. apps/runner/src/daemon/daemon.ts:219, :236 and :264 are the three injection points (default executor, nax-mode thread host, command handler). The common host prepare path calls ensureClone and cleanWorkspace (apps/runner/src/executor/host-executor.ts:101–112); thread preparation constructs an injectable input (apps/runner/src/thread/thread-job-run.ts:533–546), and the thread worktree invokes ensureClone only for a missing local clone (apps/runner/src/thread/thread-worktree.ts:175–194). Its separate fetchOrigin and project mirrors (apps/runner/src/thread/project-code/mirror-store.ts:115) are not part of the transport change. Production entrypoints only pass existing dependencies (apps/runner/src/main.ts:68, apps/runner/src/commands/run.ts:28); the runner's serverUrl policy is a separate setting. Reconcile real-git and fake fixtures together: use workspace.spec.ts, git.spec.ts, daemon.spec.ts, host-executor.spec.ts and thread-job-run/worktree tests for coverage; preserve existing HTTPS, helper, and local fixture assertions by injecting the test-only option where needed. The existing project-repo parser regression is at apps/runner/src/supervisor/assign-parser-thread.spec.ts:274. The loopback integration harness needs the injection at apps/runner/test/integration/harness/world.ts:295. Its opt-in live consumer (apps/runner/test/live/log-shipping.live.spec.ts:37–53, :88–90) instead launches the production entrypoint, bypassing `TestRunner.start`. The harness supplies its plain HTTP front as `GITHUB_API_URL` (apps/runner/test/integration/harness/world.ts:128–135; apps/runner/test/integration/harness/git-front.ts:56), and API placement preserves that scheme in ASSIGN (apps/api/src/fleet/jobs/placement.service.ts:321; apps/api/src/fleet/git-broker/clone-url.ts:2–6, :29–34). Preserve the live CLI regression with a trusted HTTPS fixture for that test, without adding a production opt-in or changing the API's URL construction. If a deployment still assigns non-HTTPS job remote URLs, migrate those repository settings to HTTPS before rolling out; there is intentionally no production override. Normal host preparation already reconciles an existing clone's origin, so there is no blanket reclone or workspace migration.\n\nUS-002 — The baseline computes spawnedHere in the lifecycle called by start (apps/runner/src/supervisor/job-run.ts:99–139); the target records it in start before any spawn. requestCancel writes the durable journal timestamp and currently sends immediately (:179–205); watch entry sends before checking ownership and escalation currently runs on a live unknown tick (:425–453). Gate the readopted signalling paths using the existing per-tick identity result, not a cached prior result or a new check. Keep grace relative to the successful first TERM attempt and keep the spawned FIX handoff's reset of signal bookkeeping (:400–422). Do not couple to other identity-based stop paths such as kill-if-ours.ts. The fake has a static unknown flag (apps/runner/test/helpers/fake-executor.ts:29, :89); script transitions with a time/tick-based processIdentity override as in apps/runner/src/supervisor/job-run.spec.ts:81–95, and use onKill to control process lifetime. Existing spawned cancellation assertions are at :662–696; the already-recorded readopt regression is at :943. Use isolated fakes rather than live process groups, assert after callbacks (watcher error handling can swallow assertions), and test cancellation before the next tick as well as ownership changes between TERM and KILL. Persisted cancelled rows require no migration. The spec's baseline note that config `pgid` is null is true only at RUNNING transition: `runConfig` later journals detached local subprocess groups through `onProcess` (apps/runner/src/supervisor/job-run.ts:321, :335). Set the instance field before the config branch; otherwise the new `requestCancel` guard would regress signalling of those locally spawned groups.\n\nUS-003 — apps/runner/src/executor/host-executor.ts:365–399 reads FIX output and currently clips the selected line; apps/runner/src/executor/agent-job/agent-result.ts:54–110 streams UTF-8 chunks for missing, invalid or oversized AGENT stdout and clips before returning the diagnostic. Both paths feed FAILED verdicts via apps/runner/src/supervisor/job-run.ts:466–480 and :514–524. Reuse apps/runner/src/diagnostics.ts:8–23 without modification; sanitize before the final per-reader length bound. For AGENT, select the first raw non-empty line once, then sanitize, including EOF and the early bounded return. Do not use sanitized undefined as the scanner's 'keep reading' sentinel for a line already found; do not scan later lines or buffer the whole file. Keep the decoder, bounded string, and surrogate-safe clip at apps/runner/src/watcher/status-snapshot.ts:21. Preserve existing tests: despite the spec's Modifies note, long lines already have regressions at apps/runner/test/unit/host-executor.spec.ts:272 and apps/runner/src/executor/agent-job/agent-result.spec.ts:68; the latter also exercises Unicode and a large trailing file at :126–135. Existing FIX fallback assertions are at apps/runner/src/supervisor/job-run.spec.ts:496 and :509. No change to log/bundle bytes or retroactive rewrite of failure reasons already stored by the server.\n\nUS-004 — apps/web/server/api/auth/me.get.ts:9–41 short-circuits without the access cookie, currently collapses all upstream HTTP errors, and supports direct data and nested data.user envelopes. apps/web/server/utils/api.ts:77–115 uses $fetch.raw with ignoreResponseError so a returned status and a rejected transport call are distinct; leave the shared forwarding utility and cookie functions unchanged. apps/web/composables/useAuth.ts:42 normalizes fetch status shapes; :58–90 establishes identity via login/register/acceptInvite; :108–129 uses useRequestFetch for SSR cookie forwarding and browser $fetch otherwise. Keep the boolean interface and expose a separate Nuxt useState ref. No new credentials are stored or set on probe failure. Existing refreshSession is separately tri-state (:140–162), used by thread stream composables (apps/web/composables/useThread.ts:31, apps/web/composables/useWorkspaceThread.ts:46); leave refresh/logout semantics unchanged. Mock Nitro globals using apps/web/tests/server/logout-route.spec.ts:30–61 and extend apps/web/tests/useAuth.spec.ts:169–200 without weakening existing apps/web/tests/composables/useAuth.spec.ts:219–277 assertions.\n\nUS-005 — The consumer is apps/web/middleware/auth.global.ts:4–32: it skips /invite/, probes only when the user is absent, retains root and non-root login redirect differences, and sanitizes the authenticated guest-only redirect through safeRedirectPath. Only a protected route with no authenticated user and an unavailable probe takes the fatal Nuxt 503 path; preserve the full target path, including query, for retry, and keep guest and signed-in behavior. The root error entrypoint changes all Nuxt error presentation; keep it a thin delegate so the full 503/generic UI remains component-testable and translatable. apps/web/tests/i18n/used-keys-exist.spec.ts:6, :35 scans components but not root error.vue. Mock middleware globals using apps/web/tests/middleware/auth.spec.ts:68–72, :224–249; inject clearError via apps/web/tests/helpers/mount-sfc.ts:138, :233–236 for component cases. Reasons not to redirect on transient error: a fresh SSR page starts without hydrated user state despite retaining cookies, and a client navigation needs a fatal error to reliably render the error page.\n\nUS-006 — The fleet form enters via apps/web/components/approvals/ApprovalRequestPanel.vue:16, and the thread card is shared by apps/web/pages/threads/[id].vue:110 and apps/web/pages/[project]/threads/[id].vue:164. The bash panel currently interpolates either command or rawDetail and context fields (apps/web/components/approvals/ApprovalRequestBashPanel.vue:14–42); BashApprovalPayload.rawDetail is nullable and parsed fallback data is checked at apps/web/lib/fleet-approvals.ts:61–94. Thread text is interpolated and optional command/reason are guarded (apps/web/components/fleet/threads/ThreadApprovalCard.vue:91–107); preserve routing, affordances, decision body, and delivery/retry behavior. Reveal only displayed input and derive the count from the same reactive display values; do not pass null into the helper, count hidden raw fallback, or reinterpret markers as HTML. This is presentation only, not payload normalization or an approval-rule change. Extend the existing mounted cases at apps/web/tests/components/approval-request-fleet-panels.spec.ts:140 and apps/web/tests/components/thread-approval-card.spec.ts:135 and update the exact key set at apps/web/tests/i18n/fleet-locale-parity.spec.ts:218. Keep the translations in both locales and avoid Vue i18n metacharacters in the warning strings.\n\nUS-007 — .github/workflows/ci.yml:31–33 currently exports Turbo secrets at workflow level, and tag-based uses start at :46; scope the existing secrets to the seven installing jobs and preserve the read-only changes job and result-only integration aggregator. The release workflow provides existing permission/pin patterns (.github/workflows/release.yml:17, :103–111). The API regression reads workflow text (apps/api/test/unit/tooling/ci-integration-shards.spec.ts:9–32) and depends on exact anchors and the shard matrix at .github/workflows/ci.yml:185–197 and :264; no new runtime tests for the permissions, pins, secrets, or ignore rules. The release builds use root context (.github/workflows/release.yml:182, :224); apps/api/Dockerfile:29 copies the app tree, so root-only patterns at .dockerignore:12–14 do not cover the nested fixture. Use ordered recursive exclusions with the example exception last; no Dockerfile, release workflow, secret value, or local test env file changes. Verify the root config changes by review without altering existing triggers, job graph, or matrix. The binding table leaves workdir unstated for this root-scoped story, so the PRD omits it.",
+  "outOfScope": [
+    "Live streaming of FIX step-2 output (D/ENH-1): it needs new stream names in `@nathapp/fleet-protocol`, the API log store and the web log viewer; FIX output stays in the job bundle.",
+    "The deploy smoke CI job (compose up, migrate, `/api/health`, web login): deferred until the production deployment decision.",
+    "Splitting `apps/runner/src/thread/thread-job-run.ts` (1114 lines) and the API files over 800 lines: a separate refactor feature.",
+    "The API items not in `review-1118-api-fixes`: `GET /agents/:slug/pickup` to POST (A/SEC-11), actors on merged-PR rows (C/ENH-1), and the OpenAPI consumer audit.",
+    "The raw invite token in client paths (D/SEC-5): `apiPath` already percent-encodes the token; moving it out of the page URL would change the emailed link.",
+    "D/BUG-10 for the root `docker-compose.yml`: the example deploy's `deploy.sh` already refuses a URL-unsafe `POSTGRES_PASSWORD`; the root compose is a local stack.",
+    "The refresh cookie's `secure: true`, `sameSite: 'strict'` and `path: '/'`, CSP and security headers, and `NODE_ENV=production` in the images: they belong to the production TLS and deploy work.",
+    "`protocol.file.allow` for git calls other than the clone in `ensureClone` and the fetch in `cleanWorkspace` (for example the config-job checkout and thread publish); `HARDENING_ARGS` is unchanged.",
+    "US-006 only: U+0085, U+00AD and U+2028/U+2029 are not replaced, and the panel's `stage` and `storyId` are not passed through `revealInvisible`.",
+    "Rejecting an approval that contains invisible characters; the web only makes them visible.",
+    "Rotating or changing the values in `apps/api/.env.test`; only the Docker build context changes.",
+    "US-002 only: an identity check before SIGTERM or SIGKILL for a job spawned by this daemon; its pid cannot have been recycled while this daemon watched it.",
+    "US-001 only: `apps/runner/test/live/log-shipping.live.spec.ts` (opt-in with `KODA_LOG_LIVE=1`, not in CI) starts the real CLI against the harness's plain-http git front, so it will refuse that ASSIGN after this feature; an HTTPS git front for the live check is a separate change."
+  ],
+  "routingProfile": "native-codex-ds"
+}

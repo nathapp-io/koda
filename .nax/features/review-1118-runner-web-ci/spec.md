@@ -124,8 +124,9 @@ Read-only symbols:
 - Baseline: `start(from)` computes a local `spawnedHere` (`from === 'prepare' || from === 'reprepare'`);
   `requestCancel`, `chainFixStep` and the start of `watchUntilExit` call `sendTerm(row)` directly; `watchUntilExit`
   calls `escalateKill(row)` on every live tick.
-- Target: a private instance field `spawnedHere`, default `false`, set in `start` from the same expression before
-  `prepareAndSpawn` runs. Config jobs are unaffected (their path returns before the watch and their `pgid` is null).
+- Target: a private instance field `spawnedHere`, default `false`, set from the same expression at the top of the
+  lifecycle, before the config-job early return and before `prepareAndSpawn` runs. A config job can journal a pgid
+  through `onProcess`, so a cancel of a config job started with `prepare` still signals it as today.
   For a job spawned here, signalling is unchanged. For a job not spawned here, `requestCancel` and the watch start
   record the cancel but send no signal; the watch loop, on each tick where the job is alive and `processIdentity`
   (already called there for such a job) returns `ours`, calls `sendTerm` when a cancel is requested and then
@@ -265,6 +266,9 @@ is the number of characters replaced. The function takes a string only; a compon
   through `revealInvisible`.
 - Rejecting an approval that contains invisible characters; the web only makes them visible.
 - Rotating or changing the values in `apps/api/.env.test`; only the Docker build context changes.
+- US-001 only: `apps/runner/test/live/log-shipping.live.spec.ts` (opt-in with `KODA_LOG_LIVE=1`, not in CI) starts the
+  real CLI against the harness's plain-http git front, so it will refuse that ASSIGN after this feature; an HTTPS git
+  front for the live check is a separate change.
 - US-002 only: an identity check before SIGTERM or SIGKILL for a job spawned by this daemon; its pid cannot have been
   recycled while this daemon watched it.
 
