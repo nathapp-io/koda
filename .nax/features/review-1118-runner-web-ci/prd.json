@@ -3,7 +3,7 @@
   "feature": "review-1118-runner-web-ci",
   "branchName": "feat/review-1118-runner-web-ci",
   "createdAt": "2026-11-18T15:42:51.446Z",
-  "updatedAt": "2026-11-18T16:39:17.363Z",
+  "updatedAt": "2026-11-18T16:49:55.465Z",
   "userStories": [
     {
       "id": "US-001",
@@ -180,14 +180,17 @@
         "diagnostics"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two readers reuse one sanitizer, but the output must not leak credentials or tokens, including at the clipping boundary."
+        "reasoning": "Two readers reuse one sanitizer, but the output must not leak credentials or tokens, including at the clipping boundary.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/host-executor.ts",
@@ -200,7 +203,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "75ff99629c00197c6cc9be6c29747fd3b582db3c"
     },
     {
       "id": "US-004",
