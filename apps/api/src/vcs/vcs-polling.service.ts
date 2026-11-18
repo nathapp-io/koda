@@ -11,6 +11,7 @@ import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { runAsSystemWriter } from '../action-context/action-context';
 import { bookkeeping } from '../action-context/audit-coverage';
 import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES } from './providers/pagination';
+import type { IssueFetchResult } from './types';
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
 
@@ -155,13 +156,20 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   private async poll(connection: VcsConnectionWithProjectDomain, active: { cancelled: boolean }): Promise<void> {
     const startTime = new Date();
 
-    try {
-      // Get encryption key from config
-      const encryptionKey = this.vcsConfig.encryptionKey;
-      if (!encryptionKey) {
-        throw new Error('VCS encryption key not configured');
-      }
+    // Get encryption key from config
+    const encryptionKey = this.vcsConfig.encryptionKey;
+    if (!encryptionKey) {
+      // Neither phase can authenticate without the key, so the tick fails as a whole.
+      await this.recordPollFailure(connection, startTime, new Error('VCS encryption key not configured'), active);
+      return;
+    }
 
+    // Review f-39881de6: the issue fetch and the PR status refresh are independent. A rejected fetch (an
+    // unusable continuation, an unreachable forge) leaves the cursor alone and is logged, but the refresh
+    // still runs: a merge request's status does not depend on issue pagination. An import that fails
+    // mid-batch keeps AC-33 and still skips the refresh for that tick.
+    let fetched: IssueFetchResult;
+    try {
       // Decrypt token
       const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
 
@@ -169,12 +177,18 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch issues since last sync
-      const { issues, cursor, capped } = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
-      if (active.cancelled) return;
+      fetched = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
+    } catch (error) {
+      await this.recordPollFailure(connection, startTime, error, active);
+      await this.refreshPrStatuses(connection, encryptionKey, active, startTime);
+      return;
+    }
+    if (active.cancelled) return;
 
+    try {
       // Filter by allowed authors
       const filteredIssues = this.syncService.filterByAllowedAuthors(
-        issues,
+        fetched.issues,
         connection.allowedAuthors,
       );
 
@@ -196,8 +210,8 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
 
       // M10: resume from the newest issue update seen, not from "now", so a capped
       // poll picks up where it stopped. Nothing seen keeps the old cursor.
-      if (cursor) {
-        await bookkeeping('vcs.poll-log', () => this.vcsRepo.updateVcsConnectionLastSynced(connection.id, cursor));
+      if (fetched.cursor) {
+        await bookkeeping('vcs.poll-log', () => this.vcsRepo.updateVcsConnectionLastSynced(connection.id, fetched.cursor));
       }
 
       if (active.cancelled) return;
@@ -207,7 +221,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         syncType: 'polling',
         issuesSynced,
         issuesSkipped,
-        ...(capped ? { errorMessage: cappedWarning(cursor) } : {}),
+        ...(fetched.capped ? { errorMessage: cappedWarning(fetched.cursor) } : {}),
         startedAt: startTime,
         completedAt: new Date(),
       }));
@@ -215,9 +229,23 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       this.logger.debug(
         `Polling complete for connection ${connection.id}: synced=${issuesSynced}, skipped=${issuesSkipped}`,
       );
+    } catch (error) {
+      await this.recordPollFailure(connection, startTime, error, active);
+      return;
+    }
 
-      if (active.cancelled) return;
-      // Sync PR statuses after issue sync completes
+    await this.refreshPrStatuses(connection, encryptionKey, active, startTime);
+  }
+
+  /** Sync PR statuses after issue sync completes. Independent of the issue phase; never throws. */
+  private async refreshPrStatuses(
+    connection: VcsConnectionWithProjectDomain,
+    encryptionKey: string,
+    active: { cancelled: boolean },
+    startTime: Date,
+  ): Promise<void> {
+    if (active.cancelled) return;
+    try {
       const prResult = await this.prSyncService.syncPrStatus(
         connection.project,
         connection,
@@ -228,25 +256,36 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         `PR sync complete for connection ${connection.id}: updated=${prResult.updated}, skipped=${prResult.skipped}`,
       );
     } catch (error) {
-      if (active.cancelled) return;
-      const errorMessage = messageOf(error);
-      this.logger.error(`Polling failed for connection ${connection.id}: ${errorMessage}`);
-      // VCS LOW: the error-path log write is guarded too; an interval callback
-      // that rejects is an unhandled rejection. lastSyncedAt is not moved, so
-      // the next tick retries from the same cursor.
-      try {
-        await bookkeeping('vcs.poll-log', () => this.vcsRepo.createVcsSyncLog({
-          vcsConnectionId: connection.id,
-          syncType: 'polling',
-          issuesSynced: 0,
-          issuesSkipped: 0,
-          errorMessage,
-          startedAt: startTime,
-          completedAt: new Date(),
-        }));
-      } catch (logError) {
-        this.logger.error(`Failed to write the polling sync log for connection ${connection.id}: ${messageOf(logError)}`);
-      }
+      await this.recordPollFailure(connection, startTime, error, active);
+    }
+  }
+
+  /**
+   * Log a failed phase and write its error sync log. VCS LOW: the error-path log write is guarded too;
+   * an interval callback that rejects is an unhandled rejection. lastSyncedAt is not moved, so the next
+   * tick retries from the same cursor.
+   */
+  private async recordPollFailure(
+    connection: VcsConnectionWithProjectDomain,
+    startTime: Date,
+    error: unknown,
+    active: { cancelled: boolean },
+  ): Promise<void> {
+    if (active.cancelled) return;
+    const errorMessage = messageOf(error);
+    this.logger.error(`Polling failed for connection ${connection.id}: ${errorMessage}`);
+    try {
+      await bookkeeping('vcs.poll-log', () => this.vcsRepo.createVcsSyncLog({
+        vcsConnectionId: connection.id,
+        syncType: 'polling',
+        issuesSynced: 0,
+        issuesSkipped: 0,
+        errorMessage,
+        startedAt: startTime,
+        completedAt: new Date(),
+      }));
+    } catch (logError) {
+      this.logger.error(`Failed to write the polling sync log for connection ${connection.id}: ${messageOf(logError)}`);
     }
   }
 }

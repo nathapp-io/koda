@@ -71,6 +71,8 @@ interface BuildOptions {
   findByTicketId?: Mock;
   /** Review B2 (fix round 2): the intent's own write, which a case can make fail. */
   record?: Mock;
+  /** Review f-33f9aae9: the VCS config, so a case can drop the encryption key. */
+  vcsConfig?: unknown;
 }
 
 function build(options: BuildOptions = {}) {
@@ -141,7 +143,7 @@ function build(options: BuildOptions = {}) {
     vcsConnectionService as never,
     { create: vi.fn() } as never,
     vcsLinkExtractorService as never,
-    { encryptionKey: 'k'.repeat(64) } as never,
+    (options.vcsConfig ?? { encryptionKey: 'k'.repeat(64) }) as never,
     undefined,
     outboxService as never,
   );
@@ -610,6 +612,25 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
         provider: 'github', externalRef: 'acme/widgets#42', url: createdPr.url,
       }));
       expect(outboxService.record).not.toHaveBeenCalled();
+    });
+
+    it('Review f-33f9aae9: an unlinked ticket without an encryption key rejects without building a provider', async () => {
+      const { service, repo } = build({ vcsConfig: {} });
+
+      await expect(service.retryPrLink(INTENT)).rejects.toThrow('requires VCS configuration');
+
+      expect(createVcsProvider).not.toHaveBeenCalled();
+      expect(decryptToken).not.toHaveBeenCalled();
+      expect(repo.createTicketLink).not.toHaveBeenCalled();
+    });
+
+    it('Review f-33f9aae9: an already-linked ticket resolves false without an encryption key', async () => {
+      const { service } = build({ vcsConfig: {}, hasPrLink: vi.fn().mockResolvedValue(true) });
+
+      await expect(service.retryPrLink(INTENT)).resolves.toBe(false);
+
+      expect(createVcsProvider).not.toHaveBeenCalled();
+      expect(decryptToken).not.toHaveBeenCalled();
     });
 
     it('uses the active connection for a legacy intent with no recorded target', async () => {

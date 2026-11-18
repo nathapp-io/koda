@@ -273,7 +273,39 @@ describe('VcsPollingService tick (M10)', () => {
       expect(repo.createVcsSyncLog).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
         vcsConnectionId: gitlab.id, issuesSynced: 0, errorMessage: expect.stringContaining('Invalid next page'),
       }));
+      // Review f-39881de6: a rejected issue fetch must not freeze the independent PR status refresh.
+      expect(prSync.syncPrStatus).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: 'proj-1' }),
+        expect.objectContaining({ id: 'conn-1' }),
+        expect.any(String),
+        'system.vcs.poll-issues',
+      );
     });
+  });
+
+  it('Review f-39881de6: a failed issue fetch still refreshes PR statuses on the next tick too', async () => {
+    repo.findVcsConnectionById.mockResolvedValue(connection());
+    fetchIssues.mockRejectedValue(new Error('GitLab unreachable'));
+    service.schedulePolling(connection());
+
+    await tick();
+    await tick();
+
+    expect(repo.createVcsSyncLog).toHaveBeenCalledTimes(2);
+    expect(prSync.syncPrStatus).toHaveBeenCalledTimes(2);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  it('Review f-39881de6: a PR refresh failure is logged and never escapes the tick', async () => {
+    repo.findVcsConnectionById.mockResolvedValue(connection());
+    prSync.syncPrStatus.mockRejectedValue(new Error('PR endpoint down'));
+    service.schedulePolling(connection());
+
+    await tick();
+
+    const logged = loggerError.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).toContain('PR endpoint down');
+    expect(unhandled).not.toHaveBeenCalled();
   });
 
   it('keeps the old cursor when nothing came back', async () => {

@@ -100,6 +100,11 @@ describe('VcsManualSync', () => {
     expect(sync.fullSync).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, connection, 'key');
     expect(provider.fetchIssues).not.toHaveBeenCalled();
   });
+  it('Review f-ee6758e4: an immediate full sync surfaces a failed fetch instead of an empty import', async () => {
+    sync.fullSync.mockRejectedValue(new Error('Invalid next page in the Link header'));
+    await expect(service.syncAll('alpha')).rejects.toThrow('Invalid next page in the Link header');
+    expect(sync.fullSync).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, connection, 'key');
+  });
   it('single prepare applies without fetching twice and ignores authors drift', async () => {
     const apply = await service.prepareSyncIssue('alpha', '7');
     connection.allowedAuthors = '["bob"]';

@@ -363,13 +363,31 @@ describe('VcsSyncService', () => {
       expect(result.createdTickets).toEqual([]);
     });
 
-    it('should surface a top-level error when provider.fetchIssues fails', async () => {
+    it('Review f-ee6758e4: propagates a rejected fetch instead of reporting an empty import', async () => {
       const project = makeProject();
       const connection = makeConnection({ allowedAuthors: '[]' });
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: vi.fn().mockRejectedValue(new Error('Network error')),
+        fetchIssues: vi.fn().mockRejectedValue(new Error('Invalid next page in the Link header')),
+        testConnection: vi.fn(),
+        fetchIssue: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
+      };
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
+
+      await expect(service.fullSync(project, connection, encryptionKey))
+        .rejects.toThrow('Invalid next page in the Link header');
+    });
+
+    it('Review f-ee6758e4: an empty repository still resolves an empty sync, not a failure', async () => {
+      const project = makeProject();
+      const connection = makeConnection({ allowedAuthors: '[]' });
+      const encryptionKey = 'test-key-32-chars-exactly-padded!!';
+
+      const mockProvider = {
+        fetchIssues: vi.fn().mockResolvedValue({ issues: [], cursor: null, capped: false }),
         testConnection: vi.fn(),
         fetchIssue: vi.fn(),
         getPullRequestStatus: vi.fn(),
@@ -379,9 +397,7 @@ describe('VcsSyncService', () => {
 
       const result = await service.fullSync(project, connection, encryptionKey);
 
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toContain('Sync failed');
-      expect(result.issuesSynced).toBe(0);
+      expect(result).toMatchObject({ issuesSynced: 0, issuesSkipped: 0, createdTickets: [], errors: [] });
     });
   });
 });
