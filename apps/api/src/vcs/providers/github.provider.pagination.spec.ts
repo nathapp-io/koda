@@ -78,6 +78,28 @@ describe('GitHubProvider.fetchIssues pagination (M10)', () => {
     expect(result.issues).toHaveLength(1);
   });
 
+  it('Review f-c80d6428: follows a relative continuation instead of capping after page one', async () => {
+    get
+      .mockResolvedValueOnce(page([issue(1, '2026-09-01T00:00:00Z')], '/repos/o/r/issues?page=2'))
+      .mockResolvedValueOnce(page([issue(2, '2026-09-02T00:00:00Z')]));
+
+    const result = await provider.fetchIssues();
+
+    expect(get).toHaveBeenNthCalledWith(2, `${API}/repos/o/r/issues?page=2`, { headers: { Authorization: 'Bearer tok' }, params: undefined });
+    expect(result.issues.map((i) => i.number)).toEqual([1, 2]);
+    expect(result.capped).toBe(false);
+  });
+
+  it('Review f-c80d6428: caps on a continuation that cannot be resolved', async () => {
+    get.mockResolvedValueOnce(page([issue(1, '2026-09-01T00:00:00Z')], 'http://['));
+
+    const result = await provider.fetchIssues();
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(result.capped).toBe(true);
+    expect(result.issues).toHaveLength(1);
+  });
+
   it('reports a null cursor when nothing came back', async () => {
     get.mockResolvedValueOnce(page([]));
     await expect(provider.fetchIssues()).resolves.toEqual({ issues: [], cursor: null, capped: false });

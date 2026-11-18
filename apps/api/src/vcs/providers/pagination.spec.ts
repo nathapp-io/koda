@@ -1,4 +1,4 @@
-import { inclusiveSince, laterOf, nextLinkUrl, nextPageFromLink, nextPageNumber, sameOrigin } from './pagination';
+import { inclusiveSince, laterOf, nextLinkUrl, nextPageFromLink, nextPageNumber, resolveLinkTarget, sameOrigin } from './pagination';
 
 describe('pagination helpers (M10)', () => {
   it('reads rel="next" from a Link header', () => {
@@ -13,6 +13,21 @@ describe('pagination helpers (M10)', () => {
 
   it('does not treat rel="next-page" as a next link', () => {
     expect(nextLinkUrl('<https://api.github.com/x?page=2>; rel="next-page"')).toBeNull();
+  });
+
+  it('Review f-acc2bf15: decodes a quoted-pair relation before comparing it', () => {
+    expect(nextLinkUrl('<https://api.github.com/x?page=2>; rel="n\\ext"')).toBe('https://api.github.com/x?page=2');
+    expect(nextLinkUrl('<https://api.github.com/x?page=2>; rel="l\\ast next"')).toBe('https://api.github.com/x?page=2');
+    expect(nextLinkUrl('<https://api.github.com/x?page=2>; rel="n\\ext-page"')).toBeNull();
+  });
+
+  it('Review f-c80d6428: resolves a relative target against the request that advertised it', () => {
+    const request = 'https://api.github.com/repos/o/r/issues?page=2';
+    expect(resolveLinkTarget('/repos/o/r/issues?page=3', request)).toBe('https://api.github.com/repos/o/r/issues?page=3');
+    expect(resolveLinkTarget('?page=3', request)).toBe('https://api.github.com/repos/o/r/issues?page=3');
+    expect(resolveLinkTarget('https://api.github.com/x', request)).toBe('https://api.github.com/x');
+    expect(resolveLinkTarget('//evil.example/x', request)).toBe('https://evil.example/x');
+    expect(resolveLinkTarget('http://[', request)).toBeNull();
   });
 
   it.each([['3', 3], ['', null], [undefined, null], ['0', null], ['abc', null]])('X-Next-Page %j → %j', (header, expected) => {

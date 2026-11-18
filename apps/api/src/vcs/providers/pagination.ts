@@ -24,11 +24,28 @@ function* nextLinkUrls(linkHeader: string | undefined): Generator<string, void> 
   for (const [, target, params] of linkHeader.matchAll(/(?:^|,)\s*<([^<>]*)>((?:[^<>,"]|"(?:[^"\\]|\\.)*")*)/g)) {
     for (const [, name, quoted, token] of params.matchAll(/;\s*([^\s=;]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s;]+)))?/g)) {
       if (name.toLowerCase() !== 'rel') continue;
-      if ((quoted ?? token ?? '').toLowerCase().split(/\s+/).includes('next')) yield target;
+      // Review f-acc2bf15: the grammar above accepts backslash escapes, so decode them before comparing —
+      // `rel="n\ext"` is the quoted-pair spelling of `next`.
+      const relation = quoted === undefined ? (token ?? '') : quoted.replace(/\\(.)/g, '$1');
+      if (relation.toLowerCase().split(/\s+/).includes('next')) yield target;
       break; // Ignore duplicate rel parameters on the same link.
     }
   }
   return null;
+}
+
+/**
+ * Review f-c80d6428: `target` resolved against the request that advertised it, or null when it is not a
+ * usable URL. A relative `Link` target is legal (RFC 8288) and stays on the current origin; before this a
+ * relative continuation read as cross-origin, so GitHub's issue fetch capped after page one and a manual
+ * sync reported a partial import as success.
+ */
+export function resolveLinkTarget(target: string, base: string): string | null {
+  try {
+    return new URL(target, base).toString();
+  } catch {
+    return null;
+  }
 }
 
 /**

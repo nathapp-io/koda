@@ -66,6 +66,8 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
     `<${api}/projects/acme%2Fapp/merge_requests?state=opened&page=2>; rel="next"`,
     '<?page=2>; rel="next"',
     '<https://other.example/unrelated?page=2>; rel="next"',
+    // Review f-acc2bf15: a quoted-pair spelling of the relation is still `next`.
+    '<?page=2>; rel="n\\ext"',
   ])('uses only the page number from the next Link %s', async (link) => {
     get
       .mockResolvedValueOnce({

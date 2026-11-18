@@ -6905,6 +6905,11 @@ describeIntegration('VCS manual issue sync lifecycle', () => {
     await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
     await post().expect(404);
   });
+  it('Review f-a8a4b124: a rejected full import answers 500 and imports nothing', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockRejectedValue(new Error('Invalid next page in Link header'));
+    await post().expect(500);
+    expect(await fixtureDb(app).ticket.count({ where: { project: { slug } } })).toBe(0);
+  });
 });
 
 describeIntegration('fleet AGENT dispatch route (US-004)', () => {

@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextLinkUrl, sameOrigin } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextLinkUrl, resolveLinkTarget, sameOrigin } from './pagination';
 
 /**
  * GitHub REST API response for an issue
@@ -117,16 +117,21 @@ export class GitHubProvider implements IVcsProvider {
     };
 
     for (let pages = 0; url && pages < MAX_ISSUE_PAGES; pages++) {
-      const response = await this.httpClient.get(url, { headers, params });
+      const requested: string = url;
+      const response = await this.httpClient.get(requested, { headers, params });
       for (const item of response.data as GitHubIssueResponse[]) {
         // PRs come back from the issues endpoint: they advance the cursor but are not issues.
         cursor = laterOf(cursor, item.updated_at);
         if (!item.pull_request) issues.push(this.mapGitHubIssueToVcsIssue(item));
       }
-      url = nextLinkUrl(response.headers?.['link']);
+      const next = nextLinkUrl(response.headers?.['link']);
       params = undefined;
-      if (url && !sameOrigin(url, this.apiBaseUrl)) {
-        // Never follow a link that would carry the token to another host.
+      // Review f-c80d6428: a relative continuation is legal (RFC 8288), so resolve it against the request
+      // that advertised it before the origin check. An unresolvable or cross-origin target is never
+      // followed — the token must not leave the origin — and the page is reported as capped so the caller
+      // resumes from the cursor instead of reading the truncation as the end of the issues.
+      url = next === null ? null : resolveLinkTarget(next, requested);
+      if (next !== null && (url === null || !sameOrigin(url, this.apiBaseUrl))) {
         return { issues, cursor, capped: true };
       }
     }
