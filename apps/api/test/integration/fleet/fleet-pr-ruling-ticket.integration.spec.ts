@@ -66,12 +66,14 @@ import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
     const rows = await linked(j.id); expect(rows).toHaveLength(1);
     expect(await db.comment.count({ where: { ticketId: rows[0].ticketId, type: 'RULING' } })).toBe(2);
   });
-  it('AC-9: edit is immutable but delete is allowed and preserves commentId', async () => {
+  it('AC-9: the ruling comment is immutable and undeletable, and the ruling keeps its commentId', async () => {
     const j = await job(); const ruling = data<{ id: string; commentId: string }>(await post(j.id).expect(201));
     const response = await request(app.getHttpServer()).patch(`/api/comments/${ruling.commentId}`).set(auth()).send({ body: 'changed' }).expect(409);
     expect(JSON.stringify(response.body)).toContain('Workflow comments cannot be edited');
-    await request(app.getHttpServer()).delete(`/api/comments/${ruling.commentId}`).set({ Authorization: `Bearer ${world.tokens.root}` }).expect(204);
-    expect(await db.comment.findUnique({ where: { id: ruling.commentId } })).toMatchObject({ deletedAt: expect.any(Date) });
+    // Review-1118 US-008: a workflow comment is evidence, so even the Owner cannot delete it.
+    const deleted = await request(app.getHttpServer()).delete(`/api/comments/${ruling.commentId}`).set({ Authorization: `Bearer ${world.tokens.root}` }).expect(409);
+    expect(JSON.stringify(deleted.body)).toContain('Workflow comments cannot be deleted');
+    expect(await db.comment.findUnique({ where: { id: ruling.commentId } })).toMatchObject({ deletedAt: null });
     expect(await db.fleetPrRuling.findUnique({ where: { id: ruling.id } })).toMatchObject({ commentId: ruling.commentId });
   });
   it.each(['comment', 'ticket'])('AC-10/13: %s failure rolls back every write', async (failure) => {
