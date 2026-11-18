@@ -69,6 +69,32 @@ describe('AGENT result', () => {
     expect(await readAgentResult(dir)).toEqual({ ok: false, stderrLine: 'x'.repeat(300) });
   });
 
+  test('US-003 AC-6: redacts bearer credentials from AGENT stderr', async () => {
+    await writeFile(join(dir, 'nax.stderr'), 'Authorization: Bearer abc.def.ghi\n');
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    expect(failure.ok ? undefined : failure.stderrLine).toBeTypeOf('string');
+    expect(failure.ok ? '' : failure.stderrLine).not.toContain('abc.def.ghi');
+  });
+
+  test('US-003 AC-7: sanitizes secrets beyond the former AGENT clip boundary', async () => {
+    await writeFile(join(dir, 'nax.stderr'), `${'x'.repeat(290)} token=SECRETVALUE123456\n`);
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    const line = failure.ok ? '' : failure.stderrLine ?? '';
+    expect(line).not.toContain('SECRETVALUE');
+    expect(line).not.toContain('SECR');
+  });
+
+  test('US-003 AC-8: sanitizes then caps long AGENT stderr at 300 characters', async () => {
+    await writeFile(join(dir, 'nax.stderr'), `\u001b[31m${'x'.repeat(1000)}\n`);
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    const line = failure.ok ? '' : failure.stderrLine ?? '';
+    expect(line).not.toContain('\u001b');
+    expect(line.length).toBeLessThanOrEqual(300);
+  });
+
   test('AC-5 retains only the UTF-8 output tail at the output bound', () => {
     const output = 'a'.repeat(20_000);
     const fitted = fitAgentResult({ ...sample, output });

@@ -7,6 +7,7 @@ import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
 import { withoutCredentialVars } from '../credentials/credential-env';
+import { sanitizeDiagnostic } from '../diagnostics';
 import { errorMessage } from '../errors';
 import type { JobRow } from '../journal/types';
 import type { JobLogSources } from '../logs/types';
@@ -401,7 +402,10 @@ export class HostExecutor implements JobExecutor {
     let stderrLine: string | null = null;
     try {
       const stderr = await readFile(join(jobDir, 'fix.stderr'), 'utf8');
-      stderrLine = stderr.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== '')?.slice(0, 200) ?? null;
+      const firstLine = stderr.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== '');
+      const sanitized = firstLine === undefined || /^\p{Cc}+$/u.test(firstLine)
+        ? '' : sanitizeDiagnostic(firstLine).slice(0, 200);
+      stderrLine = sanitized || null;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }

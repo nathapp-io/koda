@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AGENT_RESULT_LIMITS, type AgentJobResult } from '@nathapp/fleet-protocol';
 import { clip, formatCost } from '../../watcher/status-snapshot';
 import { tailBytes } from '../config-job/result-fit';
+import { sanitizeDiagnostic } from '../../diagnostics';
 
 export const AGENT_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -62,14 +63,14 @@ async function stderrLine(jobDir: string): Promise<string | undefined> {
     const inspect = (text: string): string | undefined => {
       for (const character of text) {
         if (character === '\n') {
-          if (nonEmpty) return clip(line.endsWith('\r') ? line.slice(0, -1) : line, 300);
+          if (nonEmpty) return clip(sanitizeDiagnostic(line.endsWith('\r') ? line.slice(0, -1) : line), 300);
           line = '';
           nonEmpty = false;
           continue;
         }
-        if (line.length < 301) line += character;
+        if (line.length < 4_000) line += character;
         if (character.trim().length > 0) nonEmpty = true;
-        if (nonEmpty && line.length >= 301) return clip(line, 300);
+        if (nonEmpty && line.length >= 4_000) return clip(sanitizeDiagnostic(line), 300);
       }
       return undefined;
     };
@@ -84,7 +85,7 @@ async function stderrLine(jobDir: string): Promise<string | undefined> {
     }
     const final = inspect(decoder.end());
     if (final !== undefined) return final;
-    return nonEmpty ? clip(line.endsWith('\r') ? line.slice(0, -1) : line, 300) : undefined;
+    return nonEmpty ? clip(sanitizeDiagnostic(line.endsWith('\r') ? line.slice(0, -1) : line), 300) : undefined;
   } catch {
     return undefined;
   } finally {

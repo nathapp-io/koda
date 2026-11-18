@@ -274,6 +274,38 @@ describe('HostExecutor FIX outcome reader (US-011)', () => {
     expect(await w.ex.readFixOutcome(w.row)).toMatchObject({ stderrLine: 'x'.repeat(200) });
   });
 
+  test('US-003 AC-1/2: redacts URL credentials from FIX stderr', async () => {
+    const w = await fixWorld();
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), 'push failed: https://x-access-token:ghs_abcdefghij@github.com/o/r.git\n');
+    const result = await w.ex.readFixOutcome(w.row);
+    expect(result.stderrLine).toContain('[redacted]');
+    expect(result.stderrLine).not.toContain('ghs_abcdefghij');
+  });
+
+  test('US-003 AC-3: strips ANSI formatting from FIX stderr', async () => {
+    const w = await fixWorld();
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), '\u001b[31mfailed\u001b[0m\n');
+    expect((await w.ex.readFixOutcome(w.row)).stderrLine).toBe('failed');
+  });
+
+  test('US-003 AC-4: caps sanitized FIX stderr at 200 characters', async () => {
+    const w = await fixWorld();
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), `\u001b[31m${'x'.repeat(500)}\n`);
+    const line = (await w.ex.readFixOutcome(w.row)).stderrLine ?? '';
+    expect(line).not.toContain('\u001b');
+    expect(line.length).toBeLessThanOrEqual(200);
+  });
+
+  test('US-003 AC-5: control-only first FIX stderr line returns null', async () => {
+    const w = await fixWorld();
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), '\u001b\u0007\u001f\u0085\nmeaningful later line\n');
+    expect((await w.ex.readFixOutcome(w.row)).stderrLine).toBeNull();
+  });
+
   test('AC-10: missing fix output files produce the none outcome', async () => {
     const w = await fixWorld();
     expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'none', logPath: null, pushedSha: null, fixReady: null, stderrLine: null });

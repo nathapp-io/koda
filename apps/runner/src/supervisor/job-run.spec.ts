@@ -506,6 +506,13 @@ describe('FIX verdict (US-012)', () => {
     expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'runner error: fix marker unreadable' });
   });
 
+  test('US-003 AC-9: controls-only stderr falls back to fix not pushed after review and fix', async () => {
+    const b = await judged({ outcome: { kind: 'none', logPath: null, pushedSha: null, stderrLine: null } });
+    expect(b.ex.calls).toContain('readReviewPosted:j1');
+    expect(b.ex.calls).toContain('readFixOutcome:j1');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'fix not pushed' });
+  });
+
   test('AC-13: unreadable fix outcome falls back to fix not pushed', async () => {
     const b = build('FIX'); b.ex.reviewPosted = true; b.ex.fixStepStarted = true; b.ex.dieAfterTicks(1);
     b.ex.readFixOutcome = async () => { throw new Error('fix unreadable'); };
