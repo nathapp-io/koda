@@ -1,5 +1,6 @@
 import type { Mock, Mocked } from 'vitest';
 import { HttpException } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { ProjectsService } from './projects.service';
 import { ProjectAccessService } from './project-access.service';
 import type { PermissionService } from '../permissions/permission.service';
@@ -37,6 +38,7 @@ describe('ProjectsService', () => {
   let events: { emitAsync: Mock };
   const recordedEntries: unknown[] = [];
   const mockAudit = {
+    isInTransaction: vi.fn(() => false),
     audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
       const result = await fn();
       recordedEntries.push(entriesOf(result));
@@ -46,6 +48,7 @@ describe('ProjectsService', () => {
 
   beforeEach(() => {
     recordedEntries.length = 0;
+    mockAudit.isInTransaction.mockReset().mockReturnValue(false);
     mockAudit.audited.mockReset().mockImplementation(async (fn, entriesOf) => {
       const result = await fn();
       recordedEntries.push(entriesOf(result));
@@ -405,6 +408,24 @@ describe('ProjectsService', () => {
         expect(error?.getStatus()).toBe(400);
       });
 
+      it.each([
+        ['slug race', ['slug'], 'slug'],
+        ['key race', ['key'], 'key'],
+        ['slug index-name race', 'Project_slug_key', 'slug'],
+      ])('maps audited create %s to the matching conflict field', async (_label, target, field) => {
+        mockProjectRepo.findBySlug.mockResolvedValue(null);
+        mockProjectRepo.findByKey.mockResolvedValue(null);
+        mockProjectRepo.createProject.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('duplicate', {
+          code: 'P2002', clientVersion: 'test', meta: { target },
+        }));
+
+        const error = await rejectionOf(service.create({ name: 'Beta', slug: 'beta', key: 'BETA' }));
+
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error?.getStatus()).toBe(409);
+        expect(error).toMatchObject({ args: { field }, prefix: 'projects' });
+      });
+
       it('creates the project when slug and key are free', async () => {
         mockProjectRepo.findBySlug.mockResolvedValue(null);
         mockProjectRepo.findByKey.mockResolvedValue(null);
@@ -454,6 +475,22 @@ describe('ProjectsService', () => {
         expect(error).toBeInstanceOf(ConflictAppException);
         expect(error?.getStatus()).toBe(409);
         expect(mockProjectRepo.updateBySlug).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['slug race', ['slug'], 'slug'],
+        ['key race', ['key'], 'key'],
+      ])('maps audited update %s to the matching conflict field', async (_label, target, field) => {
+        mockProjectRepo.findBySlug.mockResolvedValue(activeProject);
+        mockProjectRepo.updateBySlug.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('duplicate', {
+          code: 'P2002', clientVersion: 'test', meta: { target },
+        }));
+
+        const error = await rejectionOf(service.update('alpha', { name: 'Renamed' }));
+
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error?.getStatus()).toBe(409);
+        expect(error).toMatchObject({ args: { field }, prefix: 'projects' });
       });
 
       it('allows re-submitting the project’s own slug and key', async () => {
