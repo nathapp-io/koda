@@ -3,7 +3,7 @@
   "feature": "review-1118-runner-web-ci",
   "branchName": "feat/review-1118-runner-web-ci",
   "createdAt": "2026-11-18T15:42:51.446Z",
-  "updatedAt": "2026-11-18T15:42:51.446Z",
+  "updatedAt": "2026-11-18T16:25:59.909Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,17 @@
         "git"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The policy spans daemon, assignment, worktree and git execution seams with authenticated transport and credential-helper compatibility; strict isolation protects the trust boundary."
+        "reasoning": "The policy spans daemon, assignment, worktree and git execution seams with authenticated transport and credential-helper compatibility; strict isolation protects the trust boundary.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/executor/workspace.ts",
@@ -101,7 +104,11 @@
       "workdirSource": "stated",
       "suggestedCriteria": [
         "AC-15 [unit] When allowLocalCloneUrls is off and a daemon processes an ASSIGN with an http: or file: repo.cloneUrl, no runner journal job row exists for that ASSIGN's new job ID and lease epoch."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5a39877e48afa34031c07b51a32c2a6525ab288e"
     },
     {
       "id": "US-002",
@@ -143,7 +150,10 @@
         "apps/runner/test/helpers/fake-executor.ts"
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -183,7 +193,10 @@
         "apps/runner/src/executor/agent-job/agent-result.spec.ts"
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -231,7 +244,10 @@
         "apps/web/tests/server/auth-me-route.spec.ts"
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -300,7 +316,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -363,7 +382,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -401,7 +423,10 @@
         "apps/api/test/unit/tooling/ci-integration-shards.spec.ts"
       ],
       "workdir": ".",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This is a bug-fix and hardening bundle for the 2026-11-14 whole-repo review, checked against the spec's main reference 64fea7d27. The sibling #479 covers API fixes; no API or CLI implementation changes are needed here. The repository is a Bun/Turborepo TypeScript monorepo. The web implementation is Nuxt 4 SSR with Vue, Nitro, and Jest, not Next.js (apps/web/package.json:5, apps/web/package.json:35); runner tests use Bun. No codebase-memory tool is exposed in this session, so discovery used direct source reads and text search. No database, journal schema, fleet protocol, cookie format, or generated client migration is required. Implement US-004 before US-005; the other stories are independent, but US-001 and US-003 share host-executor.ts and host-executor.spec.ts, and US-005 and US-006 append to both locale files, so preserve sibling edits when merging.\n\nUS-001 — apps/runner/src/executor/workspace.ts:7 accepts https/http/file today; :37 validates before filesystem/git work, then clones or repoints a reused origin, and :60 fetches before doing the existing reset/clean/worktree prune. apps/runner/src/executor/git.ts:11 and :65–85 put invocation-level configuration in the spawned argv; keep the caller's subcommand at args[0] for GitError and recording stubs, and preserve credential helper ordering. apps/runner/src/supervisor/assign-parser.ts:281 validates the primary repo, whereas :143 independently restricts projectRepos. apps/runner/src/supervisor/command-handler.ts:118–128 rejects and records the ack before journal insertion. apps/runner/src/daemon/daemon.ts:219, :236 and :264 are the three injection points (default executor, nax-mode thread host, command handler). The common host prepare path calls ensureClone and cleanWorkspace (apps/runner/src/executor/host-executor.ts:101–112); thread preparation constructs an injectable input (apps/runner/src/thread/thread-job-run.ts:533–546), and the thread worktree invokes ensureClone only for a missing local clone (apps/runner/src/thread/thread-worktree.ts:175–194). Its separate fetchOrigin and project mirrors (apps/runner/src/thread/project-code/mirror-store.ts:115) are not part of the transport change. Production entrypoints only pass existing dependencies (apps/runner/src/main.ts:68, apps/runner/src/commands/run.ts:28); the runner's serverUrl policy is a separate setting. Reconcile real-git and fake fixtures together: use workspace.spec.ts, git.spec.ts, daemon.spec.ts, host-executor.spec.ts and thread-job-run/worktree tests for coverage; preserve existing HTTPS, helper, and local fixture assertions by injecting the test-only option where needed. The existing project-repo parser regression is at apps/runner/src/supervisor/assign-parser-thread.spec.ts:274. The loopback integration harness needs the injection at apps/runner/test/integration/harness/world.ts:295. Its opt-in live consumer (apps/runner/test/live/log-shipping.live.spec.ts:37–53, :88–90) instead launches the production entrypoint, bypassing `TestRunner.start`. The harness supplies its plain HTTP front as `GITHUB_API_URL` (apps/runner/test/integration/harness/world.ts:128–135; apps/runner/test/integration/harness/git-front.ts:56), and API placement preserves that scheme in ASSIGN (apps/api/src/fleet/jobs/placement.service.ts:321; apps/api/src/fleet/git-broker/clone-url.ts:2–6, :29–34). Preserve the live CLI regression with a trusted HTTPS fixture for that test, without adding a production opt-in or changing the API's URL construction. If a deployment still assigns non-HTTPS job remote URLs, migrate those repository settings to HTTPS before rolling out; there is intentionally no production override. Normal host preparation already reconciles an existing clone's origin, so there is no blanket reclone or workspace migration.\n\nUS-002 — The baseline computes spawnedHere in the lifecycle called by start (apps/runner/src/supervisor/job-run.ts:99–139); the target records it in start before any spawn. requestCancel writes the durable journal timestamp and currently sends immediately (:179–205); watch entry sends before checking ownership and escalation currently runs on a live unknown tick (:425–453). Gate the readopted signalling paths using the existing per-tick identity result, not a cached prior result or a new check. Keep grace relative to the successful first TERM attempt and keep the spawned FIX handoff's reset of signal bookkeeping (:400–422). Do not couple to other identity-based stop paths such as kill-if-ours.ts. The fake has a static unknown flag (apps/runner/test/helpers/fake-executor.ts:29, :89); script transitions with a time/tick-based processIdentity override as in apps/runner/src/supervisor/job-run.spec.ts:81–95, and use onKill to control process lifetime. Existing spawned cancellation assertions are at :662–696; the already-recorded readopt regression is at :943. Use isolated fakes rather than live process groups, assert after callbacks (watcher error handling can swallow assertions), and test cancellation before the next tick as well as ownership changes between TERM and KILL. Persisted cancelled rows require no migration. The spec's baseline note that config `pgid` is null is true only at RUNNING transition: `runConfig` later journals detached local subprocess groups through `onProcess` (apps/runner/src/supervisor/job-run.ts:321, :335). Set the instance field before the config branch; otherwise the new `requestCancel` guard would regress signalling of those locally spawned groups.\n\nUS-003 — apps/runner/src/executor/host-executor.ts:365–399 reads FIX output and currently clips the selected line; apps/runner/src/executor/agent-job/agent-result.ts:54–110 streams UTF-8 chunks for missing, invalid or oversized AGENT stdout and clips before returning the diagnostic. Both paths feed FAILED verdicts via apps/runner/src/supervisor/job-run.ts:466–480 and :514–524. Reuse apps/runner/src/diagnostics.ts:8–23 without modification; sanitize before the final per-reader length bound. For AGENT, select the first raw non-empty line once, then sanitize, including EOF and the early bounded return. Do not use sanitized undefined as the scanner's 'keep reading' sentinel for a line already found; do not scan later lines or buffer the whole file. Keep the decoder, bounded string, and surrogate-safe clip at apps/runner/src/watcher/status-snapshot.ts:21. Preserve existing tests: despite the spec's Modifies note, long lines already have regressions at apps/runner/test/unit/host-executor.spec.ts:272 and apps/runner/src/executor/agent-job/agent-result.spec.ts:68; the latter also exercises Unicode and a large trailing file at :126–135. Existing FIX fallback assertions are at apps/runner/src/supervisor/job-run.spec.ts:496 and :509. No change to log/bundle bytes or retroactive rewrite of failure reasons already stored by the server.\n\nUS-004 — apps/web/server/api/auth/me.get.ts:9–41 short-circuits without the access cookie, currently collapses all upstream HTTP errors, and supports direct data and nested data.user envelopes. apps/web/server/utils/api.ts:77–115 uses $fetch.raw with ignoreResponseError so a returned status and a rejected transport call are distinct; leave the shared forwarding utility and cookie functions unchanged. apps/web/composables/useAuth.ts:42 normalizes fetch status shapes; :58–90 establishes identity via login/register/acceptInvite; :108–129 uses useRequestFetch for SSR cookie forwarding and browser $fetch otherwise. Keep the boolean interface and expose a separate Nuxt useState ref. No new credentials are stored or set on probe failure. Existing refreshSession is separately tri-state (:140–162), used by thread stream composables (apps/web/composables/useThread.ts:31, apps/web/composables/useWorkspaceThread.ts:46); leave refresh/logout semantics unchanged. Mock Nitro globals using apps/web/tests/server/logout-route.spec.ts:30–61 and extend apps/web/tests/useAuth.spec.ts:169–200 without weakening existing apps/web/tests/composables/useAuth.spec.ts:219–277 assertions.\n\nUS-005 — The consumer is apps/web/middleware/auth.global.ts:4–32: it skips /invite/, probes only when the user is absent, retains root and non-root login redirect differences, and sanitizes the authenticated guest-only redirect through safeRedirectPath. Only a protected route with no authenticated user and an unavailable probe takes the fatal Nuxt 503 path; preserve the full target path, including query, for retry, and keep guest and signed-in behavior. The root error entrypoint changes all Nuxt error presentation; keep it a thin delegate so the full 503/generic UI remains component-testable and translatable. apps/web/tests/i18n/used-keys-exist.spec.ts:6, :35 scans components but not root error.vue. Mock middleware globals using apps/web/tests/middleware/auth.spec.ts:68–72, :224–249; inject clearError via apps/web/tests/helpers/mount-sfc.ts:138, :233–236 for component cases. Reasons not to redirect on transient error: a fresh SSR page starts without hydrated user state despite retaining cookies, and a client navigation needs a fatal error to reliably render the error page.\n\nUS-006 — The fleet form enters via apps/web/components/approvals/ApprovalRequestPanel.vue:16, and the thread card is shared by apps/web/pages/threads/[id].vue:110 and apps/web/pages/[project]/threads/[id].vue:164. The bash panel currently interpolates either command or rawDetail and context fields (apps/web/components/approvals/ApprovalRequestBashPanel.vue:14–42); BashApprovalPayload.rawDetail is nullable and parsed fallback data is checked at apps/web/lib/fleet-approvals.ts:61–94. Thread text is interpolated and optional command/reason are guarded (apps/web/components/fleet/threads/ThreadApprovalCard.vue:91–107); preserve routing, affordances, decision body, and delivery/retry behavior. Reveal only displayed input and derive the count from the same reactive display values; do not pass null into the helper, count hidden raw fallback, or reinterpret markers as HTML. This is presentation only, not payload normalization or an approval-rule change. Extend the existing mounted cases at apps/web/tests/components/approval-request-fleet-panels.spec.ts:140 and apps/web/tests/components/thread-approval-card.spec.ts:135 and update the exact key set at apps/web/tests/i18n/fleet-locale-parity.spec.ts:218. Keep the translations in both locales and avoid Vue i18n metacharacters in the warning strings.\n\nUS-007 — .github/workflows/ci.yml:31–33 currently exports Turbo secrets at workflow level, and tag-based uses start at :46; scope the existing secrets to the seven installing jobs and preserve the read-only changes job and result-only integration aggregator. The release workflow provides existing permission/pin patterns (.github/workflows/release.yml:17, :103–111). The API regression reads workflow text (apps/api/test/unit/tooling/ci-integration-shards.spec.ts:9–32) and depends on exact anchors and the shard matrix at .github/workflows/ci.yml:185–197 and :264; no new runtime tests for the permissions, pins, secrets, or ignore rules. The release builds use root context (.github/workflows/release.yml:182, :224); apps/api/Dockerfile:29 copies the app tree, so root-only patterns at .dockerignore:12–14 do not cover the nested fixture. Use ordered recursive exclusions with the example exception last; no Dockerfile, release workflow, secret value, or local test env file changes. Verify the root config changes by review without altering existing triggers, job graph, or matrix. The binding table leaves workdir unstated for this root-scoped story, so the PRD omits it.",
