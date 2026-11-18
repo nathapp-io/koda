@@ -10,7 +10,7 @@ import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { noopLastErrors } from '../../../test/helpers/outbox-record';
 import type { AuditRecordInput } from '../../audit/audit-recorder.service';
 
-const claim = { id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: 'a'.repeat(40), jobId: null, outcome: 'pending', createdAt: new Date(0), updatedAt: new Date(0) } as FleetPrReviewRecord;
+const claim: FleetPrReviewRecord = { id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: 'a'.repeat(40), jobId: null, outcome: 'pending', followUpEventId: 'fix-42:3:fix-follow-up', createdAt: new Date(0), updatedAt: new Date(0) };
 function setup(error?: unknown) {
   const audits: AuditRecordInput[] = [];
   const reviews = {

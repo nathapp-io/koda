@@ -14,7 +14,7 @@ const repo = { id: 'r1', projectId: 'p1', owner: 'o', name: 'n', autoReviewEnabl
 const pr = (number: number, headSha = `sha-${number}`): OpenPullRequest => ({ number, headSha, draft: false,
   headRepoFullName: 'o/n', updatedAt: NOW });
 const row = (number = 3, headSha = `sha-${number}`): FleetPrReviewRecord => ({ id: `row-${number}`, repoId: 'r1',
-  prNumber: number, headSha, outcome: 'pending', jobId: null, createdAt: NOW, updatedAt: NOW });
+  prNumber: number, headSha, outcome: 'pending', jobId: null, followUpEventId: null, createdAt: NOW, updatedAt: NOW });
 
 function setup(errors: unknown[] = []) {
   const rows = new Map<string, FleetPrReviewRecord>();

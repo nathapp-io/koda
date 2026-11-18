@@ -252,6 +252,7 @@ export class GitLabProvider implements IVcsProvider {
    * header (fix round 2): the page number is requested from the configured endpoint, never from the header's URL.
    */
   async findOpenPullRequestByBranch(branchName: string): Promise<VcsPrStatus | null> {
+    const endpoint = `${this.baseUrl}/merge_requests`;
     let page: number | null = 1;
 
     for (let pages = 0; page !== null; pages++) {
@@ -261,7 +262,7 @@ export class GitLabProvider implements IVcsProvider {
         );
       }
 
-      const response = await this.httpClient.get(`${this.baseUrl}/merge_requests`, {
+      const response = await this.httpClient.get(endpoint, {
         headers: this.authHeaders,
         params: { state: 'opened', source_branch: branchName, per_page: ISSUES_PER_PAGE, page },
       });
@@ -271,7 +272,11 @@ export class GitLabProvider implements IVcsProvider {
       );
       if (mergeRequest) return this.mapGitLabMrToVcsPrStatus(mergeRequest);
 
-      page = nextPageNumber(response.headers?.['x-next-page']) ?? nextPageFromLink(response.headers?.['link']);
+      const nextPageHeader = response.headers?.['x-next-page'];
+      page = nextPageNumber(nextPageHeader) ?? nextPageFromLink(response.headers?.['link'], endpoint);
+      if (page === null && nextPageHeader?.trim()) {
+        throw new Error('Invalid next page in X-Next-Page header');
+      }
     }
 
     return null;

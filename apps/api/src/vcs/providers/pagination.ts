@@ -15,11 +15,13 @@ export const MAX_MR_LOOKUP_PAGES = 10;
 /** The rel="next" URL from a GitHub `Link` header, or null. */
 export function nextLinkUrl(linkHeader: string | undefined): string | null {
   if (!linkHeader) return null;
-  for (const part of linkHeader.split(',')) {
-    // The trailing lookahead stops `rel="next-page"` (or any other rel token that
-    // merely starts with `next`) from matching a real rel="next".
-    const match = part.match(/<([^>]+)>\s*;\s*rel\s*=\s*"?next"?(?![-\w])/);
-    if (match) return match[1];
+  // Commas can also occur inside the target URI or a quoted parameter.
+  for (const [, target, params] of linkHeader.matchAll(/(?:^|,)\s*<([^<>]*)>((?:[^<>,"]|"(?:[^"\\]|\\.)*")*)/g)) {
+    for (const [, name, quoted, token] of params.matchAll(/;\s*([^\s=;]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s;]+)))?/g)) {
+      if (name.toLowerCase() !== 'rel') continue;
+      if ((quoted ?? token ?? '').toLowerCase().split(/\s+/).includes('next')) return target;
+      break; // Ignore duplicate rel parameters on the same link.
+    }
   }
   return null;
 }
@@ -44,21 +46,23 @@ export function inclusiveSince(cursor: Date): string {
  * same-project merge request, so the next page is requested from the configured endpoint — never from the URL the
  * header names, so the token never travels to a host the header chose.
  */
-export function nextPageFromLink(linkHeader: string | undefined): number | null {
+export function nextPageFromLink(linkHeader: string | undefined, endpoint: string): number | null {
   const next = nextLinkUrl(linkHeader);
   if (next === null) return null;
-  try {
-    const page = Number.parseInt(new URL(next).searchParams.get('page') ?? '', 10);
-    return Number.isInteger(page) && page > 0 ? page : null;
-  } catch {
-    return null;
-  }
+
+  const url = URL.parse(next, endpoint);
+  const pages = url?.searchParams.getAll('page');
+  const page = pages?.length === 1 ? nextPageNumber(pages[0]) : null;
+  if (page === null) throw new Error('Invalid next page in Link header');
+  return page;
 }
 
-/** GitLab's `X-Next-Page` header as a page number; empty or invalid means no next page. */
+/** Parse a positive decimal page number without accepting partial numbers or overflow. */
 export function nextPageNumber(header: string | undefined): number | null {
-  const page = Number.parseInt(header ?? '', 10);
-  return Number.isInteger(page) && page > 0 ? page : null;
+  const value = header?.trim() ?? '';
+  if (!/^\d+$/.test(value)) return null;
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page > 0 ? page : null;
 }
 
 /** The later of `current` and the ISO timestamp `iso`; unparseable input keeps `current`. */

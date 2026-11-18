@@ -13,6 +13,7 @@ import { mayDispatch } from '../schedules/schedule-access';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import {
   FIX_FOLLOW_UP,
+  fixFollowUpEventId,
   parseFixFollowUpPayload,
   type FixFollowUpPayload,
 } from '../common/fix-follow-up-events';
@@ -35,8 +36,8 @@ const COMPONENT = 'pr-fix';
  * the poller does not review that head a second time; a successful dispatch records the review job on the
  * claim and one audit entry on the FIX job, which is the link between the two jobs.
  *
- * Throws only on database failure (the `FleetJobOutcomeSubscriber` rule), so the relay redelivers: a claim
- * that still exists makes the redelivery skip instead of dispatching twice.
+ * After a database failure the relay redelivers. Only the same FIX attempt can resume its pending claim;
+ * settled claims and claims from other attempts or the poller still suppress dispatch.
  */
 @Injectable()
 @SystemWriter('system.pr-fix.follow-up')
@@ -89,14 +90,20 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       return;
     }
 
-    const claim = await bookkeeping(
+    const eventId = fixFollowUpEventId(p.jobId, p.leaseEpoch);
+    let claim = await bookkeeping(
       'fleet.pr-review-bookkeeping',
-      () => this.reviews.insertPending(p.repoId, p.prNumber, p.headSha),
+      () => this.reviews.insertPending(p.repoId, p.prNumber, p.headSha, eventId),
     );
-    // A null claim means the auto-review poller, or an earlier delivery of this event, already owns the head.
     if (claim === null) {
-      await this.recordSkip(p, 'head_already_claimed');
-      return;
+      // The failed dispatch transaction cannot undo the earlier claim insert. Resume only this event's
+      // unlinked claim; no separate cleanup write is needed before the relay can retry.
+      claim = await this.reviews.findHead(p.repoId, p.prNumber, p.headSha);
+      if (claim === null) throw new Error('Review claim disappeared during FIX follow-up; retrying');
+      if (claim.followUpEventId !== eventId || claim.outcome !== 'pending' || claim.jobId !== null) {
+        await this.recordSkip(p, 'head_already_claimed');
+        return;
+      }
     }
 
     let job: { id: string };

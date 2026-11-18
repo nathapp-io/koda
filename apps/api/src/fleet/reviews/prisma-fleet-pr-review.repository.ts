@@ -46,9 +46,9 @@ export class PrismaFleetPrReviewRepository
    * The claim. A second pass for the same head loses on the unique index and gets null, so it dispatches
    * nothing; only that violation is swallowed, a real database failure still propagates.
    */
-  async insertPending(repoId: string, prNumber: number, headSha: string): Promise<FleetPrReviewRecord | null> {
+  async insertPending(repoId: string, prNumber: number, headSha: string, followUpEventId?: string): Promise<FleetPrReviewRecord | null> {
     try {
-      const row = await this.db.fleetPrReview.create({ data: { repoId, prNumber, headSha, outcome: 'pending' } });
+      const row = await this.db.fleetPrReview.create({ data: { repoId, prNumber, headSha, followUpEventId, outcome: 'pending' } });
       return this.toDomain(row);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return null;
@@ -69,12 +69,12 @@ export class PrismaFleetPrReviewRepository
   }
 
   async markFailed(id: string, outcome: string): Promise<void> {
-    await this.db.fleetPrReview.update({ where: { id }, data: { outcome } });
+    await this.db.fleetPrReview.updateMany({ where: { id, outcome: 'pending', jobId: null }, data: { outcome } });
   }
 
-  /** deleteMany: the row another pass already removed is not an error, and the head is free either way. */
+  /** Release only a claim that has not acquired a job or been settled by another pass. */
   async remove(id: string): Promise<void> {
-    await this.db.fleetPrReview.deleteMany({ where: { id } });
+    await this.db.fleetPrReview.deleteMany({ where: { id, outcome: 'pending', jobId: null } });
   }
 
   /** Atomically deletes only a stale pending claim that has not acquired a job or settled. */

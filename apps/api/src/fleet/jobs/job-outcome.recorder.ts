@@ -6,7 +6,7 @@ import {
 } from '../../notifications/fleet/fleet-notification-events';
 import { FLEET_JOB_REPOSITORY, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { isThreadKind } from '../common/thread-jobs';
-import { buildFixFollowUpPayload, FIX_FOLLOW_UP } from '../common/fix-follow-up-events';
+import { buildFixFollowUpPayload, FIX_FOLLOW_UP, fixFollowUpEventId } from '../common/fix-follow-up-events';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
 
 /** US-002: an agent requested the job, so nothing that reads a user is meaningful for its requester. */
@@ -34,7 +34,7 @@ export class FleetJobOutcomeRecorder {
         await this.outbox.record({
           type: FIX_FOLLOW_UP,
           payload: buildFixFollowUpPayload(job, prNumber, job.resultSha),
-          metadata: { projectId: job.projectId, eventId: `${job.id}:${job.leaseEpoch}:fix-follow-up` },
+          metadata: { projectId: job.projectId, eventId: fixFollowUpEventId(job.id, job.leaseEpoch) },
         });
       }
     }

@@ -1,5 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { Mock } from 'vitest';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { decryptToken } from '../../common/utils/encryption.util';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ActivityType, TicketStatus } from '../../common/enums';
@@ -554,14 +556,54 @@ describe('TicketTransitionsService — post-commit effects (US-006)', () => {
       expect(repo.createTicketLink).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 42, url: createdPr.url }));
     });
 
-    it('uses the recorded repository, not the connection as it is now', async () => {
-      const { service } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr) });
-
-      await service.retryPrLink({ ...INTENT, repoOwner: 'fork', repoName: 'widgets-fork' });
-
-      expect((createVcsProvider as Mock).mock.calls.at(-1)?.[1]).toMatchObject({
-        repoUrl: 'https://github.com/fork/widgets-fork',
+    it.each([
+      ['repository owner', { repoOwner: 'fork' }],
+      ['repository name', { repoName: 'widgets-fork' }],
+      ['provider', { provider: 'gitlab' }],
+    ])('rejects a mismatched %s before decrypting or making an authenticated request', async (_field, replacement) => {
+      const { service, repo, provider, vcsConnectionService } = build({
+        findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr),
       });
+      vcsConnectionService.getFullByProject.mockResolvedValue({ ...connection, ...replacement });
+
+      const attempt = service.retryPrLink(INTENT);
+      await expect(attempt).rejects.toThrow('does not match the recorded PR repository');
+      expect(decryptToken).not.toHaveBeenCalled();
+      expect(createVcsProvider).not.toHaveBeenCalled();
+      expect(provider.findOpenPullRequestByBranch).not.toHaveBeenCalled();
+      expect(repo.createTicketLink).not.toHaveBeenCalled();
+    });
+
+    it('rejects while disconnected or inactive and links the PR after reconnecting to the recorded repo', async () => {
+      const { service, repo, provider, vcsConnectionService, outboxService } = build({
+        findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr),
+      });
+      vcsConnectionService.getFullByProject
+        .mockRejectedValueOnce(new NotFoundAppException({}, 'vcs.connection'))
+        .mockResolvedValueOnce({ ...connection, isActive: false })
+        .mockResolvedValueOnce({ ...connection, encryptedToken: 'rotated-token' });
+
+      await expect(service.retryPrLink(INTENT)).rejects.toThrow('no VCS connection');
+      await expect(service.retryPrLink(INTENT)).rejects.toThrow('inactive VCS connection');
+      expect(createVcsProvider).not.toHaveBeenCalled();
+      expect(repo.createTicketLink).not.toHaveBeenCalled();
+
+      await expect(service.retryPrLink(INTENT)).resolves.toBe(true);
+      expect(decryptToken).toHaveBeenCalledExactlyOnceWith('rotated-token', expect.any(String));
+      expect(provider.findOpenPullRequestByBranch).toHaveBeenCalledExactlyOnceWith(BRANCH);
+      expect(repo.createTicketLink).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        provider: 'github', externalRef: 'acme/widgets#42', url: createdPr.url,
+      }));
+      expect(outboxService.record).not.toHaveBeenCalled();
+    });
+
+    it('uses the active connection for a legacy intent with no recorded target', async () => {
+      const { service, provider, repo } = build({ findOpenPullRequestByBranch: vi.fn().mockResolvedValue(createdPr) });
+
+      await expect(service.retryPrLink({ projectId: INTENT.projectId, projectKey: INTENT.projectKey, ticketId: INTENT.ticketId }))
+        .resolves.toBe(true);
+      expect(provider.findOpenPullRequestByBranch).toHaveBeenCalledExactlyOnceWith(BRANCH);
+      expect(repo.createTicketLink).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ externalRef: 'acme/widgets#42' }));
     });
 
     it('rejects when the branch has no open PR yet, so the relay retries the same event', async () => {

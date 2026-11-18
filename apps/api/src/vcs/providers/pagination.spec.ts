@@ -19,16 +19,30 @@ describe('pagination helpers (M10)', () => {
     expect(nextPageNumber(header)).toBe(expected);
   });
 
-  // Review B3 (fix round 2): a proxy can drop X-Next-Page, leaving only the standard Link header.
+  // A proxy can drop X-Next-Page, leaving only the standard Link header.
+  const endpoint = 'https://gitlab.example/api/v4/projects/1/merge_requests';
   it.each([
-    ['<https://gitlab.example/api/v4/projects/1/merge_requests?page=2>; rel="next"', 2],
-    ['<https://gitlab.example/api/v4/projects/1/merge_requests?page=2>; rel="prev", <https://gitlab.example/api/v4/projects/1/merge_requests?page=3>; rel="next"', 3],
-    ['<https://gitlab.example/api/v4/projects/1/merge_requests?page=2>; rel="prev"', null],
-    ['<https://gitlab.example/api/v4/projects/1/merge_requests?after=cursor>; rel="next"', null],
+    [`<${endpoint}?page=2>; rel="next"`, 2],
+    [`<${endpoint}?page=2>; rel="prev", <${endpoint}?page=3>; rel="next"`, 3],
+    ['<?page=2>; rel="next"', 2],
+    ['<?page=2&tags=a,b>; title="page, two"; rel="alternate next"', 2],
+    [`<${endpoint}?page=2>; rel="prev"`, null],
+    ['<?page=2>; rel=next-page', null],
     ['not a link', null],
     [undefined, null],
   ])('Link %j → next page %j', (header, expected) => {
-    expect(nextPageFromLink(header)).toBe(expected);
+    expect(nextPageFromLink(header, endpoint)).toBe(expected);
+  });
+
+  it.each([
+    `<${endpoint}?after=cursor>; rel="next"`,
+    '<http://[broken?page=2>; rel="next"',
+    '<>; rel="next"',
+    '<?page=2junk>; rel="next"',
+    '<?page=9007199254740992>; rel="next"',
+    '<?page=2&page=3>; rel="next"',
+  ])('rejects an unusable next link: %s', (header) => {
+    expect(() => nextPageFromLink(header, endpoint)).toThrow('Invalid next page');
   });
 
   it('keeps the later of two timestamps and ignores bad input', () => {

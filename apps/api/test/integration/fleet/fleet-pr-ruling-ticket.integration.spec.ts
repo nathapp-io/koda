@@ -11,6 +11,7 @@ import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-
 import { TicketsService } from '../../../src/tickets/tickets.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
+import commentsEn from '../../../src/i18n/en/comments.json';
 
 (canRunDbTests() ? describe : describe.skip)('ruling finish ticket atomicity (PG)', () => {
   let app: NathApplication;
@@ -72,7 +73,7 @@ import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
     expect(JSON.stringify(response.body)).toContain('Workflow comments cannot be edited');
     // Review-1118 US-008: a workflow comment is evidence, so even the Owner cannot delete it.
     const deleted = await request(app.getHttpServer()).delete(`/api/comments/${ruling.commentId}`).set({ Authorization: `Bearer ${world.tokens.root}` }).expect(409);
-    expect(JSON.stringify(deleted.body)).toContain('Workflow comments cannot be deleted');
+    expect(deleted.body).toMatchObject({ ret: 409, message: commentsEn.workflowUndeletable['409'] });
     expect(await db.comment.findUnique({ where: { id: ruling.commentId } })).toMatchObject({ deletedAt: null });
     expect(await db.fleetPrRuling.findUnique({ where: { id: ruling.id } })).toMatchObject({ commentId: ruling.commentId });
   });

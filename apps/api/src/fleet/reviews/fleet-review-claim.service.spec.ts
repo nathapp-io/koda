@@ -9,7 +9,7 @@ describe('FleetReviewClaimService', () => {
   const now = new Date('2026-01-01T12:00:00.000Z');
   const row = (overrides: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord => ({
     id: 'claim-1', repoId: 'repo-1', prNumber: 12, headSha: 'h1', jobId: null,
-    outcome: 'pending', createdAt: now, updatedAt: now, ...overrides,
+    outcome: 'pending', followUpEventId: null, createdAt: now, updatedAt: now, ...overrides,
   });
   let repository: IFleetPrReviewRepository;
   let jobs: { findReviewJobIdBetween: ReturnType<typeof vi.fn> };

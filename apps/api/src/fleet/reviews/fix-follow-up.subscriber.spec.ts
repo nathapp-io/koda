@@ -31,7 +31,7 @@ const payload = (over: Partial<FleetJobRecord> = {}): FixFollowUpPayload =>
   buildFixFollowUpPayload(fixJob(over), 22, HEAD_SHA);
 
 const claimRow = (over: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord => ({
-  id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: HEAD_SHA, jobId: null, outcome: 'pending',
+  id: 'claim-1', repoId: 'r1', prNumber: 22, headSha: HEAD_SHA, jobId: null, outcome: 'pending', followUpEventId: null,
   createdAt: new Date(0), updatedAt: new Date(0), ...over,
 });
 
@@ -48,9 +48,10 @@ function createSubscriber() {
   const writeReasons: (BookkeepingReason | undefined)[] = [];
   const reviews = {
     findPrincipalAccess: vi.fn(async () => ({ exists: true, disabled: false })),
-    insertPending: vi.fn(async (): Promise<FleetPrReviewRecord | null> => {
+    findHead: vi.fn<() => Promise<FleetPrReviewRecord | null>>().mockResolvedValue(null),
+    insertPending: vi.fn(async (_repoId: string, _pr: number, _sha: string, followUpEventId: string): Promise<FleetPrReviewRecord | null> => {
       writeReasons.push(currentBookkeepingReason());
-      return claimRow();
+      return claimRow({ followUpEventId });
     }),
     markDispatched: vi.fn(async (): Promise<void> => {
       writeReasons.push(currentBookkeepingReason());
@@ -59,7 +60,7 @@ function createSubscriber() {
      * Review B4 (fix round 2): the claim link now runs inside the job insert's transaction (the fence), never after
      * the commit, so a stale-claim sweep cannot delete the claim between the job and its link.
      */
-    markDispatchedIfPending: vi.fn(async (): Promise<boolean> => {
+    markDispatchedIfPending: vi.fn(async (_claimId: string, _jobId: string): Promise<boolean> => {
       writeReasons.push(currentBookkeepingReason());
       return true;
     }),
@@ -173,7 +174,7 @@ describe('FixFollowUpSubscriber', () => {
 
     await subscriber.handle(payload());
 
-    expect(reviews.insertPending).toHaveBeenCalledExactlyOnceWith('r1', 22, HEAD_SHA);
+    expect(reviews.insertPending).toHaveBeenCalledExactlyOnceWith('r1', 22, HEAD_SHA, 'fix-1:3:fix-follow-up');
   });
 
   it('AC-5: dispatches the follow-up REVIEW with the payload values and the new audit key', async () => {
@@ -236,11 +237,44 @@ describe('FixFollowUpSubscriber', () => {
     }]);
   });
 
-  it('rethrows the fence write failure as the original error, so the relay retries', async () => {
-    const { subscriber, reviews }: Harness = createSubscriber();
-    reviews.markDispatchedIfPending.mockRejectedValue(new Error('link db down'));
+  it('rethrows the original fence failure and resumes the same claim on redelivery', async () => {
+    const { subscriber, reviews, jobs, audits }: Harness = createSubscriber();
+    const linkFailure = new Error('link db down');
+    const event = payload();
+    const committed: { id: string; command?: string }[] = [];
+    let claim: FleetPrReviewRecord | null = null;
+    reviews.insertPending.mockImplementation(async (_repo, _pr, _sha, followUpEventId) => {
+      if (claim !== null) return null;
+      claim = claimRow({ followUpEventId });
+      return claim;
+    });
+    reviews.findHead.mockImplementation(async () => claim);
+    reviews.markDispatchedIfPending
+      .mockRejectedValueOnce(linkFailure)
+      .mockImplementation(async (claimId, jobId) => {
+        if (claim?.id !== claimId || claim.outcome !== 'pending' || claim.jobId !== null) return false;
+        claim = { ...claim, jobId, outcome: 'dispatched' };
+        return true;
+      });
+    jobs.dispatch.mockImplementation(async (_actor, _project, dto, opts) => {
+      await opts?.fence?.('rev-1');
+      committed.push({ id: 'rev-1', command: dto.command });
+      return { job: { id: 'rev-1' } };
+    });
 
-    await expect(subscriber.handle(payload())).rejects.toThrow('link db down');
+    await expect(subscriber.handle(event)).rejects.toBe(linkFailure);
+    expect(committed).toEqual([]);
+    expect(audits).toEqual([]);
+
+    // Another FIX attempt must not resume the first attempt's pending claim.
+    await subscriber.handle({ ...event, leaseEpoch: event.leaseEpoch + 1 });
+    expect(jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(audits[0]?.input.summary).toBe('follow-up review skipped: head_already_claimed');
+
+    await subscriber.handle(event);
+    expect(committed).toEqual([{ id: 'rev-1', command: 'REVIEW' }]);
+    expect(claim).toMatchObject({ id: 'claim-1', jobId: 'rev-1', outcome: 'dispatched' });
+    expect(audits[1]?.input.summary).toBe('follow-up review dispatched: rev-1');
   });
 
   it('AC-9: writes one audit entry on the FIX job, inside a transaction', async () => {

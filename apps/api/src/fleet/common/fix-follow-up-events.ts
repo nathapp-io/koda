@@ -2,6 +2,10 @@ import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 
 export const FIX_FOLLOW_UP = 'fleet_fix_follow_up';
 
+export function fixFollowUpEventId(jobId: string, leaseEpoch: number): string {
+  return `${jobId}:${leaseEpoch}:fix-follow-up`;
+}
+
 export interface FixFollowUpPayload {
   jobId: string;
   leaseEpoch: number;

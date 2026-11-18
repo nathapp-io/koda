@@ -62,12 +62,15 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
     });
   });
 
-  // Review B3 (fix round 2): a response that advertises page two only through `Link rel="next"` is still paginated.
-  it('follows a Link rel="next" header when X-Next-Page is absent', async () => {
+  it.each([
+    `<${api}/projects/acme%2Fapp/merge_requests?state=opened&page=2>; rel="next"`,
+    '<?page=2>; rel="next"',
+    '<https://other.example/unrelated?page=2>; rel="next"',
+  ])('uses only the page number from the next Link %s', async (link) => {
     get
       .mockResolvedValueOnce({
         data: [fork(70)],
-        headers: { link: `<${api}/projects/acme%2Fapp/merge_requests?state=opened&page=2>; rel="next"` },
+        headers: { link },
       })
       .mockResolvedValueOnce({ data: [sameProject(71)], headers: {} });
 
@@ -77,6 +80,16 @@ describe('GitLabProvider.findOpenPullRequestByBranch', () => {
       headers: { 'PRIVATE-TOKEN': 'token' },
       params: { state: 'opened', source_branch: 'ACME-7-fix-login', per_page: 100, page: 2 },
     });
+  });
+
+  it.each([
+    { link: '<?after=cursor>; rel="next"' },
+    { 'x-next-page': '2junk' },
+  ])('rejects an advertised continuation it cannot follow: %j', async (headers) => {
+    get.mockResolvedValueOnce({ data: [fork(70)], headers });
+
+    await expect(provider.findOpenPullRequestByBranch('ACME-7-fix-login')).rejects.toThrow('Invalid next page');
+    expect(get).toHaveBeenCalledTimes(1);
   });
 
   it('returns null only once every page has been scanned', async () => {

@@ -492,45 +492,48 @@ export class TicketTransitionsService {
     const ticket = await this.ticketRepo.findTicketById(payload.ticketId);
     if (!ticket || ticket.deletedAt !== null || ticket.projectId !== payload.projectId) return false;
 
+    // The link already exists: this event's work is done, even if VCS is no longer available.
+    if (await this.ticketRepo.hasPrLink(ticket.id)) return false;
+
     const vcsService = this.vcsConnectionService;
     const vcsLinkExtractor = this.vcsLinkExtractorService;
     const vcsConfig = this.vcsConfig;
-    if (!vcsService || !vcsLinkExtractor || !vcsConfig) return false;
-    const encryptionKey = vcsConfig.encryptionKey;
-    if (!encryptionKey) return false;
-
-    // The link already exists: this event's work is done, and a throw here would retry it forever.
-    if (await this.ticketRepo.hasPrLink(ticket.id)) return false;
+    const encryptionKey = vcsConfig?.encryptionKey;
+    if (!vcsService || !vcsLinkExtractor || !vcsConfig || !encryptionKey) {
+      throw new Error(`PR link retry for ticket ${ticket.id} requires VCS configuration`);
+    }
 
     let connection: Awaited<ReturnType<typeof vcsService.getFullByProject>>;
     try {
       connection = await vcsService.getFullByProject(payload.projectId);
     } catch (err) {
-      // A project with no VCS connection will not grow one by being retried; anything else is retryable.
       if (err instanceof NotFoundAppException) {
-        this.logger.warn(`[vcs] PR link retry for ticket ${ticket.id} found no VCS connection`);
-        return false;
+        throw new Error(`PR link retry for ticket ${ticket.id} found no VCS connection`);
       }
       throw err;
     }
-    if (!connection.isActive) return false;
+    if (!connection.isActive) {
+      throw new Error(`PR link retry for ticket ${ticket.id} found an inactive VCS connection`);
+    }
 
-    const target = {
-      provider: payload.provider ?? connection.provider,
-      repoOwner: payload.repoOwner ?? connection.repoOwner,
-      repoName: payload.repoName ?? connection.repoName,
-    };
-    // A payload recorded before the intent carried its target (a row already queued at deploy time) falls back to
-    // the values the classic path used then.
+    // Legacy intents may omit the target. When present, it must match the credential's repository before
+    // any authenticated call. The provider also selects the API origin, which is configured globally per forge.
+    if (
+      (payload.provider ?? connection.provider) !== connection.provider
+      || (payload.repoOwner ?? connection.repoOwner) !== connection.repoOwner
+      || (payload.repoName ?? connection.repoName) !== connection.repoName
+    ) {
+      throw new Error(`VCS connection for ticket ${ticket.id} does not match the recorded PR repository`);
+    }
     const branchName = payload.branchName ?? buildBranchName(payload.projectKey, ticket.number, ticket.title);
     const token = decryptToken(connection.encryptedToken, encryptionKey);
-    const provider = providerForConnection(target, token, vcsConfig);
+    const provider = providerForConnection(connection, token, vcsConfig);
 
     const pr = await provider.findOpenPullRequestByBranch(branchName);
     if (pr === null) {
       // Not final: the pass that recorded the intent may still be creating this PR, and the relay backs off.
       throw new Error(
-        `no open PR on branch '${branchName}' of ${target.repoOwner}/${target.repoName} yet`,
+        `no open PR on branch '${branchName}' of ${connection.repoOwner}/${connection.repoName} yet`,
       );
     }
 
@@ -539,8 +542,8 @@ export class TicketTransitionsService {
       await repo.createTicketLink({
         ticketId: ticket.id,
         url: pr.url,
-        provider: target.provider,
-        externalRef: `${target.repoOwner}/${target.repoName}#${pr.number}`,
+        provider: connection.provider,
+        externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
         prNumber: pr.number,
         prState: pr.draft ? 'draft' : 'open',
         prUpdatedAt: new Date(),
@@ -549,28 +552,20 @@ export class TicketTransitionsService {
       if (onLinked) await onLinked();
     });
 
-    // Best-effort, after the link committed: the PR link is the recovery, and a failing branch/commit scan must not
-    // make the relay redo a link it already has. Only when the recorded repository is still the connection's, since
-    // the extractor builds its links from the connection.
-    if (
-      target.provider === connection.provider
-      && target.repoOwner === connection.repoOwner
-      && target.repoName === connection.repoName
-    ) {
-      try {
-        await vcsLinkExtractor.extractLinksFromPr(
-          { id: payload.projectId, key: payload.projectKey },
-          { id: ticket.id, number: ticket.number, externalVcsId: null },
-          connection,
-          encryptionKey,
-          branchName,
-          pr.number,
-        );
-      } catch (err) {
-        this.logger.warn(
-          `[vcs] Link extraction failed for the recovered PR #${pr.number} of ticket ${ticket.id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+    // Best-effort after commit: a failing branch/commit scan must not make the relay redo the link.
+    try {
+      await vcsLinkExtractor.extractLinksFromPr(
+        { id: payload.projectId, key: payload.projectKey },
+        { id: ticket.id, number: ticket.number, externalVcsId: null },
+        connection,
+        encryptionKey,
+        branchName,
+        pr.number,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `[vcs] Link extraction failed for the recovered PR #${pr.number} of ticket ${ticket.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     return true;

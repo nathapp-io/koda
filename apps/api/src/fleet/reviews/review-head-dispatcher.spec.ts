@@ -23,7 +23,7 @@ const pullRequest = (over: Partial<OpenPullRequest> = {}): OpenPullRequest => ({
 });
 
 const reviewRow = (over: Partial<FleetPrReviewRecord> = {}): FleetPrReviewRecord => ({
-  id: 'row-1', repoId: 'r1', prNumber: 7, headSha: 'aaa', jobId: null, outcome: 'pending',
+  id: 'row-1', repoId: 'r1', prNumber: 7, headSha: 'aaa', jobId: null, outcome: 'pending', followUpEventId: null,
   createdAt: NOW, updatedAt: NOW, ...over,
 });
 
