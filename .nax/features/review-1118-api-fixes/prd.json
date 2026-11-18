@@ -3,7 +3,7 @@
   "feature": "review-1118-api-fixes",
   "branchName": "feat/review-1118-api-fixes",
   "createdAt": "2026-11-18T08:17:05.546Z",
-  "updatedAt": "2026-11-18T09:40:02.501Z",
+  "updatedAt": "2026-11-18T09:45:19.737Z",
   "userStories": [
     {
       "id": "US-001",
@@ -507,14 +507,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A local helper extraction with a defined plain-Error result and explicit behavioral regressions for both callers."
+        "reasoning": "A local helper extraction with a defined plain-Error result and explicit behavioral regressions for both callers.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
@@ -533,7 +536,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ea131f731316f2056c569e65b802da04a370009a"
     },
     {
       "id": "US-010",
