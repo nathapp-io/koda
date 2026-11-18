@@ -48,6 +48,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     prismaService = module.get<PrismaService<any>>(PrismaService);
 
     vi.clearAllMocks();
+    mockPrismaClient.$queryRaw.mockReset();
     // memory-notes US-003: the lexeme probe gates the ranked path. "No lexeme" is the default here, so the
     // pre-feature `contains` path is the one these tests describe.
     mockPrismaClient.$queryRaw.mockResolvedValue([{ lexemes: 0 }]);
@@ -299,6 +300,92 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       expect(rawCalls()[0].values).toContain('english');
     });
 
+    it('AC-1a/AC-1b: infers a short first-page total without issuing a count', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([{ id: 'mem-1' }, { id: 'mem-2' }, { id: 'mem-3' }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2'), row('mem-3')]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 },
+      );
+
+      expect(result.total).toBe(3);
+      expect(rawCalls()).toHaveLength(2);
+      expect(rawCalls().some(({ sql }) => sql.includes('count(*)::int'))).toBe(false);
+    });
+
+    it('AC-2a/AC-2b: includes skipped ids in a short later-page total without counting', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([{ id: 'mem-1' }, { id: 'mem-2' }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2')]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy' }, { current: 2, size: 5 },
+      );
+
+      expect(result.total).toBe(7);
+      expect(rawCalls()).toHaveLength(2);
+      expect(rawCalls().some(({ sql }) => sql.includes('count(*)::int'))).toBe(false);
+    });
+
+    it('AC-3a/AC-3b: counts a full page and preserves the exact count', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce(Array.from({ length: 5 }, (_, index) => ({ id: `mem-${index}` })))
+        .mockResolvedValueOnce([{ total: 12 }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy' }, { current: 1, size: 5 },
+      );
+
+      expect(result.total).toBe(12);
+      expect(rawCalls().filter(({ sql }) => sql.includes('count(*)::int'))).toHaveLength(1);
+    });
+
+    it('AC-4a/AC-4b: returns zero for an empty first page without counting', async () => {
+      mockPrismaClient.$queryRaw.mockResolvedValueOnce([{ lexemes: 1 }]).mockResolvedValueOnce([]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 },
+      );
+
+      expect(result.total).toBe(0);
+      expect(rawCalls()).toHaveLength(2);
+    });
+
+    it('AC-5a/AC-5b: counts an empty later page', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total: 12 }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy' }, { current: 3, size: 5 },
+      );
+
+      expect(result.total).toBe(12);
+      expect(rawCalls().filter(({ sql }) => sql.includes('count(*)::int'))).toHaveLength(1);
+    });
+
+    it('AC-6: bases inferred total on ids even when hydration loses a row', async () => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([{ id: 'mem-1' }, { id: 'mem-2' }, { id: 'mem-3' }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2')]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 },
+      );
+
+      expect(result.total).toBe(3);
+      expect(result.records).toHaveLength(2);
+    });
+
     it('ranks, filters and pages in SQL, then loads the rows by id and keeps rank order', async () => {
       ranked(['mem-2', 'mem-1'], 2);
       // `in` answers in its own order on purpose: the ranked order must be restored from the id list.
@@ -322,12 +409,12 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       // resolvePageOption: page 2 of 5 skips 5 and takes 5.
       expect(idsQuery.values.slice(-2)).toEqual([5, 5]);
 
-      expect(rawCalls()[2].sql).toContain('count(*)::int');
+      expect(rawCalls()).toHaveLength(2);
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith({
         where: { id: { in: ['mem-2', 'mem-1'] }, deletedAt: null },
       });
       expect(result.records.map((item) => item.id)).toEqual(['mem-2', 'mem-1']);
-      expect(result).toEqual(expect.objectContaining({ total: 2, current: 2, size: 5 }));
+      expect(result).toEqual(expect.objectContaining({ total: 7, current: 2, size: 5 }));
     });
 
     it('applies the requested orderBy instead of rank when the caller names one', async () => {
@@ -366,7 +453,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
 
       await repository.findByProjectMemory({ projectId: 'project-123', text: '预算' }, { current: 1, size: 10 });
 
-      expect(rawCalls()).toHaveLength(3);
+      expect(rawCalls()).toHaveLength(2);
       expect(mockPrismaClient.memoryItem.count).toHaveBeenCalledWith({
         where: expect.objectContaining({
           AND: [
@@ -387,17 +474,15 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.$queryRaw
         .mockResolvedValueOnce([{ lexemes: 2, query: "'deploy' & 'backup'" }])
         .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ total: 0 }])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ total: 0 }]);
+        .mockResolvedValueOnce([]);
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
       await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy backup' }, { current: 1, size: 10 });
 
-      expect(rawCalls()).toHaveLength(5);
-      expect(rawCalls()[3].sql).toContain('replace(');
-      expect(rawCalls()[3].sql).toContain("' | ')::tsquery");
+      expect(rawCalls()).toHaveLength(3);
+      expect(rawCalls()[2].sql).toContain('replace(');
+      expect(rawCalls()[2].sql).toContain("' | ')::tsquery");
       // Both ranked passes came back empty, so the substring path answers — over all four fields, the whole
       // text as one term (AC-6). A fallback that dropped `description` would leave every other case green.
       expect(mockPrismaClient.memoryItem.count).toHaveBeenCalledWith({
@@ -409,9 +494,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.$queryRaw
         .mockResolvedValueOnce([{ lexemes: 2, query: "'deploy' & 'backup'" }])
         .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ total: 0 }])
-        .mockResolvedValueOnce([{ id: 'mem-2' }, { id: 'mem-1' }])
-        .mockResolvedValueOnce([{ total: 2 }]);
+        .mockResolvedValueOnce([{ id: 'mem-2' }, { id: 'mem-1' }]);
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2')]);
 
       const result = await repository.findByProjectMemory(
@@ -431,7 +514,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
 
         await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 });
 
-        expect(rawCalls()).toHaveLength(3);
+        expect(rawCalls()).toHaveLength(2);
       },
     );
 
@@ -441,7 +524,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
 
       await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy backup' }, { current: 1, size: 10 });
 
-      expect(rawCalls()).toHaveLength(3);
+      expect(rawCalls()).toHaveLength(2);
     });
 
     it('never probes or ranks for a blank text', async () => {

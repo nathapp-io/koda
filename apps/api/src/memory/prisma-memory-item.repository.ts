@@ -646,7 +646,8 @@ export class PrismaMemoryItemRepository
 
   /**
    * The ranked page (memory-notes US-003): one query selects the page's ids with every filter applied in
-   * SQL, a second counts the matches, and the rows are then loaded and returned in rank order.
+   * SQL, a count supplies an exact total only when the page is full or empty past page one, and the rows
+   * are then loaded and returned in rank order.
    *
    * Every filter the `contains` path applies is applied here too, in the same shape: the project, the rows
    * that are not soft-deleted, the status, the TTL bound when the status is defaulted (never an `OR` next
@@ -681,14 +682,17 @@ export class PrismaMemoryItemRepository
       ? Prisma.sql`ts_rank(m."searchVector", ${textQuery}) DESC, m."updatedAt" DESC, m."id" DESC`
       : orderBySql(query.orderBy);
     const { current, size, skip, take } = resolvePageOption(page);
-    const [pageRows, counted] = await Promise.all([
-      this.prisma.client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT m."id" FROM "MemoryItem" m WHERE ${where} ORDER BY ${order} OFFSET ${skip} LIMIT ${take}`),
-      this.prisma.client.$queryRaw<Array<{ total: number }>>(Prisma.sql`
-        SELECT count(*)::int AS "total" FROM "MemoryItem" m WHERE ${where}`),
-    ]);
+    const pageRows = await this.prisma.client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT m."id" FROM "MemoryItem" m WHERE ${where} ORDER BY ${order} OFFSET ${skip} LIMIT ${take}`);
 
-    const total = counted[0]?.total ?? 0;
+    let total: number;
+    if (pageRows.length === take || (pageRows.length === 0 && current > 1)) {
+      const counted = await this.prisma.client.$queryRaw<Array<{ total: number }>>(Prisma.sql`
+        SELECT count(*)::int AS "total" FROM "MemoryItem" m WHERE ${where}`);
+      total = counted[0]?.total ?? 0;
+    } else {
+      total = skip + pageRows.length;
+    }
     const records = await this.hydrateRanked(pageRows.map((row) => row.id));
     return new Page({ current, size }, total, records);
   }
