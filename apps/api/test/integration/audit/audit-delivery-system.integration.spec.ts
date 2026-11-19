@@ -8,7 +8,9 @@ import request from 'supertest';
 import { Logger } from '@nestjs/common';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { ConfigService } from '@nestjs/config';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { RETENTION_CFG } from '../../../src/config/retention.config';
 import { OutboxRetentionProcessor } from '../../../src/outbox/outbox-retention.processor';
 import { NotificationRetentionProcessor } from '../../../src/notifications/notification-retention.processor';
 import { FleetHealthDetector } from '../../../src/notifications/fleet/fleet-health.detector';
@@ -143,6 +145,10 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  });
+
+  it('AC-9: the booted application resolves retention config', () => {
+    expect(app.get(ConfigService).get(RETENTION_CFG)).toBeDefined();
   });
 
   it('AC-1/AC-2: audits one outbox retention entry per nonempty run and nothing when it deletes nothing', async () => {

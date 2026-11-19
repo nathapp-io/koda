@@ -18,6 +18,7 @@ import { AUTH_CFG, IAuthConfig, authConfig } from '../../config/auth.config';
 import { RAG_CFG, IRagConfig } from '../../config/rag.config';
 import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
 import { outboxConfig } from '../../config/outbox.config';
+import { retentionConfig } from '../../config/retention.config';
 import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
 import { WEBHOOK_CFG, IWebhookConfig } from '../../config/webhook.config';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -190,7 +191,7 @@ export const mockProviderCredentialsConfig: IProviderCredentialsConfig = { encry
     // real ConfigService that can resolve the JWT config object structure.
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [authConfig, vcsConfig, outboxConfig],
+      load: [authConfig, vcsConfig, outboxConfig, retentionConfig],
       envFilePath: ['.env.test'],
     }),
     // AppModule registers it too: the knowledge trigger events (fleet/common/knowledge-events.ts).
