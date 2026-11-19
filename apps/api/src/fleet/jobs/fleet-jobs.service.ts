@@ -416,8 +416,10 @@ export class FleetJobsService {
     }
 
     const result: ProjectQuiesceResult = { cancelled: [], live: [] };
+    // D-1: share the batch lock order with budget/runner cancellation, but process oldest first below.
+    const locked = await this.lockJobs(ids);
     for (const id of ids) {
-      const job = await this.repo.lockById(id);
+      const job = locked.get(id) ?? null;
       if (!job || job.cancelRequestedAt) continue;
       const unacked = job.state === FleetJobState.ASSIGNED &&
         (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;

@@ -80,6 +80,21 @@ describe('FleetJobsService.cancelForProjectDelete (US-001)', () => {
     expect(result.live).toEqual([liveFor(queued)]);
   });
 
+  it('locks the selected batch in ID order before processing it oldest first (review D-1)', async () => {
+    const oldest = jobRecord('z-oldest', 'QUEUED');
+    const newest = jobRecord('a-newest', 'QUEUED');
+    repo.findProjectUnstartedIds.mockResolvedValue([oldest.id, newest.id]);
+    repo.lockById.mockImplementation(async (id: string) => [oldest, newest].find((job) => job.id === id));
+
+    const result = await service.cancelForProjectDelete(projectId, now);
+
+    expect(repo.lockById.mock.calls).toEqual([[newest.id], [oldest.id]]);
+    expect(Math.max(...repo.lockById.mock.invocationCallOrder)).toBeLessThan(transitions.apply.mock.invocationCallOrder[0]);
+    expect(transitions.apply.mock.calls.map(([input]) => input.job.id)).toEqual([oldest.id, newest.id]);
+    expect(result.cancelled).toEqual([oldest.id, newest.id]);
+    expect(result.live).toEqual([liveFor(oldest), liveFor(newest)]);
+  });
+
   it('AC-8: cancels an ASSIGNED job whose ASSIGN command is still pending', async () => {
     const assigned = jobRecord('j2', 'ASSIGNED');
     repo.findProjectUnstartedIds.mockResolvedValue([assigned.id]);

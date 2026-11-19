@@ -21,6 +21,9 @@ describe('RunnersService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    jobs.cancelForRunnerDisabled.mockReset().mockResolvedValue({ cancelled: [], requested: [], live: [], wake: [] });
+    live.publish.mockReset();
+    notifier.notify.mockReset();
     tx.run = <T>(fn: () => Promise<T>) => fn();
   });
 
@@ -53,6 +56,8 @@ describe('RunnersService', () => {
     const dto = await service.update('u9', 'r1', { enabled: false, labels: ['b', 'a', 'a'], capacity: 2 });
     expect(repo.updateRunner).toHaveBeenCalledWith('r1', { enabled: false, labels: ['a', 'b'], capacity: 2 });
     expect(dto.enabled).toBe(false);
+    expect(live.publish).toHaveBeenCalledWith([]);
+    expect(notifier.notify).not.toHaveBeenCalled();
     expect(jobs.cancelForRunnerDisabled).toHaveBeenCalledTimes(1);
     expect(jobs.cancelForRunnerDisabled).toHaveBeenCalledWith('r1', 'u9', expect.any(Date));
     expect(repo.updateRunner.mock.invocationCallOrder[0]).toBeLessThan(jobs.cancelForRunnerDisabled.mock.invocationCallOrder[0]);

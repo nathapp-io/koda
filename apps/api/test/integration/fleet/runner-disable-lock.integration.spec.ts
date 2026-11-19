@@ -1,5 +1,8 @@
 import type { NathApplication } from '@nathapp/nestjs-app';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { RunnersService } from '../../../src/fleet/runners/runners.service';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
@@ -63,9 +66,10 @@ describeIntegration('RunnersService.update serialises on the runner row (review 
     });
 
     const disable = asUser(() => service.update('u1', id, { enabled: false }));
-    await held;
-    const enable = asUser(() => service.update('u1', id, { enabled: true }));
+    let enable: Promise<unknown> | undefined;
     try {
+      await Promise.race([held, disable]);
+      enable = asUser(() => service.update('u1', id, { enabled: true }));
       // Before the fix the enable reaches its own UPDATE on the still-enabled row after a stale read; afterwards it
       // waits at the ancestor's SELECT ... FOR NO KEY UPDATE, which is what makes the read serialised. The window is
       // short so both transactions stay inside the transaction manager's own timeout.
@@ -79,6 +83,74 @@ describeIntegration('RunnersService.update serialises on the runner row (review 
     }
     expect(await db.runner.findUnique({ where: { id } })).toMatchObject({ enabled: true });
   });
+
+  it('project cleanup and runner disable share ID-ordered job locks despite opposite queue order (review D-1)', async () => {
+    const base = await seedFleetBase(db);
+    const { id: runnerId } = await insertRunner(db, { createdById: base.adminId });
+    const repo = app.get(PrismaFleetJobRepository, { strict: false });
+    const jobs = app.get(FleetJobsService, { strict: false });
+    const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+    const createJob = (id: string, queuedAt: Date) => db.fleetJob.create({
+      data: {
+        id, queuedAt, projectId: base.projectId, repoId: base.repoId, ref: 'main', command: 'RUN', feature: id,
+        profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: base.adminId,
+        state: 'ASSIGNED', runnerId, leaseEpoch: 1,
+      },
+    });
+    const low = await createJob('d1-a-newest', new Date('2026-11-02T00:00:00Z'));
+    const high = await createJob('d1-z-oldest', new Date('2026-11-01T00:00:00Z'));
+    for (const job of [low, high]) {
+      await db.fleetCommand.create({ data: { runnerId, jobId: job.id, type: 'ASSIGN', leaseEpoch: 1, payload: {} } });
+    }
+    // Exercise the real oldest-first query; sorting the selection instead would change cleanup semantics.
+    expect(await repo.findProjectUnstartedIds(base.projectId, 500)).toEqual([high.id, low.id]);
+
+    let signalHeld!: () => void;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const lock = repo.lockById.bind(repo);
+    vi.spyOn(repo, 'lockById').mockImplementationOnce(async (id) => {
+      const job = await lock(id);
+      signalHeld();
+      await released;
+      return job;
+    });
+    // Disable owns the low ID. Before D-1, cleanup takes the high ID and then waits on the low ID;
+    // resuming disable creates a real PostgreSQL deadlock. Afterwards cleanup waits on low first.
+    const disable = withTestActor({ type: 'USER', id: base.adminId }, () => service.update(base.adminId, runnerId, { enabled: false }));
+    let cleanup: Promise<unknown> | undefined;
+    let results: PromiseSettledResult<unknown>[] = [];
+    try {
+      await Promise.race([held, disable]);
+      cleanup = withTestActor({ type: 'SYSTEM', id: 'seed' }, () => tx.run(() => jobs.cancelForProjectDelete(base.projectId)));
+      await Promise.race([
+        cleanup.then(() => { throw new Error('cleanup should wait for the disabled runner job lock'); }),
+        vi.waitFor(async () => {
+          const blocked = await db.$queryRaw<Array<{ query: string }>>`
+            SELECT query FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock' AND query LIKE '%"FleetJob"%FOR UPDATE%'
+          `;
+          expect(blocked.length).toBeGreaterThan(0);
+        }, { timeout: 2_000, interval: 20 }),
+      ]);
+    } finally {
+      release();
+      // Always drain both transactions, including a deadlock victim, before restoring the lock spy.
+      results = await Promise.allSettled([disable, ...(cleanup ? [cleanup] : [])]);
+    }
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+    }
+    expect(await db.runner.findUniqueOrThrow({ where: { id: runnerId } })).toMatchObject({ enabled: false });
+    for (const job of [low, high]) {
+      expect(await db.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({
+        state: 'CANCELLED', cancelReason: 'runner_disabled', leaseEpoch: 2,
+      });
+      expect(await db.fleetCommand.count({ where: { jobId: job.id, type: 'ASSIGN', ackedAt: null } })).toBe(0);
+    }
+  }, 20_000);
 
   it('an edit lock does not block the command foreign key a concurrent cancellation takes (review B4)', async () => {
     const base = await seedFleetBase(db);
@@ -109,11 +181,12 @@ describeIntegration('RunnersService.update serialises on the runner row (review 
     });
 
     const disable = asUser(() => service.update('u1', runnerId, { enabled: false }));
-    await held;
-    const insert = db.fleetCommand.create({ data: { runnerId, jobId: other.id, type: 'CANCEL', leaseEpoch: 0, payload: {} } });
+    let insert: Promise<unknown> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let outcome: 'inserted' | 'blocked';
     try {
+      await Promise.race([held, disable]);
+      insert = Promise.resolve(db.fleetCommand.create({ data: { runnerId, jobId: other.id, type: 'CANCEL', leaseEpoch: 0, payload: {} } }));
       // With `FOR UPDATE` the FK check waits on this transaction and never resolves; `FOR NO KEY UPDATE` lets it through.
       outcome = await Promise.race([
         insert.then(() => 'inserted' as const),
@@ -122,8 +195,7 @@ describeIntegration('RunnersService.update serialises on the runner row (review 
     } finally {
       if (timer) clearTimeout(timer);
       release();
-      await disable;
-      await insert.catch(() => undefined);
+      await Promise.all([disable, insert]);
     }
     expect(outcome).toBe('inserted');
   }, 20_000);
