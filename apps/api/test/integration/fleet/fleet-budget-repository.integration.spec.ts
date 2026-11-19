@@ -52,6 +52,7 @@ describeIntegration('budget repository (PG)', () => {
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetJob.deleteMany();
+    await prisma.project.updateMany({ where: { deletedAt: { not: null } }, data: { deletedAt: null } });
   });
 
   it('writes need an action context', async () => {
@@ -120,6 +121,59 @@ describeIntegration('budget repository (PG)', () => {
     expect(await repo.findQueuedJobIds({ scopeType: 'global', scopeId: null })).toContain(fix.id);
     expect((await repo.findHeldJobIds(scope)).sort()).toEqual([running.id, assigned.id].sort());
     expect(await repo.findQueuedJobIds({ scopeType: 'global', scopeId: null })).toHaveLength(3);
+  });
+
+  it('AC-1: excludes paused project policies for soft-deleted projects', async () => {
+    const other = await seedFleetBase(prisma);
+    const policy = await createPolicy({
+      scopeType: 'project', scopeId: other.projectId, scopeKey: `project:${other.projectId}`, projectId: other.projectId,
+      pausedAt: new Date('2026-10-10T00:00:00.000Z'),
+    });
+    await prisma.project.update({ where: { id: other.projectId }, data: { deletedAt: new Date('2026-10-11T00:00:00.000Z') } });
+
+    expect(await repo.findPaused()).not.toContainEqual(expect.objectContaining({ id: policy.id }));
+  });
+
+  it('AC-2: excludes paused repo policies when their project is soft-deleted', async () => {
+    const policy = await createPolicy({
+      scopeType: 'repo', scopeId: base.repoId, scopeKey: `repo:${base.repoId}`, projectId: base.projectId,
+      pausedAt: new Date('2026-10-10T00:00:00.000Z'),
+    });
+    await prisma.project.update({ where: { id: base.projectId }, data: { deletedAt: new Date('2026-10-11T00:00:00.000Z') } });
+
+    expect(await repo.findPaused()).not.toContainEqual(expect.objectContaining({ id: policy.id }));
+  });
+
+  it('AC-3: returns paused runner policies with no project', async () => {
+    const runner = await insertRunner(prisma);
+    const policy = await createPolicy({
+      scopeType: 'runner', scopeId: runner.id, scopeKey: `runner:${runner.id}`, projectId: null,
+      pausedAt: new Date('2026-10-10T00:00:00.000Z'),
+    });
+
+    expect(await repo.findPaused()).toContainEqual(expect.objectContaining({ id: policy.id }));
+  });
+
+  it('AC-4: returns paused policies for projects that are not deleted', async () => {
+    const policy = await createPolicy({
+      scopeType: 'project', scopeId: base.projectId, scopeKey: `project:${base.projectId}`, projectId: base.projectId,
+      pausedAt: new Date('2026-10-10T00:00:00.000Z'),
+    });
+
+    expect(await repo.findPaused()).toContainEqual(expect.objectContaining({ id: policy.id }));
+  });
+
+  it('AC-5: restores the original paused policy when the project is restored', async () => {
+    const policy = await createPolicy({
+      scopeType: 'project', scopeId: base.projectId, scopeKey: `project:${base.projectId}`, projectId: base.projectId,
+      pausedAt: new Date('2026-10-10T00:00:00.000Z'), pausedWindowStart: new Date('2026-10-01T00:00:00.000Z'),
+    });
+    await prisma.project.update({ where: { id: base.projectId }, data: { deletedAt: new Date('2026-10-11T00:00:00.000Z') } });
+    expect(await repo.findPaused()).not.toContainEqual(expect.objectContaining({ id: policy.id }));
+
+    await prisma.project.update({ where: { id: base.projectId }, data: { deletedAt: null } });
+
+    expect(await repo.findPaused()).toContainEqual(expect.objectContaining({ id: policy.id, pausedAt: policy.pausedAt }));
   });
 
   it('shows a project its own policies and the global ones, not another project\'s', async () => {

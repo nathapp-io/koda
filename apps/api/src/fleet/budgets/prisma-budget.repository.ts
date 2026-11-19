@@ -65,7 +65,16 @@ export class PrismaBudgetRepository implements IBudgetRepository {
   }
 
   async findPaused(): Promise<BudgetPolicyRecord[]> {
-    return (await this.db.budgetPolicy.findMany({ where: { pausedAt: { not: null } }, orderBy: ORDER })).map(toPolicy);
+    const rows = await this.db.budgetPolicy.findMany({ where: { pausedAt: { not: null } }, orderBy: ORDER });
+    const projectIds = [...new Set(rows.flatMap((row) => row.projectId === null ? [] : [row.projectId]))];
+    if (projectIds.length === 0) return rows.map(toPolicy);
+
+    const deletedProjects = await this.db.project.findMany({
+      where: { id: { in: projectIds }, deletedAt: { not: null } },
+      select: { id: true },
+    });
+    const deletedProjectIds = new Set(deletedProjects.map((project) => project.id));
+    return rows.filter((row) => row.projectId === null || !deletedProjectIds.has(row.projectId)).map(toPolicy);
   }
 
   async create(data: NewBudgetPolicy): Promise<BudgetPolicyRecord> {
