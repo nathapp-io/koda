@@ -11,7 +11,7 @@ const row = (over = {}) => ({
 });
 
 describe('RunnersService', () => {
-  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForUpdate: vi.fn(), countUnfinishedJobs: vi.fn() };
   const activity = { record: vi.fn() };
   const jobs = { cancelForRunnerDisabled: vi.fn() };
   const live = { publish: vi.fn() };
@@ -58,6 +58,16 @@ describe('RunnersService', () => {
     expect(repo.updateRunner.mock.invocationCallOrder[0]).toBeLessThan(jobs.cancelForRunnerDisabled.mock.invocationCallOrder[0]);
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'u9', action: 'runner.updated', entityId: 'r1', payload: { enabled: false, labels: ['a', 'b'], capacity: 2 } }));
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'fields: capacity, enabled, labels' });
+  });
+
+  it('locks the runner row before reading enabled, so a concurrent enable cannot slip between the read and the write (review B1)', async () => {
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ enabled: false }));
+    await service.update('u9', 'r1', { enabled: false });
+    expect(repo.lockForUpdate).toHaveBeenCalledWith('r1');
+    // The read only sees the state the lock held, and that read is what decides the cancellation.
+    expect(repo.lockForUpdate.mock.invocationCallOrder[0]).toBeLessThan(repo.findRunnerById.mock.invocationCallOrder[0]);
+    expect(repo.findRunnerById.mock.invocationCallOrder[0]).toBeLessThan(repo.updateRunner.mock.invocationCallOrder[0]);
   });
 
   it('does not cancel when the runner was already disabled', async () => {
@@ -122,7 +132,7 @@ describe('RunnersService', () => {
     repo.findRunnerById.mockResolvedValue(row());
     repo.countUnfinishedJobs.mockResolvedValue(0);
     await service.remove('u9', 'r1');
-    expect(repo.lockForDelete).toHaveBeenCalledWith('r1');
+    expect(repo.lockForUpdate).toHaveBeenCalledWith('r1');
     expect(repo.deleteRunner).toHaveBeenCalledWith('r1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'runner.deleted', entityId: 'r1', payload: { name: 'box' } }));
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.runner.delete', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'deleted' });

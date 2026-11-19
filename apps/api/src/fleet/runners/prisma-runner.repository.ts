@@ -91,7 +91,7 @@ export class PrismaRunnerRepository implements IRunnerRepository {
     return this.db.fleetJob.count({ where: { OR: [{ runnerId }, { pinnedRunnerId: runnerId }], state: { in: [...ACTIVE_STATES] } } });
   }
 
-  async lockForDelete(id: string): Promise<void> {
+  async lockForUpdate(id: string): Promise<void> {
     await this.db.$queryRaw`SELECT "id" FROM "Runner" WHERE "id" = ${id} FOR UPDATE`;
   }
 }

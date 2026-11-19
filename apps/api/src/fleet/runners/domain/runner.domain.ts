@@ -73,6 +73,9 @@ export interface IRunnerRepository {
   deleteRunner(id: string): Promise<void>;
   /** Number of the runner's jobs in an active state, as runner or as pin (plan D15). */
   countUnfinishedJobs(runnerId: string): Promise<number>;
-  /** SELECT ... FOR UPDATE on the runner row, so the delete decision sees a stable row (review m6). */
-  lockForDelete(id: string): Promise<void>;
+  /**
+   * SELECT ... FOR UPDATE on the runner row. The delete decision sees a stable row (review m6), and an update reads
+   * `enabled` from the state it writes from, serialised against placement's own runner-row lock (review B1).
+   */
+  lockForUpdate(id: string): Promise<void>;
 }

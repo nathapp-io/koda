@@ -6,7 +6,7 @@ import { ApprovalRelay } from '../approvals/approval-relay';
 import type { AcpAgentProbe } from '../capabilities/acp-agent-probe';
 import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
-import { NaxJobCheck } from '../capabilities/job-check';
+import { NaxJobCheck, StaticJobCheck, type JobCheck } from '../capabilities/job-check';
 import { RetryingJobCheck } from '../capabilities/job-check-retry';
 import { vaultHelperEnabled } from '../commands/vault';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
@@ -213,7 +213,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // C10 US-009: `providerKey` resolves a provider through the job's own provider-key socket, so the post-checkout check
   // does not refuse a vault-only job for a key koda holds (branch review B1).
   // #406: a check that only timed out (a busy host) is asked again before the job fails.
-  const jobCheck = naxMode
+  // Review B2: in static mode (D104) nax is never asked, but the job profile still forces the sandbox on for RUN,
+  // REVIEW, FIX and AGENT, so the machine's own configured report must satisfy that requirement before nax spawns.
+  const jobCheck: JobCheck = naxMode
     ? new RetryingJobCheck({
       inner: new NaxJobCheck({
         nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs,
@@ -221,9 +223,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }),
       retries: tuning.jobCheckRetries, backoffMs: tuning.jobCheckRetryBackoffMs, sleep,
     })
-    : undefined;   // D104
+    : new StaticJobCheck({ capabilities: () => reporter.latest() });
   const executor = options.executorFactory?.() ?? new HostExecutor({
-    config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, ...(jobCheck ? { jobCheck } : {}),
+    config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, jobCheck,
     // review-1118 US-001: test-only; unset in production, where a job clones over https only.
     allowLocalCloneUrls: options.allowLocalCloneUrls === true,
   });

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AssignPayload, RunnerCapabilities } from '@nathapp/fleet-protocol';
 import type { SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../../src/approvals/approval-relay';
-import { NaxJobCheck, type JobCheck } from '../../src/capabilities/job-check';
+import { NaxJobCheck, StaticJobCheck, type JobCheck } from '../../src/capabilities/job-check';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { FORGE_TOKEN_MIN_REMAINING_MS, HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
@@ -495,6 +495,18 @@ describe('HostExecutor RUN', () => {
       profiles: {}, credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'],
     };
     const jobCheck = new NaxJobCheck({ nax: new FakeNaxCli({ config: { default: { transport: 'native', providers: [], sandbox: false } } }), capabilities: () => capabilities });
+    const w = await world('RUN', {}, {}, NO_APPROVALS, NO_PROCESSES, jobCheck);
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: false, reason: 'capability mismatch: sandbox' });
+    await expect(stat(jobProfilePath(w.naxHome, 'cjob1'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('review B2: a static report with no sandbox fails prepare for a forced kind before any nax start', async () => {
+    const capabilities: RunnerCapabilities = {
+      nax: { version: '0.83.1', protocols: ['native'] }, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' },
+      profiles: {}, credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'],
+    };
+    // The check the daemon builds in static-capabilities mode: no nax is asked, the configured report decides.
+    const jobCheck = new StaticJobCheck({ capabilities: () => capabilities });
     const w = await world('RUN', {}, {}, NO_APPROVALS, NO_PROCESSES, jobCheck);
     expect(await w.ex.prepare(w.row)).toEqual({ ok: false, reason: 'capability mismatch: sandbox' });
     await expect(stat(jobProfilePath(w.naxHome, 'cjob1'))).rejects.toMatchObject({ code: 'ENOENT' });

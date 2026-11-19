@@ -2,7 +2,7 @@ import { chmod, copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat }
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { isConfigKind } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
-import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
+import { NO_JOB_CHECK, requiresSandbox, type JobCheck } from '../capabilities/job-check';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
@@ -153,7 +153,7 @@ export class HostExecutor implements JobExecutor {
       // flow-handoff US-007: a handoff RUN publishes the PR under koda's own forge identity. The job profile
       // deep-merges after the repo config, so this key wins whatever the repo's own `workflow.publish` says.
       const publishPr = assign.command === 'RUN' && assign.handoff !== undefined;
-      const forceSandbox = ['RUN', 'REVIEW', 'FIX', 'AGENT'].includes(assign.command);
+      const forceSandbox = requiresSandbox(assign.command);
       await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd, modelAliases, ruleContext, publishPr, forceSandbox);
       return { ok: true, branch: checkout.branch };
     } catch (error) {

@@ -101,6 +101,19 @@ describe('cancel jobs held by a disabled runner (US-003)', () => {
     await service.cancelForRunnerDisabled('r1', 'u1', now);
     expect(repo.update).toHaveBeenCalledWith('j1', expect.objectContaining({ cancelRequestedAt: now }));
   });
+
+  it('B3: takes every held job lock in job-id order, whatever order the rows arrive in', async () => {
+    const { service, repo } = setup([heldJob({ id: 'j2' }), heldJob({ id: 'j1' })]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.lockById.mock.calls.map(([id]) => id)).toEqual(['j1', 'j2']);
+  });
+
+  it('B3: takes the budget job locks in job-id order, then applies the policy order', async () => {
+    const { service, repo } = setup([heldJob({ id: 'j2' }), heldJob({ id: 'j1' })]);
+    const result = await service.cancelForBudget(['j2', 'j1'], { id: 'pol1', responsibleUserId: 'u1' }, now);
+    expect(repo.lockById.mock.calls.map(([id]) => id)).toEqual(['j1', 'j2']);
+    expect(result.requested).toEqual(['j2', 'j1']);
+  });
 });
 
 describe('fleet jobs service approvals count (S1.5 2a D272)', () => {

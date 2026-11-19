@@ -3,7 +3,7 @@ import type { AssignPayload, RunnerCapabilities } from '@nathapp/fleet-protocol'
 import type { JobRow } from '../journal/types';
 import type { NaxCli } from '../nax/nax-cli';
 import { FakeNaxCli, json, naxError, type NaxAnswers } from '../../test/helpers/fake-nax-cli';
-import { NaxJobCheck, firstMismatch } from './job-check';
+import { NaxJobCheck, StaticJobCheck, firstMismatch } from './job-check';
 
 const REPO = '/w/acme/app';
 const CAPS: RunnerCapabilities = {
@@ -198,6 +198,40 @@ describe('NaxJobCheck (D104)', () => {
       });
       expect(await hanging.check(row(['fast']), REPO)).toBe('capability mismatch: provider openrouter unavailable');
     });
+  });
+});
+
+describe('StaticJobCheck (D95 static capabilities, review B2)', () => {
+  const UNAVAILABLE: RunnerCapabilities = { ...CAPS, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' } };
+  const check = (command: JobRow['command'], capabilities: RunnerCapabilities | null) =>
+    new StaticJobCheck({ capabilities: () => capabilities }).check(row([], command), REPO);
+
+  test.each(['RUN', 'REVIEW', 'FIX', 'AGENT'] as const)(
+    'a static report with sandbox.available: false refuses %s with the sandbox mismatch',
+    async (command) => {
+      expect(await check(command, UNAVAILABLE)).toBe('capability mismatch: sandbox');
+    },
+  );
+
+  test('PLAN is not forced, so an unavailable sandbox in the static report passes', async () => {
+    expect(await check('PLAN', UNAVAILABLE)).toBeNull();
+  });
+
+  test('CONFIG_EDIT and CONFIG_DRIFT are not forced either', async () => {
+    expect(await check('CONFIG_EDIT', UNAVAILABLE)).toBeNull();
+    expect(await check('CONFIG_DRIFT', UNAVAILABLE)).toBeNull();
+  });
+
+  test('a static report with a working sandbox passes a forced kind', async () => {
+    expect(await check('RUN', CAPS)).toBeNull();
+  });
+
+  test('no report yet passes, as the nax-mode check does', async () => {
+    expect(await check('RUN', null)).toBeNull();
+  });
+
+  test('it needs no nax: the static report alone decides, so static mode never probes', async () => {
+    expect(await new StaticJobCheck({ capabilities: () => UNAVAILABLE }).check(row([], 'RUN'), REPO)).toBe('capability mismatch: sandbox');
   });
 });
 

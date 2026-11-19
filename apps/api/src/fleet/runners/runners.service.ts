@@ -58,6 +58,10 @@ export class RunnersService {
       ...(patch.threadCapacity !== undefined ? { threadCapacity: patch.threadCapacity } : {}),
     };
     const { dto, cancellation } = await this.txManager.run(async () => {
+      // Review B1: the enabled read must be the state this transaction writes from. Placement takes this same
+      // runner-row lock before it re-reads `enabled`, so a job placed concurrently either sees the runner disabled or
+      // is already held and is cancelled below; a concurrent enable cannot commit between the read and the write.
+      await this.repo.lockForUpdate(id);
       const existing = await this.repo.findRunnerById(id);
       if (!existing) throw new NotFoundAppException({}, 'fleet.runners');
       const updated = await this.repo.updateRunner(id, clean);
@@ -82,7 +86,7 @@ export class RunnersService {
    */
   async remove(actorId: string, id: string): Promise<void> {
     await this.txManager.run(async () => {
-      await this.repo.lockForDelete(id);
+      await this.repo.lockForUpdate(id);
       const runner = await this.repo.findRunnerById(id);
       if (!runner) throw new NotFoundAppException({}, 'fleet.runners');
       if ((await this.repo.countUnfinishedJobs(id)) > 0) throw new ConflictAppException({}, 'fleet.runnerBusy');

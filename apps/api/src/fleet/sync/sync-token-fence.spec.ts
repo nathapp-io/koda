@@ -68,10 +68,23 @@ describe('sync repository token fence', () => {
     const h = harness();
     h.repo.recordRunnerSync.mockImplementation(async () => {
       expect(currentBookkeepingReason()).toBe('runner.heartbeat');
-      return { previousBootId: 'b1' };
+      return { previousBootId: 'b1', enabled: true };
     });
     await h.sync([]);
     expect(h.repo.recordRunnerSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('B3: takes the token-request job locks in job-id order, whatever order the requests arrive in', async () => {
+    const h = harness();
+    const jobFor = (id: string) => ({
+      id, projectId: 'p1', repoId: 'anchor', runnerId: 'runner1', leaseEpoch: 1, command: FleetJobKind.RUN, state: FleetJobState.RUNNING,
+    } as FleetJobRecord);
+    h.repo.lockById.mockImplementation(async (id: string) => jobFor(id));
+    const response = await h.sync([{ jobId: 'j2', leaseEpoch: 1 }, { jobId: 'j1', leaseEpoch: 1 }]);
+    expect(h.repo.lockById.mock.calls.map(([id]) => id)).toEqual(['j1', 'j2']);
+    // The locks are only reordered: both requests are still answered, in their own order.
+    expect(h.broker.mint.mock.calls.map(([req]) => req.jobId)).toEqual(['j2', 'j1']);
+    expect(response.gitTokenErrors).toEqual([]);
   });
 
   it('AC-2: marks command delivery at the delivered write', async () => {

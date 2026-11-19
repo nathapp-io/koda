@@ -149,9 +149,16 @@ export class SyncService {
     const unknownJobIds: string[] = [];
     const toMint = await this.txManager.run(async () => {
       const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: GitTokenPurpose }> = [];
+      // Review B3: take every distinct job lock in jobId order, like `grantProviderKeys` and the runner-disable sweep,
+      // so two overlapping batches that name the same jobs in opposite orders (or a disable sweep) cannot deadlock.
+      // The locks are held until the transaction ends either way, so only their order changes; the requests are still
+      // answered in their own order.
+      const locked = new Map<string, FleetJobRecord | null>();
+      for (const jobId of [...new Set(requests.map((req) => req.jobId))].sort()) {
+        locked.set(jobId, await this.repo.lockById(jobId));
+      }
       for (const req of requests) {
-        // Row lock: two overlapping syncs from one runner must not both queue an ABANDON.
-        const job = await this.repo.lockById(req.jobId);
+        const job = locked.get(req.jobId) ?? null;
         if (!job) {
           unknownJobIds.push(req.jobId);
         } else if (!this.fence.holds(job, runnerId, req.leaseEpoch)) {

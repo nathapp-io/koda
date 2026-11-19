@@ -300,6 +300,17 @@ export class FleetJobsService {
   }
 
   /**
+   * Review B3: every path that locks more than one job row takes the distinct ids in job-ID order (the order the
+   * disable sweep already reads them in), so two paths whose batches name the same jobs in opposite orders cannot
+   * deadlock — the transaction manager does not retry one. Callers still process their own order through the map.
+   */
+  private async lockJobs(ids: readonly string[]): Promise<Map<string, FleetJobRecord | null>> {
+    const locked = new Map<string, FleetJobRecord | null>();
+    for (const id of [...new Set(ids)].sort()) locked.set(id, await this.repo.lockById(id));
+    return locked;
+  }
+
+  /**
    * S1b §2.2 hard stop: the scope's QUEUED jobs, and (runningJobs = cancel) its ASSIGNED and RUNNING jobs.
    * A system action: the activity actor is SYSTEM, the responsible user the policy's last editor.
    * Call inside txManager.run (the evaluator holds the policy lock); jobs are re-checked under their own row lock.
@@ -307,8 +318,9 @@ export class FleetJobsService {
   async cancelForBudget(jobIds: readonly string[], policy: { id: string; responsibleUserId: string }, now = new Date()): Promise<BudgetCancelResult> {
     const reason = budgetReason(policy.id);
     const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
+    const locked = await this.lockJobs(jobIds);   // B3: one shared lock order, the policy's own order below
     for (const id of jobIds) {
-      const job = await this.repo.lockById(id);
+      const job = locked.get(id) ?? null;
       if (!job || job.cancelRequestedAt) continue;
       const unacked = job.state === FleetJobState.ASSIGNED &&
         (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;
@@ -344,9 +356,11 @@ export class FleetJobsService {
       FleetJobKind.RUN, FleetJobKind.PLAN, FleetJobKind.REVIEW, FleetJobKind.FIX, FleetJobKind.THREAD, FleetJobKind.AGENT,
     ]);
     const held = await this.repo.findRunnerHeld(runnerId);
-    for (const candidate of held) {
-      if (!cancellableCommands.has(candidate.command)) continue;
-      const job = await this.repo.lockById(candidate.id);
+    const candidates = held.filter((candidate) => cancellableCommands.has(candidate.command));
+    // B3: the held rows already come in id order; taking every distinct lock first keeps that the one global order.
+    const locked = await this.lockJobs(candidates.map((candidate) => candidate.id));
+    for (const candidate of candidates) {
+      const job = locked.get(candidate.id) ?? null;
       if (!job || job.runnerId !== runnerId || job.cancelRequestedAt || !cancellableCommands.has(job.command)) continue;
       if (job.state === FleetJobState.ASSIGNED) {
         const unacked = await this.repo.findPendingCommand({ jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch });
