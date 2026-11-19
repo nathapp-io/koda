@@ -34,9 +34,27 @@ export class VcsTargetDriftError extends Error {
 
 /**
  * Revalidates the caller's captured import target. The repository runs it inside each issue write's
- * transaction, before that write, so the check and the write share one lock.
+ * transaction, after that write's project lock and before its insert, so the check and the write share
+ * one lock — taken in the same order approval execution takes its own (review-1119 US-006, B5).
  */
 export type VcsTargetRevalidation = () => Promise<void>;
+
+/** What one `syncIssues` pass leaves behind: the counts, the per-issue failures, and why it stopped short. */
+export interface SyncIssuesResult {
+  issuesSynced: number;
+  issuesSkipped: number;
+  createdTickets: Array<{ id: string; number: number; title: string }>;
+  /**
+   * The ordinary per-issue write failures, one entry per issue.
+   *
+   * Review-1119 US-006 (B1): a target-drift refusal is not one of them. It stops the pass, and the caller
+   * logs `errors` truncated, so an entry appended after ten failures lost its reason — it now travels in
+   * `stopped`, which the caller logs on its own.
+   */
+  errors: string[];
+  /** Why the pass stopped before the last fetched issue (today: a target-drift refusal); absent otherwise. */
+  stopped?: string;
+}
 
 export interface SyncIssuesOptions {
   isolate: boolean;
@@ -150,12 +168,7 @@ export class VcsSyncService {
     project: { id: string; key: string },
     connection: VcsConnectionDomain,
     encryptionKey: string,
-  ): Promise<{
-    issuesSynced: number;
-    issuesSkipped: number;
-    createdTickets: Array<{ id: string; number: number; title: string }>;
-    errors: string[];
-  }> {
+  ): Promise<SyncIssuesResult> {
     const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
     const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
     const { issues } = await provider.fetchIssues();
@@ -169,11 +182,12 @@ export class VcsSyncService {
     repo: VcsRepoRef,
     auditKey: VcsIssueAuditKey,
     { isolate, revalidate }: SyncIssuesOptions,
-  ) {
+  ): Promise<SyncIssuesResult> {
     const createdTickets: Array<{ id: string; number: number; title: string }> = [];
     const errors: string[] = [];
     let issuesSynced = 0;
     let issuesSkipped = 0;
+    let stopped: string | undefined;
     for (const issue of issues) {
       try {
         const result = await this.syncIssue(project, issue, 'manual', repo, auditKey, revalidate);
@@ -189,8 +203,10 @@ export class VcsSyncService {
         if (!isolate) throw error;
         if (error instanceof VcsTargetDriftError) {
           // Review-1119 US-006 (B1): the target is gone or changed. Each remaining write would be refused
-          // the same way, so stop here and report the refusal once instead of once per fetched issue.
-          errors.push(`import stopped: ${error.message}`);
+          // the same way, so stop here and report the refusal once instead of once per fetched issue. It is
+          // reported through `stopped` rather than as one more `errors` entry, because the caller logs
+          // `errors` truncated: behind ten ordinary failures the reason would never be printed.
+          stopped = error.message;
           break;
         }
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -198,6 +214,6 @@ export class VcsSyncService {
         issuesSkipped++;
       }
     }
-    return { issuesSynced, issuesSkipped, createdTickets, errors };
+    return { issuesSynced, issuesSkipped, createdTickets, errors, stopped };
   }
 }

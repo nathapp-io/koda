@@ -121,9 +121,12 @@ export class VcsManualSync {
       }
     };
     const importIssues = async () => {
-      const { errors } = await this.sync.syncIssues(
+      const { errors, stopped } = await this.sync.syncIssues(
         project, filtered, connection, 'vcs.sync.all', { isolate: true, revalidate: revalidateTarget },
       );
+      // The refusal that ended the pass is the one thing the truncated summary cannot carry: it is
+      // reported on its own line, with its reason, whatever the per-issue failures before it.
+      if (stopped !== undefined) this.logImportStopped(project.id, stopped);
       this.logImportFailures(project.id, errors);
     };
     return async () => {
@@ -145,10 +148,21 @@ export class VcsManualSync {
   }
 
   /**
+   * The pass stopped before the last fetched issue: a target-drift refusal, whose reason is the whole
+   * report of what happened to the remaining issues (review-1119 US-006, B1). It is logged on its own
+   * line because `logImportFailures` truncates its list — ten ordinary failures before the drift would
+   * otherwise push the reason out of the log.
+   */
+  private logImportStopped(projectId: string, reason: string): void {
+    this.logger.error(`VCS full import for project ${projectId} stopped: ${reason}`);
+  }
+
+  /**
    * `isolate` turns a failed issue write into an entry of the summary instead of a rejection, so these
    * entries are the only report a partially failed import gives: without this, a pass that imported
    * nothing but skipped every issue would look like a successful one. The message is bounded because the
-   * array can hold one entry per fetched issue (up to a thousand).
+   * array can hold one entry per fetched issue (up to a thousand), so the entry that stopped the pass is
+   * not in it (`logImportStopped`).
    */
   private logImportFailures(projectId: string, errors: string[]): void {
     if (errors.length === 0) return;

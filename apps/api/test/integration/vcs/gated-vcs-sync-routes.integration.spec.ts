@@ -6,9 +6,10 @@ import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/a
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { GitHubProvider } from '../../../src/vcs/providers/github.provider';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
+import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import type { VcsIssue } from '../../../src/vcs/types';
-import { fixtureDb } from '../../helpers/action-context';
+import { fixtureDb, withTestActor } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
@@ -217,12 +218,80 @@ describeIntegration('gated manual VCS sync', () => {
       // The captured connection and author filter no longer match, so no ticket is written from the old
       // target, and the refusal is reported once for the whole pass.
       expect(await tickets()).toEqual([]);
-      expect(errorLog.mock.calls.map((call) => String(call[0])).join('\n')).toContain('import stopped');
+      expect(errorLog.mock.calls.map((call) => String(call[0])).join('\n'))
+        .toContain('stopped: VCS connection or allowed authors changed after approval');
       // The mutation already landed: the same statement has nothing left to change.
       expect(await concurrent.$executeRawUnsafe(sql, p.id)).toBe(rerunRows);
     } finally {
       await concurrent.$disconnect();
     }
+  });
+  /**
+   * Review-1119 US-006 (B5): an import and another VCS approval on the same project take two row locks —
+   * the project's and the connection's. Every approval execution takes the project first
+   * (`ApprovalExecutionService` → `lockProjectSlug`, before its command reaches `VcsConnection`), so the
+   * import write has to take them in the same order. Opposite orders form a cycle PostgreSQL resolves by
+   * killing one transaction: a ticket write is lost, or the other approval fails with it.
+   *
+   * The holder below is that approval — the same statement, held open. Starting a write against it and
+   * probing the connection row then pins the order the blocked write is waiting in: a write that already
+   * held the connection row would make the probe time out. This is deterministic, not a race: the probe
+   * only runs once PostgreSQL reports the write blocked.
+   */
+  it('B5: a write blocked on the project row holds no connection lock, so no approval can deadlock it', async () => {
+    const sync = app.get(VcsSyncService, { strict: false });
+    const connections = app.get(VcsConnectionService, { strict: false });
+    const connection = await connections.getFullByProject(p.id);
+    const project = await db.project.findUniqueOrThrow({ where: { id: p.id }, select: { id: true, key: true } });
+
+    const holder = createTestPrismaClient();
+    const url = new URL(testDatabaseUrl());
+    url.searchParams.set('options', '-c lock_timeout=300ms');
+    const probe = createTestPrismaClient(url.toString());
+    await holder.$connect();
+    await probe.$connect();
+
+    let releaseHolder!: () => void;
+    const holderReleased = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    let signalHeld!: () => void;
+    const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+    const holding = holder.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'SELECT "slug" FROM "Project" WHERE "id" = $1 AND "deletedAt" IS NULL FOR UPDATE', p.id,
+      );
+      signalHeld();
+      await holderReleased;
+    }, { timeout: 30_000 });
+
+    let write: Promise<unknown> | undefined;
+    try {
+      await held;
+      write = withTestActor({ type: 'USER', id: world.ids.root }, () => sync.syncIssue(
+        project, issue(7), 'manual', connection, 'vcs.sync.all',
+        () => connections.getFullByProject(p.id, { lock: true }),
+      ));
+      await vi.waitFor(async () => {
+        const blocked = await db.$queryRaw<Array<{ query: string }>>`
+          SELECT query FROM pg_stat_activity
+          WHERE datname = current_database() AND pid <> pg_backend_pid()
+            AND wait_event_type = 'Lock' AND query LIKE '%"Project"%FOR UPDATE%'
+        `;
+        expect(blocked.length).toBeGreaterThan(0);
+      }, { timeout: 5_000, interval: 20 });
+
+      // The connection row is still free while the write waits for the project: the project lock came first.
+      const locked = await probe.$queryRawUnsafe<Array<{ id: string }>>(
+        'SELECT "id" FROM "VcsConnection" WHERE "projectId" = $1 FOR UPDATE', p.id,
+      );
+      expect(locked).toEqual([{ id: connection.id }]);
+    } finally {
+      releaseHolder();
+      await holding.catch(() => undefined);
+      await write;
+      await holder.$disconnect();
+      await probe.$disconnect();
+    }
+    expect(await tickets()).toMatchObject([{ externalVcsId: `acme/${p.slug}#7` }]);
   });
   it('AC-11: a failing deferred import leaves the approval executed with the fetch result', async () => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues')

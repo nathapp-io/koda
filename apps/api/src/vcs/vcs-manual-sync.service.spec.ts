@@ -161,6 +161,30 @@ describe('VcsManualSync', () => {
         expect.stringContaining('VCS full import'),
       );
     });
+    /**
+     * Review-1119 US-006 (B1): `logImportFailures` truncates to ten entries, so a drift refused after ten
+     * ordinary failures used to be reported only as "and 1 more", its reason gone. It gets its own line.
+     */
+    it('B1: logs the drift that stopped the pass apart from the bounded summary of ten failures', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      const drift = 'VCS connection or allowed authors changed after approval';
+      const failures = Array.from({ length: 10 }, (_, index) => `Issue ${index + 1}: write failed`);
+      sync.syncIssues.mockResolvedValue({
+        issuesSynced: 0, issuesSkipped: 10, createdTickets: [], errors: failures, stopped: drift,
+      });
+
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+
+      const messages = errorLog.mock.calls.map((call) => String(call[0]));
+      // The refusal is printed with its reason, on a line of its own...
+      expect(messages).toContainEqual(expect.stringContaining(`stopped: ${drift}`));
+      // ...and the per-issue summary stays the ten failures it can show, with nothing cut off.
+      expect(messages).toContainEqual(expect.stringContaining('failed 10 issue(s)'));
+      expect(messages).not.toContainEqual(expect.stringContaining('more'));
+      expect(messages.filter((message) => message.includes(drift))).toHaveLength(1);
+    });
     it('AC-8: with no enclosing scope the closure imports before it resolves', async () => {
       let imported = false;
       sync.syncIssues.mockImplementation(async () => {

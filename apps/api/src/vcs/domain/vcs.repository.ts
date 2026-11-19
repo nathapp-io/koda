@@ -24,10 +24,13 @@ export interface CreateTicketFromIssueResult {
 export type OnTicketCreated = (ticket: { id: string; number: number }) => Promise<void>;
 
 /**
- * Runs at the start of the ticket-number attempt's transaction, before the project row lock and the
- * insert (review-1119 US-006, B1). A deferred import writes after the approval committed, so the
- * connection lock its target check held is gone: this is where each write re-reads the captured target
- * under that lock, and a throw here rolls the attempt back with nothing written.
+ * Runs inside the ticket-number attempt's transaction, after the project row lock and before the insert
+ * (review-1119 US-006, B1). A deferred import writes after the approval committed, so the connection lock
+ * its target check held is gone: this is where each write re-reads the captured target under that lock,
+ * and a throw here rolls the attempt back with nothing written.
+ *
+ * It runs after the project lock, not before it (review-1119 US-006, B5): approval execution locks the
+ * project and then the connection, so the write path takes the same two rows in the same order.
  */
 export type BeforeTicketInsert = () => Promise<void>;
 

@@ -259,7 +259,37 @@ describe('VcsSyncService', () => {
 
       expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(2);
       expect(result.issuesSynced).toBe(1);
-      expect(result.errors).toEqual([`import stopped: ${drift.message}`]);
+      expect(result.stopped).toBe(drift.message);
+      expect(result.errors).toEqual([]);
+    });
+
+    /**
+     * Review-1119 US-006 (B1): the caller logs `errors` truncated to ten entries, so a drift behind ten
+     * ordinary failures was only ever printed as "and 1 more", its reason lost. The refusal travels beside
+     * the summary now.
+     */
+    it('B1: reports the drift beside ten ordinary failures, not as an eleventh summary entry', async () => {
+      const drift = new VcsTargetDriftError();
+      const many = Array.from({ length: 11 }, (_, index) => makeIssue({ number: index + 1 }));
+      const revalidate = vi.fn().mockRejectedValue(drift);
+      // Ten ordinary issue writes fail before the eleventh reaches its revalidation and is refused.
+      let writes = 0;
+      mockRepo.createTicketFromIssue.mockImplementation(async (_project, _issue, _externalVcsId, _onCreated, beforeInsert) => {
+        writes++;
+        if (writes <= 10) throw new Error('write failed');
+        await beforeInsert?.();
+        return { id: 't-11', number: 11, title: 'Test issue' };
+      });
+
+      const result = await service.syncIssues(
+        makeProject(), many, makeConnection(), 'vcs.sync.all', { isolate: true, revalidate },
+      );
+
+      expect(result.errors).toHaveLength(10);
+      expect(result.errors[0]).toBe('Issue 1: write failed');
+      expect(result.errors).not.toContainEqual(expect.stringContaining(drift.message));
+      expect(result.stopped).toBe(drift.message);
+      expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(11);
     });
 
     it('keeps an ordinary write failure per issue and continues the pass', async () => {
@@ -276,6 +306,7 @@ describe('VcsSyncService', () => {
 
       expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(3);
       expect(result.errors).toEqual(['Issue 2: audit down']);
+      expect(result.stopped).toBeUndefined();
       expect(result.issuesSynced).toBe(2);
     });
   });
