@@ -5,6 +5,104 @@ import type { Mock } from 'vitest';
 import { FleetJobsService } from './fleet-jobs.service';
 import type { FleetJobRecord, NewFleetJob } from './domain/fleet-job.domain';
 
+describe('cancel jobs held by a disabled runner (US-003)', () => {
+  const now = new Date('2026-11-19T12:00:00.000Z');
+  const heldJob = (overrides: Record<string, unknown> = {}) => ({
+    id: 'j1', projectId: 'p1', repoId: 'repo1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+    maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
+    runnerId: 'r1', runnerBootId: 'boot1', leaseEpoch: 7, state: 'RUNNING', stateReason: null, requestedById: 'u2',
+    queuedAt: now, assignedAt: now, startedAt: now, finishedAt: null, cancelRequestedAt: null, cancelReason: null,
+    naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
+    costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: now, scheduleId: null, coalescedCount: 0,
+    scheduleCountedAt: null, lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
+    resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
+    postRun: null, configResult: null, eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null, updatedAt: now,
+    ...overrides,
+  }) as FleetJobRecord;
+
+  const setup = (jobs: FleetJobRecord[]) => {
+    const repo = {
+      findRunnerHeld: vi.fn().mockResolvedValue(jobs), lockById: vi.fn(async (id: string) => jobs.find((job) => job.id === id) ?? null),
+      findPendingCommand: vi.fn().mockResolvedValue(null), update: vi.fn(async (id: string, patch: Record<string, unknown>) => ({ ...jobs.find((job) => job.id === id), ...patch })),
+      createCommand: vi.fn(), appendEvent: vi.fn(),
+    };
+    const activity = { record: vi.fn() };
+    const live = { event: vi.fn((job: FleetJobRecord) => ({ id: job.id })), publish: vi.fn() };
+    const transitions = { apply: vi.fn().mockResolvedValue({ job: heldJob({ state: 'CANCELLED' }), live: { id: 'j1' } }) };
+    const notifier = { notify: vi.fn() };
+    const service = new FleetJobsService(
+      repo as never, {} as never, activity as never, live as never, transitions as never, notifier as never,
+      {} as never, { run: vi.fn((fn: () => Promise<unknown>) => fn()) } as never, {} as never, {} as never,
+      {} as never, {} as never, mockAuditRecorder, {} as never, {} as never,
+    );
+    return { service, repo, activity, live, transitions, notifier };
+  };
+
+  it('AC-1/2: requests cancellation on a held running job with reason', async () => {
+    const { service, repo } = setup([heldJob()]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.update).toHaveBeenCalledWith('j1', expect.objectContaining({ cancelRequestedAt: now, cancelReason: 'runner_disabled' }));
+  });
+
+  it('AC-3: creates a current-epoch CANCEL command for the held runner', async () => {
+    const { service, repo } = setup([heldJob()]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.createCommand).toHaveBeenCalledWith({ runnerId: 'r1', jobId: 'j1', type: 'CANCEL', leaseEpoch: 7, payload: {} });
+  });
+
+  it('AC-4: records SYSTEM cancellation activity with responsible user and reason', async () => {
+    const { service, activity } = setup([heldJob()]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      actorType: 'SYSTEM', action: 'job.cancel_requested', entityId: 'j1', responsibleUserId: 'u1', payload: { state: 'RUNNING', reason: 'runner_disabled' },
+    }));
+  });
+
+  it('AC-5: returns requested id, live event and runner wake for an active request', async () => {
+    const { service } = setup([heldJob()]);
+    await expect(service.cancelForRunnerDisabled('r1', 'u1', now)).resolves.toEqual({
+      cancelled: [], requested: ['j1'], live: [{ id: 'j1' }], wake: ['r1'],
+    });
+  });
+
+  it('AC-6: ends an ASSIGNED job whose current ASSIGN is pending on the server', async () => {
+    const job = heldJob({ state: 'ASSIGNED' });
+    const { service, repo, transitions } = setup([job]);
+    repo.findPendingCommand.mockResolvedValue({ id: 'assign' });
+    const result = await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(transitions.apply).toHaveBeenCalledWith(expect.objectContaining({ job, to: 'CANCELLED', by: 'server', reason: 'runner_disabled', extra: { cancelReason: 'runner_disabled' } }));
+    expect(result.cancelled).toEqual(['j1']);
+  });
+
+  it('AC-7: skips a running job that already has a cancellation request', async () => {
+    const { service, repo } = setup([heldJob({ cancelRequestedAt: now })]);
+    const result = await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.createCommand).not.toHaveBeenCalled();
+    expect(result).toEqual({ cancelled: [], requested: [], live: [], wake: [] });
+  });
+
+  it('AC-8: skips UPLOADING jobs', async () => {
+    const { service, repo } = setup([heldJob({ state: 'UPLOADING' })]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: skips CONFIG_EDIT jobs', async () => {
+    const { service, repo } = setup([heldJob({ command: 'CONFIG_EDIT' })]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: requests cancellation for a held THREAD job', async () => {
+    const { service, repo } = setup([heldJob({ command: 'THREAD' })]);
+    await service.cancelForRunnerDisabled('r1', 'u1', now);
+    expect(repo.update).toHaveBeenCalledWith('j1', expect.objectContaining({ cancelRequestedAt: now }));
+  });
+});
+
 describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
   const now = new Date('2026-10-01T00:00:00.000Z');
   const record = (id: string): FleetJobRecord =>

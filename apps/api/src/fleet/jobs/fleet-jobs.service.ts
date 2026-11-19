@@ -334,6 +334,51 @@ export class FleetJobsService {
   }
 
   /**
+   * Cancels runnable jobs held by a disabled runner. The caller owns the transaction; each candidate is re-read
+   * under its row lock so a completed, already-cancelled, or otherwise changed job is left alone. CONFIG jobs and
+   * UPLOADING jobs are deliberately excluded. Publish the returned live events and wake runners after commit.
+   */
+  async cancelForRunnerDisabled(runnerId: string, responsibleUserId: string, now = new Date()): Promise<BudgetCancelResult> {
+    const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
+    const cancellableCommands = new Set<FleetJobKind>([
+      FleetJobKind.RUN, FleetJobKind.PLAN, FleetJobKind.REVIEW, FleetJobKind.FIX, FleetJobKind.THREAD, FleetJobKind.AGENT,
+    ]);
+    const held = await this.repo.findRunnerHeld(runnerId);
+    for (const candidate of held) {
+      if (!cancellableCommands.has(candidate.command)) continue;
+      const job = await this.repo.lockById(candidate.id);
+      if (!job || job.runnerId !== runnerId || job.cancelRequestedAt || !cancellableCommands.has(job.command)) continue;
+      if (job.state === FleetJobState.ASSIGNED) {
+        const unacked = await this.repo.findPendingCommand({ jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch });
+        if (unacked) {
+          const transition = await this.transitions.apply({
+            job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR,
+            reason: RUNNER_DISABLED_REASON, extra: { cancelReason: RUNNER_DISABLED_REASON },
+          });
+          result.cancelled.push(job.id);
+          result.live.push(transition.live);
+          continue;
+        }
+      }
+      if ((job.state !== FleetJobState.ASSIGNED && job.state !== FleetJobState.RUNNING) || !job.runnerId) continue;
+      const updated = await this.repo.update(job.id, { cancelRequestedAt: now, cancelReason: RUNNER_DISABLED_REASON });
+      await this.repo.createCommand({ runnerId: job.runnerId, jobId: job.id, type: FleetCommandType.CANCEL, leaseEpoch: job.leaseEpoch, payload: {} });
+      await this.repo.appendEvent(job.id, {
+        leaseEpoch: job.leaseEpoch, runnerSeq: null, type: 'lifecycle',
+        payload: { level: 'info', message: `cancel requested (${RUNNER_DISABLED_REASON})` },
+      });
+      await this.activity.record({
+        actorType: 'SYSTEM', actorId: SYSTEM_ACTOR.id, action: 'job.cancel_requested', entityType: 'job', entityId: job.id, jobId: job.id,
+        projectId: job.projectId, responsibleUserId, payload: { state: job.state, reason: RUNNER_DISABLED_REASON },
+      });
+      result.requested.push(job.id);
+      result.live.push(this.live.event(updated));
+      result.wake.push(job.runnerId);
+    }
+    return result;
+  }
+
+  /**
    * US-001: ends the unstarted jobs of a soft-deleted project, in the caller's transaction.
    *
    * A deleted project's QUEUED jobs would still be placed on the next runner sync and spend real budget
