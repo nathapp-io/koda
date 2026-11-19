@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
+import { WEBHOOK_SIGNATURE_CFG } from '../config/webhook-signature.config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
@@ -57,6 +59,7 @@ describe('CiWebhookController', () => {
     assertFresh: vi.fn(),
     forget: vi.fn(),
   };
+  const mockConfig = { get: vi.fn() };
 
   const validPayload: CiWebhookPayloadDto = {
     event: 'pipeline_failed',
@@ -72,12 +75,14 @@ describe('CiWebhookController', () => {
     mockCiWebhookService.processCiWebhook.mockReset().mockResolvedValue({ success: true, message: 'ok' });
     mockReplayGuard.assertFresh.mockReset().mockResolvedValue(undefined);
     mockReplayGuard.forget.mockReset().mockResolvedValue(undefined);
+    mockConfig.get.mockReset().mockImplementation((key: string) => key === WEBHOOK_SIGNATURE_CFG ? undefined : undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CiWebhookController],
       providers: [
         { provide: CiWebhookService, useValue: mockCiWebhookService },
         { provide: WebhookReplayGuard, useValue: mockReplayGuard },
+        { provide: ConfigService, useValue: mockConfig },
         { provide: PermissionService, useValue: { can: vi.fn() } },
         RequiresGuard,
       ],
@@ -223,6 +228,91 @@ describe('CiWebhookController', () => {
       expect(forwarded).toBeInstanceOf(CiWebhookPayloadDto);
       expect(forwarded.event).toBe(event);
       expect(mockReplayGuard.assertFresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('v2 signature decisions', () => {
+    const rawBody = JSON.stringify(validPayload);
+    const nowTimestamp = () => String(Math.floor(Date.now() / 1000));
+    const independentlySignV2 = (secret: string, timestamp: string, deliveryId: string, body = rawBody) =>
+      `sha256=${createHmac('sha256', secret).update(`${timestamp}.${deliveryId}.${body}`).digest('hex')}`;
+
+    it('AC-1: accepts v2-only and forwards the validated payload', async () => {
+      const timestamp = nowTimestamp();
+      const delivery = 'd-1';
+      await controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), undefined, delivery, undefined,
+        timestamp, independentlySignV2(SECRET, timestamp, delivery));
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledWith('koda', expect.any(CiWebhookPayloadDto));
+    });
+
+    it('AC-2: valid v2 controls even when v1 is wrong and required', async () => {
+      mockConfig.get.mockImplementation((key: string) => key === WEBHOOK_SIGNATURE_CFG ? { v1Enabled: true, ciRequireV2: true } : undefined);
+      const timestamp = nowTimestamp();
+      await controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), 'sha256=wrong', 'd-2', undefined,
+        timestamp, independentlySignV2(SECRET, timestamp, 'd-2'));
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-3/13: bad v2 matches bad-v1 refusal and does not touch replay protection', async () => {
+      const reference = await badSignatureRejection();
+      const timestamp = nowTimestamp();
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), sign(rawBody), 'd-3', undefined,
+        timestamp, independentlySignV2('other-secret', timestamp, 'd-3')));
+      expect(err.getResponse()).toEqual(reference.getResponse());
+      expect(err.getStatus()).toBe(401);
+      expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
+    });
+
+    it.each([['AC-4', -301], ['AC-5', 301]])('%s: rejects timestamp outside tolerance', async (_ac, offset) => {
+      const timestamp = String(Math.floor(Date.now() / 1000) + Number(offset));
+      const delivery = 'd-time';
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), undefined, delivery, undefined,
+        timestamp, independentlySignV2(SECRET, timestamp, delivery)));
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+    });
+
+    it('AC-6: rejects malformed timestamp', async () => {
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), undefined, 'd-invalid', undefined,
+        'abc', independentlySignV2(SECRET, 'abc', 'd-invalid')));
+      expect(err).toBeInstanceOf(AuthException);
+    });
+
+    it.each([['AC-7', 'delivery', undefined, '1700000000'], ['AC-8', 'timestamp', 'd-missing-time', undefined]])('%s: rejects missing %s', async (_ac, _name, delivery, timestamp) => {
+      const ts = timestamp ?? '1700000000';
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), undefined, delivery, undefined,
+        timestamp, independentlySignV2(SECRET, ts, delivery ?? '')));
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+    });
+
+    it('AC-9/14: require-v2 rejects v1-only before replay check', async () => {
+      mockConfig.get.mockImplementation((key: string) => key === WEBHOOK_SIGNATURE_CFG ? { v1Enabled: true, ciRequireV2: true } : undefined);
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), sign(rawBody), 'd-v1'));
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+      expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: defaults to v1 when signature config is undefined', async () => {
+      await controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), sign(rawBody));
+      expect(mockConfig.get).toHaveBeenCalledWith(WEBHOOK_SIGNATURE_CFG);
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-11: treats empty v2 as present and refuses fallback', async () => {
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), sign(rawBody), 'd-empty', undefined,
+        nowTimestamp(), ''));
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+    });
+
+    it('AC-12: binds v2 signature to the received delivery id', async () => {
+      const timestamp = nowTimestamp();
+      const err = await rejectionOf(controller.handleCiWebhook('koda', requestOf(validPayload, rawBody), undefined, 'd-2', undefined,
+        timestamp, independentlySignV2(SECRET, timestamp, 'd-1')));
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
     });
   });
 

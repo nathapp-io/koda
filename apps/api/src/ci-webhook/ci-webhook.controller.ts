@@ -1,4 +1,5 @@
 import { Controller, Post, Param, HttpCode, Headers, Req, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
@@ -13,7 +14,8 @@ import {
   parseInboundPayload,
   signedBytesOf,
 } from '../webhook-security/inbound-webhook-request';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { WEBHOOK_SIGNATURE_CFG } from '../config/webhook-signature.config';
+import { isFreshTimestamp, signatureV1, signatureV2, signaturesMatch } from '../webhook-security/webhook-signature';
 
 @ApiTags('ci-webhooks')
 @Controller()
@@ -21,6 +23,7 @@ export class CiWebhookController {
   constructor(
     private ciWebhookService: CiWebhookService,
     private readonly replayGuard: WebhookReplayGuard,
+    private readonly config: ConfigService,
   ) {}
 
   @Post('projects/:slug/ci-webhook')
@@ -39,11 +42,19 @@ export class CiWebhookController {
     @Headers('x-ci-signature') signature?: string,
     @Headers('x-ci-delivery') deliveryId?: string,
     @Headers('date') dateHeader?: string,
+    @Headers('x-ci-timestamp') timestamp?: string,
+    @Headers('x-ci-signature-v2') signatureV2Header?: string,
   ) {
     // One lookup. An unknown slug, a missing token and a bad signature all get
     // the same 401, so the route does not reveal which slugs exist.
     const target = await this.ciWebhookService.findInboundTarget(slug);
-    if (!target || !this.verifySignature(signedBytesOf(request), signature ?? '', target.secret)) {
+    const rawBody = signedBytesOf(request);
+    const config = this.config.get<{ ciRequireV2: boolean }>(WEBHOOK_SIGNATURE_CFG);
+    const validSignature = signatureV2Header !== undefined
+      ? Boolean(deliveryId !== undefined && timestamp !== undefined && isFreshTimestamp(timestamp, Date.now()) &&
+        signaturesMatch(signatureV2(target?.secret ?? '', timestamp, deliveryId, rawBody), signatureV2Header))
+      : !config?.ciRequireV2 && Boolean(target && this.verifySignature(rawBody, signature ?? '', target.secret));
+    if (!target || !validSignature) {
       throw new AuthException({}, 'ci_webhook');
     }
 
@@ -72,15 +83,7 @@ export class CiWebhookController {
 
   private verifySignature(payload: string, signature: string, secret: string): boolean {
     try {
-      const expectedSignature = `sha256=${createHmac('sha256', secret).update(payload).digest('hex')}`;
-      const expected = Buffer.from(expectedSignature);
-      const received = Buffer.from(signature);
-
-      if (expected.length !== received.length) {
-        return false;
-      }
-
-      return timingSafeEqual(expected, received);
+      return signaturesMatch(signatureV1(secret, payload), signature);
     } catch {
       return false;
     }
