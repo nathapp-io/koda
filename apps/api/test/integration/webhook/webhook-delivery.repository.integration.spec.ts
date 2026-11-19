@@ -5,6 +5,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/webhook/webhook-delivery.repository.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaWebhookDeliveryRepository } from '../../../src/webhook-security/prisma-webhook-delivery.repository';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -40,7 +42,7 @@ describeDb('WebhookDelivery repository retention (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    repo = new PrismaWebhookDeliveryRepository(app.get(PrismaService));
+    repo = new PrismaWebhookDeliveryRepository(app.get(TRANSACTION_MANAGER), app.get(PrismaService));
     const project = await prisma.project.create({ data: { name: 'Hooks', slug: 'hooks-retention', key: 'HKR' } });
     projectId = project.id;
   }, 60_000);
@@ -72,5 +74,27 @@ describeDb('WebhookDelivery repository retention (PG)', () => {
     expect(deleted).toBe(1);
     expect(await find(stale.id)).toBeNull();
     expect(await find(fresh.id)).not.toBeNull();
+  });
+
+  /**
+   * F1: the repository is built on the transaction manager, so its delete runs on the caller's
+   * transaction client — a caller that rolls back keeps the rows (the retention purge depends on this:
+   * a rejected audit record must not lose the deliveries).
+   */
+  it('F1: rolls the delete back with the enclosing transaction', async () => {
+    const stale = await received(new Date(CUTOFF.getTime() - DAY));
+    const txManager = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+
+    await expect(
+      withTestActor({ type: 'SYSTEM', id: 'webhook-delivery' }, () =>
+        txManager.run(async () => {
+          const deleted = await repo.deleteReceivedBefore(CUTOFF);
+          if (deleted !== 1) throw new Error(`expected 1 deleted row, got ${deleted}`);
+          throw new Error('rollback');
+        }),
+      ),
+    ).rejects.toThrow('rollback');
+
+    expect(await find(stale.id)).not.toBeNull();
   });
 });
