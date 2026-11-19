@@ -114,6 +114,24 @@ describe('cancel jobs held by a disabled runner (US-003)', () => {
     expect(repo.lockById.mock.calls.map(([id]) => id)).toEqual(['j1', 'j2']);
     expect(result.requested).toEqual(['j2', 'j1']);
   });
+
+  it('B5: processes a job named twice once, in first-seen policy order', async () => {
+    const { service, repo, activity } = setup([heldJob({ id: 'j2' }), heldJob({ id: 'j1' })]);
+    // The evaluator's two queries can both return the same job (it was placed between them). The second pass used to
+    // reuse the pre-cancellation snapshot and send a second CANCEL.
+    const result = await service.cancelForBudget(['j2', 'j1', 'j2'], { id: 'pol1', responsibleUserId: 'u1' }, now);
+    expect(result.requested).toEqual(['j2', 'j1']);
+    expect(repo.createCommand).toHaveBeenCalledTimes(2);
+    expect(repo.createCommand.mock.calls.map(([command]) => command.jobId)).toEqual(['j2', 'j1']);
+    expect(activity.record).toHaveBeenCalledTimes(2);
+  });
+
+  it('B5: ends a job named twice once when the first pass cancels it on the server', async () => {
+    const { service, transitions } = setup([heldJob({ id: 'j1', state: 'QUEUED', runnerId: null })]);
+    const result = await service.cancelForBudget(['j1', 'j1'], { id: 'pol1', responsibleUserId: 'u1' }, now);
+    expect(transitions.apply).toHaveBeenCalledTimes(1);
+    expect(result.cancelled).toEqual(['j1']);
+  });
 });
 
 describe('fleet jobs service approvals count (S1.5 2a D272)', () => {

@@ -319,7 +319,11 @@ export class FleetJobsService {
     const reason = budgetReason(policy.id);
     const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
     const locked = await this.lockJobs(jobIds);   // B3: one shared lock order, the policy's own order below
-    for (const id of jobIds) {
+    // B5: the evaluator builds its list from a QUEUED query and a held-jobs query, so one job can appear in both (it
+    // was placed between the two). Each id is processed once, in first-seen policy order: a second pass would reuse
+    // the pre-transition snapshot taken by `lockJobs`, sending a second CANCEL — or one after the first pass already
+    // ended the job on the server.
+    for (const id of new Set(jobIds)) {
       const job = locked.get(id) ?? null;
       if (!job || job.cancelRequestedAt) continue;
       const unacked = job.state === FleetJobState.ASSIGNED &&

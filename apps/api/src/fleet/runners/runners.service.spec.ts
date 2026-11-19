@@ -11,7 +11,7 @@ const row = (over = {}) => ({
 });
 
 describe('RunnersService', () => {
-  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForUpdate: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForUpdate: vi.fn(), lockForNoKeyUpdate: vi.fn(), countUnfinishedJobs: vi.fn() };
   const activity = { record: vi.fn() };
   const jobs = { cancelForRunnerDisabled: vi.fn() };
   const live = { publish: vi.fn() };
@@ -64,9 +64,11 @@ describe('RunnersService', () => {
     repo.findRunnerById.mockResolvedValue(row());
     repo.updateRunner.mockResolvedValue(row({ enabled: false }));
     await service.update('u9', 'r1', { enabled: false });
-    expect(repo.lockForUpdate).toHaveBeenCalledWith('r1');
+    expect(repo.lockForNoKeyUpdate).toHaveBeenCalledWith('r1');
+    // Review B4: an edit takes the key-share-compatible mode; only deletion keeps FOR UPDATE.
+    expect(repo.lockForUpdate).not.toHaveBeenCalled();
     // The read only sees the state the lock held, and that read is what decides the cancellation.
-    expect(repo.lockForUpdate.mock.invocationCallOrder[0]).toBeLessThan(repo.findRunnerById.mock.invocationCallOrder[0]);
+    expect(repo.lockForNoKeyUpdate.mock.invocationCallOrder[0]).toBeLessThan(repo.findRunnerById.mock.invocationCallOrder[0]);
     expect(repo.findRunnerById.mock.invocationCallOrder[0]).toBeLessThan(repo.updateRunner.mock.invocationCallOrder[0]);
   });
 

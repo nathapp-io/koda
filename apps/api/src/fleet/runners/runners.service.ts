@@ -61,7 +61,11 @@ export class RunnersService {
       // Review B1: the enabled read must be the state this transaction writes from. Placement takes this same
       // runner-row lock before it re-reads `enabled`, so a job placed concurrently either sees the runner disabled or
       // is already held and is cancelled below; a concurrent enable cannot commit between the read and the write.
-      await this.repo.lockForUpdate(id);
+      // Review B4: an edit takes FOR NO KEY UPDATE, not FOR UPDATE. It still conflicts with placement's FOR UPDATE,
+      // but it does not conflict with the FOR KEY SHARE lock the cancellation below takes when it inserts a CANCEL
+      // command for this runner — with FOR UPDATE the two transactions deadlock (this one waits for the job row, the
+      // cancellation waits for the runner's key-share lock).
+      await this.repo.lockForNoKeyUpdate(id);
       const existing = await this.repo.findRunnerById(id);
       if (!existing) throw new NotFoundAppException({}, 'fleet.runners');
       const updated = await this.repo.updateRunner(id, clean);

@@ -74,8 +74,16 @@ export interface IRunnerRepository {
   /** Number of the runner's jobs in an active state, as runner or as pin (plan D15). */
   countUnfinishedJobs(runnerId: string): Promise<number>;
   /**
-   * SELECT ... FOR UPDATE on the runner row. The delete decision sees a stable row (review m6), and an update reads
-   * `enabled` from the state it writes from, serialised against placement's own runner-row lock (review B1).
+   * SELECT ... FOR UPDATE on the runner row. The delete decision sees a stable row (review m6).
+   *
+   * Deletion keeps this strongest mode because nothing may reference the row while it goes away.
    */
   lockForUpdate(id: string): Promise<void>;
+  /**
+   * SELECT ... FOR NO KEY UPDATE on the runner row: the lock an edit takes. It still conflicts with placement's own
+   * `FOR UPDATE` runner-row lock (review B1), so the `enabled` read is the state the edit writes from, but it does not
+   * conflict with the `FOR KEY SHARE` lock an FK check takes when a concurrent transaction inserts a command that
+   * references the runner (review B4: `FOR UPDATE` there deadlocks against a concurrent cancellation).
+   */
+  lockForNoKeyUpdate(id: string): Promise<void>;
 }

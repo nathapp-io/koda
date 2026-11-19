@@ -91,6 +91,18 @@ export class PrismaRunnerRepository implements IRunnerRepository {
     return this.db.fleetJob.count({ where: { OR: [{ runnerId }, { pinnedRunnerId: runnerId }], state: { in: [...ACTIVE_STATES] } } });
   }
 
+  /**
+   * Review B4: an edit takes the weaker `FOR NO KEY UPDATE` mode. It still conflicts with placement's `FOR UPDATE`
+   * (so an `enabled` read here is serialised against placement), but it does not conflict with the `FOR KEY SHARE`
+   * lock a concurrent cancellation takes on this row when its CANCEL command insert checks the runner foreign key —
+   * `FOR UPDATE` here would deadlock: this transaction waits for the job row the cancellation holds, and the
+   * cancellation waits for the key-share lock this transaction's `FOR UPDATE` blocks.
+   */
+  async lockForNoKeyUpdate(id: string): Promise<void> {
+    await this.db.$queryRaw`SELECT "id" FROM "Runner" WHERE "id" = ${id} FOR NO KEY UPDATE`;
+  }
+
+  /** Deletion keeps the strongest mode: nothing may reference the row while it goes away. */
   async lockForUpdate(id: string): Promise<void> {
     await this.db.$queryRaw`SELECT "id" FROM "Runner" WHERE "id" = ${id} FOR UPDATE`;
   }
