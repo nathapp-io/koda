@@ -166,6 +166,8 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   // (`webhook-delivery`, `audit`) are derived from the key's second segment.
   'system.webhook-delivery.retention': 'any',
   'system.audit.retention': 'any',
+  // review-1119 US-003: the nightly settled-request purge, whose actor id is `approval`.
+  'system.approval.retention': 'any',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);

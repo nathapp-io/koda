@@ -8,6 +8,7 @@ import type { ApprovalRequestFilter, ApprovalRequestCounts } from './approval-re
 import { visibleRequestWhere } from './approval-visibility';
 import { Prisma, type ApprovalRequest, type ApprovalDecision, type PrismaClient } from '../generated/prisma/client';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord, ApprovalRequestStatus } from './domain/approval.domain';
+import { SETTLED_APPROVAL_STATUSES } from './domain/approval.domain';
 
 export interface PendingApprovalMatch {
   actorType: ApprovalRequestRecord['actor']['type']; actorId: string;
@@ -185,6 +186,24 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
       where: { requestId }, select: { pendingClose: true },
     });
     return link !== null && link.pendingClose !== null;
+  }
+
+  /**
+   * US-003 retention purge: delete the settled requests last updated before the cutoff in one
+   * statement, and report how many went. The status filter lists the settled states explicitly, so a
+   * `pending` or `approved` request is never purged however old it is. The rows that reference a
+   * request — its decisions, the fleet ask, the assistant action — go with it through their
+   * `onDelete: Cascade`; a `FleetFlow.approvalRequestId` keeps its id, because that column has no
+   * foreign key.
+   *
+   * It reads the transaction-aware client, so a rejected audit record of the purge rolls the delete
+   * back with it, and the next night's run retries.
+   */
+  async deleteSettledBefore(before: Date): Promise<number> {
+    const { count } = await this.prisma.client.approvalRequest.deleteMany({
+      where: { status: { in: [...SETTLED_APPROVAL_STATUSES] }, updatedAt: { lt: before } },
+    });
+    return count;
   }
 
   async findStaleApproved(before: Date, limit: number): Promise<ApprovalRequestRecord[]> {

@@ -251,7 +251,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "admin": {
     "agent.create": ["granted","granted"],
@@ -505,7 +506,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "member": {
     "agent.create": ["not-granted","not-granted"],
@@ -759,7 +761,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "agent": {
     "agent.create": ["not-granted","not-granted"],
@@ -1013,7 +1016,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "project-admin": {
     "agent.create": ["not-granted","not-granted"],
@@ -1267,7 +1271,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "developer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1521,7 +1526,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "reviewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1775,7 +1781,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "verifier": {
     "agent.create": ["not-granted","not-granted"],
@@ -2029,7 +2036,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "triager": {
     "agent.create": ["not-granted","not-granted"],
@@ -2283,7 +2291,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "approver": {
     "agent.create": ["not-granted","not-granted"],
@@ -2537,7 +2546,8 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   },
   "viewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -2791,6 +2801,7 @@
     "system.flow.advance": ["non-role-key","non-role-key"],
     "system.flow.ticket": ["non-role-key","non-role-key"],
     "system.webhook-delivery.retention": ["non-role-key","non-role-key"],
-    "system.audit.retention": ["non-role-key","non-role-key"]
+    "system.audit.retention": ["non-role-key","non-role-key"],
+    "system.approval.retention": ["non-role-key","non-role-key"]
   }
 }

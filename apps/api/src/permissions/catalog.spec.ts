@@ -129,6 +129,8 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   // review-1119 US-002: the nightly webhook-delivery and audit purges.
   'system.webhook-delivery.retention': 'any',
   'system.audit.retention': 'any',
+  // review-1119 US-003: the nightly settled-approval-request purge.
+  'system.approval.retention': 'any',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 

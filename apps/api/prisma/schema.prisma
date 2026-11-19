@@ -1877,6 +1877,8 @@ model ApprovalRequest {
 
   @@index([status, expiresAt])
   @@index([projectId, status, createdAt])
+  // US-003 retention: the nightly settled-request purge filters on both columns.
+  @@index([status, updatedAt])
   @@index([actorType, actorId, onBehalfOfId, permissionKey, inputHash, status])
 }
 
