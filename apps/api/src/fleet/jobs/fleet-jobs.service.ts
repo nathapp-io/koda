@@ -54,6 +54,7 @@ export const PROJECT_QUIESCE_LIMIT = 500;
 
 /** US-001: the `cancelReason` (and `stateReason`) of a job a project delete ended. */
 export const PROJECT_DELETED_REASON = 'project_deleted';
+export const RUNNER_DISABLED_REASON = 'runner_disabled';
 
 /** What a project-delete quiesce did: the ids it ended, and the live events to publish after the commit. */
 export interface ProjectQuiesceResult {

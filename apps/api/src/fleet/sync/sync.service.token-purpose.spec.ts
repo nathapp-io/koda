@@ -21,7 +21,7 @@ function harness(command: FleetJobKind, provider: 'github' | 'gitlab' = 'github'
   const repository = createMock<IFleetJobRepository>();
   const job = { id: 'job-1', projectId: 'project-1', repoId: selectedRepo.id, runnerId: 'runner-1', leaseEpoch: 7, command, state: FleetJobState.ASSIGNED } as FleetJobRecord;
   repository.lockById.mockResolvedValue(job);
-  repository.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1' });
+  repository.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: true });
   repository.findPendingCommands.mockResolvedValue([]);
   repository.findRepo.mockResolvedValue(selectedRepo);
   const github = createMock<GitHubAppClient>();
