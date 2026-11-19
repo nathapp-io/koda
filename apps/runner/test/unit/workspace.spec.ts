@@ -30,6 +30,21 @@ describe('assertCloneUrl', () => {
     expect(() => assertCloneUrl(u)).toThrow(PathError);
     expect(() => assertCloneUrl(u, { allowLocalCloneUrls: true })).not.toThrow();
   });
+  test.each([
+    'https://github.com:443/acme/app.git',
+    'https://GitHub.com:443/acme/app.git',
+    'https://[::1]:443/acme/app.git',
+  ])('accepts an explicit HTTPS default port: %s', (url) => {
+    expect(() => assertCloneUrl(url)).not.toThrow();
+  });
+  test.each([
+    'https://github.com:/acme/app.git',
+    'https://github.com:0443/acme/app.git',
+    'https://github.com%3a443/acme/app.git',
+    'https://github.com:443\\@evil.test/acme/app.git',
+  ])('still rejects an ambiguous authority: %s', (url) => {
+    expect(() => assertCloneUrl(url)).toThrow(PathError);
+  });
   test('AC-1: a plain-http loopback URL is refused without the option', () => {
     expect(() => assertCloneUrl('http://127.0.0.1:1234/a/b.git')).toThrow(new PathError('invalid cloneUrl'));
   });

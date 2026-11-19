@@ -6,7 +6,8 @@ const { t } = useI18n()
  * Review-1118 US-005 post-review: the retry must ask the API again. A protected route's outage page comes from Nuxt's
  * forced initial middleware pass, which leaves the failed URL as the current route; `clearError({ redirect })` is then
  * a duplicate router push that Vue Router drops without re-running the guard, so the same page would come back without
- * a fresh `/api/auth/me` probe. A document navigation clears the error state and runs the guard from scratch.
+ * a fresh `/api/auth/me` probe. Clear Nuxt's error through its public API, then navigate the document so the guard
+ * runs from scratch even if the router dropped the redirect as a duplicate.
  */
 function retryTarget(): string {
   const redirect = props.error.data?.redirect
@@ -16,8 +17,13 @@ function retryTarget(): string {
   return localPath && redirect !== undefined ? redirect : '/'
 }
 
-function retry() {
+async function retry() {
   const target = retryTarget()
+  try {
+    await clearError({ redirect: target })
+  } catch {
+    // A non-duplicate redirect can re-enter the still-failing client guard. The document retry below must still run.
+  }
   const destination = new URL(target, window.location.href)
   // B4: `location.assign` is only a document navigation when the destination differs in its path or query. A
   // destination that matches the current path and query — the recorded redirect of a deep link that carried a

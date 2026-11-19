@@ -102,14 +102,30 @@ describe('AGENT result', () => {
     expect(await readAgentResult(dir)).toEqual({ ok: false });
   });
 
-  test('post-review B2: a line of 4,000 characters is still read and sanitized whole', async () => {
-    await putStdout('');
-    await writeFile(join(dir, 'nax.stderr'), `${'x'.repeat(3_960)} token=SECRETVALUE123456\n`);
+  test.each(['\n', '\r\n', ''])('reads exactly 4,000 UTF-16 units before %j and retains a sanitized diagnostic', async (ending) => {
+    const credential = 'https://user:SECRETVALUE123456@github.com/o/r.git';
+    const line = credential + 'x'.repeat(4_000 - credential.length);
+    expect(line.length).toBe(4_000);
+    await writeFile(join(dir, 'nax.stderr'), line + ending);
     const failure = await readAgentResult(dir);
     expect(failure.ok).toBe(false);
-    const line = failure.ok ? '' : failure.stderrLine ?? '';
-    expect(line).not.toContain('SECRETVALUE');
-    expect(line.length).toBeLessThanOrEqual(300);
+    const diagnostic = failure.ok ? undefined : failure.stderrLine;
+    expect(diagnostic).toBeTypeOf('string');
+    expect(diagnostic).toContain('[redacted]');
+    expect(diagnostic).not.toContain('SECRETVALUE');
+    expect(diagnostic?.length).toBeLessThanOrEqual(300);
+  });
+
+  test.each(['\n', '\r\n', ''])('drops an oversized astral line before %j instead of accepting 4,001 units', async (ending) => {
+    const line = 'x'.repeat(3_999) + '😀';
+    expect(line.length).toBe(4_001);
+    await writeFile(join(dir, 'nax.stderr'), line + ending + (ending ? 'later diagnostic' : ''));
+    expect(await readAgentResult(dir)).toEqual({ ok: false });
+  });
+
+  test('retains an astral character that fits exactly at the read boundary', async () => {
+    await writeFile(join(dir, 'nax.stderr'), 'x'.repeat(3_998) + '😀\r\n');
+    expect(await readAgentResult(dir)).toEqual({ ok: false, stderrLine: 'x'.repeat(300) });
   });
 
   test('post-review B2: a line that sanitization empties has no detail', async () => {

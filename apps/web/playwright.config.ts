@@ -6,6 +6,10 @@ const API_PORT = process.env['E2E_API_PORT'] ?? '3102';
 const WEB_PORT = process.env['E2E_WEB_PORT'] ?? '3103';
 const API_URL = `http://localhost:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
+// Test-owned proxy observes server-side auth probes as well as browser requests (auth-outage-retry).
+const AUTH_PROXY_PORT = process.env['E2E_AUTH_PROXY_PORT'] ?? String(Number(WEB_PORT) + 1);
+const AUTH_PROXY_URL = `http://127.0.0.1:${AUTH_PROXY_PORT}`;
+process.env['E2E_AUTH_PROXY_URL'] = AUTH_PROXY_URL;
 
 // Postgres from docker-compose.test.yml (`bun run test:db:up` in apps/api).
 // `prisma migrate reset` creates the koda_e2e database if missing.
@@ -100,6 +104,13 @@ export default defineConfig({
       },
     },
     {
+      command: 'bun tests/e2e/fixtures/auth-probe-proxy.ts',
+      url: `${AUTH_PROXY_URL}/__test/health`,
+      cwd: path.resolve(__dirname),
+      reuseExistingServer: false,
+      env: { E2E_PROXY_UPSTREAM: API_URL, E2E_AUTH_PROXY_PORT: AUTH_PROXY_PORT },
+    },
+    {
       // Web
       command: WEB_BUILD_MODE ? WEB_BUILD_COMMAND : WEB_DEV_COMMAND,
       url: WEB_URL,
@@ -109,7 +120,7 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
-        NUXT_API_INTERNAL_URL: API_URL,
+        NUXT_API_INTERNAL_URL: AUTH_PROXY_URL,
         E2E_RUN: '1',
         PORT: String(WEB_PORT),
       },

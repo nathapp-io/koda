@@ -52,7 +52,7 @@ function parseResult(value: unknown): RawAgentResult | undefined {
   };
 }
 
-/** review-1118 US-003: the first non-empty nax.stderr line is read up to this many characters, then sanitized. */
+/** First non-empty nax.stderr line: UTF-16 units excluding the LF or CRLF terminator, then sanitized. */
 const STDERR_LINE_MAX_CHARS = 4_000;
 /** review-1118 US-003: and the sanitized reason is clipped to this. */
 const STDERR_LINE_MAX_OUTPUT = 300;
@@ -85,8 +85,11 @@ async function stderrLine(jobDir: string): Promise<string | undefined> {
         }
         const blank = character.trim().length === 0;
         if (!blank) nonEmpty = true;
-        if (line.length >= STDERR_LINE_MAX_CHARS) {
-          if (nonEmpty) return { done: true };   // past the read bound: no detail rather than an unsanitizable prefix
+        const nextLength = line.length + character.length;
+        // Keep one provisional CR beyond the bound only until we know whether it terminates a CRLF line.
+        const possibleTerminator = character === '\r' && nextLength === STDERR_LINE_MAX_CHARS + 1;
+        if (nextLength > STDERR_LINE_MAX_CHARS && !possibleTerminator) {
+          if (nonEmpty) return { done: true };   // no detail rather than an unsanitizable prefix
           continue;                              // a blank line over the bound only delays the next one
         }
         line += character;
@@ -104,7 +107,7 @@ async function stderrLine(jobDir: string): Promise<string | undefined> {
     }
     const final = inspect(decoder.end());
     if (final.done) return final.line;
-    return nonEmpty ? sanitized(line) : undefined;
+    return nonEmpty && line.length <= STDERR_LINE_MAX_CHARS ? sanitized(line) : undefined;
   } catch {
     return undefined;
   } finally {

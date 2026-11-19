@@ -41,7 +41,13 @@ function isExplicitUrl(url: string, parsed: URL): boolean {
   if (parsed.protocol === 'file:') return rawUserinfo === '' && (rawHost === '' || rawHost.toLowerCase() === parsed.host.toLowerCase());
   const parsedUserinfo = parsed.username === '' && parsed.password === ''
     ? '' : `${parsed.username}${parsed.password === '' ? '' : `:${parsed.password}`}`;
-  return rawHost !== '' && rawHost.toLowerCase() === parsed.host.toLowerCase() && rawUserinfo === parsedUserinfo;
+  // WHATWG elides default ports. Admit only the literal equivalent spelling, not other host normalization
+  // (percent escapes, an empty port, padded ports, or alternative IP spellings) that git could read differently.
+  const defaultPort = parsed.protocol === 'https:' ? '443' : '80';
+  const host = rawHost.toLowerCase();
+  const canonicalHost = parsed.host.toLowerCase();
+  const sameHost = host === canonicalHost || (parsed.port === '' && host === `${canonicalHost}:${defaultPort}`);
+  return rawHost !== '' && sameHost && rawUserinfo === parsedUserinfo;
 }
 
 /**

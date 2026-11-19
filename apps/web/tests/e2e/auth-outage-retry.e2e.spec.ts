@@ -67,6 +67,20 @@ test.describe('Session outage page', () => {
     // case `location.assign` cannot navigate to a document.
     await expect(page).toHaveURL(/\/agents(#staff)?$/);
 
+    // The proxy, not page.route, observes SSR calls made during a document reload. Scope the counter to this
+    // session so unrelated auth probes cannot satisfy the regression. Keep failing browser probes: only a fresh
+    // server-side probe can increase this count and recover the page.
+    const token = (await page.context().cookies()).find((cookie) => cookie.name === 'koda_token')?.value;
+    expect(token).toBeTruthy();
+    const upstreamProbes = async (): Promise<number> => {
+      const response = await page.request.get(`${process.env['E2E_AUTH_PROXY_URL']}/__test/auth-probes`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(response.ok()).toBe(true);
+      return (await response.json() as { probes: number }).probes;
+    };
+    const beforeRetry = await upstreamProbes();
+
     // Only the retry's own document requests count from here.
     const documentRequests: string[] = [];
     page.on('request', (request) => {
@@ -82,5 +96,6 @@ test.describe('Session outage page', () => {
     await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible();
     // A fragment is never sent on the wire, so the request carries the path without it.
     expect(documentRequests).toEqual([expect.stringMatching(/\/agents$/)]);
+    await expect.poll(upstreamProbes).toBeGreaterThan(beforeRetry);
   });
 });
