@@ -6,6 +6,7 @@ import { PrismaAuditStorage } from './prisma-audit.storage';
 import { AuditRecorder } from './audit-recorder.service';
 import { AuditLogService } from './audit-log.service';
 import { AuditController } from './audit.controller';
+import { AuditRetentionProcessor } from './audit-retention.processor';
 
 @Global()
 @Module({
@@ -17,6 +18,7 @@ import { AuditController } from './audit.controller';
     { provide: AUDIT_STORAGE, useExisting: PrismaAuditStorage },
     AuditRecorder,
     AuditLogService,
+    AuditRetentionProcessor,
   ],
   exports: [AuditRecorder, AuditLogService],
 })

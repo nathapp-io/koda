@@ -21,6 +21,8 @@ import { FleetHealthDetector } from '../notifications/fleet/fleet-health.detecto
 import { MemoryGovernanceProcessor } from '../memory/memory-governance.processor';
 import { NotificationRetentionProcessor } from '../notifications/notification-retention.processor';
 import { OutboxRetentionProcessor } from '../outbox/outbox-retention.processor';
+import { AuditRetentionProcessor } from '../audit/audit-retention.processor';
+import { WebhookDeliveryRetentionProcessor } from '../webhook-security/webhook-delivery-retention.processor';
 import { CronOptimizeStrategy } from '../rag/strategies/cron-optimize.strategy';
 import { CounterOptimizeStrategy } from '../rag/strategies/counter-optimize.strategy';
 import { ManualOptimizeStrategy } from '../rag/strategies/manual-optimize.strategy';
@@ -70,6 +72,9 @@ const writers = new Map<Function, string>([
   [MemoryGovernanceProcessor, 'system.memory.govern'],
   [NotificationRetentionProcessor, 'system.notification.retention'],
   [OutboxRetentionProcessor, 'system.outbox.retention'],
+  // review-1119 US-002: the nightly webhook-delivery and audit purges.
+  [WebhookDeliveryRetentionProcessor, 'system.webhook-delivery.retention'],
+  [AuditRetentionProcessor, 'system.audit.retention'],
   [CronOptimizeStrategy, 'system.rag.optimize'],
   [CounterOptimizeStrategy, 'system.rag.optimize'],
   [ManualOptimizeStrategy, 'system.rag.optimize'],
@@ -119,7 +124,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(44);
+    expect(writers).toHaveLength(46);
     expect(actual).toEqual(expected);
   });
 

@@ -80,6 +80,19 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
   }
 
   /**
+   * US-002 retention purge: delete the entries created before the cutoff in one statement, and report
+   * how many went. The log is append-only while the application writes it — this is its only delete,
+   * and the nightly cron purge is the only caller. It reads the transaction-aware client, so a
+   * rejected audit record of the purge rolls the delete back with it.
+   */
+  async deleteCreatedBefore(before: Date): Promise<number> {
+    const { count } = await this.prisma.client.auditEntry.deleteMany({
+      where: { createdAt: { lt: before } },
+    });
+    return count;
+  }
+
+  /**
    * One page's display labels, in at most one `findMany` per non-empty kind (Permissions P2 US-001).
    *
    * Designer's call: this reads the label columns of `User`, `Agent`, `Runner` and `Project` from the

@@ -11,6 +11,7 @@ import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { RETENTION_CFG } from '../../../src/config/retention.config';
+import { AuditRetentionProcessor } from '../../../src/audit/audit-retention.processor';
 import { OutboxRetentionProcessor } from '../../../src/outbox/outbox-retention.processor';
 import { NotificationRetentionProcessor } from '../../../src/notifications/notification-retention.processor';
 import { FleetHealthDetector } from '../../../src/notifications/fleet/fleet-health.detector';
@@ -27,6 +28,8 @@ const DAY = 86_400_000;
 const OUTBOX_KEY = 'system.outbox.retention';
 const NOTIFICATION_KEY = 'system.notification.retention';
 const HEALTH_KEY = 'system.health.detect';
+const AUDIT_KEY = 'system.audit.retention';
+const AUDIT_RETENTION_DAYS = '365';
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -39,6 +42,7 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
   const priorEnv = {
     outbox: process.env['OUTBOX_RETENTION_DAYS'],
     notification: process.env['NOTIFICATION_RETENTION_DAYS'],
+    audit: process.env['AUDIT_RETENTION_DAYS'],
   };
 
   const old = () => new Date(Date.now() - 40 * DAY);
@@ -68,6 +72,7 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
   };
 
   const purgeOutbox = () => app.get(OutboxRetentionProcessor).scheduledPurge();
+  const purgeAudit = () => app.get(AuditRetentionProcessor).scheduledPurge();
   const purgeNotifications = () => app.get(NotificationRetentionProcessor).scheduledPurge();
   const detect = (now = later()) => app.get(FleetHealthDetector).detect(now);
 
@@ -95,12 +100,23 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
   const createClosedAlert = () =>
     db.fleetHealthAlert.create({ data: { kind: 'runner_offline', subjectKey: `old-${++n}`, closedAt: old() } });
 
+  /** Past the audit horizon (AUDIT_RETENTION_DAYS = 365), so the audit purge is eligible for it. */
+  const createAgedAuditEntry = () =>
+    db.auditEntry.create({
+      data: {
+        key: 'ticket.create', resourceType: 'ticket', resourceId: `aged-${++n}`, projectId: ids.project,
+        actorType: 'USER', actorId: ids.root, origin: 'rest', requiredMode: 'none', satisfiedBy: 'none',
+        correlationId: `aged-${n}`, createdAt: new Date(Date.now() - 400 * DAY),
+      },
+    });
+
   const offlineRunner = (lastSeenAt = old()) =>
     insertRunner(db, { name: `audit-runner-${++n}`, lastSeenAt, createdById: ids.root, capabilities: FLEET_CAPS });
 
   beforeAll(async () => {
     process.env['OUTBOX_RETENTION_DAYS'] = '30';
     process.env['NOTIFICATION_RETENTION_DAYS'] = '30';
+    process.env['AUDIT_RETENTION_DAYS'] = AUDIT_RETENTION_DAYS;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     db = fixtureDb(app);
@@ -141,6 +157,7 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
     for (const [key, value] of [
       ['OUTBOX_RETENTION_DAYS', priorEnv.outbox],
       ['NOTIFICATION_RETENTION_DAYS', priorEnv.notification],
+      ['AUDIT_RETENTION_DAYS', priorEnv.audit],
     ] as const) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -183,6 +200,20 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
       'Outbox retention purge failed, will retry next run: audit down',
     );
     errorLog.mockRestore();
+  });
+
+  /**
+   * review-1119 US-002 AC-15: the audit purge and its entry are one transaction, so a rejected record
+   * rolls the delete back and the entries live to the next night's run.
+   */
+  it('AC-15: a rejected record rolls the audit retention delete back', async () => {
+    const entry = await createAgedAuditEntry();
+    rejectFirstRecord(AUDIT_KEY);
+
+    await expect(purgeAudit()).resolves.toBeUndefined();
+
+    expect(await db.auditEntry.findUnique({ where: { id: entry.id } })).not.toBeNull();
+    expect(await count(AUDIT_KEY)).toBe(0);
   });
 
   it('AC-4/AC-5: audits each nonempty notification retention step with its own resource type', async () => {
