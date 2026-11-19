@@ -1,3 +1,4 @@
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { validate } from './env.validation';
 import { webhookSignatureConfig } from './webhook-signature.config';
 
@@ -45,13 +46,22 @@ describe('webhookSignatureConfig', () => {
     expect(withEnv({ CI_WEBHOOK_REQUIRE_V2: 'TRUE' }, () => webhookSignatureConfig().ciRequireV2)).toBe(true);
   });
 
-  it('AC-7: rejects invalid CI_WEBHOOK_REQUIRE_V2 and names the variable', () => {
-    expect(() => validate({
-      DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
-      JWT_SECRET: 'j'.repeat(32),
-      JWT_REFRESH_SECRET: 'r'.repeat(32),
-      API_KEY_SECRET: 'k'.repeat(32),
-      CI_WEBHOOK_REQUIRE_V2: 'yes',
-    })).toThrow('CI_WEBHOOK_REQUIRE_V2');
+  it('AC-7: rejects invalid CI_WEBHOOK_REQUIRE_V2 with a named ValidationAppException', () => {
+    let thrown: unknown;
+    try {
+      validate({
+        DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
+        JWT_SECRET: 'j'.repeat(32),
+        JWT_REFRESH_SECRET: 'r'.repeat(32),
+        API_KEY_SECRET: 'k'.repeat(32),
+        CI_WEBHOOK_REQUIRE_V2: 'yes',
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ValidationAppException);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain('CI_WEBHOOK_REQUIRE_V2');
   });
 });
