@@ -239,12 +239,12 @@ describe('GitHubAppClient', () => {
         status: 200,
         body: {
           state: 'closed', draft: false, merged: true, merged_at: '2026-10-06T01:02:03Z', merged_by: { login: 'dev' },
-          merge_commit_sha: 'abc123', html_url: 'https://github.com/acme/app/pull/9', title: 'Fix it',
+          merge_commit_sha: 'abc123', html_url: 'https://github.com/acme/app/pull/9', title: 'Fix it', user: { login: 'alice' },
         },
       }));
       await expect(client.getPullRequest('ghs_tok', 'acme', 'app', 9)).resolves.toEqual({
         number: 9, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T01:02:03Z'), mergedBy: 'dev',
-        mergeSha: 'abc123', url: 'https://github.com/acme/app/pull/9', title: 'Fix it',
+        mergeSha: 'abc123', url: 'https://github.com/acme/app/pull/9', title: 'Fix it', author: 'alice',
       });
       expect(forge.requests[0].headers.authorization).toBe('Bearer ghs_tok');
     });

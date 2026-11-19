@@ -56,6 +56,9 @@ const envSchema = Joi.object({
     .integer()
     .min(0)
     .optional(),
+  WEBHOOK_DELIVERY_RETENTION_DAYS: Joi.number().integer().min(0).max(3_650).optional(),
+  APPROVAL_RETENTION_DAYS: Joi.number().integer().min(0).max(3_650).optional(),
+  AUDIT_RETENTION_DAYS: Joi.number().integer().min(0).max(3_650).optional(),
   NOTIFICATION_RETENTION_DAYS: Joi.number()
     .integer()
     .min(0)

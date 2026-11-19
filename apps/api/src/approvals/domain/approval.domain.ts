@@ -22,6 +22,14 @@ export interface ApprovalPolicyInput {
   requireDistinctApprover?: boolean;
 }
 export type ApprovalRequestStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'executed' | 'failed';
+/**
+ * US-003 retention: the states a request can never leave. `pending` and `approved` are absent on
+ * purpose — a pending request can still be decided and an approved one executed, so neither is old
+ * enough to purge however long ago it was last written.
+ */
+export const SETTLED_APPROVAL_STATUSES: readonly ApprovalRequestStatus[] = [
+  'rejected', 'expired', 'cancelled', 'executed', 'failed',
+];
 export const DEFAULT_APPROVAL_TIMEOUT_SEC = 86_400;
 export const APPROVAL_POLICY_REPOSITORY = Symbol('APPROVAL_POLICY_REPOSITORY');
 export const APPROVAL_REQUEST_REPOSITORY = Symbol('APPROVAL_REQUEST_REPOSITORY');

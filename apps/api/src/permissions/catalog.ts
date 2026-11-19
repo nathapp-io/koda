@@ -162,6 +162,12 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'system.flow.respec': 'any',
   'system.flow.advance': 'any',
   'system.flow.ticket': 'any',
+  // review-1119 US-002: the two nightly retention purges of this story. Their system actor ids
+  // (`webhook-delivery`, `audit`) are derived from the key's second segment.
+  'system.webhook-delivery.retention': 'any',
+  'system.audit.retention': 'any',
+  // review-1119 US-003: the nightly settled-request purge, whose actor id is `approval`.
+  'system.approval.retention': 'any',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);

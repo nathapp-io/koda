@@ -103,6 +103,10 @@ describe('env validation', () => {
     });
   });
 
+  it('AC-7: rejects approval retention beyond 3650 days and identifies the variable', () => {
+    expect(() => validate({ ...REQUIRED, APPROVAL_RETENTION_DAYS: '4000' })).toThrow('APPROVAL_RETENTION_DAYS');
+  });
+
   it('accepts empty SMTP_URL / EMAIL_FROM / WEB_PUBLIC_URL as "email off" (S4b review I1)', () => {
     expect(() => validate({ ...REQUIRED, SMTP_URL: '', EMAIL_FROM: '', WEB_PUBLIC_URL: '' })).not.toThrow();
   });

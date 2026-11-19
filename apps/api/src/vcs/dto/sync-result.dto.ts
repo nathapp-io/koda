@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SyncResultDto {
   @ApiProperty({
@@ -34,4 +34,18 @@ export class SyncResultDto {
     ref: string;
     title: string;
   }>;
+
+  @ApiPropertyOptional({
+    description: 'Issues the approved import will process, after the allowedAuthors filter. '
+      + 'Reported by an approved full import, which imports after the approval commits.',
+    example: 3,
+  })
+  fetchedIssues?: number;
+
+  @ApiPropertyOptional({
+    description: 'True when the provider had more issues than the fetch returned, so this import is '
+      + 'not the whole backlog.',
+    example: true,
+  })
+  capped?: boolean;
 }

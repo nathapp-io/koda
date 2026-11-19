@@ -1,6 +1,6 @@
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { VcsSyncService } from './vcs-sync.service';
+import { VcsSyncService, VcsTargetDriftError } from './vcs-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsIssue } from './types';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
@@ -126,6 +126,7 @@ describe('VcsSyncService', () => {
         expect.objectContaining({ number: issue.number }),
         'owner/repo#1',
         expect.any(Function),
+        undefined,
       );
     });
 
@@ -211,7 +212,102 @@ describe('VcsSyncService', () => {
       await service.syncIssue({ id: 'p1' }, issue, 'polling', { repoOwner: 'acme', repoName: 'widgets' }, 'vcs.sync.all');
 
       expect(repo.findExistingTicketByExternalId).toHaveBeenCalledWith('p1', 'acme/widgets#5');
-      expect(repo.createTicketFromIssue).toHaveBeenCalledWith({ id: 'p1' }, issue, 'acme/widgets#5', expect.any(Function));
+      expect(repo.createTicketFromIssue).toHaveBeenCalledWith(
+        { id: 'p1' }, issue, 'acme/widgets#5', expect.any(Function), undefined,
+      );
+    });
+  });
+
+  /**
+   * Review-1119 US-006 (B1): a deferred import writes after the approval committed, so the connection
+   * lock its target check held is gone. Each issue write revalidates the captured target in its own
+   * transaction; the first refusal means every remaining write would be refused too.
+   */
+  describe('B1: per-write target revalidation', () => {
+    const issues = [makeIssue({ number: 1 }), makeIssue({ number: 2 }), makeIssue({ number: 3 })];
+
+    /** The repository side of the contract: the revalidation runs inside the write it guards. */
+    const revalidateInsideWrite = () => mockRepo.createTicketFromIssue.mockImplementation(
+      async (_project, _issue, _externalVcsId, _onCreated, beforeInsert) => {
+        await beforeInsert?.();
+        return { id: 't-1', number: 1, title: 'Test issue' };
+      },
+    );
+
+    it('hands the revalidation to every issue write', async () => {
+      const revalidate = vi.fn().mockResolvedValue(undefined);
+      revalidateInsideWrite();
+
+      await service.syncIssues(makeProject(), issues, makeConnection(), 'vcs.sync.all', { isolate: true, revalidate });
+
+      expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(3);
+      for (const call of mockRepo.createTicketFromIssue.mock.calls) {
+        expect(call[4]).toBe(revalidate);
+      }
+    });
+
+    it('stops at the first drift refusal and reports it once instead of once per issue', async () => {
+      const drift = new VcsTargetDriftError();
+      const revalidate = vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(drift);
+      revalidateInsideWrite();
+
+      const result = await service.syncIssues(
+        makeProject(), issues, makeConnection(), 'vcs.sync.all', { isolate: true, revalidate },
+      );
+
+      expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(2);
+      expect(result.issuesSynced).toBe(1);
+      expect(result.stopped).toBe(drift.message);
+      expect(result.errors).toEqual([]);
+    });
+
+    /**
+     * Review-1119 US-006 (B1): the caller logs `errors` truncated to ten entries, so a drift behind ten
+     * ordinary failures was only ever printed as "and 1 more", its reason lost. The refusal travels beside
+     * the summary now.
+     */
+    it('B1: reports the drift beside ten ordinary failures, not as an eleventh summary entry', async () => {
+      const drift = new VcsTargetDriftError();
+      const many = Array.from({ length: 11 }, (_, index) => makeIssue({ number: index + 1 }));
+      const revalidate = vi.fn().mockRejectedValue(drift);
+      // Ten ordinary issue writes fail before the eleventh reaches its revalidation and is refused.
+      let writes = 0;
+      mockRepo.createTicketFromIssue.mockImplementation(async (_project, _issue, _externalVcsId, _onCreated, beforeInsert) => {
+        writes++;
+        if (writes <= 10) throw new Error('write failed');
+        await beforeInsert?.();
+        return { id: 't-11', number: 11, title: 'Test issue' };
+      });
+
+      const result = await service.syncIssues(
+        makeProject(), many, makeConnection(), 'vcs.sync.all', { isolate: true, revalidate },
+      );
+
+      expect(result.errors).toHaveLength(10);
+      expect(result.errors[0]).toBe('Issue 1: write failed');
+      expect(result.errors).not.toContainEqual(expect.stringContaining(drift.message));
+      expect(result.stopped).toBe(drift.message);
+      expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(11);
+    });
+
+    it('keeps an ordinary write failure per issue and continues the pass', async () => {
+      const revalidate = vi.fn().mockResolvedValue(undefined);
+      mockRepo.createTicketFromIssue.mockImplementation(async (_project, issue, _externalVcsId, _onCreated, beforeInsert) => {
+        await beforeInsert?.();
+        if (issue.number === 2) throw new Error('audit down');
+        return { id: 't-1', number: 1, title: 'Test issue' };
+      });
+
+      const result = await service.syncIssues(
+        makeProject(), issues, makeConnection(), 'vcs.sync.all', { isolate: true, revalidate },
+      );
+
+      expect(mockRepo.createTicketFromIssue).toHaveBeenCalledTimes(3);
+      expect(result.errors).toEqual(['Issue 2: audit down']);
+      expect(result.stopped).toBeUndefined();
+      expect(result.issuesSynced).toBe(2);
     });
   });
 

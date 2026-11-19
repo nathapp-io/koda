@@ -19949,6 +19949,16 @@
                 }
               }
             }
+          },
+          "fetchedIssues": {
+            "type": "number",
+            "description": "Issues the approved import will process, after the allowedAuthors filter. Reported by an approved full import, which imports after the approval commits.",
+            "example": 3
+          },
+          "capped": {
+            "type": "boolean",
+            "description": "True when the provider had more issues than the fetch returned, so this import is not the whole backlog.",
+            "example": true
           }
         },
         "required": [
@@ -28098,7 +28108,16 @@
           },
           "result": {
             "type": "object",
-            "nullable": true
+            "nullable": true,
+            "description": "The executed command's recorded result, null until the request executes; the shape is the command's own. An executed `vcs.sync.all` records the approved full import's fetch metadata, not a completed import: `syncType` `manual`, `issuesSynced` 0, `issuesSkipped` 0 and `tickets` always `[]` (the import itself runs after this commit), plus `fetchedIssues` (issues the import will process, after the allowedAuthors filter) and `capped` (the provider had more issues than the fetch returned). A request that failed records `{ error }` instead — the pre-check code, or `execution-failed` with the thrown error's `name`.",
+            "example": {
+              "syncType": "manual",
+              "issuesSynced": 0,
+              "issuesSkipped": 0,
+              "tickets": [],
+              "fetchedIssues": 3,
+              "capped": true
+            }
           },
           "decisions": {
             "type": "array",

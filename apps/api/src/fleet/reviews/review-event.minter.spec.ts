@@ -46,6 +46,7 @@ function githubStubs() {
   return {
     mintThreadReadToken: vi.fn(minted), mintReadOnlyToken: vi.fn(minted),
     getRepoRole: vi.fn().mockResolvedValue('write'), getReviewThread: vi.fn().mockResolvedValue(matchingThread()),
+    getPullRequest: vi.fn().mockResolvedValue(null),
   };
 }
 
@@ -83,6 +84,8 @@ interface GitLabOptions {
   levels?: Record<string, number>;
   /** What the discussion read answers, or the error it throws. */
   discussion?: { authors: string[] } | null | Error;
+  author?: string | null;
+  mergeRequestError?: Error;
   /** When set, every access-level read throws it. */
   accessError?: Error;
   /** False models a repo with no credential row. */
@@ -116,6 +119,10 @@ function gitlabSetup(logins = ['alice'], over: GitLabOptions = {}) {
     store.call(repo, kind, async (access) => { accesses.push(access); return fn(access); }));
 
   const gitlab = {
+    getMergeRequest: vi.fn(async (_access: GitLabAccess, _iid: number) => {
+      if (over.mergeRequestError) throw over.mergeRequestError;
+      return over.author === undefined || over.author === null ? null : { author: over.author };
+    }),
     getMemberAccessLevel: vi.fn(async (_access: GitLabAccess, login: string) => {
       if (over.accessError) throw over.accessError;
       return over.levels?.[login] ?? 0;
@@ -335,14 +342,15 @@ describe('ReviewEventMinter', () => {
     it('US-006 AC-4: every forge read runs in its own read call, and the GitHub client is untouched', async () => {
       const s = gitlabSetup(['alice', 'bob'], { levels: { alice: 30, bob: 20 }, discussion: { authors: ['alice'] } });
       await s.minter.run();
-      // One call per forge request: two access-level reads and one discussion read.
-      expect(s.call).toHaveBeenCalledTimes(3);
-      expect(s.call.mock.calls.map((c) => c[1])).toEqual(['read', 'read', 'read']);
+      // One call per forge request: two access-level reads, MR read, and discussion read.
+      expect(s.call).toHaveBeenCalledTimes(4);
+      expect(s.call.mock.calls.map((c) => c[1])).toEqual(['read', 'read', 'read', 'read']);
       expect(s.call.mock.calls.map((c) => c[0])).toEqual([
-        { id: 'r1', host: 'https://gitlab.com' }, { id: 'r1', host: 'https://gitlab.com' }, { id: 'r1', host: 'https://gitlab.com' },
+        { id: 'r1', host: 'https://gitlab.com' }, { id: 'r1', host: 'https://gitlab.com' },
+        { id: 'r1', host: 'https://gitlab.com' }, { id: 'r1', host: 'https://gitlab.com' },
       ]);
-      expect(s.accesses).toHaveLength(3);
-      expect(new Set(s.accesses).size).toBe(3);
+      expect(s.accesses).toHaveLength(4);
+      expect(new Set(s.accesses).size).toBe(4);
       // Each read is handed the access its own call produced.
       expect(s.gitlab.getMemberAccessLevel).toHaveBeenCalledTimes(2);
       for (const [access, login] of s.gitlab.getMemberAccessLevel.mock.calls) {
@@ -443,6 +451,74 @@ describe('ReviewEventMinter', () => {
       expect(s.github.mintReadOnlyToken).not.toHaveBeenCalled();
       expect(s.github.getRepoRole).not.toHaveBeenCalled();
       expect(s.github.getReviewThread).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('US-004 author exclusion', () => {
+    it('AC-3: excludes the GitHub PR author before selecting approver', async () => {
+      const s = setup(['alice', 'carol']); const approval = recordedApproval(s);
+      s.github.getPullRequest.mockResolvedValue({ author: 'ALICE' } as never);
+      await s.minter.run();
+      expect(approval()).toMatchObject({ approverId: 'github:carol', satisfiedBy: 'none' });
+    });
+
+    it('AC-4/5: skips and never mints when the sole GitHub writer is the PR author', async () => {
+      const s = setup(['Alice']);
+      s.github.getPullRequest.mockResolvedValue({ author: 'alice' } as never);
+      await s.minter.run();
+      expect(s.events.markSkipped).toHaveBeenCalledWith(s.row.id, 'author-only');
+      expect(s.writer.mint).not.toHaveBeenCalled();
+    });
+
+    it('AC-6: excludes a verified author and leaves the remaining GitHub writer unverified', async () => {
+      const s = setup(['alice', 'carol']); const approval = recordedApproval(s);
+      s.github.getPullRequest.mockResolvedValue({ author: 'alice' } as never);
+      s.github.getReviewThread.mockResolvedValue(matchingThread({ authors: ['alice'] }));
+      await s.minter.run();
+      expect(approval()).toMatchObject({ approverId: 'github:carol', satisfiedBy: 'none' });
+    });
+
+    it('AC-7: excludes the GitLab MR author before selecting approver', async () => {
+      const s = gitlabSetup(['bob', 'dave'], { levels: { bob: 30, dave: 30 }, author: 'bob' }); const approval = recordedApproval(s);
+      await s.minter.run();
+      expect(approval()).toMatchObject({ approverId: 'gitlab:dave' });
+    });
+
+    it('AC-8: skips when the only GitLab writer is the MR author', async () => {
+      const s = gitlabSetup(['bob'], { levels: { bob: 30 }, author: 'bob' });
+      await s.minter.run();
+      expect(s.events.markSkipped).toHaveBeenCalledWith(s.row.id, 'author-only');
+      expect(s.writer.mint).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: skips GitHub PR permission-read failures', async () => {
+      const s = setup(); s.github.getPullRequest.mockRejectedValue(new Error('provider failure'));
+      await s.minter.run();
+      expect(s.events.markSkipped).toHaveBeenCalledWith(s.row.id, 'permission-check-failed');
+      expect(s.writer.mint).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: skips GitLab MR permission-read failures', async () => {
+      const s = gitlabSetup(['bob'], { levels: { bob: 30 }, mergeRequestError: new Error('provider failure') });
+      await s.minter.run();
+      expect(s.events.markSkipped).toHaveBeenCalledWith(s.row.id, 'permission-check-failed');
+      expect(s.writer.mint).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: null GitLab MR preserves first-writer unverified fallback', async () => {
+      const s = gitlabSetup(['dave', 'bob'], { levels: { bob: 30, dave: 30 }, author: null, discussion: { authors: [] } });
+      const approval = recordedApproval(s);
+      await s.minter.run();
+      expect(s.gitlab.getMergeRequest).toHaveBeenCalledExactlyOnceWith(expect.anything(), 42);
+      expect(approval()).toMatchObject({ approverId: 'gitlab:dave', satisfiedBy: 'none' });
+    });
+
+    it('AC-12: null GitHub PR preserves first-writer unverified fallback', async () => {
+      const s = setup(['carol', 'alice']); const approval = recordedApproval(s);
+      s.github.getReviewThread.mockResolvedValue(matchingThread({ authors: [] }));
+      await s.minter.run();
+      expect(s.github.getPullRequest).toHaveBeenCalledExactlyOnceWith('secret', 'acme', 'api', 42);
+      expect(approval()).toMatchObject({ approverId: 'github:carol', satisfiedBy: 'none' });
     });
   });
 });

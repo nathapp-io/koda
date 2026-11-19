@@ -1,6 +1,7 @@
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { ApprovalPolicyService } from './approval-policy.service';
 import { Global, Injectable, Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createMockPrismaService, PrismaService } from '@nathapp/nestjs-prisma';
@@ -13,6 +14,7 @@ import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalPolicyResolver } from './approval-policy.resolver';
 import { ApprovalRequestExpirySweeper } from './approval-request-expiry.sweeper';
 import { FLEET_CFG } from '../config/fleet.config';
+import { retentionConfig } from '../config/retention.config';
 import { PermissionService } from '../permissions/permission.service';
 import { SYSTEM_WRITER_METADATA } from '../permissions/system-writer.decorator';
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
@@ -23,9 +25,14 @@ import { AfterCommitService } from '../permissions/after-commit.service';
 import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalRequestQueries } from './approval-request.queries';
 import { ApprovalRouteGate } from './route/approval-route-gate';
+import { ApprovalRetentionProcessor } from './approval-retention.processor';
 
 @Global()
-@Module({ providers: [
+@Module({ imports: [
+  // US-003: the retention processor reads its horizon through ConfigService. The real
+  // ConfigModule (not a stub) so the config object shape matches production.
+  ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [retentionConfig] }),
+], providers: [
   { provide: AuditRecorder, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
   { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
   { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]), roleIdsAnywhere: vi.fn().mockResolvedValue([]) } },
@@ -109,6 +116,14 @@ describe('ApprovalEngineModule', () => {
     expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, ApprovalRequestExpirySweeper)).toBe('system.approval.expire');
     // The instance's constructor is what `runAsSystemWriter` reads the key from.
     expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, sweeper.constructor)).toBe('system.approval.expire');
+  });
+  it('US-003 AC-11: resolves the nightly retention processor with its system writer key', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
+
+    const processor = moduleRef.get(ApprovalRetentionProcessor);
+    expect(processor).toBeInstanceOf(ApprovalRetentionProcessor);
+    // The instance's constructor is what `runAsSystemWriter` reads the key from.
+    expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, processor.constructor)).toBe('system.approval.retention');
   });
   it('US-012 AC-11 and visibility: an importing module injects all exported services', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();

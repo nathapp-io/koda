@@ -1,0 +1,427 @@
+{
+  "project": "koda",
+  "feature": "review-1119-data-rulings",
+  "branchName": "feat/review-1119-data-rulings",
+  "createdAt": "2026-11-19T05:23:58.886Z",
+  "updatedAt": "2026-11-19T09:21:08.479Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Configure retention horizons",
+      "description": "**Goal** — Register and validate the configurable retention horizons consumed by the API's nightly purges.\n\n**Motivation** — `AuditEntry`, `ApprovalRequest` (with its cascaded `ApprovalDecision`, `FleetApprovalAsk` and `AssistantActionRequest` rows) and inbound `WebhookDelivery` rows are never deleted.\n\n**Approach** — **Retention defaults.** `WEBHOOK_DELIVERY_RETENTION_DAYS` 30, `APPROVAL_RETENTION_DAYS` 180, `AUDIT_RETENTION_DAYS` 365. They follow the `OUTBOX_RETENTION_DAYS` rule in `config/outbox.config.ts`: the default applies when `NODE_ENV` is not `test`; under test the purge is off; an explicit `0` turns it off. Each value is an integer 0..3650, validated in `config/env.validation.ts`.\n\n**Retention config.** `config/retention.config.ts` registers `RETENTION_CFG` returning `{ webhookDeliveryDays, approvalDays, auditDays }`, each `number | null`. It joins the `load:` array in `app.module.ts` and the test stub config in `common/test-helpers/global-stubs.module.ts`.\n\n`RETENTION_CFG` (US-001) is consumed by US-002 and US-003 through `ConfigService.get`. US-001 AC-9 pins the production wiring: the booted app resolves it. Test-mode disablement is the unset default, not a veto of explicit values: as with outbox, a positive override wins including under `test`; `null` is the disabled value. Add range validation to the existing `validate` suite in `env.validation.spec.ts` and preserve existing outbox settings. Use the existing `bootHttpApp` setup in `test/integration/audit/audit-delivery-system.integration.spec.ts` to check the real wiring, and restore environment mutations after config tests.\n\n**Scope** — In: retention env validation, registered config, production and global test loader wiring and their unit and real-app tests. Out: the repository deletes, scheduled processors and permission registration in US-002 and US-003; configuring retention for unrelated tables.\n\n**Interface** — `RETENTION_CFG`; `retentionConfig()` returns `{ webhookDeliveryDays, approvalDays, auditDays }`, each `number | null`.",
+      "acceptanceCriteria": [
+        "[unit] When none of the three retention variables is set and NODE_ENV is production, then retentionConfig() returns webhookDeliveryDays: 30.",
+        "[unit] When none of the three retention variables is set and NODE_ENV is production, then retentionConfig() returns approvalDays: 180.",
+        "[unit] When none of the three retention variables is set and NODE_ENV is production, then retentionConfig() returns auditDays: 365.",
+        "[unit] When none of the three retention variables is set and NODE_ENV is test, then retentionConfig() returns auditDays: null.",
+        "[unit] When AUDIT_RETENTION_DAYS=0 and NODE_ENV is production, then retentionConfig() returns auditDays: null.",
+        "[unit] When APPROVAL_RETENTION_DAYS=7, then retentionConfig() returns approvalDays: 7.",
+        "[unit] When validate() receives an otherwise valid environment with APPROVAL_RETENTION_DAYS='4000', then it throws ValidationAppException identifying APPROVAL_RETENTION_DAYS.",
+        "[unit] When a testing module imports GlobalStubsModule under NODE_ENV=test and none of the three retention variables is set, then ConfigService.get(RETENTION_CFG) returns an object with auditDays: null.",
+        "[integration] When bootHttpApp boots the application, then app.get(ConfigService).get(RETENTION_CFG) returns a defined object."
+      ],
+      "tags": [
+        "api",
+        "config",
+        "retention"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "An established config factory and validation pattern with two known module loaders.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/config/outbox.config.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/app.module.ts",
+        "apps/api/src/common/test-helpers/global-stubs.module.ts",
+        "apps/api/test/helpers/http-app.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/config/retention.config.ts",
+        "apps/api/src/config/retention.config.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When WEBHOOK_DELIVERY_RETENTION_DAYS=3650, then environment validation accepts it.",
+        "When AUDIT_RETENTION_DAYS=1.5, then environment validation rejects it."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "28a9449926c214d514a0125f78c1e18c7e76a607"
+    },
+    {
+      "id": "US-002",
+      "title": "Purge old webhook deliveries and audit entries",
+      "description": "**Goal** — Nightly, delete old inbound webhook deliveries and audit entries using separately configured horizons.\n\n**Motivation** — `AuditEntry`, `ApprovalRequest` (with its cascaded `ApprovalDecision`, `FleetApprovalAsk` and `AssistantActionRequest` rows) and inbound `WebhookDelivery` rows are never deleted.\n\n**Approach** — **Purge shape.** Each purge copies `OutboxRetentionProcessor`: a `@SystemWriter('<key>')` class, an `@Cron` method `scheduledPurge` that runs the purge through `runAsSystemWriter`, a cutoff of now minus the configured days, one repository delete wrapped in `AuditRecorder.audited` (recording an entry only when the count is above 0), and log-and-swallow on failure. The next night is the retry. Each purge is a single statement, not batched.\n\n- `WebhookDeliveryRetentionProcessor`, key `system.webhook-delivery.retention`, cron `0 5 * * *`. It calls a new module-private `PrismaWebhookDeliveryRepository.deleteReceivedBefore(before): Promise<number>`, registered in `WebhookSecurityModule`.\n- `AuditRetentionProcessor`, key `system.audit.retention`, cron `30 5 * * *`. It calls `PrismaAuditEntryRepository.deleteCreatedBefore(before): Promise<number>` and is registered in `AuditLogModule`.\n- The three keys are added to `permissions/catalog.ts` beside `system.outbox.retention`, with scope `['system']`. This story registers only its two keys; US-003 registers the third.\n\n**Webhook replay.** The `WebhookDelivery` row is the replay guard's dedup record. Purging it after 30 days means a delivery id older than the horizon is no longer refused. The owner accepted this with ruling 10. The guard's doc comment says a repeat is refused \"forever\"; US-002 changes it to \"for the retention horizon\".\n\nUse `ConfigService.get(RETENTION_CFG)` to read `webhookDeliveryDays` / `auditDays`; null is a no-op. Use strict `receivedAt < before` / `createdAt < before` filters, return the count and use the transaction-aware client for both repositories. A delete failure records nothing; an audit record failure rolls back the delete. Log failures at error and swallow them. In `system-writer.decorator.spec.ts`, add both processors and advance the writer count from 44 to 46; in `catalog.spec.ts` add both system keys to `NEW_KEY_SCOPES` as `'any'`; regenerate `permissions/__snapshots__/role-matrix.json`. Add `ConfigModule.forRoot({ load: [retentionConfig] })` to the local `GlobalMocksModule` in `audit-log.module.spec.ts`, with `isGlobal: true` and `ignoreEnvFile: true` as in the outbox wiring test. Compile `WebhookSecurityModule` with the existing global test stubs (or equivalent stubbed persistence, config and recorder) without starting the scheduler or opening a DB connection. Extend the audit repository integration spec for the cutoff and reuse the real `AuditRecorder` rollback harness in `test/integration/audit/audit-delivery-system.integration.spec.ts` to exercise audit retention with a failing `record` call. Keep the live replay guard and existing-row dedup checks unchanged.\n\n**Scope** — In: two repositories' deletion paths, two processors, their DI and system permission metadata, replay guard comment, and unit and DB regression tests. Out: authoring the retention config (US-001); the approval purge, index and third system key (US-003); replay protection for inbound webhooks older than the `WebhookDelivery` retention horizon, webhook signature v2, batching, or purging unrelated tables.\n\n**Interface** — `PrismaWebhookDeliveryRepository.deleteReceivedBefore(before): Promise<number>`; `PrismaAuditEntryRepository.deleteCreatedBefore(before): Promise<number>`; each processor exposes `scheduledPurge(): Promise<void>`.",
+      "acceptanceCriteria": [
+        "[integration] When PrismaWebhookDeliveryRepository.deleteReceivedBefore(cutoff) runs, then a WebhookDelivery received before cutoff is deleted.",
+        "[integration] When PrismaWebhookDeliveryRepository.deleteReceivedBefore(cutoff) deletes an older delivery, then an existing WebhookDelivery received after cutoff is kept in that same run.",
+        "[integration] When PrismaAuditEntryRepository.deleteCreatedBefore(cutoff) runs on a fixture with one earlier and one later AuditEntry, then the earlier entry is deleted.",
+        "[integration] When PrismaAuditEntryRepository.deleteCreatedBefore(cutoff) runs with exactly one AuditEntry created before cutoff, then it returns 1.",
+        "[integration] When PrismaAuditEntryRepository.deleteCreatedBefore(cutoff) deletes an earlier entry, then an existing AuditEntry created after cutoff is kept in that same run.",
+        "[unit] When webhookDeliveryDays is 30, then WebhookDeliveryRetentionProcessor.scheduledPurge calls deleteReceivedBefore with a cutoff exactly 30 days before now.",
+        "[unit] When the webhook delete returns 2, then WebhookDeliveryRetentionProcessor.scheduledPurge records exactly one audit entry with key system.webhook-delivery.retention.",
+        "[unit] When auditDays is null, then AuditRetentionProcessor.scheduledPurge does not call deleteCreatedBefore.",
+        "[unit] When deleteCreatedBefore throws, then AuditRetentionProcessor.scheduledPurge resolves without throwing.",
+        "[unit] When deleteCreatedBefore throws, then AuditRetentionProcessor.scheduledPurge logs an error.",
+        "[unit] When its audit record call throws, then AuditRetentionProcessor.scheduledPurge resolves without throwing.",
+        "[unit] When its audit record call throws, then AuditRetentionProcessor.scheduledPurge logs an error.",
+        "[unit] When WebhookSecurityModule is compiled with stubbed persistence, then it resolves WebhookDeliveryRetentionProcessor.",
+        "[unit] When AuditLogModule is compiled with stubbed persistence, then it resolves AuditRetentionProcessor.",
+        "[integration] When AuditRecorder.record throws after a successful deleteCreatedBefore in AuditRetentionProcessor.scheduledPurge, then the eligible AuditEntry is still present in PostgreSQL after scheduledPurge resolves, demonstrating rollback."
+      ],
+      "tags": [
+        "api",
+        "retention",
+        "audit",
+        "webhook",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Coordinates two scheduled modules, transactional audit, and system-only keys; webhook replay protection makes strict isolation appropriate.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/outbox/outbox-retention.processor.ts",
+        "apps/api/src/webhook-security/webhook-replay.guard.ts",
+        "apps/api/src/webhook-security/webhook-security.module.ts",
+        "apps/api/src/audit/prisma-audit-entry.repository.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook-security/prisma-webhook-delivery.repository.ts",
+        "apps/api/src/webhook-security/webhook-delivery-retention.processor.ts",
+        "apps/api/src/audit/audit-retention.processor.ts",
+        "apps/api/src/webhook-security/webhook-delivery-retention.processor.spec.ts",
+        "apps/api/src/webhook-security/webhook-security.module.spec.ts",
+        "apps/api/src/audit/audit-retention.processor.spec.ts",
+        "apps/api/test/integration/webhook/webhook-delivery.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a delivery's receivedAt equals cutoff exactly, then deleteReceivedBefore(cutoff) keeps that delivery.",
+        "When a retention delete matches zero rows, then the purge creates no audit entry."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "its table pins every `@SystemWriter` processor with its key and `toHaveLength(44)`; add `WebhookDeliveryRetentionProcessor` (`system.webhook-delivery.retention`) and `AuditRetentionProcessor` (`system.audit.retention`) and set the length to 46."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its hand-maintained `NEW_KEY_SCOPES` map feeds an exact key-set equality and a total-length check; add `system.webhook-delivery.retention` and `system.audit.retention` to `NEW_KEY_SCOPES` with the scope class `'any'`, as the `system.flow.*` keys there."
+        },
+        {
+          "path": "apps/api/src/audit/audit-log.module.spec.ts",
+          "reason": "it compiles `AuditLogModule` against a local `GlobalMocksModule` that provides no `ConfigService`; that stub module gains a `ConfigModule.forRoot({ load: [retentionConfig] })` import, the same repair the outbox module spec uses, so the module still compiles with `AuditRetentionProcessor` registered."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "the snapshot lists every system key per role; it is regenerated to include `system.webhook-delivery.retention` and `system.audit.retention`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2507e08c009ba10dc95bf60a93aa44503b7e15d2"
+    },
+    {
+      "id": "US-003",
+      "title": "Purge old settled approval requests",
+      "description": "**Goal** — Remove approval requests past the configured retention horizon only after they reach a settled state.\n\n**Motivation** — `AuditEntry`, `ApprovalRequest` (with its cascaded `ApprovalDecision`, `FleetApprovalAsk` and `AssistantActionRequest` rows) and inbound `WebhookDelivery` rows are never deleted.\n\n**Approach** — **Purge shape.** Each purge copies `OutboxRetentionProcessor`: a `@SystemWriter('<key>')` class, an `@Cron` method `scheduledPurge` that runs the purge through `runAsSystemWriter`, a cutoff of now minus the configured days, one repository delete wrapped in `AuditRecorder.audited` (recording an entry only when the count is above 0), and log-and-swallow on failure. The next night is the retry. Each purge is a single statement, not batched.\n\n- `ApprovalRetentionProcessor`, key `system.approval.retention`, cron `15 5 * * *`. It calls `PrismaApprovalRequestRepository.deleteSettledBefore(before): Promise<number>` and is registered in `ApprovalEngineModule`.\n- The three keys are added to `permissions/catalog.ts` beside `system.outbox.retention`, with scope `['system']`. In this story, add only `system.approval.retention`; the other two arrive in US-002.\n\n**Approval purge scope.**\n- It deletes requests whose `status` is settled (`rejected`, `expired`, `cancelled`, `executed` or `failed`) and whose `updatedAt` is before the cutoff.\n- `pending` and `approved` rows are never purged.\n- The rows that reference a request (`ApprovalDecision`, `FleetApprovalAsk`, `AssistantActionRequest`) go with it through their existing `onDelete: Cascade`.\n- A migration adds `@@index([status, updatedAt])` to `ApprovalRequest`.\n\nRead `approvalDays` with `ConfigService.get(RETENTION_CFG)`; null is a no-op. A delete failure records nothing; an audit record failure rolls back the delete. Both log at error and are swallowed. Use the transaction-aware Prisma client and return the deleted request count. Ship `prisma/migrations/20261119120000_approval_request_status_updated_index/migration.sql` in addition to the Prisma schema change. Add the writer/key to `system-writer.decorator.spec.ts` and advance the count from 46 to 47, add the key to `catalog.spec.ts`'s `NEW_KEY_SCOPES` with scope class `'any'`, and regenerate `permissions/__snapshots__/role-matrix.json`. Add `ConfigModule.forRoot({ load: [retentionConfig] })` to the local `ExternalStubsModule` in `approval-engine.module.spec.ts`, with `isGlobal: true` and `ignoreEnvFile: true` so the new processor resolves without a DB. Extend `test/integration/approvals/approval-repositories.integration.spec.ts` with cutoff and cascade fixtures.\n\n**Scope** — In: the concrete approval repository, scheduled processor, module wiring, system key, index migration, and unit and DB tests. Out: authoring the retention config (US-001); webhook and audit purges (US-002); batching, retention for unrelated tables, and purging `FleetFlow.approvalRequestId` references (the column has no foreign key, and a flow pointing at a purged request keeps its id).\n\n**Interface** — `PrismaApprovalRequestRepository.deleteSettledBefore(before): Promise<number>`; `ApprovalRetentionProcessor.scheduledPurge(): Promise<void>`; `@@index([status, updatedAt])` on `ApprovalRequest`.",
+      "acceptanceCriteria": [
+        "[integration] When PrismaApprovalRequestRepository.deleteSettledBefore(cutoff) runs, then an executed request last updated before cutoff is deleted.",
+        "[integration] When deleteSettledBefore(cutoff) deletes an executed request last updated before cutoff, then the existing ApprovalDecision rows for that request are gone through the cascade.",
+        "[integration] When deleteSettledBefore(cutoff) runs, then a rejected request last updated before cutoff is deleted.",
+        "[integration] When deleteSettledBefore(cutoff) runs, then a pending request last updated before cutoff is kept.",
+        "[integration] When deleteSettledBefore(cutoff) runs, then an approved request last updated before cutoff is kept.",
+        "[integration] When deleteSettledBefore(cutoff) runs, then an executed request last updated after cutoff is kept.",
+        "[unit] When approvalDays is 180, then ApprovalRetentionProcessor.scheduledPurge calls deleteSettledBefore with a cutoff exactly 180 days before now.",
+        "[unit] When deleteSettledBefore returns 3, then ApprovalRetentionProcessor.scheduledPurge records exactly one audit entry with key system.approval.retention.",
+        "[unit] When deleteSettledBefore throws, then ApprovalRetentionProcessor.scheduledPurge resolves without throwing.",
+        "[unit] When deleteSettledBefore throws, then ApprovalRetentionProcessor.scheduledPurge logs an error.",
+        "[unit] When ApprovalEngineModule is compiled with stubbed persistence, then it resolves ApprovalRetentionProcessor.",
+        "[unit] When deleteSettledBefore throws, then ApprovalRetentionProcessor.scheduledPurge records no audit entry.",
+        "[unit] When approvalDays is null, then ApprovalRetentionProcessor.scheduledPurge does not call deleteSettledBefore."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "retention",
+        "migration",
+        "audit"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The purge crosses Prisma migration and cascades, audit transaction ownership and the scheduled system-writer catalog; it reuses that writer authority without changing any actor's permissions or approval eligibility.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/outbox/outbox-retention.processor.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/approvals/approval-engine.module.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-retention.processor.ts",
+        "apps/api/src/approvals/approval-retention.processor.spec.ts",
+        "apps/api/prisma/migrations/20261119120000_approval_request_status_updated_index/migration.sql"
+      ],
+      "suggestedCriteria": [
+        "When an executed request's updatedAt equals cutoff exactly, then deleteSettledBefore(cutoff) keeps that request."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "add `ApprovalRetentionProcessor` (`system.approval.retention`) to its processor table and set its length to 47."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "add `system.approval.retention` to `NEW_KEY_SCOPES` with the scope class `'any'`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.spec.ts",
+          "reason": "it compiles `ApprovalEngineModule` against a local `ExternalStubsModule` that exports no `ConfigService`; that stub module gains a `ConfigModule.forRoot({ load: [retentionConfig] })` import, so the module still compiles with `ApprovalRetentionProcessor` registered."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated to include `system.approval.retention`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5cce1bf1006e5f7755392aadb1667afc14cea8f3"
+    },
+    {
+      "id": "US-004",
+      "title": "Exclude the PR author from review decision approvers",
+      "description": "**Goal** — Prevent a reported PR or MR author from being picked as the approver of their own not-a-defect review decision.\n\n**Motivation** — `apps/api/src/fleet/reviews/review-event.minter.ts` picks `verified ?? writers[0]` as the approver, and nothing excludes the PR's author.\n\n**Approach** — **Author exclusion.**\n- `VcsPrStatus` gains `author?: string`. `GitHubAppClient.getPullRequest` sets it from `user.login`, and `GitLabAccessChecker.getMergeRequest` from `author.username`, only when that value is a string. The key is absent otherwise.\n- The minter reads the PR once per row, after the writers are known: GitHub with the thread-read token it already minted; GitLab through `gitlab.credentials.call(..., 'read', ...)`, as its other reads do.\n- Writers whose login equals the author (case-insensitive, through `normalizeLogin`) are dropped before the verified/unverified choice. A row whose only writers are the author is skipped with `author-only`.\n- A PR read that throws skips the row with `permission-check-failed`. A PR read that answers `null` (404) filters nothing.\n\nAdd `getPullRequest` to the minter's GitHub dependency surface. Keep using `skip(id, reason)` and the remaining writer order. The verified candidate must be selected from the filtered writers; if no remaining writer authored the matching thread, use the first remaining writer as unverified. Do not conflate errors reading the PR/MR with errors reading the thread or discussion. In `review-event.minter.spec.ts`, add default null responses to the GitHub `getPullRequest` and GitLab `getMergeRequest` stubs. Update the GitLab one-call-per-read case to four `credentials.call` invocations and four distinct accesses, including the MR read. Extend the existing forge client tests for string authors. Assert the selected approver in the existing `runWithApproval` context during the mint (`approverId` and `satisfiedBy`), not as a new argument to `ReviewDecisionWriter.mint`. Keep `markMinted` and `skip` bookkeeping unchanged.\n\n**Scope** — In: the two forge adapters, optional shared status field, both minter branches, and their unit tests. Out: unrelated retention, budget and import changes (US-001–003, US-005–006); excluding the PR author from approvers anywhere other than `ReviewEventMinter`; excluding an author the forge does not report (no string author login means the key is absent and writers are unfiltered).\n\n**Interface** — `VcsPrStatus` adds `author?: string`; `getPullRequest(token: string, owner: string, name: string, number: number): Promise<VcsPrStatus | null>`; `getMergeRequest(access: GitLabAccess, iid: number): Promise<VcsPrStatus | null>`.",
+      "acceptanceCriteria": [
+        "[unit] When a GitHub pull request body has user.login equal to alice, then GitHubAppClient.getPullRequest returns author: 'alice'.",
+        "[unit] When a GitLab merge request body has author.username equal to bob, then GitLabAccessChecker.getMergeRequest returns author: 'bob'.",
+        "[unit] When a GitHub review event has writers alice and carol and the PR is authored by alice, then the mint's approval context has approverId 'github:carol'.",
+        "[unit] When the only GitHub writer is Alice and the PR is authored by alice, then the minter records skipReason 'author-only' for the event.",
+        "[unit] When the only GitHub writer is Alice and the PR is authored by alice, then ReviewDecisionWriter.mint is never called.",
+        "[unit] When GitHub PR author alice is the only eligible writer who authored the matching thread before filtering, with carol also a writer, then the mint's approval context matches { approverId: 'github:carol', satisfiedBy: 'none' }, meaning carol is unverified.",
+        "[unit] When a GitLab review event has writers bob and dave and the MR is authored by bob, then the mint's approval context has approverId 'gitlab:dave'.",
+        "[unit] When the only GitLab writer is the MR's author, then the minter records skipReason 'author-only' for the event.",
+        "[unit] When the GitHub PR read throws a provider error, then the minter records skipReason 'permission-check-failed' for the event.",
+        "[unit] When the GitLab MR read throws a provider error, then the minter records skipReason 'permission-check-failed' for the event.",
+        "[unit] When the GitLab MR read answers null and there is no verified discussion writer, then the event is minted with approver writers[0], preserving the existing first-writer fallback.",
+        "[unit] When the GitHub PR read answers null (404) and there is no verified thread writer, then the event is minted with approver writers[0], preserving the existing first-writer fallback."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "reviews",
+        "security",
+        "vcs"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends two existing forge adapters and one minter without a new abstraction; strict TDD is required because the selection changes approval eligibility and relies on scoped credentials.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-event.minter.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/gitlab-access-checker.ts",
+        "apps/api/src/vcs/types.ts",
+        "apps/api/src/fleet/reviews/review-event.minter.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a successful forge response contains a non-string author login, then the returned status has no author key.",
+        "When a GitLab MR author read returns null and a later writer is verified through the discussion, then the minter selects that verified writer."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/reviews/review-event.minter.spec.ts",
+          "reason": "its GitHub stub has no `getPullRequest` and its GitLab checker stub no `getMergeRequest`; both gain a default answering `null`, so the existing cases keep their writers unfiltered. Its GitLab \"one call per read\" case asserts 3 `credentials.call` invocations and 3 distinct accesses; the merge-request read is a fourth `call`, so those counts become 4."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6cbef0c7dc48d5de0a1a1e64eaab03a4a04f579d"
+    },
+    {
+      "id": "US-005",
+      "title": "Ignore budget pauses for soft-deleted projects",
+      "description": "**Goal** — Suppress pauses attached to deleted projects while allowing an in-window restore to reactivate the retained pause.\n\n**Motivation** — `apps/api/src/fleet/budgets/prisma-budget.repository.ts` `findPaused` returns paused policies of soft-deleted projects, so `BudgetGate` keeps enforcing a pause on a project that no longer runs work.\n\n**Approach** — **Budget pause.** `findPaused` drops policies whose `projectId` names a soft-deleted project. `BudgetPolicy.projectId` is a plain column with no relation, so the filter needs a second query for the deleted ids (or one raw query). Policies with a null `projectId` (global, runner) are always kept. No row is changed. The sweeper still clears pauses of past windows, so a restore brings back a pause only within its window.\n\nUse `Project.deletedAt` to identify soft deletion and apply the exclusion to every matching non-null `projectId`, including repo policies. Preserve return ordering and the existing BudgetGate snapshot/window checks. Verify by extending the existing budget repository integration spec; alter `deletedAt` to demonstrate reappearance without recreating or mutating the policy.\n\n**Scope** — In: the read filter in `PrismaBudgetRepository.findPaused` and its integration coverage. Out: other data rulings (US-001–004 and US-006), changing how budget windows or sweeps work, and policy mutation or schema changes.\n\n**Interface** — `findPaused(): Promise<BudgetPolicyRecord[]>`.",
+      "acceptanceCriteria": [
+        "[integration] When a paused project-scope policy points to a soft-deleted project, then PrismaBudgetRepository.findPaused does not return the policy.",
+        "[integration] When a paused repo-scope policy has projectId naming a soft-deleted project, then findPaused does not return the policy.",
+        "[integration] When a runner-scope policy is paused and its projectId is null, then findPaused returns the policy.",
+        "[integration] When a paused policy belongs to a project that is not deleted, then findPaused returns the policy.",
+        "[integration] Given a policy paused before its project was soft-deleted, when the project's deletedAt is cleared within the same budget window without recreating or updating the policy, then findPaused returns the original paused policy again."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "budgets",
+        "prisma"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A read-only filter in an existing repository with Postgres coverage; it does not change auth, policy state, or gate semantics.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/budgets/prisma-budget.repository.ts",
+        "apps/api/src/fleet/budgets/budget-gate.ts",
+        "apps/api/src/fleet/budgets/budget-sweeper.ts",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/test/integration/fleet/fleet-budget-repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a global policy is paused and its projectId is null, then findPaused returns the policy.",
+        "When a project is restored in a later monthly window and only its past window was paused, then BudgetGate.assertNotPaused for that project resolves without throwing."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ff26aaa8cb4a0770bd39958c3ab74e2d6af817e3"
+    },
+    {
+      "id": "US-006",
+      "title": "Run approved full issue imports after commit",
+      "description": "**Goal** — Execute approved full imports after the approval transaction commits, isolate issue writes and record the fetch metadata.\n\n**Motivation** — `apps/api/src/vcs/vcs-manual-sync.service.ts` `VcsManualSync.prepareSyncAll` imports up to 1,000 issues inside the approval's transaction with `isolate: false`, so one failed issue write rolls back the whole import, and the provider's `capped` flag is dropped.\n\n**Approach** — **Deferred import.**\n- The ruling said \"show `capped` in the approval preview\". But the full import fetches its issues only when the approved request executes (`prepare` runs after the decision), so no preview can know whether the fetch was capped. The executed result reports it instead.\n- The prepared closure keeps its target check, then queues the import with `AfterCommitService.defer(() => this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: true }))`.\n- It returns `{ syncType: 'manual', issuesSynced: 0, issuesSkipped: 0, tickets: [], fetchedIssues, capped }`, where `fetchedIssues` counts the issues after the `allowedAuthors` filter, the ones the import will process.\n- The `defer`-false fallback is safe only outside a transaction. Production calls `prepareSyncAll` only from the approval path; `prepareSyncAll` itself fetches before the scope, and approval execution runs the prepared closure inside `afterCommit.scope`. A direct invocation without a transaction still uses the fallback.\n- Approval execution runs inside `afterCommit.scope`, so the import runs only after the approval commits.\n- A failure in the deferred pass is caught and logged at error.\n- `defer` answering `false` (no enclosing scope) runs the import directly, the pattern `vcs-connection.service.ts` uses.\n- `VcsManualSync` gains an `AfterCommitService` constructor argument.\n- `SyncResultDto` gains optional `fetchedIssues` and `capped`.\n\nAdapt the above call to the actual `() => Promise<void>` task contract by awaiting and discarding the sync summary inside an async task; catch deferred-pass failures inside that task, not outside `scope`. Keep the target check before enqueueing; failed checks and provider fetch failures remain approval execution failures. The no-scope fallback awaits the isolated pass directly before returning the fetch result. Keep non-approved `syncAll` using its `fullSync` summary. Update `vcs-manual-sync.service.spec.ts` to construct the service with `AfterCommitService` and prove the before/after-scope behavior. Update existing gated VCS integration cases that expect completed counts, all-or-nothing writes or a full-import lock through the writes: assert the durable fetch result, partial progress, and release of the approval lock before full-import writes; preserve single-issue lock and target-validation coverage. Document both optional DTO fields with Swagger metadata; regenerate `openapi.json` and `apps/cli/src/generated/types.gen.ts` with `bun run generate` from the repo root, never by hand.\n\n**Scope** — In: approved `vcs.sync.all`, post-commit import and executed result contract, unit and DB regressions (including the unchanged immediate path), and regeneration of the committed root OpenAPI schema and CLI types. Out: unrelated rulings (US-001–005); fetching for preview, changing the approval engine, changing single-issue or PR sync, recording the deferred import's per-issue outcome back onto the approval request, and hand-editing generated clients.\n\n**Interface** — `prepareSyncAll(slug: string): Promise<() => Promise<SyncResultDto>>`; `AfterCommitService.scope(fn)` and `defer(task): boolean`; `syncIssues(project, issues, repo, auditKey, { isolate })`; `SyncResultDto` adds `fetchedIssues?: number` and `capped?: boolean`.",
+      "acceptanceCriteria": [
+        "[unit] When the approved full-import fetch returns three issues and capped: true and all three pass the allowedAuthors filter, then the prepareSyncAll closure resolves with fetchedIssues: 3.",
+        "[unit] When the approved full-import fetch returns three eligible issues and capped: true, then the prepareSyncAll closure resolves with capped: true.",
+        "[unit] When the approved full-import fetch returns three eligible issues and capped: true, then the prepareSyncAll closure resolves with issuesSynced: 0.",
+        "[unit] When a fetch of three eligible issues with capped: true yields a prepareSyncAll closure that resolves inside an open AfterCommitService.scope, then syncIssues has not yet been called.",
+        "[unit] When the AfterCommitService.scope containing the prepareSyncAll closure ends successfully, then syncIssues has been called exactly once with the captured project, author-filtered issues, captured connection, audit key vcs.sync.all, and { isolate: true }, in that argument order.",
+        "[unit] When syncIssues rejects during the deferred pass, then the enclosing AfterCommitService.scope resolves without throwing.",
+        "[unit] When syncIssues rejects during the deferred pass, then VcsManualSync logs an error.",
+        "[unit] When the prepareSyncAll closure runs outside a transaction with no enclosing AfterCommitService.scope, then syncIssues is called once with { isolate: true } before the closure resolves.",
+        "[unit] When VcsManualSync.syncAll runs without approval, then its returned issuesSynced equals the issuesSynced value resolved by VcsSyncService.fullSync, preserving the existing immediate-sync count.",
+        "[unit] When VcsManualSync.syncAll runs without approval, then its returned issuesSkipped equals the issuesSkipped value resolved by VcsSyncService.fullSync, preserving the existing immediate-sync count.",
+        "[integration] When syncIssues rejects during the deferred pass for an approved full import of three eligible issues with capped: true, then the persisted approval's status and result match { status: 'executed', result: { syncType: 'manual', issuesSynced: 0, issuesSkipped: 0, tickets: [], fetchedIssues: 3, capped: true } }."
+      ],
+      "tags": [
+        "api",
+        "vcs",
+        "approvals",
+        "transactions",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The change spans transaction ordering, per-issue writes and the generated result contract, but reuses the existing after-commit queue and leaves credential resolution, authorization and the in-transaction target check intact.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-manual-sync.service.ts",
+        "apps/api/src/permissions/after-commit.service.ts",
+        "apps/api/src/vcs/vcs-connection.service.ts",
+        "apps/api/src/vcs/dto/sync-result.dto.ts",
+        "apps/api/src/approvals/approval-execution.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When a transaction callback queues the import and then rejects, then no issue from that import is written.",
+        "When the provider returns three issues and allowedAuthors excludes one of them, then the recorded fetchedIssues is 2."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-manual-sync.service.spec.ts",
+          "reason": "the `vcs.sync.all` case asserts the deferred closure calls `syncIssues` with `{ isolate: false }`; it is replaced by the closure deferring the import with `{ isolate: true }` and returning `fetchedIssues` and `capped`, and the construction gains an `AfterCommitService`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "`SyncResultDto` gains the documented optional `fetchedIssues` and `capped` properties; regenerate with `bun run generate` from the repo root."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate` for the same two `SyncResultDto` properties; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ae6666773b6a3ec5ceef9f927c598237ef4cfa58"
+    }
+  ],
+  "analysis": "The November 19 owner rulings 10, 18, 19 and 20 govern this feature; use the consolidated list in docs/20261114-review-whole-repo.md:154 as provenance and the feature spec as the target. Koda is a Bun monorepo; the implementation lives in the NestJS/Fastify API with Prisma/PostgreSQL and Vitest. US-006 also refreshes committed root/CLI artifacts without changing its bound workdir. Codebase-memory MCP was not available in this session; findings are from direct source reads and text search.\n\nUS-001 — apps/api/src/config/outbox.config.ts:49 supplies the registerAs/explicit override/test-default pattern, and apps/api/src/config/outbox.config.spec.ts:69 shows env restoration and positive overrides under test. apps/api/src/config/env.validation.ts:55 is the nearby integer rule; the new keys additionally require max(3650). Load the registered namespace in both apps/api/src/app.module.ts:75 and apps/api/src/common/test-helpers/global-stubs.module.ts:191, not just in one module or in an injected test constant. The actual application boot at apps/api/test/helpers/http-app.ts:67 uses AppModule; use it to pin the production module graph with test env defaults. US-002 and US-003 read this namespace via ConfigService, so land US-001 first.\n\nUS-002 — apps/api/src/outbox/outbox-retention.processor.ts:21 is the cron/system-writer/date-cutoff/audit reference. Scheduling is already enabled in apps/api/src/app.module.ts:79. apps/api/src/audit/audit-recorder.service.ts:38 wraps mutation and recording in the same transaction and rejects unknown keys at :48. Use the injected PrismaService's transaction-aware client in the repositories, not a detached client, so audit failure actually restores deleted rows. The timestamp indexes already exist at apps/api/prisma/schema.prisma:766 and :1018. apps/api/src/webhook-security/webhook-replay.guard.ts:25 overstates the lifetime, and :61 and :72 show the persisted dedup read/write; consumers are the VCS and CI controllers (apps/api/src/vcs/vcs-webhook.controller.ts:20; apps/api/src/ci-webhook/ci-webhook.controller.ts:23). Preserve the live guard behavior, unique key and signature checks; only retention changes the lifetime of the persisted record. apps/api/src/webhook-security/webhook-security.module.ts:5 currently only provides/exports the guard; the new repository and processor need not be exported. apps/api/src/audit/audit-log.module.ts:10 is global and already provides the audit repository and exports the recorder; its isolated test graph at apps/api/src/audit/audit-log.module.spec.ts:22 needs config. Existing test anchors: apps/api/src/webhook-security/webhook-replay.guard.spec.ts:15, apps/api/test/integration/audit/audit-entry.repository.integration.spec.ts, and apps/api/test/integration/audit/audit-recorder.audited.integration.spec.ts:74 (real rollback on audit failure).\n\nUS-003 — Add the deletion to the concrete repository already wired in apps/api/src/approvals/approval-engine.module.ts:29, following the transaction-aware client pattern in apps/api/src/approvals/prisma-approval-request.repository.ts:61. `updatedAt` is a persistence column intentionally omitted from the domain mapping at :31; query it at the database, and use an explicit settled allowlist from the states at apps/api/src/approvals/domain/approval.domain.ts:24. Cascades are already declared at apps/api/prisma/schema.prisma:1896, :1913 and :1940; FleetFlow's plain id at :1350 is not a foreign key. Extend the fixture coverage in apps/api/test/integration/approvals/approval-repositories.integration.spec.ts:95 and add ConfigService visibility to the isolated module fixture at apps/api/src/approvals/approval-engine.module.spec.ts:28. The only schema rollout is the additive ApprovalRequest composite index (mirror apps/api/prisma/migrations/20260926120000_outbox_retention_idx/migration.sql:3); ship both schema and the named SQL migration and apply it before enabling the job in production. No backfill is required. Existing eligible rows can be deleted on the first nightly run; an explicit 0 pauses future deletions, not restores deleted history. A large initial single-statement run may hold locks longer or amplify cascades, but batching is out of scope.\n\nUS-002/003 common permission seam — apps/api/src/permissions/catalog.ts:403 holds the system-only registrations; apps/api/src/action-context/action-context.ts:79 derives system actor IDs from that catalog, and :153 resolves the writer's key. Keep the keys system-only, not grants. Synchronize the closed-world processor table/count at apps/api/src/permissions/system-writer.decorator.spec.ts:72 and :122, catalog map/equality at apps/api/src/permissions/catalog.spec.ts:94 and :546, and committed per-role matrix checked at apps/api/src/permissions/role-matrix.spec.ts:213. US-003 follows US-002 to avoid conflicting edits. Module DI checks use mocked persistence and no DB; cutoff/cascade/rollback tests use the repository's real Postgres integration harness.\n\nUS-004 — Both minter branches currently choose verified ?? writers[0] (apps/api/src/fleet/reviews/review-event.minter.ts:109–163). Filter before the existing thread verification routines (:211, :232), using the existing normalization at :21; record author-only via the existing skip path at :257. The extra PR/MR lookup adds one provider call per row with writers. Preserve no-writer short-circuit, credential handling, evaluation order, verified versus unverified semantics, and thread-lookup failure behavior. apps/api/src/fleet/git-broker/github-app-client.ts:246 and apps/api/src/fleet/git-broker/gitlab-access-checker.ts:63 already implement nullable reads and non-404 errors; an absent author must not add an own property or require all VcsPrStatus producers to change. The shared type is at apps/api/src/vcs/types.ts:39. Fleet PR refresh, rulings, and flow code share these adapters (apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts:127; apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:71; apps/api/src/fleet/flows/fleet-flow-feature-passes.ts:393, :435); the additive field should not change those decisions. Existing forge mapping/404/error specs are at apps/api/src/fleet/git-broker/github-app-client.spec.ts:234 and apps/api/src/fleet/git-broker/gitlab-access-checker.spec.ts:63. apps/api/src/fleet/reviews/review-event.minter.spec.ts:335 pins credential call count, target, read intent and distinct accesses and must account for the extra MR read. A null PR/MR or absent string author keeps the usual selection (including the first-writer fallback when none is verified), not a new denial.\n\nUS-005 — apps/api/src/fleet/budgets/prisma-budget.repository.ts:67 feeds apps/api/src/fleet/budgets/budget-gate.ts:11. The gate is used by job dispatch/requeue (apps/api/src/fleet/jobs/fleet-jobs.service.ts:111, :391) and placement (apps/api/src/fleet/jobs/placement.service.ts:102). Filter by BudgetPolicy.projectId, not scope type, because repo policies also carry the owning project ID, and global/runner rows have NULL (apps/api/prisma/schema.prisma:1049–1054; Project.deletedAt at :151). A second query can restrict itself to distinct non-null IDs from the paused candidates; only suppress known soft-deleted projects, preserve ordering/domain mapping, and avoid unintentionally losing NULLs through SQL three-valued logic. No mutation, new relation, or migration. apps/api/src/fleet/budgets/budget-sweeper.ts:65 uses findAll and :103 clears stale pauses; leave it and scopeExists at apps/api/src/fleet/budgets/prisma-budget.repository.ts:91 intact. apps/api/src/fleet/budgets/budget-rules.ts:28 still decides effective windows even before the sweeper clears a stale pause. Extend apps/api/test/integration/fleet/fleet-budget-repository.integration.spec.ts:94, :134 for soft-delete and restore behavior.\n\nUS-006 — apps/api/src/vcs/vcs-route.commands.ts:120 is the prepareSyncAll caller and uses identity toResult, so the execution result needs no new serialization layer. apps/api/src/approvals/approval-execution.service.ts:265 prepares after the decision, :281 wraps txManager.run in afterCommit.scope, and :301–309 invokes the prepared closure and persists the executed result. apps/api/src/permissions/after-commit.service.ts:29 flushes tasks only when the outer scope succeeds and awaits them; this is not a durable queue or fire-and-forget. Catch deferred-pass rejection inside the task so it cannot reject the flush after a successful commit. Use the existing globally exported singleton (apps/api/src/permissions/permissions.module.ts:41, :61); apps/api/src/vcs/vcs.module.ts:28 already provides the manual service. apps/api/src/vcs/vcs-connection.service.ts:252 is the defer-false inline precedent; don't use inline fallback inside a transaction. apps/api/src/vcs/vcs-manual-sync.service.ts:38 holds the target check, including an authors drift check; :82 currently drops capped and applies inside the approval transaction. Keep the lock through approval commit, not through the deferred writes, and retain the captured target/filter. A connection can change in the post-commit window; no new cross-commit lock or second target check is specified. apps/api/src/vcs/types.ts:18 defines capped as the provider's fetch result, independent of the filtered count. apps/api/src/vcs/vcs-sync.service.ts:53 creates/audits tickets in their per-issue attempts, and :134–163 continues on issue failures with isolate:true; preserve the immediate best-effort fullSync at :117. Update apps/api/src/vcs/vcs-manual-sync.service.spec.ts:75 and the preexisting contradicting HTTP/DB integration tests in apps/api/test/integration/vcs/gated-vcs-sync-routes.integration.spec.ts:88–108, :128–169: the executed result is fetch metadata, a failed second write leaves the first ticket and the request executed, and the full-sync connection lock is released before the import. Keep the single-issue lock-through-write assertion and both pre-apply drift/fetch failure regressions. Add optional Swagger metadata to apps/api/src/vcs/dto/sync-result.dto.ts:3 and regenerate root openapi.json:19918 and apps/cli/src/generated/types.gen.ts:1023 via package.json:20–22. The additive DTO fields preserve compatibility for immediate consumers, but approved full-import consumers must no longer treat issuesSynced or tickets on the approval record as completed work. No data migration or preview change is required.\n\nRefine-pass crosswalk — all 54 numbered spec criteria stay with their binding story. Using one-based positions within each PRD acceptanceCriteria array: US-001 AC-1–9 map directly to 1–9; US-002 AC-1–11 map to 1, 2, 3–4, 5, 6, 7, 8, 9–10, 11–12, 13, 14; US-003 AC-1–10 map to 1–8, 9–10, 11; US-004 AC-1–12 and US-005 AC-1–5 map directly; US-006 AC-1–7 map to 1, 2–3, 4, 5, 6–7, 8, 9–10. Remaining criteria implement the failure table: US-002 #15 verifies real rollback on failed audit; US-003 #12–13 verify no audit on delete failure and no delete with null config; US-004 preserves both error skips and no-filter 404 fallback; US-006 #11 verifies that the committed execution snapshot survives a deferred batch failure. US-001 covers invalid env values, and US-005 covers suppression as well as restoration and unaffected policies. All ten feature-level exclusions and all binding dependencies are retained.\n\nVerification plan — keep behavior tests adjacent to source where practical; compile isolated module graphs with stubbed persistence; use DB fixtures for real cutoff, rollback, and state cases. Reuse the real AppModule retention suite and audit failure harness (apps/api/test/integration/audit/audit-delivery-system.integration.spec.ts:54, :99, :165) rather than creating another boot-only integration suite. Run scoped DB-backed suites through the host test command (apps/api/AGENTS.md, Testing Rules); a sandbox skip does not verify behavior. No implementation changes or test runs were made while drafting or refining this PRD.",
+  "outOfScope": [
+    "Ruling 2: documenting \"the default branch must be protected\" as a FIX deployment prerequisite is a docs change made by hand.",
+    "Ruling 21: webhook signature v2 is a separate feature.",
+    "Ruling 23: the production TLS terminator belongs to the production deployment work.",
+    "Replay protection for inbound webhooks older than the `WebhookDelivery` retention horizon: accepted by ruling 10.",
+    "Batching the purge deletes: each night's purge is one statement.",
+    "Purging `FleetFlow.approvalRequestId` references: the column has no foreign key, and a flow pointing at a purged request keeps its id.",
+    "Retention for any table other than `WebhookDelivery`, `ApprovalRequest` (with its cascades) and `AuditEntry`.",
+    "Recording the deferred import's per-issue outcome back onto the approval request.",
+    "Excluding the PR author from approvers anywhere other than `ReviewEventMinter`.",
+    "Excluding an author the forge does not report: a PR read whose body carries no string author login (a deleted \"ghost\" user) leaves `author` absent and filters no writer."
+  ],
+  "routingProfile": "native-codex-ds"
+}

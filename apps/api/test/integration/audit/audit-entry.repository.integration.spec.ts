@@ -23,6 +23,16 @@ describeDb('AuditEntry repository (PG)', () => {
   afterAll(async () => { await app?.close(); await prisma.$disconnect(); });
   beforeEach(async () => { await withTestActor({ type: 'USER', id: 'u1' }, () => prisma.auditEntry.deleteMany()); });
   const create = (input = row()) => withTestActor({ type: 'USER', id: 'u1' }, () => repo.create(input));
+  const cutoff = new Date('2026-01-02T00:00:00.000Z');
+  const earlier = () => row({ createdAt: new Date('2026-01-01T00:00:00.000Z') });
+  const later = () => row({ createdAt: new Date('2026-01-03T00:00:00.000Z') });
+  /** The purge's own actor: `AuditRetentionProcessor` runs as `SYSTEM/audit`. */
+  const purge = (before = cutoff) =>
+    withTestActor({ type: 'SYSTEM', id: 'audit' }, () => repo.deleteCreatedBefore(before));
+  const stillThere = async (id: string | undefined): Promise<boolean> => {
+    if (id === undefined) throw new Error('the created entry has no id');
+    return (await withTestActor({ type: 'USER', id: 'u1' }, () => repo.findById(id))) !== null;
+  };
   it('round trips create and rejects updates', async () => {
     const created = await create();
     const createdId = created.id;
@@ -52,5 +62,30 @@ describeDb('AuditEntry repository (PG)', () => {
     expect(page.records.map((x) => x.createdAt.getTime())).toEqual([d2.getTime(), d2.getTime(), midday.getTime(), d1.getTime()]);
     const equalTimeIds = created.filter((item) => item.createdAt.getTime() === d2.getTime()).map((item) => item.id).filter((id): id is string => id !== undefined).sort().reverse();
     expect(page.records.slice(0, 2).map((item) => item.id)).toEqual(equalTimeIds);
+  });
+
+  it('AC-3: deletes the entry created before the cutoff', async () => {
+    await create(later());
+    const old = await create(earlier());
+
+    await purge();
+
+    expect(await stillThere(old.id)).toBe(false);
+  });
+
+  it('AC-4: returns 1 when exactly one entry was created before the cutoff', async () => {
+    await create(earlier());
+
+    await expect(purge()).resolves.toBe(1);
+  });
+
+  it('AC-5: keeps the entry created after the cutoff in that same run', async () => {
+    await create(earlier());
+    const recent = await create(later());
+
+    const deleted = await purge();
+
+    expect(deleted).toBe(1);
+    expect(await stillThere(recent.id)).toBe(true);
   });
 });

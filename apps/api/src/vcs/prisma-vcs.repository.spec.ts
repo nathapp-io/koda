@@ -146,6 +146,54 @@ describe('PrismaVcsRepository', () => {
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * Review-1119 US-006 (B1): the deferred import's target revalidation has to run inside the write's own
+   * transaction.
+   *
+   * Review-1119 US-006 (B5): it runs after the project lock, not before it. Approval execution locks the
+   * project row and only then reaches a VCS command that locks the connection row; taking the connection
+   * first here would let an import and another VCS approval on the same project deadlock.
+   */
+  it('B1/B5: revalidates the import target inside the attempt, after the project lock and before the insert', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 't1', number: 1, title: 'Issue title' });
+    const beforeInsert = vi.fn(async () => undefined);
+
+    await repo.createTicketFromIssue(
+      { id: 'p1' } as never,
+      { number: 99, title: 'Issue title', body: null, url: 'http://gh/issue/99' } as never,
+      'acme/widgets#99',
+      undefined,
+      beforeInsert,
+    );
+
+    expect(beforeInsert).toHaveBeenCalledOnce();
+    expect(beforeInsert.mock.invocationCallOrder[0]).toBeGreaterThan(mockRun.mock.invocationCallOrder[0]);
+    expect(beforeInsert.mock.invocationCallOrder[0]).toBeGreaterThan(mockQueryRaw.mock.invocationCallOrder[0]);
+    expect(beforeInsert.mock.invocationCallOrder[0]).toBeLessThan(mockCreate.mock.invocationCallOrder[0]);
+  });
+
+  it('B1: a refusing revalidation writes no ticket', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    const beforeInsert = vi.fn(async () => {
+      throw new Error('target changed');
+    });
+
+    await expect(repo.createTicketFromIssue(
+      { id: 'p1' } as never,
+      { number: 99, title: 'Issue title', body: null, url: 'http://gh/issue/99' } as never,
+      'acme/widgets#99',
+      undefined,
+      beforeInsert,
+    )).rejects.toThrow('target changed');
+
+    // The project lock is the attempt's first statement now, so the refusal still leaves the attempt with
+    // nothing to roll back: allocation and insert never ran.
+    expect(mockQueryRaw).toHaveBeenCalledOnce();
+    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it('findActiveTicketLinksWithPrs filters merged/closed and null deleted tickets', async () => {
     mockFindMany.mockResolvedValue([]);
     await repo.findActiveTicketLinksWithPrs('p1', { repoOwner: 'acme', repoName: 'app' });

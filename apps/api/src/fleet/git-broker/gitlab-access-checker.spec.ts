@@ -56,13 +56,13 @@ describe('GitLabAccessChecker', () => {
         status: 200,
         body: {
           state: 'merged', draft: false, merged_at: '2026-10-06T01:00:00Z', merged_by: { username: 'dev' },
-          merge_commit_sha: null, squash_commit_sha: 'sq1', web_url: 'https://gitlab.example.com/grp/sub/app/-/merge_requests/7', title: 'Fix',
+          merge_commit_sha: null, squash_commit_sha: 'sq1', web_url: 'https://gitlab.example.com/grp/sub/app/-/merge_requests/7', title: 'Fix', author: { username: 'bob' },
         },
       });
 
       await expect(checker.getMergeRequest(access, 7)).resolves.toEqual({
         number: 7, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T01:00:00Z'), mergedBy: 'dev',
-        mergeSha: 'sq1', url: 'https://gitlab.example.com/grp/sub/app/-/merge_requests/7', title: 'Fix',
+        mergeSha: 'sq1', url: 'https://gitlab.example.com/grp/sub/app/-/merge_requests/7', title: 'Fix', author: 'bob',
       });
       expect(lastRequest().url).toBe(`${API_BASE}/projects/${PROJECT_ID}/merge_requests/7`);
       expect(lastRequest().headers['private-token']).toBe('glpat');

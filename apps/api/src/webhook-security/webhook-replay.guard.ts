@@ -22,8 +22,11 @@ const MAX_IN_MEMORY_ENTRIES = 10_000;
  *
  * Every accepted delivery is recorded in `WebhookDelivery` keyed on
  * (projectId, source, deliveryId), so a replayed payload with the same
- * delivery id is rejected with HTTP 409 forever — even across instances
- * and after the in-memory fast-path window has expired.
+ * delivery id is rejected with HTTP 409 for the retention horizon
+ * (WEBHOOK_DELIVERY_RETENTION_DAYS, 30 days by default) — even across
+ * instances and after the in-memory fast-path window has expired. A delivery
+ * older than that horizon has had its row purged by
+ * `WebhookDeliveryRetentionProcessor`, so its id is no longer refused (ruling 10).
  *
  * Callers must invoke `forget` when processing fails with a retriable
  * error, so legitimate sender retries (GitHub re-delivers with the same

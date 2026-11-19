@@ -157,6 +157,65 @@ describeDb('approval repositories through AppModule', () => {
     expect(found).toHaveLength(50);
     expect(found.map((d) => d.decidedAt.getTime())).toEqual([...found.map((d) => d.decidedAt.getTime())].sort((a, b) => a - b));
   });
+  /**
+   * US-003 — the settled-request purge. `updatedAt` is the request's last change, so a settled
+   * request past the horizon is one nothing will touch again; `pending` and `approved` can still be
+   * decided or executed and are never purged.
+   */
+  const DAY = 86_400_000;
+  /** The purge's own actor: the processor runs as `SYSTEM/approval` (its key's second segment). */
+  const purge = (before: Date) =>
+    withTestActor({ type: 'SYSTEM', id: 'approval' }, () => requests.deleteSettledBefore(before));
+  const beforeCutoff = () => new Date(now.getTime() - DAY);
+  const afterCutoff = () => new Date(now.getTime() + DAY);
+  const found = (id: string) => db.approvalRequest.findUnique({ where: { id } });
+  const decision = (requestId: string) =>
+    write(() => db.approvalDecision.create({ data: { requestId, deciderType: 'USER', deciderId: 'u1', decision: 'approve' } }));
+
+  it('US-003 AC-1: deletes an executed request last updated before the cutoff', async () => {
+    const stale = await create({ status: 'executed', updatedAt: beforeCutoff() });
+
+    expect(await purge(now)).toBe(1);
+    expect(await found(stale.id)).toBeNull();
+  });
+
+  it('US-003 AC-2: the decisions of a purged request go with it through the cascade', async () => {
+    const stale = await create({ status: 'executed', updatedAt: beforeCutoff() });
+    await decision(stale.id);
+
+    expect(await purge(now)).toBe(1);
+    expect(await found(stale.id)).toBeNull();
+    expect(await db.approvalDecision.count({ where: { requestId: stale.id } })).toBe(0);
+  });
+
+  it('US-003 AC-3: deletes a rejected request last updated before the cutoff', async () => {
+    const stale = await create({ status: 'rejected', updatedAt: beforeCutoff() });
+
+    expect(await purge(now)).toBe(1);
+    expect(await found(stale.id)).toBeNull();
+  });
+
+  it('US-003 AC-4: keeps a pending request last updated before the cutoff', async () => {
+    const open = await create({ status: 'pending', updatedAt: beforeCutoff() });
+
+    expect(await purge(now)).toBe(0);
+    expect(await found(open.id)).not.toBeNull();
+  });
+
+  it('US-003 AC-5: keeps an approved request last updated before the cutoff', async () => {
+    const approved = await create({ status: 'approved', updatedAt: beforeCutoff() });
+
+    expect(await purge(now)).toBe(0);
+    expect(await found(approved.id)).not.toBeNull();
+  });
+
+  it('US-003 AC-6: keeps an executed request last updated after the cutoff', async () => {
+    const recent = await create({ status: 'executed', updatedAt: afterCutoff() });
+
+    expect(await purge(now)).toBe(0);
+    expect(await found(recent.id)).not.toBeNull();
+  });
+
   it('AC-10: locks and loads a request within the ambient transaction', async () => {
     const row = await create();
     await write(() => tx.run(async () => {

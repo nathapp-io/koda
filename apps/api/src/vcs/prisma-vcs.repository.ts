@@ -19,6 +19,7 @@ import {
   MergedPrTransitionInput,
   OutboxDedupQuery,
   OnTicketCreated,
+  BeforeTicketInsert,
   PrStateWriteOutcome,
   TicketLinkData,
   UpdateVcsConnectionData,
@@ -233,12 +234,24 @@ export class PrismaVcsRepository implements IVcsRepository {
    * transaction, so answering null would hide a doomed transaction — it is rethrown instead. The ambient
    * state is captured before the retry helper runs, because the helper's own `run` would report the
    * attempt's transaction rather than the caller's.
+   *
+   * Review-1119 (US-006, B1): `beforeInsert` runs inside the attempt, and takes its own lock. A
+   * deferred import reaches this after the approval committed, so this is the only place its target can
+   * still be proven unchanged: the lock it takes is the one the connection writes wait on, and a throw
+   * here leaves the attempt with nothing to roll back.
+   *
+   * Review-1119 (US-006, B5): the project row is locked *first*, because every approval execution locks
+   * it before it reaches a VCS command (`ApprovalExecutionService` → `lockProjectSlug`, then
+   * `VcsConnectionService.update` locking the connection row). Taking the connection row first here puts
+   * two writers on the same project in opposite orders, which is a real PostgreSQL deadlock: an import
+   * overlapping another VCS approval loses a ticket write, and the approval fails with it.
    */
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
     externalVcsId: string,
     onCreated?: OnTicketCreated,
+    beforeInsert?: BeforeTicketInsert,
   ): Promise<CreateTicketFromIssueResult | null> {
     const inTransaction = this.txManager.isInTransaction();
     try {
@@ -250,6 +263,10 @@ export class PrismaVcsRepository implements IVcsRepository {
           SELECT "id" FROM "Project" WHERE "id" = ${project.id} AND "deletedAt" IS NULL FOR UPDATE
         `;
         if (live.length === 0) throw new NotFoundAppException({}, 'projects');
+
+        // Revalidate the captured import target only after the project lock, in the same order every
+        // approval execution takes its locks (see the doc comment above).
+        if (beforeInsert) await beforeInsert();
 
         const lastTicket = await this.db.ticket.findFirst({
           where: { projectId: project.id },

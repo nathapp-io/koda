@@ -1,11 +1,14 @@
+import { Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsManualSync } from './vcs-manual-sync.service';
+import { VcsTargetDriftError } from './vcs-sync.service';
 import type { ProjectsService } from '../projects/projects.service';
 import type { VcsConnectionService } from './vcs-connection.service';
 import type { VcsPrSyncService } from './vcs-pr-sync.service';
 import type { VcsSyncService } from './vcs-sync.service';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import type { IVcsConfig } from '../config/vcs.config';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 const provider = vi.hoisted(() => ({ fetchIssues: vi.fn(), fetchIssue: vi.fn() }));
 vi.mock('./provider-for-connection', () => ({ providerForConnection: vi.fn(() => provider) }));
@@ -19,23 +22,26 @@ describe('VcsManualSync', () => {
   const prSync = { syncPrStatus: vi.fn(), fetchPrStatuses: vi.fn(), applyPrStatuses: vi.fn(), startExtractions: vi.fn() };
   let connections: { getFullByProject: ReturnType<typeof vi.fn> };
   let config: IVcsConfig;
+  let afterCommit: AfterCommitService;
   beforeEach(() => {
     vi.resetAllMocks();
     prSync.fetchPrStatuses.mockResolvedValue([]);
     prSync.applyPrStatuses.mockResolvedValue({ updated: 1, skipped: 0, extractions: [] });
     prSync.syncPrStatus.mockResolvedValue({ updated: 1, skipped: 0 });
     connection = { id: 'c', projectId: 'p', provider: 'github', repoOwner: 'acme', repoName: 'repo', encryptedToken: 'enc', allowedAuthors: '[]', syncMode: 'off', pollingIntervalMs: 300000, webhookSecret: null, lastSyncedAt: null, isActive: true, createdAt: new Date(), updatedAt: new Date() };
-    provider.fetchIssues.mockResolvedValue({ issues: [issue] });
+    provider.fetchIssues.mockResolvedValue({ issues: [issue], cursor: null, capped: false });
     provider.fetchIssue.mockResolvedValue(issue);
     sync = { syncIssues: vi.fn().mockResolvedValue({ issuesSynced: 1, issuesSkipped: 0, createdTickets: [{ number: 3, title: issue.title }], errors: [] }), syncIssue: vi.fn().mockResolvedValue({ action: 'created', ticketNumber: 3 }), fullSync: vi.fn(), filterByAllowedAuthors: vi.fn((issues) => issues) };
     connections = { getFullByProject: vi.fn(async () => ({ ...connection })) };
     config = { encryptionKey: 'key' } as IVcsConfig;
+    afterCommit = new AfterCommitService();
     service = new VcsManualSync(
       { findBySlug: vi.fn().mockResolvedValue({ id: 'p', key: 'ALPHA' }) } as unknown as ProjectsService,
       connections as unknown as VcsConnectionService,
       sync as unknown as VcsSyncService,
       config,
       prSync as unknown as VcsPrSyncService,
+      afterCommit,
     );
   });
   it('PR prepare fetches before strict apply and leaves extraction to afterCommit', async () => {
@@ -71,16 +77,156 @@ describe('VcsManualSync', () => {
     await expect(service.prepareSyncAll('alpha')).rejects.toThrow(ValidationAppException);
     expect(provider.fetchIssues).not.toHaveBeenCalled();
   });
-  it('AC-11: fetches once before the callback and never in apply', async () => {
+  it('the approved full import fetches once before the closure and reports the fetch result', async () => {
     const apply = await service.prepareSyncAll('alpha');
     expect(connections.getFullByProject).toHaveBeenLastCalledWith('p');
     expect(provider.fetchIssues).toHaveBeenCalledOnce();
     expect(sync.syncIssues).not.toHaveBeenCalled();
-    expect(await apply()).toEqual({ syncType: 'manual', issuesSynced: 1, issuesSkipped: 0, tickets: [{ ref: 'ALPHA-3', title: issue.title }] });
+    expect(await apply()).toEqual({ syncType: 'manual', issuesSynced: 0, issuesSkipped: 0, tickets: [], fetchedIssues: 1, capped: false });
     expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
     expect(provider.fetchIssues).toHaveBeenCalledOnce();
     expect(provider.fetchIssue).not.toHaveBeenCalled();
-    expect(sync.syncIssues).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, [issue], expect.objectContaining({ id: 'c' }), 'vcs.sync.all', { isolate: false });
+    expect(sync.syncIssues).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, [issue], expect.objectContaining({ id: 'c' }), 'vcs.sync.all', { isolate: true, revalidate: expect.any(Function) });
+  });
+  describe('approved full import of three eligible issues from a capped fetch', () => {
+    const issues = [issue, { ...issue, number: 8 }, { ...issue, number: 9 }];
+    beforeEach(() => {
+      provider.fetchIssues.mockResolvedValue({ issues, cursor: null, capped: true });
+      sync.filterByAllowedAuthors.mockReturnValue(issues);
+    });
+    const prepare = () => service.prepareSyncAll('alpha');
+
+    it('AC-1: the closure resolves with the author-filtered issue count', async () => {
+      const result = await (await prepare())();
+      expect(result).toMatchObject({ fetchedIssues: 3 });
+    });
+    it('AC-2: the closure resolves with the capped fetch flag', async () => {
+      const result = await (await prepare())();
+      expect(result).toMatchObject({ capped: true });
+    });
+    it('AC-3: the closure resolves before the import reports any synced issue', async () => {
+      const result = await (await prepare())();
+      expect(result).toMatchObject({ issuesSynced: 0 });
+    });
+    it('AC-4: the import waits for the enclosing after-commit scope', async () => {
+      const apply = await prepare();
+      await afterCommit.scope(async () => {
+        await apply();
+        expect(sync.syncIssues).not.toHaveBeenCalled();
+      });
+    });
+    it('AC-5: ending the scope imports the captured issues in one isolated pass', async () => {
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+      expect(sync.syncIssues).toHaveBeenCalledExactlyOnceWith(
+        { id: 'p', key: 'ALPHA' }, issues, connection, 'vcs.sync.all', { isolate: true, revalidate: expect.any(Function) },
+      );
+    });
+    it('AC-6: a failing deferred pass leaves the enclosing scope resolved', async () => {
+      sync.syncIssues.mockRejectedValue(new Error('import blew up'));
+      const apply = await prepare();
+      await expect(afterCommit.scope(() => apply())).resolves.toMatchObject({ fetchedIssues: 3, capped: true });
+    });
+    it('AC-7: a failing deferred pass is logged as an error', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      sync.syncIssues.mockRejectedValue(new Error('import blew up'));
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+      expect(errorLog.mock.calls.map((call) => String(call[0]))).toContainEqual(
+        expect.stringContaining('import blew up'),
+      );
+    });
+    it('AC-7: a partially failed deferred pass logs the isolated issue failures', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      // `isolate` collects a failed issue write in the summary instead of rejecting the pass.
+      sync.syncIssues.mockResolvedValue({
+        issuesSynced: 1, issuesSkipped: 2, createdTickets: [],
+        errors: ['Issue 8: write failed', 'Issue 9: write failed'],
+      });
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+      expect(errorLog.mock.calls.map((call) => String(call[0]))).toContainEqual(
+        expect.stringContaining('Issue 8: write failed'),
+      );
+    });
+    it('AC-7: a clean deferred pass logs no import error', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      sync.syncIssues.mockResolvedValue({ issuesSynced: 3, issuesSkipped: 0, createdTickets: [], errors: [] });
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+      expect(errorLog.mock.calls.map((call) => String(call[0]))).not.toContainEqual(
+        expect.stringContaining('VCS full import'),
+      );
+    });
+    /**
+     * Review-1119 US-006 (B1): `logImportFailures` truncates to ten entries, so a drift refused after ten
+     * ordinary failures used to be reported only as "and 1 more", its reason gone. It gets its own line.
+     */
+    it('B1: logs the drift that stopped the pass apart from the bounded summary of ten failures', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      const drift = 'VCS connection or allowed authors changed after approval';
+      const failures = Array.from({ length: 10 }, (_, index) => `Issue ${index + 1}: write failed`);
+      sync.syncIssues.mockResolvedValue({
+        issuesSynced: 0, issuesSkipped: 10, createdTickets: [], errors: failures, stopped: drift,
+      });
+
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+
+      const messages = errorLog.mock.calls.map((call) => String(call[0]));
+      // The refusal is printed with its reason, on a line of its own...
+      expect(messages).toContainEqual(expect.stringContaining(`stopped: ${drift}`));
+      // ...and the per-issue summary stays the ten failures it can show, with nothing cut off.
+      expect(messages).toContainEqual(expect.stringContaining('failed 10 issue(s)'));
+      expect(messages).not.toContainEqual(expect.stringContaining('more'));
+      expect(messages.filter((message) => message.includes(drift))).toHaveLength(1);
+    });
+    it('AC-8: with no enclosing scope the closure imports before it resolves', async () => {
+      let imported = false;
+      sync.syncIssues.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        imported = true;
+        return { issuesSynced: 3, issuesSkipped: 0, createdTickets: [], errors: [] };
+      });
+      const result = await (await prepare())();
+      expect(imported).toBe(true);
+      expect(sync.syncIssues).toHaveBeenCalledExactlyOnceWith(
+        { id: 'p', key: 'ALPHA' }, issues, connection, 'vcs.sync.all', { isolate: true, revalidate: expect.any(Function) },
+      );
+      expect(result).toMatchObject({ issuesSynced: 0, fetchedIssues: 3 });
+    });
+    /**
+     * Review-1119 US-006 (B1): the closure's own target check runs inside the approval transaction and its
+     * lock dies with it, so the pass it queues hands `syncIssues` a revalidation that reads the connection
+     * again under a lock — inside each issue write's transaction.
+     */
+    it('B1: the deferred import revalidates the captured connection and author filter under a lock', async () => {
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+
+      const options = sync.syncIssues.mock.calls[0]?.[4] as { isolate: boolean; revalidate: () => Promise<void> };
+      expect(options.isolate).toBe(true);
+
+      // The captured target still matches: the revalidation passes through the locking read.
+      await expect(options.revalidate()).resolves.toBeUndefined();
+      expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
+
+      // A repository change and a tightened author filter commit after the approval: the write is refused.
+      connections.getFullByProject.mockResolvedValue({ ...connection, repoName: 'changed', allowedAuthors: '["bob"]' });
+      await expect(options.revalidate()).rejects.toBeInstanceOf(VcsTargetDriftError);
+    });
+  });
+  it('AC-9: the immediate full sync keeps the fullSync synced count', async () => {
+    sync.fullSync.mockResolvedValue({ issuesSynced: 2, issuesSkipped: 1, createdTickets: [], errors: [] });
+    expect((await service.syncAll('alpha')).issuesSynced).toBe(2);
+  });
+  it('AC-10: the immediate full sync keeps the fullSync skipped count', async () => {
+    sync.fullSync.mockResolvedValue({ issuesSynced: 2, issuesSkipped: 1, createdTickets: [], errors: [] });
+    expect((await service.syncAll('alpha')).issuesSkipped).toBe(1);
   });
   it.each(['repoName', 'allowedAuthors'] as const)('rejects full-sync drift in %s before any writes', async (field) => {
     const apply = await service.prepareSyncAll('alpha');

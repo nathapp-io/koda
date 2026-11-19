@@ -8,6 +8,7 @@ import { ApprovalDecisionService } from './approval-decision.service';
 import { ApprovalPolicyService } from './approval-policy.service';
 import { ApprovalPolicyResolver } from './approval-policy.resolver';
 import { ApprovalRequestExpirySweeper } from './approval-request-expiry.sweeper';
+import { ApprovalRetentionProcessor } from './approval-retention.processor';
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
@@ -22,6 +23,8 @@ import { ApprovalRouteGate } from './route/approval-route-gate';
  * so `ApprovalGate` (US-008) and the registering module share one map.
  *
  * `ApprovalRequestExpirySweeper` is provided, not exported: its interval is the only caller (US-012).
+ *
+ * `ApprovalRetentionProcessor` (US-003) is provided, not exported: its nightly cron is the only caller.
  *
  * `ApprovalRouteGate` (US-003) is the REST entry point: a gated handler asks it to run a registered
  * route command, after it has refused a non-principal actor and one that does not hold the key.
@@ -41,6 +44,7 @@ import { ApprovalRouteGate } from './route/approval-route-gate';
     ApprovalPolicyService,
     ApprovalPolicyResolver,
     ApprovalRequestExpirySweeper,
+    ApprovalRetentionProcessor,
     ApprovalCommandRegistry,
     PrismaApprovalPolicyRepository,
     { provide: APPROVAL_POLICY_REPOSITORY, useExisting: PrismaApprovalPolicyRepository },

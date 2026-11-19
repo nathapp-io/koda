@@ -93,7 +93,11 @@ describe('VcsSyncService.syncIssue', () => {
 
       const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
+      // Review-1119 US-006 (B1): the write takes a fifth argument, the per-write target revalidation a
+      // deferred import supplies. A plain sync supplies none, so the repository receives `undefined`.
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(
+        mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function), undefined,
+      );
       expect(result.action).toBe('created');
     });
 
@@ -111,7 +115,9 @@ describe('VcsSyncService.syncIssue', () => {
         const result = await service.syncIssue(mockProject as any, mockVcsIssue, source, repoRef, 'vcs.sync.issue');
 
         expect(result.action).toBe('created');
-        expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
+        expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(
+          mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function), undefined,
+        );
       }
     });
   });
@@ -253,7 +259,9 @@ describe('VcsSyncService.syncIssue', () => {
 
       await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(
+        mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function), undefined,
+      );
     });
 
     it('should handle null issue.body (passed through to repository)', async () => {
@@ -272,7 +280,9 @@ describe('VcsSyncService.syncIssue', () => {
       const result = await service.syncIssue(mockProject as any, issueWithoutDescription, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result.action).toBe('created');
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, issueWithoutDescription, 'owner/repo#42', expect.any(Function));
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(
+        mockProject, issueWithoutDescription, 'owner/repo#42', expect.any(Function), undefined,
+      );
     });
   });
 
@@ -287,7 +297,9 @@ describe('VcsSyncService.syncIssue', () => {
 
       const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(
+        mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function), undefined,
+      );
       expect(result.ticketNumber).toBe(6);
     });
 

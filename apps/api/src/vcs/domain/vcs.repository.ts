@@ -23,6 +23,17 @@ export interface CreateTicketFromIssueResult {
  */
 export type OnTicketCreated = (ticket: { id: string; number: number }) => Promise<void>;
 
+/**
+ * Runs inside the ticket-number attempt's transaction, after the project row lock and before the insert
+ * (review-1119 US-006, B1). A deferred import writes after the approval committed, so the connection lock
+ * its target check held is gone: this is where each write re-reads the captured target under that lock,
+ * and a throw here rolls the attempt back with nothing written.
+ *
+ * It runs after the project lock, not before it (review-1119 US-006, B5): approval execution locks the
+ * project and then the connection, so the write path takes the same two rows in the same order.
+ */
+export type BeforeTicketInsert = () => Promise<void>;
+
 export interface TicketLinkData {
   id: string;
   ticketId: string;
@@ -111,12 +122,16 @@ export interface IVcsRepository {
    * (projectId, externalVcsId) won the race while this call ran outside any transaction — the caller
    * reports `skipped`. Inside an enclosing transaction the violation is rethrown, because that
    * transaction is already aborted.
+   *
+   * Review-1119 (US-006, B1): `beforeInsert` revalidates the caller's captured target inside this
+   * attempt's transaction, so the target cannot change between the check and the write.
    */
   createTicketFromIssue(
     project: { id: string },
     issue: { number: number; title: string; body: string | null },
     externalVcsId: string,
     onCreated?: OnTicketCreated,
+    beforeInsert?: BeforeTicketInsert,
   ): Promise<CreateTicketFromIssueResult | null>;
 
   // TicketLink operations
