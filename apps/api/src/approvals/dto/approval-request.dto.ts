@@ -63,15 +63,21 @@ export class ApprovalRequestDto extends ApprovalRequestFields {
    * belongs to the command, so it cannot be one schema — but the approved full import is the operation
    * whose answer a client needs to read, and it is not reachable through any sync response (that one has
    * already answered `202 pending`): this field is where its fetch result is reported.
+   *
+   * Review-1119 (D-5): that answer is the fetch's, not a finished import's, and a request that failed
+   * records an error instead. `vcs.sync.all` always records `tickets: []` — the import runs after this
+   * commit — so the description must not read as if it listed the tickets the import created.
    */
   @ApiProperty({
     type: Object,
     nullable: true,
     description: 'The executed command\'s recorded result, null until the request executes; the shape is the '
-      + 'command\'s own. An executed `vcs.sync.all` records the approved full import\'s fetch result — '
-      + '`syncType` `manual`, `issuesSynced` 0 and `issuesSkipped` 0 (the import itself runs after this '
-      + 'commit), the created `tickets`, `fetchedIssues` (issues the import will process, after the '
-      + 'allowedAuthors filter) and `capped` (the provider had more issues than the fetch returned).',
+      + 'command\'s own. An executed `vcs.sync.all` records the approved full import\'s fetch metadata, not a '
+      + 'completed import: `syncType` `manual`, `issuesSynced` 0, `issuesSkipped` 0 and `tickets` always `[]` '
+      + '(the import itself runs after this commit), plus `fetchedIssues` (issues the import will process, '
+      + 'after the allowedAuthors filter) and `capped` (the provider had more issues than the fetch '
+      + 'returned). A request that failed records `{ error }` instead — the pre-check code, or '
+      + '`execution-failed` with the thrown error\'s `name`.',
     example: {
       syncType: 'manual',
       issuesSynced: 0,

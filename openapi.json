@@ -28109,7 +28109,7 @@
           "result": {
             "type": "object",
             "nullable": true,
-            "description": "The executed command's recorded result, null until the request executes; the shape is the command's own. An executed `vcs.sync.all` records the approved full import's fetch result — `syncType` `manual`, `issuesSynced` 0 and `issuesSkipped` 0 (the import itself runs after this commit), the created `tickets`, `fetchedIssues` (issues the import will process, after the allowedAuthors filter) and `capped` (the provider had more issues than the fetch returned).",
+            "description": "The executed command's recorded result, null until the request executes; the shape is the command's own. An executed `vcs.sync.all` records the approved full import's fetch metadata, not a completed import: `syncType` `manual`, `issuesSynced` 0, `issuesSkipped` 0 and `tickets` always `[]` (the import itself runs after this commit), plus `fetchedIssues` (issues the import will process, after the allowedAuthors filter) and `capped` (the provider had more issues than the fetch returned). A request that failed records `{ error }` instead — the pre-check code, or `execution-failed` with the thrown error's `name`.",
             "example": {
               "syncType": "manual",
               "issuesSynced": 0,
