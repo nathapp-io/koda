@@ -3,7 +3,7 @@
   "feature": "review-1119-data-rulings",
   "branchName": "feat/review-1119-data-rulings",
   "createdAt": "2026-11-19T05:23:58.886Z",
-  "updatedAt": "2026-11-19T08:45:01.284Z",
+  "updatedAt": "2026-11-19T08:53:39.762Z",
   "userStories": [
     {
       "id": "US-001",
@@ -256,14 +256,17 @@
         "vcs"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends two existing forge adapters and one minter without a new abstraction; strict TDD is required because the selection changes approval eligibility and relies on scoped credentials."
+        "reasoning": "Extends two existing forge adapters and one minter without a new abstraction; strict TDD is required because the selection changes approval eligibility and relies on scoped credentials.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-event.minter.ts",
@@ -286,7 +289,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6cbef0c7dc48d5de0a1a1e64eaab03a4a04f579d"
     },
     {
       "id": "US-005",
