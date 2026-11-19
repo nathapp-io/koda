@@ -16,7 +16,7 @@
         <pre
           class="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs"
           data-testid="approval-request-bash-command"
-        >{{ payload.command }}</pre>
+        >{{ commandText.text }}</pre>
       </div>
       <div v-else class="space-y-1">
         <p class="font-medium">{{ t('approvals.fleet.bash.rawDetail') }}</p>
@@ -24,7 +24,7 @@
         <pre
           class="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs"
           data-testid="approval-request-bash-raw"
-        >{{ payload.rawDetail }}</pre>
+        >{{ rawDetailText.text }}</pre>
       </div>
       <p v-if="payload.maskedCount > 0" class="text-muted-foreground" data-testid="approval-request-bash-masked">
         {{ t('approvals.fleet.bash.masked', { count: payload.maskedCount }) }}
@@ -32,12 +32,15 @@
       <p v-if="payload.commandTruncated" class="text-status-rejected" data-testid="approval-request-bash-truncated">
         {{ t('approvals.fleet.bash.truncated') }}
       </p>
+      <p v-if="invisibleCount > 0" class="text-status-rejected" data-testid="approval-request-bash-invisible">
+        {{ t('approvals.fleet.bash.invisible', { count: invisibleCount }) }}
+      </p>
       <dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-        <div><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.root') }}</dt><dd class="break-all font-mono text-xs">{{ payload.root }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.root') }}</dt><dd class="break-all font-mono text-xs">{{ rootText.text }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.stage') }}</dt><dd>{{ payload.stage }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.story') }}</dt><dd>{{ payload.storyId ?? '-' }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.feature') }}</dt><dd class="break-all">{{ payload.featureName }}</dd></div>
-        <div class="sm:col-span-2"><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.reason') }}</dt><dd class="whitespace-pre-wrap break-all">{{ payload.reason }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.feature') }}</dt><dd class="break-all">{{ featureNameText.text }}</dd></div>
+        <div class="sm:col-span-2"><dt class="text-muted-foreground">{{ t('approvals.fleet.bash.reason') }}</dt><dd class="whitespace-pre-wrap break-all">{{ reasonText.text }}</dd></div>
       </dl>
     </template>
 
@@ -84,6 +87,7 @@
  */
 import { computed, ref } from 'vue'
 import { bashChoices, countdownText, secondsLeft } from '~/lib/fleet-approvals'
+import { revealInvisible } from '~/lib/reveal-invisible'
 import type { BashDecision } from '~/lib/fleet-approvals'
 import { bashAskOf, bashRequestBody } from '~/lib/approval-request-fleet'
 import { buildCommentSchema } from '~/lib/approval-requests'
@@ -105,6 +109,16 @@ const { t } = useI18n()
 
 const ask = computed(() => bashAskOf(props.request))
 const payload = computed(() => ask.value?.payload ?? null)
+const emptyRevealed = { text: '', count: 0 }
+const revealField = (value: unknown) => typeof value === 'string' ? revealInvisible(value) : emptyRevealed
+const commandText = computed(() => revealField(payload.value?.command))
+const rawDetailText = computed(() => revealField(payload.value?.rawDetail))
+const rootText = computed(() => revealField(payload.value?.root))
+const featureNameText = computed(() => revealField(payload.value?.featureName))
+const reasonText = computed(() => revealField(payload.value?.reason))
+const invisibleCount = computed(() => payload.value === null ? 0 :
+  (payload.value.command !== '' ? commandText.value.count : rawDetailText.value.count) +
+  rootText.value.count + featureNameText.value.count + reasonText.value.count)
 const choices = computed(() => bashChoices(payload.value))
 const pending = computed(() => props.request.status === 'pending')
 const left = computed(() => (pending.value ? secondsLeft(props.request.expiresAt, props.now) : null))

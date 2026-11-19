@@ -13,6 +13,8 @@ beforeAll(() => isolateGit());
 afterAll(() => tmp.cleanup());
 const g = createGit();
 const identity = { name: 'koda-fleet[bot]', email: 'koda-fleet[bot]@users.noreply.github.com' };
+/** review-1118 US-001: this world's origin is a `file://` path, so clone and fetch need the test-only policy. */
+const LOCAL_ORIGIN = { allowLocalCloneUrls: true };
 const NEW_PRD = JSON.stringify({ feature: 'f', branchName: 'feat/f', userStories: [{ id: 'US-001' }] });
 
 async function setup(files: Record<string, string> = { 'README.md': 'x' }, extra: Parameters<typeof makeOrigin>[2]['branches'] = []) {
@@ -20,8 +22,8 @@ async function setup(files: Record<string, string> = { 'README.md': 'x' }, extra
   const origin = await makeOrigin(base, 'origin', { files, branches: extra });
   const repoDir = join(base, 'clone');
   const jobDir = join(base, 'job');
-  await ensureClone(g, { repoDir, cloneUrl: origin.url, identity });
-  await cleanWorkspace(g, repoDir);
+  await ensureClone(g, { repoDir, cloneUrl: origin.url, identity, ...LOCAL_ORIGIN });
+  await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
   await sh(repoDir, 'checkout', '-q', '--detach', 'origin/main');
   return { base, origin, repoDir, jobDir, refSha: await sh(repoDir, 'rev-parse', 'HEAD') };
 }
@@ -169,7 +171,7 @@ describe('commitAndPushPlan', () => {
     const local = await sh(s.repoDir, 'rev-parse', 'feat/f');
     expect(local).not.toBe(s.refSha);                        // the commit is kept locally
     await sh(s.repoDir, 'remote', 'set-url', 'origin', s.origin.url);
-    await cleanWorkspace(g, s.repoDir);
+    await cleanWorkspace(g, s.repoDir, null, LOCAL_ORIGIN);
     const again = await commitAndPushPlan(input(s));
     expect(again).toMatchObject({ ok: true, committed: false, sha: local });
     expect(await sh(s.origin.dir, 'rev-parse', 'feat/f')).toBe(local);
@@ -224,7 +226,7 @@ describe('commitAndPushPlan', () => {
     await sh(s.repoDir, 'commit', '-q', '--allow-empty', '-m', 'local only');
     const local = await sh(s.repoDir, 'rev-parse', 'HEAD');
     await pushCommit(s.base, s.origin.url, 'feat/f', 'other.txt', '2');
-    await cleanWorkspace(g, s.repoDir);
+    await cleanWorkspace(g, s.repoDir, null, LOCAL_ORIGIN);
     await sh(s.repoDir, 'checkout', '-q', '--detach', s.refSha);
     await planOutputs(s.repoDir);
     expect(await commitAndPushPlan(input(s))).toEqual({ ok: false, reason: 'checkout: branch diverged' });

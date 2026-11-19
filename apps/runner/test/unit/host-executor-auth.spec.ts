@@ -57,6 +57,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN') {
   const ex = new HostExecutor({
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'naxhome') }, git: createGit(), log: createMemoryLogger(),
     nowMs: () => Date.now(), sleep: async () => undefined, credentials: broker, approvals: NO_APPROVALS,
+    allowLocalCloneUrls: true,   // review-1118 US-001: the fixture origin is a loopback HTTP git front
   });
   const grant = (): void => {
     tokens.want(row.jobId, row.leaseEpoch);

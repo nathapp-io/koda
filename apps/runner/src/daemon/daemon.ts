@@ -70,6 +70,12 @@ export interface DaemonOptions {
   readonly threadSessions?: Pick<ThreadSessionFactory, 'open'>;
   /** Fleet S5a §3: nax-agent's process-wide credential config; tests inject a spy. Default: nax-agent's own. */
   readonly configureCredentials?: (config: CredentialsConfig) => void;
+  /**
+   * review-1118 US-001, TEST-ONLY: admit `http:` and `file:` job clone URLs and allow the file transport for this
+   * daemon's clone and fetch. A spec's origin is a local path or a loopback HTTP git front; `main.ts` and
+   * `commands/run.ts` never set it, so a real runner clones over https only.
+   */
+  readonly allowLocalCloneUrls?: boolean;
 }
 
 export interface DaemonHandle {
@@ -218,6 +224,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     : undefined;   // D104
   const executor = options.executorFactory?.() ?? new HostExecutor({
     config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, ...(jobCheck ? { jobCheck } : {}),
+    // review-1118 US-001: test-only; unset in production, where a job clones over https only.
+    allowLocalCloneUrls: options.allowLocalCloneUrls === true,
   });
   const uploader: BundleUploader = {
     upload: (job, file, rebuild) => uploadWithRetry({
@@ -245,6 +253,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
       kodaTools: { call: (args) => client.callKodaTool(args) },
+      // review-1118 US-001: test-only, the same value the executor got.
+      allowLocalCloneUrls: options.allowLocalCloneUrls === true,
     },
     tuning,
   } : undefined;
@@ -261,7 +271,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // threadBackends, so its THREAD rows fail `backend_unavailable` in the supervisor.
     ...(threads ? { threads } : {}),
   });
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals });
+  const handler = new CommandHandler({
+    journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals,
+    // review-1118 US-001: test-only; a real runner's ASSIGN must carry an https clone URL.
+    allowLocalCloneUrls: options.allowLocalCloneUrls === true,
+  });
 
   let stopReason: StopReason | null = null;
   const loop = new SyncLoop({

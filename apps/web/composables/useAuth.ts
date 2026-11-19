@@ -58,6 +58,7 @@ function errorStatus(error: unknown): number | null {
  */
 export function useAuth() {
   const user = useState<AuthUser | null>('koda_user', () => null)
+  const sessionUnavailable = useState<boolean>('koda_session_unavailable', () => false)
 
   const isAuthenticated = computed(() => !!user.value)
 
@@ -67,6 +68,7 @@ export function useAuth() {
       body: credentials,
     })
     user.value = response.user
+    sessionUnavailable.value = false
   }
 
   async function register(credentials: RegisterCredentials): Promise<void> {
@@ -75,6 +77,7 @@ export function useAuth() {
       body: credentials,
     })
     user.value = response.user
+    sessionUnavailable.value = false
   }
 
   /**
@@ -88,6 +91,7 @@ export function useAuth() {
       body,
     })
     user.value = response.user
+    sessionUnavailable.value = false
   }
 
   async function logout(): Promise<void> {
@@ -122,9 +126,16 @@ export function useAuth() {
       }
       const response = await requestFetch<{ user: AuthUser | null }>('/api/auth/me')
       user.value = response.user
+      sessionUnavailable.value = false
       return !!response.user
-    } catch {
-      user.value = null
+    } catch (error) {
+      const status = errorStatus(error)
+      if (status === 401 || status === 403) {
+        user.value = null
+        sessionUnavailable.value = false
+      } else {
+        sessionUnavailable.value = true
+      }
       return false
     }
   }
@@ -159,5 +170,5 @@ export function useAuth() {
     return (await refreshSession()) === 'ok'
   }
 
-  return { user, isAuthenticated, login, register, acceptInvite, logout, fetchUser, refresh, refreshSession }
+  return { user, sessionUnavailable, isAuthenticated, login, register, acceptInvite, logout, fetchUser, refresh, refreshSession }
 }

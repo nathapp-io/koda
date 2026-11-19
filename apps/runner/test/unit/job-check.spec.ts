@@ -89,6 +89,7 @@ async function world(profiles: string[], vault?: VaultOptions, wrap: (check: Job
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(),
     sleep: async () => undefined, credentials: vault === undefined ? NO_CREDENTIALS : provider.credentials, approvals: NO_APPROVALS, jobCheck: wrap(jobCheck),
     spawnNax: (argv, options) => { calls.push({ argv, options }); return HANDLE; },
+    allowLocalCloneUrls: true,   // review-1118 US-001: the fixture origin is a `file://` path
   });
   return { naxHome, row, ex, caps, calls, asked: provider.asked };
 }

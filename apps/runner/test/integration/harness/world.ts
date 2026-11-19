@@ -292,7 +292,11 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
             return response;
           };
           await prisma.runner.update({ where: { name }, data: { enabled: true } });
-          runner.daemon = await startDaemon({ home, config, identity, log, fetchFn, selfCommand: SELF, tuning: { statusPollMs: 50, syncMinGapMs: 20, ackPollMs: 25 } });
+          runner.daemon = await startDaemon({
+            home, config, identity, log, fetchFn, selfCommand: SELF, tuning: { statusPollMs: 50, syncMinGapMs: 20, ackPollMs: 25 },
+            // review-1118 US-001, TEST-ONLY: the harness's git front is loopback HTTP and its origins are local files.
+            allowLocalCloneUrls: true,
+          });
           return runner.daemon;
         },
         async stop() {

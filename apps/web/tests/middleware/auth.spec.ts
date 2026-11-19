@@ -309,6 +309,39 @@ test.each(['/forgot-password', '/reset-password/abc', '/login', '/register'])('A
   await mod.default(makeRoute(path), makeRoute('/'))
   expect(navigate).not.toHaveBeenCalled()
 })
+describe('US-005 outage middleware', () => {
+  async function run(path: string, user: object | null, unavailable: boolean) {
+    const userRef = ref<object | null>(user)
+    const isAuthenticated = computed(() => !!userRef.value)
+    const navigate = jest.fn((value: unknown) => ({ redirect: value }))
+    const abort = jest.fn((error: unknown) => ({ aborted: error }))
+    const create = jest.fn((error: unknown) => error)
+    const sessionUnavailable = ref(false)
+    const fetchUser = jest.fn(async () => { sessionUnavailable.value = unavailable; return false })
+    ;(globalThis as Record<string, unknown>).useAuth = () => ({ user: userRef, isAuthenticated, fetchUser, sessionUnavailable })
+    ;(globalThis as Record<string, unknown>).navigateTo = navigate
+    ;(globalThis as Record<string, unknown>).abortNavigation = abort
+    ;(globalThis as Record<string, unknown>).createError = create
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: unknown) => fn
+    const mod = await import(`${middlewarePath}`)
+    await mod.default(makeRoute(path), makeRoute('/'))
+    return { navigate, abort, create }
+  }
+
+  test('AC-1/2/3/4 outage aborts with fatal 503 redirect and no login navigation', async () => {
+    const { navigate, abort, create } = await run('/projects', null, true)
+    expect(create).toHaveBeenCalledWith({ statusCode: 503, statusMessage: 'Service Unavailable', fatal: true, data: { redirect: '/projects' } })
+    expect(abort).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 503, fatal: true, data: { redirect: '/projects' } }))
+    expect(navigate).not.toHaveBeenCalled()
+  })
+  test('AC-5 guest routes do not abort', async () => { expect((await run('/login', null, true)).abort).not.toHaveBeenCalled() })
+  test('AC-6 loaded users do not abort', async () => { expect((await run('/projects', { id: '1' }, true)).abort).not.toHaveBeenCalled() })
+  test('AC-7 definite unauthenticated response redirects to login', async () => {
+    const { navigate } = await run('/projects', null, false)
+    expect(navigate).toHaveBeenCalledWith({ path: '/login', query: { redirect: '/projects' } })
+  })
+})
+
 test.each(['/forgot-password', '/reset-password/abc', '/login', '/register'])('AC-12/15 authenticated guest route %s sanitizes redirect', async path => {
   const { userRef, isAuthenticated } = makeAuthEnv('token', { id: '1' })
   const navigate = jest.fn()

@@ -69,6 +69,71 @@ describe('AGENT result', () => {
     expect(await readAgentResult(dir)).toEqual({ ok: false, stderrLine: 'x'.repeat(300) });
   });
 
+  test('US-003 AC-6: redacts bearer credentials from AGENT stderr', async () => {
+    await writeFile(join(dir, 'nax.stderr'), 'Authorization: Bearer abc.def.ghi\n');
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    expect(failure.ok ? undefined : failure.stderrLine).toBeTypeOf('string');
+    expect(failure.ok ? '' : failure.stderrLine).not.toContain('abc.def.ghi');
+  });
+
+  test('US-003 AC-7: sanitizes secrets beyond the former AGENT clip boundary', async () => {
+    await writeFile(join(dir, 'nax.stderr'), `${'x'.repeat(290)} token=SECRETVALUE123456\n`);
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    const line = failure.ok ? '' : failure.stderrLine ?? '';
+    expect(line).not.toContain('SECRETVALUE');
+    expect(line).not.toContain('SECR');
+  });
+
+  test('US-003 AC-8: sanitizes then caps long AGENT stderr at 300 characters', async () => {
+    await writeFile(join(dir, 'nax.stderr'), `\u001b[31m${'x'.repeat(1000)}\n`);
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    const line = failure.ok ? '' : failure.stderrLine ?? '';
+    expect(line).not.toContain('\u001b');
+    expect(line.length).toBeLessThanOrEqual(300);
+  });
+
+  test('post-review B2: a line past the read bound is dropped whole instead of leaking a cut credential', async () => {
+    // The credential opens in the first 4,000 characters and closes after them: a prefix cut could not be redacted.
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `${'x'.repeat(200)} https://x-access-token:ghs_${'S'.repeat(3_900)}@github.com/o/r.git\n`);
+    expect(await readAgentResult(dir)).toEqual({ ok: false });
+  });
+
+  test.each(['\n', '\r\n', ''])('reads exactly 4,000 UTF-16 units before %j and retains a sanitized diagnostic', async (ending) => {
+    const credential = 'https://user:SECRETVALUE123456@github.com/o/r.git';
+    const line = credential + 'x'.repeat(4_000 - credential.length);
+    expect(line.length).toBe(4_000);
+    await writeFile(join(dir, 'nax.stderr'), line + ending);
+    const failure = await readAgentResult(dir);
+    expect(failure.ok).toBe(false);
+    const diagnostic = failure.ok ? undefined : failure.stderrLine;
+    expect(diagnostic).toBeTypeOf('string');
+    expect(diagnostic).toContain('[redacted]');
+    expect(diagnostic).not.toContain('SECRETVALUE');
+    expect(diagnostic?.length).toBeLessThanOrEqual(300);
+  });
+
+  test.each(['\n', '\r\n', ''])('drops an oversized astral line before %j instead of accepting 4,001 units', async (ending) => {
+    const line = 'x'.repeat(3_999) + '😀';
+    expect(line.length).toBe(4_001);
+    await writeFile(join(dir, 'nax.stderr'), line + ending + (ending ? 'later diagnostic' : ''));
+    expect(await readAgentResult(dir)).toEqual({ ok: false });
+  });
+
+  test('retains an astral character that fits exactly at the read boundary', async () => {
+    await writeFile(join(dir, 'nax.stderr'), 'x'.repeat(3_998) + '😀\r\n');
+    expect(await readAgentResult(dir)).toEqual({ ok: false, stderrLine: 'x'.repeat(300) });
+  });
+
+  test('post-review B2: a line that sanitization empties has no detail', async () => {
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `\u001b[31m\u0007\u0000\u001b[0m\n`);
+    expect(await readAgentResult(dir)).toEqual({ ok: false });
+  });
+
   test('AC-5 retains only the UTF-8 output tail at the output bound', () => {
     const output = 'a'.repeat(20_000);
     const fitted = fitAgentResult({ ...sample, output });

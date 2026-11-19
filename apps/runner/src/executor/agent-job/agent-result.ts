@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AGENT_RESULT_LIMITS, type AgentJobResult } from '@nathapp/fleet-protocol';
 import { clip, formatCost } from '../../watcher/status-snapshot';
 import { tailBytes } from '../config-job/result-fit';
+import { sanitizeDiagnostic } from '../../diagnostics';
 
 export const AGENT_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -51,6 +52,16 @@ function parseResult(value: unknown): RawAgentResult | undefined {
   };
 }
 
+/** First non-empty nax.stderr line: UTF-16 units excluding the LF or CRLF terminator, then sanitized. */
+const STDERR_LINE_MAX_CHARS = 4_000;
+/** review-1118 US-003: and the sanitized reason is clipped to this. */
+const STDERR_LINE_MAX_OUTPUT = 300;
+
+/**
+ * The first non-empty line of nax.stderr, sanitized, or `undefined`. Review-1118 US-003 post-review: a line longer
+ * than the read bound is dropped whole rather than clipped — the sanitizer cannot see the closing delimiter of a URL
+ * credential that starts inside the collected prefix and ends past it, so a cut prefix could carry a secret.
+ */
 async function stderrLine(jobDir: string): Promise<string | undefined> {
   let file;
   try {
@@ -59,19 +70,31 @@ async function stderrLine(jobDir: string): Promise<string | undefined> {
     const buffer = Buffer.alloc(4096);
     let line = '';
     let nonEmpty = false;
-    const inspect = (text: string): string | undefined => {
+    const sanitized = (value: string): string | undefined => {
+      const clean = sanitizeDiagnostic(value.endsWith('\r') ? value.slice(0, -1) : value);
+      return clean.length === 0 ? undefined : clip(clean, STDERR_LINE_MAX_OUTPUT);
+    };
+    /** `done` answers the read: the first non-empty line is found, or it is too long to keep. */
+    const inspect = (text: string): { done: boolean; line?: string } => {
       for (const character of text) {
         if (character === '\n') {
-          if (nonEmpty) return clip(line.endsWith('\r') ? line.slice(0, -1) : line, 300);
+          if (nonEmpty) return { done: true, line: sanitized(line) };
           line = '';
           nonEmpty = false;
           continue;
         }
-        if (line.length < 301) line += character;
-        if (character.trim().length > 0) nonEmpty = true;
-        if (nonEmpty && line.length >= 301) return clip(line, 300);
+        const blank = character.trim().length === 0;
+        if (!blank) nonEmpty = true;
+        const nextLength = line.length + character.length;
+        // Keep one provisional CR beyond the bound only until we know whether it terminates a CRLF line.
+        const possibleTerminator = character === '\r' && nextLength === STDERR_LINE_MAX_CHARS + 1;
+        if (nextLength > STDERR_LINE_MAX_CHARS && !possibleTerminator) {
+          if (nonEmpty) return { done: true };   // no detail rather than an unsanitizable prefix
+          continue;                              // a blank line over the bound only delays the next one
+        }
+        line += character;
       }
-      return undefined;
+      return { done: false };
     };
     let eof = false;
     while (!eof) {
@@ -79,12 +102,12 @@ async function stderrLine(jobDir: string): Promise<string | undefined> {
       if (bytesRead === 0) eof = true;
       else {
         const found = inspect(decoder.write(buffer.subarray(0, bytesRead)));
-        if (found !== undefined) return found;
+        if (found.done) return found.line;
       }
     }
     const final = inspect(decoder.end());
-    if (final !== undefined) return final;
-    return nonEmpty ? clip(line.endsWith('\r') ? line.slice(0, -1) : line, 300) : undefined;
+    if (final.done) return final.line;
+    return nonEmpty && line.length <= STDERR_LINE_MAX_CHARS ? sanitized(line) : undefined;
   } catch {
     return undefined;
   } finally {

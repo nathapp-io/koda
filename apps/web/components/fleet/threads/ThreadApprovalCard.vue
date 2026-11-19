@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
+import { revealInvisible } from '~/lib/reveal-invisible'
 import type { ThreadActionResult } from '~/lib/thread-controller'
 import type { ThreadApprovalDecision, ThreadApprovalDelivery, ThreadPendingApprovalDto } from '~/lib/thread-types'
 
@@ -32,6 +33,13 @@ const props = defineProps<{
   decide: (requestId: string, decision: ThreadApprovalDecision) => Promise<ThreadActionResult>
 }>()
 const { t } = useI18n()
+
+const toolText = computed(() => revealInvisible(props.approval.tool))
+const summaryText = computed(() => revealInvisible(props.approval.summary))
+const commandText = computed(() => props.approval.command ? revealInvisible(props.approval.command) : null)
+const reasonText = computed(() => props.approval.reason ? revealInvisible(props.approval.reason) : null)
+const invisibleCount = computed(() => toolText.value.count + summaryText.value.count +
+  (commandText.value?.count ?? 0) + (reasonText.value?.count ?? 0))
 
 /** Identifies one acknowledgement, so a reloaded copy of the same outcome is not mistaken for a new one. */
 function deliveryKeyOf(delivery: ThreadApprovalDelivery | undefined): string {
@@ -96,19 +104,22 @@ function resend(): void {
 <template>
   <div class="rounded-md border border-border bg-card p-3 text-sm" data-testid="thread-approval">
     <div class="flex items-center gap-2">
-      <p class="font-medium whitespace-pre-wrap break-words" data-testid="thread-approval-tool">{{ props.approval.tool }}</p>
+      <p class="font-medium whitespace-pre-wrap break-words" data-testid="thread-approval-tool">{{ toolText.text }}</p>
       <Badge v-if="props.approval.unsandboxed" variant="outline" data-testid="thread-approval-unsandboxed">
         {{ t('fleet.threads.approval.unsandboxed') }}
       </Badge>
     </div>
-    <p class="mt-1 whitespace-pre-wrap break-words" data-testid="thread-approval-summary">{{ props.approval.summary }}</p>
+    <p class="mt-1 whitespace-pre-wrap break-words" data-testid="thread-approval-summary">{{ summaryText.text }}</p>
     <p v-if="props.approval.command" class="mt-1 text-xs text-muted-foreground" data-testid="thread-approval-command">
       <span class="font-medium">{{ t('fleet.threads.approval.command') }}</span>
-      <span class="ml-1 whitespace-pre-wrap break-words">{{ props.approval.command }}</span>
+      <span class="ml-1 whitespace-pre-wrap break-words">{{ commandText?.text }}</span>
     </p>
     <p v-if="props.approval.reason" class="mt-1 text-xs text-muted-foreground" data-testid="thread-approval-reason">
       <span class="font-medium">{{ t('fleet.threads.approval.reason') }}</span>
-      <span class="ml-1 whitespace-pre-wrap break-words">{{ props.approval.reason }}</span>
+      <span class="ml-1 whitespace-pre-wrap break-words">{{ reasonText?.text }}</span>
+    </p>
+    <p v-if="invisibleCount > 0" class="mt-1 text-xs text-status-rejected" data-testid="thread-approval-invisible">
+      {{ t('fleet.threads.approval.invisible', { count: invisibleCount }) }}
     </p>
     <div v-if="props.canDecide" class="mt-2 flex items-center gap-2">
       <Button size="sm" :disabled="busy || queued" data-testid="thread-approval-approve" @click="send('allow')">

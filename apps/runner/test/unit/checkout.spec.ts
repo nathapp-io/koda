@@ -14,14 +14,16 @@ beforeAll(() => isolateGit());
 afterAll(() => tmp.cleanup());
 const g = createGit();
 const identity = { name: 'bot', email: 'bot@x' };
+/** review-1118 US-001: this world's origin is a `file://` path, so clone and fetch need the test-only policy. */
+const LOCAL_ORIGIN = { allowLocalCloneUrls: true };
 const prd = (over: Record<string, unknown> = {}) => JSON.stringify({ branchName: 'feat/f', userStories: [{ id: 'US-001' }], ...over });
 
 async function setup(files: Record<string, string> = { '.nax/features/f/prd.json': prd(), 'README.md': 'x' }, extra: Partial<Parameters<typeof makeOrigin>[2]> = {}) {
   const base = await tmp.make('co');
   const origin: Origin = await makeOrigin(base, 'origin', { files, tags: ['v1'], ...extra });
   const repoDir = join(base, 'clone');
-  await ensureClone(g, { repoDir, cloneUrl: origin.url, identity });
-  await cleanWorkspace(g, repoDir);
+  await ensureClone(g, { repoDir, cloneUrl: origin.url, identity, ...LOCAL_ORIGIN });
+  await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
   return { base, origin, repoDir };
 }
 const assign = (over: Partial<AssignPayload> = {}): AssignPayload => ({
@@ -39,7 +41,7 @@ describe('resolveRef (design §2 step 3)', () => {
     expect(await resolveRef(g, repoDir, 'v1')).toEqual({ ok: true, sha: tip, kind: 'other' });
     expect(await resolveRef(g, repoDir, tip)).toEqual({ ok: true, sha: tip, kind: 'other' });
     const advanced = await pushCommit(base, origin.url, 'main', 'n', '1');
-    await cleanWorkspace(g, repoDir);
+    await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
     expect(await resolveRef(g, repoDir, 'main')).toMatchObject({ ok: true, sha: advanced });
   });
   test('an unknown ref is not-found; option-shaped and odd refs are invalid (D31)', async () => {
@@ -79,7 +81,7 @@ describe('prepareCheckout RUN: the five branch cases (R-3.3)', () => {
     await prepareCheckout({ git: g, repoDir, assign: assign() });
     await sh(repoDir, 'commit', '-q', '--allow-empty', '-m', 'unpushed run commit');
     const local = await head(repoDir);
-    await cleanWorkspace(g, repoDir);
+    await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
     expect(await prepareCheckout({ git: g, repoDir, assign: assign() })).toMatchObject({ ok: true });
     expect(await head(repoDir)).toBe(local);
   });
@@ -87,7 +89,7 @@ describe('prepareCheckout RUN: the five branch cases (R-3.3)', () => {
     const { repoDir, origin, base } = await setup(undefined, { branches: [{ name: 'feat/f', files: { 'a': '1' } }] });
     await prepareCheckout({ git: g, repoDir, assign: assign() });
     const advanced = await pushCommit(base, origin.url, 'feat/f', 'b', '2');
-    await cleanWorkspace(g, repoDir);
+    await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
     await prepareCheckout({ git: g, repoDir, assign: assign() });
     expect(await head(repoDir)).toBe(advanced);
   });
@@ -97,7 +99,7 @@ describe('prepareCheckout RUN: the five branch cases (R-3.3)', () => {
     await sh(repoDir, 'commit', '-q', '--allow-empty', '-m', 'local only');
     const local = await head(repoDir);
     await pushCommit(base, origin.url, 'feat/f', 'c', '3');
-    await cleanWorkspace(g, repoDir);
+    await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
     expect(await prepareCheckout({ git: g, repoDir, assign: assign() })).toEqual({ ok: false, reason: 'checkout: branch diverged' });
     expect(await head(repoDir)).toBe(local);
   });
@@ -219,7 +221,7 @@ describe('prepareCheckout PLAN with expectBranch (US-005)', () => {
     await sh(repoDir, 'commit', '-q', '--allow-empty', '-m', 'local re-publish');
     const local = await head(repoDir);
     await sh(repoDir, 'checkout', '-q', '--detach', 'origin/main');
-    await cleanWorkspace(g, repoDir);
+    await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
     return { repoDir, origin, base, local, remote: await sh(repoDir, 'rev-parse', 'origin/feat/add-auth') };
   }
 
@@ -254,7 +256,7 @@ describe('prepareCheckout PLAN with expectBranch (US-005)', () => {
     await sh(repoDir, 'branch', 'feat/add-auth', 'origin/feat/add-auth');
     const local = await sh(repoDir, 'rev-parse', 'feat/add-auth');
     const remote = await pushCommit(base, origin.url, 'feat/add-auth', 'docs/calls.md', 'calls');
-    await cleanWorkspace(g, repoDir);
+    await cleanWorkspace(g, repoDir, null, LOCAL_ORIGIN);
     return { repoDir, origin, base, local, remote };
   }
 

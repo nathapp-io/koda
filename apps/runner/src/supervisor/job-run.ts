@@ -80,6 +80,7 @@ export class JobRun {
   private tickErrors = 0;
   private fixChainAttempted = false;
   private fixSpawnFailure: string | undefined;
+  private spawnedHere = false;
 
   constructor(private readonly deps: JobRunDeps, readonly jobId: string, readonly leaseEpoch: number) {
     this.events = new JobEvents(deps.journal, jobId, leaseEpoch, deps.log);
@@ -123,20 +124,20 @@ export class JobRun {
   }
 
   private async lifecycle(from: RunStart): Promise<void> {
+    this.spawnedHere = from === 'prepare' || from === 'reprepare';
     const { command } = this.mustRow();
     if (isConfigKind(command)) {
       await this.runConfig(from, command);
       return;
     }
     // Only the session that spawned the review may chain a fix: readopt has no surviving token cache.
-    const spawnedHere = from === 'prepare' || from === 'reprepare';
-    if (spawnedHere && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
+    if (this.spawnedHere && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
     this.registerLogs();
     if (from === 'watch') {
       await this.resumeCredentials();
       await this.resumeApprovals();
     }
-    if (from !== 'finish') await this.watchUntilExit(spawnedHere);
+    if (from !== 'finish') await this.watchUntilExit();
     if (this.halted) return;
     await this.finish();
   }
@@ -185,7 +186,7 @@ export class JobRun {
       return true;
     }
     if (row.cancelRequestedAt === null) this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
-    if (row.state === 'RUNNING') this.sendTerm(row);
+    if (row.state === 'RUNNING' && this.spawnedHere) this.sendTerm(row);
     return true;
   }
 
@@ -422,7 +423,7 @@ export class JobRun {
     return true;
   }
 
-  private async watchUntilExit(spawnedHere: boolean): Promise<void> {
+  private async watchUntilExit(): Promise<void> {
     const start = this.mustRow();
     // BUG-2: a RUNNING row with pid === null is corrupt (journal patch missing or DB race); fall through to
     // finish() would upload a partial bundle and call it FAILED with 'no status.json' — honest, but reachable on
@@ -434,20 +435,26 @@ export class JobRun {
     const watcher = this.deps.executor.createWatcher(start, this.events, {
       onRunIds: (ids) => { this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { naxRunId: ids.naxRunId, logPath: ids.logPath }); },
     });
-    if (start.cancelRequestedAt !== null && start.state === 'RUNNING') this.sendTerm(start);
+    if (start.cancelRequestedAt !== null && start.state === 'RUNNING' && this.spawnedHere) this.sendTerm(start);
     for (;;) {
       await this.tick(watcher, false);
       if (this.halted) return;
       const row = this.mustRow();
       const alive = row.pid !== null && this.deps.executor.isAlive(row.pid);
-      const identity = alive && !spawnedHere ? await this.deps.executor.processIdentity(row) : 'ours';
+      const identity = alive && !this.spawnedHere ? await this.deps.executor.processIdentity(row) : 'ours';
+      // A halt (abandon, daemon stop) that lands while the probe is in flight must win: the stop contract says a
+      // halted run signals nothing, so it is re-read before the journal and before any SIGTERM/SIGKILL.
+      if (this.halted) return;
       if (!alive || identity === 'other') {
-        const chained = await this.chainFixStep(row, spawnedHere);
+        const chained = await this.chainFixStep(row, this.spawnedHere);
         if (this.halted) return;
         if (chained) continue;
         break;
       }
-      this.escalateKill(row);
+      if (this.spawnedHere || identity === 'ours') {
+        if (!this.spawnedHere && this.cancelRequested()) this.sendTerm(row);
+        this.escalateKill(row);
+      }
       await this.deps.sleep(this.deps.tuning.statusPollMs);
       if (this.halted) return;
     }

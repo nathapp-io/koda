@@ -38,6 +38,8 @@ export interface PrepareThreadWorktreeInput {
   readonly threadId: string;
   readonly baseRef: string;
   readonly feature: string;
+  /** review-1118 US-001: test-only; the daemon's value, so a spec's `file://` origin can be cloned. */
+  readonly allowLocalCloneUrls?: boolean;
 }
 
 export interface PruneArchivedThreadsInput {
@@ -177,7 +179,10 @@ async function ensureRepoClone(input: PrepareThreadWorktreeInput, credentialHelp
   const release = await input.mutex.acquire(input.repoKey);
   try {
     if (!(await isClone(input.repoDir))) {
-      await ensureClone(input.git, { repoDir: input.repoDir, cloneUrl: input.cloneUrl, identity: commitIdentity(input.identity), credentialHelper });
+      await ensureClone(input.git, {
+        repoDir: input.repoDir, cloneUrl: input.cloneUrl, identity: commitIdentity(input.identity), credentialHelper,
+        allowLocalCloneUrls: input.allowLocalCloneUrls === true,
+      });
     }
   } finally {
     release();

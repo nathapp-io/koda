@@ -14,6 +14,12 @@ export interface GitOptions {
   readonly env?: Readonly<Record<string, string>>;
   /** D86: this call may authenticate, through the job's helper; every other call keeps an empty helper list. */
   readonly credentialHelper?: string | null;
+  /**
+   * review-1118 US-001: `protocol.file.allow` for this one call. The job clone and its fetch say `never`, so a
+   * repository the server pointed at a local path cannot be transported; only a test that clones a local origin
+   * passes `always`. Unset leaves the argv exactly as it was.
+   */
+  readonly fileProtocol?: 'always' | 'never';
 }
 
 export class GitError extends Error {
@@ -63,6 +69,9 @@ const NO_HELPER_ARGS = ['-c', 'credential.helper='] as const;
 const helperArgs = (helper: string | null | undefined): readonly string[] =>
   helper ? ['-c', 'credential.helper=', '-c', `credential.helper=${helper}`] : NO_HELPER_ARGS;
 const HARDENING_ARGS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false'] as const;
+/** review-1118 US-001: a call that must not use the file transport says so itself; an unset value adds nothing. */
+const fileProtocolArgs = (value: 'always' | 'never' | undefined): readonly string[] =>
+  value === undefined ? [] : ['-c', `protocol.file.allow=${value}`];
 
 export const MIN_GIT_VERSION: readonly [number, number] = [2, 30];
 
@@ -82,7 +91,7 @@ export async function assertMinGitVersion(git: Git): Promise<void> {
 
 export function createGit(): Git {
   const run: Git['run'] = async (args, options) => {
-    const proc = Bun.spawn(['git', ...HARDENING_ARGS, ...helperArgs(options.credentialHelper), ...args], {
+    const proc = Bun.spawn(['git', ...HARDENING_ARGS, ...fileProtocolArgs(options.fileProtocol), ...helperArgs(options.credentialHelper), ...args], {
       cwd: options.cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
       timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, killSignal: 'SIGKILL',
       env: { ...process.env, ...options.env, ...NO_PROMPT_ENV },

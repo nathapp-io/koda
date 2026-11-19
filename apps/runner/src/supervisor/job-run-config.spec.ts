@@ -41,6 +41,15 @@ const lifecycles = (b: Built) => events(b).filter((e) => e.type === 'lifecycle')
 const settle = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe('config job happy path (S3 §3, §5)', () => {
+  test('AC-11: cancel signals a journaled config subprocess started during prepare', async () => {
+    const b = build();
+    b.ex.onConfigRun = async (ctx) => {
+      ctx.onProcess({ pid: 5252, pgid: 5252 });
+      b.run.requestCancel();
+    };
+    await b.run.start('prepare');
+    expect(b.ex.killed).toEqual([{ pgid: 5252, signal: 'SIGTERM' }]);
+  });
   test('fetch, prepare, RUNNING, run, result snapshot, UPLOADING, COMPLETED with reason ok; no nax, no bundle', async () => {
     const b = build();
     await b.run.start('prepare');

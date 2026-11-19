@@ -78,6 +78,35 @@ describe('createGit', () => {
   });
 });
 
+describe('createGit file transport (review-1118 US-001)', () => {
+  const tempDirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+  /** A local bare origin and a directory beside it: the clone the file transport is asked to refuse. */
+  async function localOrigin(): Promise<{ base: string; url: string }> {
+    const base = await mkdtemp(join(tmpdir(), 'koda-git-file-'));
+    tempDirs.push(base);
+    const origin = join(base, 'o.git');
+    for (const args of [['init', '-q', '--bare', '-b', 'main', origin], ['-C', origin, 'config', 'user.name', 'T'], ['-C', origin, 'config', 'user.email', 't@x']]) {
+      const proc = Bun.spawn(['git', ...args], { stdout: 'ignore', stderr: 'pipe' });
+      if (await proc.exited !== 0) throw new Error(await new Response(proc.stderr).text());
+    }
+    return { base, url: `file://${origin}` };
+  }
+  test('AC-5: a file-URL clone with fileProtocol never fails', async () => {
+    const { base, url } = await localOrigin();
+    const result = await createGit().run(['clone', '--', url, join(base, 'clone')], { cwd: base, fileProtocol: 'never' });
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('transport \'file\' not allowed');
+  });
+  test('the same clone with fileProtocol always succeeds', async () => {
+    const { base, url } = await localOrigin();
+    const result = await createGit().run(['clone', '--', url, join(base, 'clone')], { cwd: base, fileProtocol: 'always' });
+    expect(result.code).toBe(0);
+  });
+});
+
 describe('git version floor (D69)', () => {
   test('parseGitVersion reads the first three numbers, Apple and Windows suffixes included', () => {
     expect(parseGitVersion('git version 2.50.1 (Apple Git-155)\n')).toEqual([2, 50, 1]);

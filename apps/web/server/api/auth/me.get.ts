@@ -2,9 +2,8 @@
  * GET /api/auth/me
  *
  * Proxies the upstream /auth/me route using the access-token cookie.
- * Returns the user payload on success; returns { user: null } when no
- * cookie is present or the upstream call fails so the client can use it
- * as a soft authentication probe.
+ * Returns the user payload on success; definite unauthenticated outcomes
+ * return { user: null }, while upstream outages are reported as 503.
  */
 export default defineEventHandler(async (event) => {
   const accessToken = getCookie(event, ACCESS_COOKIE)
@@ -12,12 +11,17 @@ export default defineEventHandler(async (event) => {
     return { user: null }
   }
 
-  const { status, body: responseBody } = await forwardToApi(event, '/auth/me', {
-    method: 'GET',
-  })
+  let response: { status: number; body: unknown }
+  try {
+    response = await forwardToApi(event, '/auth/me', { method: 'GET' })
+  } catch {
+    throw createError({ statusCode: 503, statusMessage: 'Service Unavailable' })
+  }
 
+  const { status, body: responseBody } = response
+  if (status === 401 || status === 403) return { user: null }
   if (status >= 400) {
-    return { user: null }
+    throw createError({ statusCode: 503, statusMessage: 'Service Unavailable' })
   }
 
   const envelope = responseBody as

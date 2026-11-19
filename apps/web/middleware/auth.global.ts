@@ -19,6 +19,15 @@ export default defineNuxtRouteMiddleware(async (to, _from) => {
   }
 
   // If unauthenticated and trying to access a protected route (not /login or /register)
+  if (!auth.isAuthenticated.value && auth.sessionUnavailable?.value && !guestOnly) {
+    return abortNavigation(createError({
+      statusCode: 503,
+      statusMessage: 'Service Unavailable',
+      fatal: true,
+      data: { redirect: to.fullPath },
+    }))
+  }
+
   if (!auth.isAuthenticated.value && !guestOnly) {
     return navigateTo(to.fullPath === '/'
       ? { path: '/login' }

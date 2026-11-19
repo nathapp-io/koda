@@ -215,7 +215,7 @@ describe('Fleet locale parity (en and zh)', () => {
   // wordings of a runner-refused decision.
   test('the thread page mode and approval keys cover exactly what the controls render (US-012)', () => {
     const modeKeys = ['read', 'ask', 'full']
-    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting', 'queued', 'retry', 'rejected', 'rejectedNoDetail']
+    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting', 'queued', 'retry', 'rejected', 'rejectedNoDetail', 'invisible']
     for (const locale of [en, zh]) {
       const modes = at(locale, 'fleet.threads.mode') as Tree | undefined
       expect(Object.keys(modes ?? {}).sort()).toEqual(['label', 'noPermission', ...modeKeys].sort())
