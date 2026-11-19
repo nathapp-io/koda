@@ -3,7 +3,7 @@
   "feature": "review-1119-fleet-rulings",
   "branchName": "feat/review-1119-fleet-rulings",
   "createdAt": "2026-11-19T05:12:14.945Z",
-  "updatedAt": "2026-11-19T05:59:06.665Z",
+  "updatedAt": "2026-11-19T06:05:58.274Z",
   "userStories": [
     {
       "id": "US-001",
@@ -152,14 +152,17 @@
         "cancellation"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The new method follows the existing budget cancellation pattern and reuses the repository, job transitions and activity collaborators; focused state and lease tests can run in one session."
+        "reasoning": "The new method follows the existing budget cancellation pattern and reuses the repository, job transitions and activity collaborators; focused state and lease tests can run in one session.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -176,7 +179,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5b552d22c40a4f42c8c51b8dd13fc9971a2c26b2"
     },
     {
       "id": "US-004",
