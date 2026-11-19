@@ -262,6 +262,7 @@ export class GitHubAppClient {
       mergeSha: typeof b.merge_commit_sha === 'string' ? b.merge_commit_sha : null,
       url: b.html_url,
       title: typeof b.title === 'string' ? b.title : '',
+      ...(typeof obj(b.user).login === 'string' ? { author: obj(b.user).login as string } : {}),
     };
   }
 

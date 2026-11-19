@@ -80,6 +80,7 @@ export class GitLabAccessChecker {
       ...(typeof b.sha === 'string' ? { headSha: b.sha } : {}),
       url: b.web_url,
       title: typeof b.title === 'string' ? b.title : '',
+      ...(typeof obj(b.author).username === 'string' ? { author: obj(b.author).username as string } : {}),
     };
   }
 

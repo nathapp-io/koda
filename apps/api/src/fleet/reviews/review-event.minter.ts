@@ -13,6 +13,7 @@ import { FleetReposService } from '../repos/fleet-repos.service';
 import { GITHUB_LOGIN } from '../ingest/parsers/bot-review.parser';
 import type { FleetReviewEventRecord } from './domain/fleet-review-event.domain';
 import { FleetReviewEventsService } from './fleet-review-events.service';
+import type { VcsPrStatus } from '../../vcs/types';
 
 /** A repository role that may author a review: the same set `getRepoRole` reports as write-capable. */
 const WRITER_ROLES: ReadonlySet<string> = new Set(['admin', 'maintain', 'write']);
@@ -124,10 +125,23 @@ export class ReviewEventMinter {
     }
     if (writers.length === 0) return this.skip(row.id, 'no-writer');
 
+    let pr: VcsPrStatus | null;
+    try {
+      pr = await this.github.getPullRequest(token, repo.owner, repo.name, row.prNumber);
+    } catch (error) {
+      this.logFailure(row.id, error);
+      return this.skip(row.id, 'permission-check-failed');
+    }
+    const author = pr?.author;
+    const eligibleWriters = author === undefined
+      ? writers
+      : writers.filter(login => normalizeLogin(login) !== normalizeLogin(author));
+    if (eligibleWriters.length === 0) return this.skip(row.id, 'author-only');
+
     // US-007 (ruling 14): the writer is the approver either way; only a confirmed thread author is a
     // *verified* forge-human approval. An unverified decision is still minted — downgraded, not dropped.
-    const verified = await this.verifiedWriter(row, repo, token, writers);
-    const approver = verified ?? writers[0];
+    const verified = await this.verifiedWriter(row, repo, token, eligibleWriters);
+    const approver = verified ?? eligibleWriters[0];
     return this.mintDecision(row, input, 'github', approver, verified !== undefined);
   }
 
@@ -158,8 +172,22 @@ export class ReviewEventMinter {
     }
     if (writers.length === 0) return this.skip(row.id, 'no-writer');
 
-    const verified = await this.verifiedGitLabWriter(gitlab, row, repo, writers);
-    const approver = verified ?? writers[0];
+    let mergeRequest: VcsPrStatus | null;
+    try {
+      mergeRequest = await gitlab.credentials.call({ id: repo.id, host: repo.host }, 'read',
+        (access) => gitlab.checker.getMergeRequest(access, row.prNumber));
+    } catch (error) {
+      this.logFailure(row.id, error);
+      return this.skip(row.id, 'permission-check-failed');
+    }
+    const author = mergeRequest?.author;
+    const eligibleWriters = author === undefined
+      ? writers
+      : writers.filter(login => normalizeLogin(login) !== normalizeLogin(author));
+    if (eligibleWriters.length === 0) return this.skip(row.id, 'author-only');
+
+    const verified = await this.verifiedGitLabWriter(gitlab, row, repo, eligibleWriters);
+    const approver = verified ?? eligibleWriters[0];
     return this.mintDecision(row, input, 'gitlab', approver, verified !== undefined);
   }
 
