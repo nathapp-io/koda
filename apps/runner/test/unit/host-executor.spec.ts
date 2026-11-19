@@ -2,9 +2,10 @@ import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AssignPayload } from '@nathapp/fleet-protocol';
+import type { AssignPayload, RunnerCapabilities } from '@nathapp/fleet-protocol';
 import type { SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../../src/approvals/approval-relay';
+import { NaxJobCheck, StaticJobCheck, type JobCheck } from '../../src/capabilities/job-check';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { FORGE_TOKEN_MIN_REMAINING_MS, HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
@@ -23,6 +24,7 @@ import { JobRun } from '../../src/supervisor/job-run';
 import { RepoMutex } from '../../src/supervisor/repo-mutex';
 import { runVerdict } from '../../src/verdict/run-verdict';
 import { FakeLogShipping } from '../helpers/fake-log-shipping';
+import { FakeNaxCli } from '../helpers/fake-nax-cli';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
 import { NO_APPROVALS } from '../helpers/no-approvals';
 import { NO_CREDENTIALS } from '../helpers/no-credentials';
@@ -38,7 +40,7 @@ afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAK
 /** A `ProcessInfo` with no processes: `ps` is never spawned (nax#2520). Tests override the lookups they need. */
 const NO_PROCESSES: ProcessInfo = { start: async () => null, command: async () => null };
 
-async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'AGENT' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
+async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'AGENT' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES, jobCheck?: JobCheck) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -52,7 +54,7 @@ async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'AGENT' = 'RUN
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
   const log = createMemoryLogger();
   // review-1118 US-001: the fixture's origin is a `file://` path, so this world needs the test-only clone policy.
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo, allowLocalCloneUrls: true });
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo, ...(jobCheck === undefined ? {} : { jobCheck }), allowLocalCloneUrls: true });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
 
@@ -443,7 +445,7 @@ describe('HostExecutor rule override (fleet #370 US-009)', () => {
     expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'))).not.toHaveProperty('context');
   });
 
-  test('AC-14: the FIX step rewrites the profile with the override', async () => {
+  test('US-001 AC-12 / AC-14: the FIX step rewrites the profile with sandbox and override', async () => {
     const w = await world('FIX', { review: { prNumber: 42, botLogin: 'koda-fleet[bot]' }, ruleOverride: OVERRIDE });
     const credentials: CredentialProvider = {
       acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
@@ -464,6 +466,7 @@ describe('HostExecutor rule override (fleet #370 US-009)', () => {
     const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
     expect(profile.context.rules.overrideDir).toBe(join(w.row.jobDir, 'koda-rules'));
     expect(profile.context.rules.overrideMode).toBe('merge');
+    expect(profile.execution.sandbox.enabled).toBe(true);
   });
 
   test('AC-15: a rule path outside the rules directory fails the prepare with the workspace reason', async () => {
@@ -474,6 +477,41 @@ describe('HostExecutor rule override (fleet #370 US-009)', () => {
 });
 
 describe('HostExecutor RUN', () => {
+  test('US-001 AC-10: prepare writes the forced sandbox into a RUN profile', async () => {
+    const w = await world('RUN');
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8')).execution.sandbox.enabled).toBe(true);
+  });
+
+  test('US-001 AC-11: prepare leaves PLAN profiles without an execution.sandbox key', async () => {
+    const w = await world('PLAN');
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8')).execution).toBeUndefined();
+  });
+
+  test('US-001 AC-13: a sandbox capability mismatch fails prepare before a profile or nax start', async () => {
+    const capabilities: RunnerCapabilities = {
+      nax: { version: '0.83.1', protocols: ['native'] }, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' },
+      profiles: {}, credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'],
+    };
+    const jobCheck = new NaxJobCheck({ nax: new FakeNaxCli({ config: { default: { transport: 'native', providers: [], sandbox: false } } }), capabilities: () => capabilities });
+    const w = await world('RUN', {}, {}, NO_APPROVALS, NO_PROCESSES, jobCheck);
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: false, reason: 'capability mismatch: sandbox' });
+    await expect(stat(jobProfilePath(w.naxHome, 'cjob1'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('review B2: a static report with no sandbox fails prepare for a forced kind before any nax start', async () => {
+    const capabilities: RunnerCapabilities = {
+      nax: { version: '0.83.1', protocols: ['native'] }, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' },
+      profiles: {}, credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'],
+    };
+    // The check the daemon builds in static-capabilities mode: no nax is asked, the configured report decides.
+    const jobCheck = new StaticJobCheck({ capabilities: () => capabilities });
+    const w = await world('RUN', {}, {}, NO_APPROVALS, NO_PROCESSES, jobCheck);
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: false, reason: 'capability mismatch: sandbox' });
+    await expect(stat(jobProfilePath(w.naxHome, 'cjob1'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   test('wires the production logger into progress commit failures (#186)', async () => {
     const w = await world();
     await w.ex.prepare(w.row);
@@ -845,7 +883,7 @@ describe('HostExecutor approval relay (plan D273, D285)', () => {
     expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
     expect(approvals.open).toHaveBeenCalledTimes(1);
     const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
-    expect(profile.execution).toEqual({ bashApproval: 'gated', approvalTimeout: 60_000 });
+    expect(profile.execution).toEqual({ sandbox: { enabled: true }, bashApproval: 'gated', approvalTimeout: 60_000 });
   });
   test('a raw RUN never opens the relay', async () => {
     const approvals = spy();

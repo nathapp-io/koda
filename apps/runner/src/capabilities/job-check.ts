@@ -21,6 +21,17 @@ export interface JobCheck {
 /** Static capabilities (D95) and unit specs: no post-checkout check. */
 export const NO_JOB_CHECK: JobCheck = { check: async () => null };
 
+/**
+ * The kinds whose job profile forces nax's OS sandbox on (spec ruling 3, US-001). `jobProfileContent` writes
+ * `execution.sandbox.enabled: true` for exactly these, so only these require a working sandbox probe.
+ */
+export const FORCED_SANDBOX_COMMANDS: readonly string[] = ['RUN', 'REVIEW', 'FIX', 'AGENT'];
+
+/** Is `command` one of the kinds `jobProfileContent` sandboxes? */
+export function requiresSandbox(command: string): boolean {
+  return FORCED_SANDBOX_COMMANDS.includes(command);
+}
+
 /** Placement's order (apps/api/src/fleet/jobs/placement-rules.ts `capabilityMisfit`): protocol, providers, sandbox. */
 export function firstMismatch(
   requirements: Requirements,
@@ -72,8 +83,10 @@ export class NaxJobCheck implements JobCheck {
     ]);
     if (!trust.trusted) return trust.reason;
     if (!json.ok) return `capability mismatch: profile resolve failed (${json.code})`;
-    const requirements = parseRequirements(json.value);
-    if (!requirements) return 'capability mismatch: profile resolve failed (NAX_OUTPUT_UNPARSEABLE)';
+    const parsedRequirements = parseRequirements(json.value);
+    if (!parsedRequirements) return 'capability mismatch: profile resolve failed (NAX_OUTPUT_UNPARSEABLE)';
+    const forceSandbox = requiresSandbox(assign.command);
+    const requirements = forceSandbox ? { ...parsedRequirements, sandbox: true } : parsedRequirements;
     // #207 spec §3.3: nax merged the job's real chain (repo config included), so this is the exact check; placement's
     // per-profile check is an approximation. An absent or unknown result (older nax) passes.
     const interaction = parseInteraction(json.value);
@@ -126,5 +139,22 @@ export class NaxJobCheck implements JobCheck {
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+/**
+ * D95 static mode (`runner.json` carries the capabilities): nax is never probed, so trust and the job's profile chain
+ * cannot be resolved here. The one requirement this mode can still honour is the sandbox the job profile itself forces
+ * on (review B2): placement does not require a sandbox for RUN, REVIEW, FIX and AGENT, so without this check an
+ * otherwise compatible job reaches a nax run on a host whose own report says there is no sandbox.
+ */
+export class StaticJobCheck implements JobCheck {
+  constructor(private readonly deps: { capabilities: () => RunnerCapabilities | null }) {}
+
+  async check(job: JobRow, _repoDir?: string): Promise<string | null> {
+    if (!requiresSandbox(job.assign.command)) return null;
+    const caps = this.deps.capabilities();
+    // No report yet: the check passes, as it does in nax mode.
+    return caps !== null && !caps.sandbox.available ? 'capability mismatch: sandbox' : null;
   }
 }

@@ -71,6 +71,17 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     await prisma.$disconnect();
   });
 
+  it('US-002 AC-1: recordRunnerSync returns the runner enabled snapshot', async () => {
+    await prisma.runner.update({ where: { id: runnerId }, data: { enabled: false } });
+    try {
+      await expect(repo.recordRunnerSync(runnerId, {
+        now: new Date(), bootId: 'boot-2', daemonVersion: '0.1.0', protocolVersion: 1,
+      })).resolves.toEqual({ previousBootId: 'boot-1', enabled: false });
+    } finally {
+      await prisma.runner.update({ where: { id: runnerId }, data: { enabled: true, bootId: 'boot-1' } });
+    }
+  });
+
   it('AC-9: findRepo projects only the GitLab write-user identity, never encrypted tokens', async () => {
     const found = await repo.findRepo(gitlabRepoWithCredentialId);
     expect(found?.gitlabWriteUser).toEqual({ id: 77, username: 'koda-bot' });

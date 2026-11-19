@@ -453,8 +453,8 @@ export interface IFleetJobRepository {
   findRunnerHeld(runnerId: string): Promise<FleetJobRecord[]>;
   /** Jobs held by a runner whose lastSeenAt is before the cutoff. */
   findSilentHeldIds(runnerSeenBefore: Date): Promise<string[]>;
-  /** Updates lastSeenAt and the reported fields; returns the boot id stored before this sync, or null if the runner is gone. */
-  recordRunnerSync(runnerId: string, s: { now: Date; bootId: string; daemonVersion: string; protocolVersion: number; capabilities?: RunnerCapabilities }): Promise<{ previousBootId: string } | null>;
+  /** Updates lastSeenAt and the reported fields; returns the boot id and enabled snapshot from before this sync, or null if the runner is gone. */
+  recordRunnerSync(runnerId: string, s: { now: Date; bootId: string; daemonVersion: string; protocolVersion: number; capabilities?: RunnerCapabilities }): Promise<{ previousBootId: string; enabled: boolean } | null>;
 
   findPlacementRunners(ids?: readonly string[]): Promise<PlacementRunnerRow[]>;
   /** Locks runner rows in id order (all when ids is undefined); returns the locked ids. */

@@ -54,6 +54,7 @@ export const PROJECT_QUIESCE_LIMIT = 500;
 
 /** US-001: the `cancelReason` (and `stateReason`) of a job a project delete ended. */
 export const PROJECT_DELETED_REASON = 'project_deleted';
+export const RUNNER_DISABLED_REASON = 'runner_disabled';
 
 /** What a project-delete quiesce did: the ids it ended, and the live events to publish after the commit. */
 export interface ProjectQuiesceResult {
@@ -299,6 +300,17 @@ export class FleetJobsService {
   }
 
   /**
+   * Review B3: every path that locks more than one job row takes the distinct ids in job-ID order (the order the
+   * disable sweep already reads them in), so two paths whose batches name the same jobs in opposite orders cannot
+   * deadlock — the transaction manager does not retry one. Callers still process their own order through the map.
+   */
+  private async lockJobs(ids: readonly string[]): Promise<Map<string, FleetJobRecord | null>> {
+    const locked = new Map<string, FleetJobRecord | null>();
+    for (const id of [...new Set(ids)].sort()) locked.set(id, await this.repo.lockById(id));
+    return locked;
+  }
+
+  /**
    * S1b §2.2 hard stop: the scope's QUEUED jobs, and (runningJobs = cancel) its ASSIGNED and RUNNING jobs.
    * A system action: the activity actor is SYSTEM, the responsible user the policy's last editor.
    * Call inside txManager.run (the evaluator holds the policy lock); jobs are re-checked under their own row lock.
@@ -306,8 +318,13 @@ export class FleetJobsService {
   async cancelForBudget(jobIds: readonly string[], policy: { id: string; responsibleUserId: string }, now = new Date()): Promise<BudgetCancelResult> {
     const reason = budgetReason(policy.id);
     const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
-    for (const id of jobIds) {
-      const job = await this.repo.lockById(id);
+    const locked = await this.lockJobs(jobIds);   // B3: one shared lock order, the policy's own order below
+    // B5: the evaluator builds its list from a QUEUED query and a held-jobs query, so one job can appear in both (it
+    // was placed between the two). Each id is processed once, in first-seen policy order: a second pass would reuse
+    // the pre-transition snapshot taken by `lockJobs`, sending a second CANCEL — or one after the first pass already
+    // ended the job on the server.
+    for (const id of new Set(jobIds)) {
+      const job = locked.get(id) ?? null;
       if (!job || job.cancelRequestedAt) continue;
       const unacked = job.state === FleetJobState.ASSIGNED &&
         (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;
@@ -326,6 +343,53 @@ export class FleetJobsService {
         projectId: job.projectId, responsibleUserId: policy.responsibleUserId, payload: { state: job.state, reason },
       });
       result.requested.push(id);
+      result.live.push(this.live.event(updated));
+      result.wake.push(job.runnerId);
+    }
+    return result;
+  }
+
+  /**
+   * Cancels runnable jobs held by a disabled runner. The caller owns the transaction; each candidate is re-read
+   * under its row lock so a completed, already-cancelled, or otherwise changed job is left alone. CONFIG jobs and
+   * UPLOADING jobs are deliberately excluded. Publish the returned live events and wake runners after commit.
+   */
+  async cancelForRunnerDisabled(runnerId: string, responsibleUserId: string, now = new Date()): Promise<BudgetCancelResult> {
+    const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
+    const cancellableCommands = new Set<FleetJobKind>([
+      FleetJobKind.RUN, FleetJobKind.PLAN, FleetJobKind.REVIEW, FleetJobKind.FIX, FleetJobKind.THREAD, FleetJobKind.AGENT,
+    ]);
+    const held = await this.repo.findRunnerHeld(runnerId);
+    const candidates = held.filter((candidate) => cancellableCommands.has(candidate.command));
+    // B3: the held rows already come in id order; taking every distinct lock first keeps that the one global order.
+    const locked = await this.lockJobs(candidates.map((candidate) => candidate.id));
+    for (const candidate of candidates) {
+      const job = locked.get(candidate.id) ?? null;
+      if (!job || job.runnerId !== runnerId || job.cancelRequestedAt || !cancellableCommands.has(job.command)) continue;
+      if (job.state === FleetJobState.ASSIGNED) {
+        const unacked = await this.repo.findPendingCommand({ jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch });
+        if (unacked) {
+          const transition = await this.transitions.apply({
+            job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR,
+            reason: RUNNER_DISABLED_REASON, extra: { cancelReason: RUNNER_DISABLED_REASON },
+          });
+          result.cancelled.push(job.id);
+          result.live.push(transition.live);
+          continue;
+        }
+      }
+      if ((job.state !== FleetJobState.ASSIGNED && job.state !== FleetJobState.RUNNING) || !job.runnerId) continue;
+      const updated = await this.repo.update(job.id, { cancelRequestedAt: now, cancelReason: RUNNER_DISABLED_REASON });
+      await this.repo.createCommand({ runnerId: job.runnerId, jobId: job.id, type: FleetCommandType.CANCEL, leaseEpoch: job.leaseEpoch, payload: {} });
+      await this.repo.appendEvent(job.id, {
+        leaseEpoch: job.leaseEpoch, runnerSeq: null, type: 'lifecycle',
+        payload: { level: 'info', message: `cancel requested (${RUNNER_DISABLED_REASON})` },
+      });
+      await this.activity.record({
+        actorType: 'SYSTEM', actorId: SYSTEM_ACTOR.id, action: 'job.cancel_requested', entityType: 'job', entityId: job.id, jobId: job.id,
+        projectId: job.projectId, responsibleUserId, payload: { state: job.state, reason: RUNNER_DISABLED_REASON },
+      });
+      result.requested.push(job.id);
       result.live.push(this.live.event(updated));
       result.wake.push(job.runnerId);
     }
@@ -352,8 +416,10 @@ export class FleetJobsService {
     }
 
     const result: ProjectQuiesceResult = { cancelled: [], live: [] };
+    // D-1: share the batch lock order with budget/runner cancellation, but process oldest first below.
+    const locked = await this.lockJobs(ids);
     for (const id of ids) {
-      const job = await this.repo.lockById(id);
+      const job = locked.get(id) ?? null;
       if (!job || job.cancelRequestedAt) continue;
       const unacked = job.state === FleetJobState.ASSIGNED &&
         (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;

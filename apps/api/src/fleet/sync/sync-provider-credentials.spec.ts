@@ -32,7 +32,7 @@ function harness() {
     command: FleetJobKind.RUN, state: FleetJobState.RUNNING, requestedById: 'u1', requestedByType: 'USER',
   } as FleetJobRecord;
   repo.lockById.mockResolvedValue(job);
-  repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1' });
+  repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: true });
   repo.findPendingCommands.mockResolvedValue([]);
   repo.findThreadCredentialScope.mockResolvedValue({ projectId: 'thread-project', repoId: 'thread-repo' });
 
@@ -97,6 +97,27 @@ describe('sync provider credential requests', () => {
     expect(expiresAt).toBeLessThanOrEqual(after + 600_000);
     expect(response.providerKeyErrors).toEqual([]);
     expect(h.credentials.resolve).toHaveBeenCalledExactlyOnceWith({ projectId: 'p1', repoId: 'r1', providerId: 'openrouter' });
+  });
+
+  it('US-002 AC-5..7 refuses provider keys for a disabled runner without issuing or recording', async () => {
+    const h = harness();
+    h.repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: false });
+
+    const response = await h.sync(h.request());
+
+    expect(response.providerKeyErrors).toEqual([{ jobId: 'j1', providerId: 'openrouter', reason: 'job_not_active' }]);
+    expect(h.credentials.issueKey).not.toHaveBeenCalled();
+    expect(h.activity.record).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-11: disabled runner is refused before the disabled vault check', async () => {
+    const h = harness();
+    h.repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: false });
+    h.credentials.isEnabled.mockReturnValue(false);
+
+    const response = await h.sync(h.request());
+
+    expect(response.providerKeyErrors).toEqual([{ jobId: 'j1', providerId: 'openrouter', reason: 'job_not_active' }]);
   });
 
   it('answers vault_off without resolving when the vault is disabled', async () => {

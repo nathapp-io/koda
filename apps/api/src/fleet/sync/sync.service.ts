@@ -14,6 +14,7 @@ import type {
 import { responsibleUserOf } from '../common/responsible-user';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
 import type { GitTokenPurpose } from '../git-broker/git-token.broker';
+import { RUNNER_DISABLED_REASON } from '../jobs/fleet-jobs.service';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
@@ -122,8 +123,8 @@ export class SyncService {
     }
     await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));
 
-    const tokens = await this.grantTokens(runnerId, req.tokenRequests, now);
-    const provider = await this.grantProviderKeys(runnerId, req.providerRequests ?? [], now);
+    const tokens = await this.grantTokens(runnerId, req.tokenRequests, now, seen.enabled);
+    const provider = await this.grantProviderKeys(runnerId, req.providerRequests ?? [], now, seen.enabled);
     let commands = await this.deliver(runnerId, now);
     const idle = jobAcks.length === 0 && unknownJobIds.length === 0 && commands.length === 0 &&
       tokens.gitTokens.length === 0 && tokens.gitTokenErrors.length === 0 && tokens.unknownJobIds.length === 0 &&
@@ -142,21 +143,30 @@ export class SyncService {
   }
 
   /** Spec §6.3: fence each request (ABANDON on a stale epoch), then mint outside any transaction. */
-  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }>, now: Date) {
+  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }>, now: Date, enabled: boolean) {
     const gitTokens: GitToken[] = [];
     const gitTokenErrors: GitTokenError[] = [];
     const unknownJobIds: string[] = [];
     const toMint = await this.txManager.run(async () => {
       const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: GitTokenPurpose }> = [];
+      // Review B3: take every distinct job lock in jobId order, like `grantProviderKeys` and the runner-disable sweep,
+      // so two overlapping batches that name the same jobs in opposite orders (or a disable sweep) cannot deadlock.
+      // The locks are held until the transaction ends either way, so only their order changes; the requests are still
+      // answered in their own order.
+      const locked = new Map<string, FleetJobRecord | null>();
+      for (const jobId of [...new Set(requests.map((req) => req.jobId))].sort()) {
+        locked.set(jobId, await this.repo.lockById(jobId));
+      }
       for (const req of requests) {
-        // Row lock: two overlapping syncs from one runner must not both queue an ABANDON.
-        const job = await this.repo.lockById(req.jobId);
+        const job = locked.get(req.jobId) ?? null;
         if (!job) {
           unknownJobIds.push(req.jobId);
         } else if (!this.fence.holds(job, runnerId, req.leaseEpoch)) {
           await this.fence.abandon(runnerId, job, req.leaseEpoch);
         } else if (!(RUNNER_HELD_STATES as readonly string[]).includes(job.state)) {
           gitTokenErrors.push({ jobId: job.id, reason: 'job_not_active', ...(req.repoId !== undefined ? { repoId: req.repoId } : {}) });
+        } else if (!enabled) {
+          gitTokenErrors.push({ jobId: job.id, reason: RUNNER_DISABLED_REASON, ...(req.repoId !== undefined ? { repoId: req.repoId } : {}) });
         } else if (req.repoId !== undefined) {
           // No stored ASSIGN scope: recompute with the same ordered, capped walk used by placement.
           const scope = job.command === 'THREAD' ? await this.repo.findThreadTokenScope(job.id) : null;
@@ -203,6 +213,7 @@ export class SyncService {
     runnerId: string,
     requests: readonly ProviderKeyRequest[],
     now: Date,
+    enabled: boolean,
   ): Promise<ProviderGrantOutcome> {
     const providerKeys: ProviderKeyGrant[] = [];
     const providerKeyErrors: ProviderKeyError[] = [];
@@ -227,7 +238,7 @@ export class SyncService {
           await this.fence.abandon(runnerId, job, req.leaseEpoch);
           continue;
         }
-        const refusal = this.providerRefusalOf(job);
+        const refusal = this.providerRefusalOf(job, enabled);
         if (refusal !== null) {
           providerKeyErrors.push({ jobId: job.id, providerId: req.providerId, reason: refusal });
           continue;
@@ -257,8 +268,9 @@ export class SyncService {
   }
 
   /** Why this job may not be handed a key, or null when it may. State and vault first: they leak nothing. */
-  private providerRefusalOf(job: FleetJobRecord): ProviderKeyError['reason'] | null {
+  private providerRefusalOf(job: FleetJobRecord, runnerEnabled: boolean): ProviderKeyError['reason'] | null {
     if (!(RUNNER_HELD_STATES as readonly string[]).includes(job.state)) return 'job_not_active';
+    if (!runnerEnabled) return 'job_not_active';
     if (!this.providerCredentials.isEnabled()) return 'vault_off';
     return null;
   }

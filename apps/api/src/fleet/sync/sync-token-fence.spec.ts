@@ -28,7 +28,7 @@ function harness() {
   const job = { id: 'j1', projectId: 'p1', repoId: 'anchor', runnerId: 'runner1', leaseEpoch: 1, command: FleetJobKind.THREAD, state: FleetJobState.RUNNING } as FleetJobRecord;
   const r1 = repository();
   repo.lockById.mockResolvedValue(job);
-  repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1' });
+  repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: true });
   repo.findPendingCommands.mockResolvedValue([]);
   repo.findThreadTokenScope.mockResolvedValue({ kind: 'PROJECT', action: 'SESSION' });
   repo.findThreadCredentialScope.mockResolvedValue({ projectId: 'p1', repoId: null });
@@ -68,10 +68,23 @@ describe('sync repository token fence', () => {
     const h = harness();
     h.repo.recordRunnerSync.mockImplementation(async () => {
       expect(currentBookkeepingReason()).toBe('runner.heartbeat');
-      return { previousBootId: 'b1' };
+      return { previousBootId: 'b1', enabled: true };
     });
     await h.sync([]);
     expect(h.repo.recordRunnerSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('B3: takes the token-request job locks in job-id order, whatever order the requests arrive in', async () => {
+    const h = harness();
+    const jobFor = (id: string) => ({
+      id, projectId: 'p1', repoId: 'anchor', runnerId: 'runner1', leaseEpoch: 1, command: FleetJobKind.RUN, state: FleetJobState.RUNNING,
+    } as FleetJobRecord);
+    h.repo.lockById.mockImplementation(async (id: string) => jobFor(id));
+    const response = await h.sync([{ jobId: 'j2', leaseEpoch: 1 }, { jobId: 'j1', leaseEpoch: 1 }]);
+    expect(h.repo.lockById.mock.calls.map(([id]) => id)).toEqual(['j1', 'j2']);
+    // The locks are only reordered: both requests are still answered, in their own order.
+    expect(h.broker.mint.mock.calls.map(([req]) => req.jobId)).toEqual(['j2', 'j1']);
+    expect(response.gitTokenErrors).toEqual([]);
   });
 
   it('AC-2: marks command delivery at the delivered write', async () => {
@@ -196,6 +209,61 @@ describe('sync repository token fence', () => {
     expect(h.broker.mint).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', leaseEpoch: 1, repo: repository('anchor') }, expect.any(Date));
     expect(h.repo.findThreadTokenScope).not.toHaveBeenCalled();
     expect(h.repo.findProjectRepos).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-9: enabled RUNNING runner still mints an eligible default repository token', async () => {
+    const h = harness();
+    h.job.command = FleetJobKind.RUN;
+    h.repo.findRepo.mockResolvedValue(repository());
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+
+    expect(response.gitTokenErrors).toEqual([]);
+    expect(h.broker.mint).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', leaseEpoch: 1, repo: repository() }, expect.any(Date));
+  });
+
+  it('US-002 AC-2..3 refuses default git-token requests for a disabled runner before minting', async () => {
+    const h = harness();
+    h.job.command = FleetJobKind.RUN;
+    h.repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: false });
+    h.repo.findRepo.mockResolvedValue(repository());
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'runner_disabled' }]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-4 refuses scoped token requests for a disabled THREAD job and preserves repoId', async () => {
+    const h = harness();
+    h.repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: false });
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1, repoId: 'r1' }]);
+
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', repoId: 'r1', reason: 'runner_disabled' }]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-10 refuses repo-less PROJECT THREAD tokens for a disabled runner', async () => {
+    const h = harness();
+    h.repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: false });
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'runner_disabled' }]);
+    expect(h.repo.findThreadTokenScope).not.toHaveBeenCalled();
+    expect(h.broker.mint).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-8 fences stale requests before disabled-runner refusal', async () => {
+    const h = harness();
+    h.repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1', enabled: false });
+    h.fence.holds.mockReturnValue(false);
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 0 }]);
+
+    expect(h.fence.abandon).toHaveBeenCalledExactlyOnceWith('runner1', h.job, 0);
+    expect(response.gitTokenErrors).toEqual([]);
   });
 
   it('AC-13 abandons another runner lease before scope lookup', async () => {

@@ -14,9 +14,10 @@ import { RunnersService } from './runners.service';
 import { PrismaRunnerRepository } from './prisma-runner.repository';
 import { EnrollmentRetentionProcessor } from './enrollment-retention.processor';
 import { RUNNER_REPOSITORY } from './domain/runner.domain';
+import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 
 @Module({
-  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule, FleetJobsModule],
   controllers: [EnrollmentsController, RunnerApiController, RunnersController, ProjectFleetRunnersController],
   providers: [RunnerRouteCommands, PrismaRunnerRepository, { provide: RUNNER_REPOSITORY, useExisting: PrismaRunnerRepository }, EnrollmentService, RunnersService, EnrollmentRetentionProcessor],
   exports: [RUNNER_REPOSITORY, RunnersService],

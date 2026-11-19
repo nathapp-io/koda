@@ -12,6 +12,9 @@ import { RunnerDto, RunnerView } from './dto/runner.dto';
 import { RunnerSummaryDto } from './dto/runner-summary.dto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { fieldsSummary } from '../../audit/audit-summary';
+import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
+import { RunnerNotifier } from '../jobs/runner-notifier';
 
 @Injectable()
 export class RunnersService {
@@ -21,6 +24,9 @@ export class RunnersService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'runnerOfflineSec'>,
     private readonly audit: AuditRecorder,
+    private readonly jobs: FleetJobsService,
+    private readonly live: FleetJobLivePublisher,
+    private readonly notifier: RunnerNotifier,
   ) {}
 
   private view(now: Date): RunnerView {
@@ -51,13 +57,30 @@ export class RunnersService {
       ...(patch.capacity !== undefined ? { capacity: patch.capacity } : {}),
       ...(patch.threadCapacity !== undefined ? { threadCapacity: patch.threadCapacity } : {}),
     };
-    return this.txManager.run(async () => {
-      if (!(await this.repo.findRunnerById(id))) throw new NotFoundAppException({}, 'fleet.runners');
+    const { dto, cancellation } = await this.txManager.run(async () => {
+      // Review B1: the enabled read must be the state this transaction writes from. Placement takes this same
+      // runner-row lock before it re-reads `enabled`, so a job placed concurrently either sees the runner disabled or
+      // is already held and is cancelled below; a concurrent enable cannot commit between the read and the write.
+      // Review B4: an edit takes FOR NO KEY UPDATE, not FOR UPDATE. It still conflicts with placement's FOR UPDATE,
+      // but it does not conflict with the FOR KEY SHARE lock the cancellation below takes when it inserts a CANCEL
+      // command for this runner — with FOR UPDATE the two transactions deadlock (this one waits for the job row, the
+      // cancellation waits for the runner's key-share lock).
+      await this.repo.lockForNoKeyUpdate(id);
+      const existing = await this.repo.findRunnerById(id);
+      if (!existing) throw new NotFoundAppException({}, 'fleet.runners');
       const updated = await this.repo.updateRunner(id, clean);
+      const cancellation = existing.enabled && clean.enabled === false
+        ? await this.jobs.cancelForRunnerDisabled(id, actorId, new Date())
+        : null;
       await this.activity.record({ actorType: 'USER', actorId, action: 'runner.updated', entityType: 'runner', entityId: id, payload: { ...clean } });
       await this.audit.record({ key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: id, projectId: null, summary: fieldsSummary(clean) });
-      return RunnerDto.from(updated, this.view(new Date()));
+      return { dto: RunnerDto.from(updated, this.view(new Date())), cancellation };
     });
+    if (cancellation) {
+      this.live.publish(cancellation.live);
+      for (const runnerId of new Set(cancellation.wake)) this.notifier.notify(runnerId);
+    }
+    return dto;
   }
 
   /**
@@ -67,7 +90,7 @@ export class RunnersService {
    */
   async remove(actorId: string, id: string): Promise<void> {
     await this.txManager.run(async () => {
-      await this.repo.lockForDelete(id);
+      await this.repo.lockForUpdate(id);
       const runner = await this.repo.findRunnerById(id);
       if (!runner) throw new NotFoundAppException({}, 'fleet.runners');
       if ((await this.repo.countUnfinishedJobs(id)) > 0) throw new ConflictAppException({}, 'fleet.runnerBusy');

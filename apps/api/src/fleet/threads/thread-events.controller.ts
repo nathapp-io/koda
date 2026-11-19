@@ -38,9 +38,10 @@ export class ThreadEventsGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<ThreadEventsRequest>();
     const principal = req.user;
-    // Permissions P1 US-002: no principal-type refusal is left on this route — the key decides, so an
-    // agent passes this guard. Authentication is the global guard's; a stream without a principal is
-    // refused with `live`, the code the stream route already answers for that state.
+    // Permissions P1 US-002: no principal-type refusal is left in the permission checks — the key decides.
+    // The stream itself is users-only (review 11-14 ruling 17): it needs a JWT for its re-checks, so an
+    // API-key caller passes the permission checks and is then refused with `live` below. Authentication is
+    // the global guard's; a stream without a principal is refused with `live` too.
     if (!principal) throw new ForbiddenAppException({}, 'live');
 
     const projectId = await this.access.findProjectIdBySlug(req.params.slug);

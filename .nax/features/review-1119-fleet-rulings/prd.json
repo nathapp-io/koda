@@ -1,0 +1,255 @@
+{
+  "project": "koda",
+  "feature": "review-1119-fleet-rulings",
+  "branchName": "feat/review-1119-fleet-rulings",
+  "createdAt": "2026-11-19T05:12:14.945Z",
+  "updatedAt": "2026-11-19T06:11:22.882Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Force the sandbox for RUN, REVIEW, FIX and AGENT jobs",
+      "description": "**Goal** — Force nax's OS sandbox for RUN, REVIEW, FIX and AGENT jobs and refuse those jobs when the runner knows the sandbox is unavailable.\n\n**Motivation** — `apps/runner/src/executor/job-profile.ts` `jobProfileContent` writes no `execution.sandbox` key, so whether REVIEW, FIX, RUN and AGENT agents run sandboxed depends on each runner host's global nax config.\n\n**Approach**\n- **Sandbox kinds.** The forced set is exactly RUN, REVIEW, FIX and AGENT, read from `job.assign.command`. PLAN, CONFIG_EDIT, CONFIG_DRIFT and THREAD keep today's behaviour.\n- **Sandbox key.** nax reads its OS sandbox from `execution.sandbox` (`{ enabled, network }`), a root-only key the job profile may set: the profile already sets the root-only `execution.bashApproval`. The overlay sets only `execution.sandbox.enabled: true`; nax deep-merges profiles, so the host's `execution.sandbox.network` allowlist is kept.\n- **Sandbox refusal.** `NaxJobCheck.check` resolves the job's own profile chain (`assign.profiles`), which never includes the koda job profile. For a forced kind it treats the requirement as `sandbox: true` whatever the chain reports, so a host whose last capability report has `sandbox.available: false` refuses the job with the existing reason `capability mismatch: sandbox`. With no report yet (`capabilities()` null) the check passes, as today.\n- `apps/runner/src/capabilities/job-check.ts` `firstMismatch(requirements, caps, credentials)`: it returns `'capability mismatch: sandbox'` when `requirements.sandbox && !caps.sandbox.available`.\n- `NaxJobCheck.check` (`apps/runner/src/capabilities/job-check.ts`)\n  - Target: when `job.assign.command` is RUN, REVIEW, FIX or AGENT, `firstMismatch` receives the parsed requirements with `sandbox: true`.\n- `HostExecutor` (`apps/runner/src/executor/host-executor.ts`)\n  - Target: both `writeJobProfile` calls (in `prepare`, and in the FIX step) pass `sandbox: true` for a forced kind.\n\n**Scope** — In: runner capability checks and initial/FIX profile writes; adjust existing Bun specs, including the shared CAPS fixture and gated RUN execution expectation. Out: disabled-runner credentials and cancellation (US-002–US-004). A per-runner or per-repo opt-out from the forced sandbox. Forcing the sandbox for PLAN, CONFIG_EDIT, CONFIG_DRIFT or THREAD jobs. Placement awareness of the forced sandbox: `placement-rules.ts` still approximates from the job's profiles, and the runner's job check is the refusal point.\n\n**Interface**\n- `jobProfileContent` and `writeJobProfile` (`apps/runner/src/executor/job-profile.ts`)\n  - Baseline: `jobProfileContent(outputDir, projectName, relay?, botCostLimitUsd?, modelAliases?, context?, publishPr?)`.\n  - Target: a trailing `sandbox?: boolean`. When `true`, the result's `execution` holds `sandbox: { enabled: true }`, merged with the relay's `bashApproval` and `approvalTimeout` when a relay is present. `writeJobProfile` takes and passes the same trailing argument.",
+      "acceptanceCriteria": [
+        "[unit] When `jobProfileContent('/out', 'p', undefined, undefined, undefined, undefined, undefined, true)` is called, then the returned `execution` equals `{ sandbox: { enabled: true } }`.",
+        "[unit] When `jobProfileContent` is called with a gated relay overlay and `sandbox` true, then the returned `execution.sandbox` equals `{ enabled: true }`.",
+        "[unit] When `jobProfileContent` is called with a gated relay overlay and `sandbox` true, then the returned `execution.bashApproval` equals the relay's `bashMode`.",
+        "[unit] When `NaxJobCheck.check` checks an otherwise compatible job with `assign.command: 'RUN'` whose resolved chain reports `sandbox: false` on a host whose last capability report has `sandbox.available: false`, then it returns `capability mismatch: sandbox`.",
+        "[unit] When `NaxJobCheck.check` checks an otherwise compatible job with `assign.command: 'REVIEW'` whose resolved chain reports `sandbox: false` on a host whose last capability report has `sandbox.available: false`, then it returns `capability mismatch: sandbox`.",
+        "[unit] When `NaxJobCheck.check` checks an otherwise compatible job with `assign.command: 'FIX'` whose resolved chain reports `sandbox: false` on a host whose last capability report has `sandbox.available: false`, then it returns `capability mismatch: sandbox`.",
+        "[unit] When `NaxJobCheck.check` checks an otherwise compatible job with `assign.command: 'AGENT'` whose resolved chain reports `sandbox: false` on a host whose last capability report has `sandbox.available: false`, then it returns `capability mismatch: sandbox`.",
+        "[unit] When `NaxJobCheck.check` checks an otherwise compatible job with `assign.command: 'PLAN'` whose resolved chain reports `sandbox: false` on a host whose last capability report has `sandbox.available: false`, then it returns `null` (regression guard).",
+        "[unit] When `NaxJobCheck.check` checks a RUN job whose `capabilities()` answers `null` and the trust, profile and interaction checks pass, then it returns `null` (regression guard).",
+        "[unit] When `HostExecutor.prepare` successfully prepares a RUN job, then the written job profile's `execution.sandbox.enabled` is `true`.",
+        "[unit] When `HostExecutor.prepare` successfully prepares a PLAN job, then the written job profile has no `execution.sandbox` key (regression guard).",
+        "[unit] When `HostExecutor.spawnFixStep` prepares the FIX step of a FIX job, then the rewritten job profile's `execution.sandbox.enabled` is `true`.",
+        "[unit] When `HostExecutor.prepare` reaches the sandbox check for an otherwise compatible forced-kind job on a host whose last report has `sandbox.available: false`, then it returns `{ ok: false, reason: 'capability mismatch: sandbox' }` before nax job execution starts."
+      ],
+      "tags": [
+        "runner",
+        "security",
+        "sandbox"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small changes to existing profile and capability paths, but the OS sandbox is an execution access-control boundary and needs isolated security tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/job-profile.ts",
+        "apps/runner/src/capabilities/job-check.ts",
+        "apps/runner/src/executor/host-executor.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/capabilities/job-check.spec.ts",
+          "reason": "its shared `CAPS` reports `sandbox.available: false` and its default row is a RUN job, so every case expecting `null` would now get `capability mismatch: sandbox`; the shared `CAPS` becomes `sandbox.available: true`, and the existing sandbox-unavailable case keeps its own unavailable capabilities and still expects the mismatch."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "the gated RUN case asserts `profile.execution` equals `{ bashApproval: 'gated', approvalTimeout: 60_000 }`; a RUN job's profile now also carries `sandbox: { enabled: true }`, so the expected object gains that key."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "96ab93fe9efba6a9dc80b8a6df6529bd944bf65d"
+    },
+    {
+      "id": "US-002",
+      "title": "Refuse credentials to a disabled runner",
+      "description": "**Goal** — Refuse new git tokens and provider keys using the runner's enabled state at the start of each sync.\n\n**Motivation** — A disabled runner gets no new work (placement reads `enabled`), but it keeps receiving credentials for the jobs it holds, and those jobs keep running.\n\n**Approach**\n- **Disabled runner, refusal order.** Inside each grant loop the order is: unknown job, fence (stale epoch queues the ABANDON), not runner-held (`job_not_active`), then the disabled check, then the existing branches. For git tokens those are the `repoId` branch, the THREAD WORKSPACE/PROJECT branch and the default repo, and the disabled check applies to every one. For provider keys the disabled check sits inside `providerRefusalOf`, after the state check and before the vault check, so a disabled runner with the vault off gets `job_not_active`, not `vault_off`.\n- **Disabled runner, reasons.** A git-token refusal carries reason `runner_disabled` (`GitTokenError.reason` is a free string). The string is one exported constant `RUNNER_DISABLED_REASON` in `fleet-jobs.service.ts`, beside `PROJECT_DELETED_REASON`, used by the sync refusal and by `cancelForRunnerDisabled`. A provider-key refusal carries `job_not_active`, because `ProviderKeyErrorReason` is a closed union in `packages/fleet-protocol` and this feature does not change that package. The runner does not branch on either.\n- **Disabled runner, snapshot.** `enabled` is read once per sync from `recordRunnerSync`. A disable that commits during that sync takes effect on the runner's next sync.\n\nPreserve `repoId` on scoped git refusals so the runner can correlate the answer. Use `export const RUNNER_DISABLED_REASON = 'runner_disabled';` next to `PROJECT_DELETED_REASON` if the shared export is absent; US-003 uses the identical declaration and location, and the integrated file must contain a single declaration. Extend the repository interface, the existing PG repository suite and the sync provider, purpose and fence fixtures; enabled fixtures get `enabled: true`, including both heartbeat overrides in the fence spec.\n\n**Scope** — In: repository snapshot and sync credential decisions. Out: cancellation and update-side effects (US-003 and US-004) and sandbox enforcement (US-001). Adding `runner_disabled` to `ProviderKeyErrorReason` in `packages/fleet-protocol`. Re-reading `Runner.enabled` inside the grant transaction: a disable that commits during a sync takes effect on the next sync. Revoking credentials already issued to a runner before it was disabled: they stay valid until they expire.\n\n**Interface**\n- `PrismaFleetJobRepository.recordRunnerSync`\n  - Baseline: returns `{ previousBootId } | null`.\n  - Target: returns `{ previousBootId, enabled } | null`.\n- `IFleetJobRepository.recordRunnerSync` gains the `enabled` return field.\n- `SyncService.sync`, `grantTokens` and `grantProviderKeys`\n  - Target: the grant methods receive `enabled` and apply the disabled check in the order above.",
+      "acceptanceCriteria": [
+        "[integration] When `PrismaFleetJobRepository.recordRunnerSync` records a sync for a runner row with `enabled: false`, then the result has `enabled: false`.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a git token request without `repoId` at the current lease epoch for a RUNNING job it holds with an eligible default repo, then `gitTokenErrors` contains `{ jobId, reason: 'runner_disabled' }`.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a git token request without `repoId` at the current lease epoch for a RUNNING job it holds with an eligible default repo, then `GitTokenBroker.mint` is never called.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a current-epoch token request carrying a `repoId` for a RUNNING THREAD job it holds, then `gitTokenErrors` contains an entry for that request with reason `runner_disabled`.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a current-epoch provider-key request for a RUNNING job it holds with the vault on and a grantable key, then `providerKeyErrors` contains `{ jobId, providerId, reason: 'job_not_active' }`.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a current-epoch provider-key request for a RUNNING job it holds with the vault on and a grantable key, then `ProviderCredentialsService.issueKey` is never called.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a current-epoch provider-key request for a RUNNING job it holds with the vault on and a grantable key, then no `credential.issued` activity is recorded for that request.",
+        "[unit] When a disabled runner calls `SyncService.sync` with a git token request carrying a stale `leaseEpoch` for a known job and no ABANDON is already pending for that lease, then the observed fence outcome is an ABANDON queued at the stale epoch with no `runner_disabled` entry in `gitTokenErrors` for that job.",
+        "[unit] When an enabled runner calls `SyncService.sync` with the same current-epoch git token request without `repoId` for a RUNNING job it holds with an eligible default repo, then `GitTokenBroker.mint` is called once for that job (regression guard).",
+        "[unit] When a disabled runner calls `SyncService.sync` with a current-epoch token request without `repoId` for a RUNNING THREAD job it holds whose token scope is `PROJECT`, then `gitTokenErrors` contains an entry for that request with reason `runner_disabled`.",
+        "[unit] When the vault is off and a disabled runner calls `SyncService.sync` with a current-epoch provider-key request for a RUNNING job it holds, then `providerKeyErrors` contains an entry for that request with reason `job_not_active`."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing repository and sync paths gain one snapshot field and two refusal branches without new abstractions, but credential issuance requires strict test isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When a disabled runner requests a git token for a fenced but terminal job, then the refusal reason is `job_not_active`.",
+        "When a disabled runner's git token request names a `repoId`, then its `runner_disabled` refusal echoes that `repoId`."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/sync-provider-credentials.spec.ts",
+          "reason": "`recordRunnerSync` is stubbed as `{ previousBootId: 'b1' }`; it must return `{ previousBootId: 'b1', enabled: true }` so the existing cases keep describing an enabled runner."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts",
+          "reason": "`recordRunnerSync` is stubbed as `{ previousBootId: ... }`; it must also return `enabled: true` so the existing cases keep describing an enabled runner."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+          "reason": "`recordRunnerSync` is stubbed as `{ previousBootId: 'b1' }` (twice); it must also return `enabled: true` so the existing cases keep describing an enabled runner."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b4183a1792fe85a3d167e265288239f9a3237849"
+    },
+    {
+      "id": "US-003",
+      "title": "Cancel a disabled runner's held jobs",
+      "description": "**Goal** — Add a fleet job service operation that cancels eligible held jobs server-side or requests cancellation from their runner.\n\n**Motivation** — A disabled runner gets no new work (placement reads `enabled`), but it keeps receiving credentials for the jobs it holds, and those jobs keep running.\n\n**Approach** — It mirrors `cancelForBudget` (`fleet-jobs.service.ts`):\n- It acts on the runner's held jobs (`findRunnerHeld`) whose command is RUN, PLAN, REVIEW, FIX, THREAD or AGENT, the same set budget hard stops use. CONFIG_EDIT and CONFIG_DRIFT jobs are left to finish.\n- An ASSIGNED job whose ASSIGN command is still pending ends CANCELLED on the server, with reason `runner_disabled`.\n- An acked ASSIGNED job, or a RUNNING one, gets `cancelRequestedAt`, `cancelReason: 'runner_disabled'`, a CANCEL command at its `leaseEpoch`, and a `job.cancel_requested` activity. The actor is SYSTEM and the responsible user is the one who disabled the runner.\n- UPLOADING jobs, and jobs whose `cancelRequestedAt` is already set, are skipped.\n- It returns `{ cancelled, requested, live, wake }`.\n\nThe string is one exported constant `RUNNER_DISABLED_REASON` in `fleet-jobs.service.ts`, beside `PROJECT_DELETED_REASON`, used by the sync refusal and by `cancelForRunnerDisabled`. Use `export const RUNNER_DISABLED_REASON = 'runner_disabled';` there if not already present; the identical US-002 export must be retained only once. As in the budget pattern, recheck each selected job under its row lock, use the terminal transition for pending ASSIGN, and collect live data and runner wakes without publishing inside the caller's transaction. Exercise the cancellation branches in the existing fleet jobs unit suite.\n\n**Scope** — In: held-job selection, state transition or fenced cancellation request, SYSTEM activity and returned effects. Out: sync refusal (US-002), calling the operation from runner update and publishing effects (US-004), and sandboxing (US-001). Cancelling QUEUED jobs pinned to a disabled runner, its UPLOADING jobs, or its CONFIG_EDIT and CONFIG_DRIFT jobs.\n\n**Interface**\n- `FleetJobsService` gains `cancelForRunnerDisabled(runnerId: string, responsibleUserId: string, now?: Date)`.\n- `apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts` `findRunnerHeld(runnerId): Promise<FleetJobRecord[]>`.\n- `apps/api/src/fleet/jobs/fleet-jobs.service.ts` `cancelForBudget(jobIds, policy, now)`, the pattern to mirror.",
+      "acceptanceCriteria": [
+        "[unit] Given an uncancelled RUNNING RUN job held by `r1`, when `cancelForRunnerDisabled('r1', 'u1')` runs, then the persisted job's `cancelRequestedAt` is a `Date`.",
+        "[unit] Given an uncancelled RUNNING RUN job held by `r1`, when `cancelForRunnerDisabled('r1', 'u1')` runs, then the persisted job's `cancelReason` is `runner_disabled`.",
+        "[unit] Given an uncancelled RUNNING RUN job held by `r1`, when `cancelForRunnerDisabled('r1', 'u1')` runs, then it creates a CANCEL command for that job and runner `r1` at the job's `leaseEpoch`.",
+        "[unit] Given an uncancelled RUNNING RUN job held by `r1`, when `cancelForRunnerDisabled('r1', 'u1')` runs, then the recorded activity for the job has action `job.cancel_requested`, actor type `SYSTEM`, `responsibleUserId: 'u1'` and `payload.reason: 'runner_disabled'`.",
+        "[unit] Given one uncancelled RUNNING RUN job `j1` held by `r1`, when `cancelForRunnerDisabled('r1', 'u1')` runs, then its return value includes `{ wake: ['r1'], requested: ['j1'] }`.",
+        "[unit] Given one eligible ASSIGNED job `j1` held by the target runner with its current-epoch ASSIGN still pending, when `cancelForRunnerDisabled` runs, then the observed outcome is a server transition of `j1` to `CANCELLED` with reason `runner_disabled`, with `['j1']` in the returned `cancelled` field.",
+        "[unit] When `cancelForRunnerDisabled` examines a held RUNNING job whose `cancelRequestedAt` is already set, then it leaves that job and its pending commands unchanged.",
+        "[unit] When `cancelForRunnerDisabled` processes a held UPLOADING job, then that job is left unchanged.",
+        "[unit] When `cancelForRunnerDisabled` processes a held RUNNING CONFIG_EDIT job, then that job is left unchanged.",
+        "[unit] When `cancelForRunnerDisabled` processes a held RUNNING THREAD job, then it sets that job's `cancelRequestedAt`."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "cancellation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The new method follows the existing budget cancellation pattern and reuses the repository, job transitions and activity collaborators; focused state and lease tests can run in one session.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/job-transitions.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+        "apps/api/src/fleet/budgets/prisma-budget.repository.ts"
+      ],
+      "suggestedCriteria": [
+        "When an eligible held ASSIGNED job's ASSIGN has been acknowledged at the current epoch, then disabling its runner queues a CANCEL command at that epoch.",
+        "When a job is no longer held by the disabled runner at cancellation time, then the operation leaves the job unchanged."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5b552d22c40a4f42c8c51b8dd13fc9971a2c26b2"
+    },
+    {
+      "id": "US-004",
+      "title": "Disabling a runner cancels its held jobs",
+      "description": "**Goal** — Call held-job cancellation on a true-to-false runner update and publish its effects only after the update commits.\n\n**Motivation** — `apps/api/src/fleet/sync/sync.service.ts` `grantTokens` and `grantProviderKeys` never check `Runner.enabled`, and `RunnersService.update` only flips the flag.\n\n**Approach**\n- **Disabled runner, jobs.** An `enabled: true -> false` change in `RunnersService.update` calls `FleetJobsService.cancelForRunnerDisabled(runnerId, responsibleUserId, now)` inside the update's transaction, after `updateRunner` has written `enabled: false`. Placement locks the runner row and re-reads `enabled`, so writing the flag first means a job placed concurrently either sees the runner disabled or is already held and is cancelled.\n- After the transaction commits, `RunnersService.update` publishes `live` through `FleetJobLivePublisher` and calls `RunnerNotifier.notify` for each id in `wake`.\n- Re-enabling a runner cancels nothing.\n- `apps/api/src/fleet/budgets/budget-evaluator.ts` `evaluate`: it publishes `live` and notifies woken runners after its `txManager.run` returns.\n- `apps/api/src/fleet/jobs/fleet-jobs.module.ts` exports `FleetJobsService`, `FleetJobLivePublisher` and `RunnerNotifier`, and does not import `RunnersModule`.\n\nPreserve the existing update DTO, `runner.updated` activity and audit. Call the existing publisher with the `live` array and notify after the update's transaction resolves. The publisher and notifier already defer their actual effects when an approved route execution owns the outer commit scope. Extend the positional service fixture with the three dependency stubs, have the existing disabling case observe one cancellation call, and test ordering with a transaction boundary the test controls.\n\n**Scope** — In: transition detection, Nest wiring, transactional call to US-003 and post-commit live publication and runner wake. Out: implementing held-job selection or state transitions (US-003), refusing credentials (US-002), and sandboxing (US-001). Cancelling QUEUED jobs pinned to a disabled runner, its UPLOADING jobs, or its CONFIG_EDIT and CONFIG_DRIFT jobs. An HTTP-level integration test of `PATCH /fleet/runners/:id` with a held job.\n\n**Interface**\n- `RunnersService`\n  - Target: the constructor appends `FleetJobsService`, `FleetJobLivePublisher` and `RunnerNotifier`.\n  - Target: `update` calls `cancelForRunnerDisabled` as above.\n  - `RunnersModule` imports `FleetJobsModule`.\n- `FleetJobsService.cancelForRunnerDisabled(runnerId: string, responsibleUserId: string, now?: Date)` returns `{ cancelled, requested, live, wake }`.",
+      "acceptanceCriteria": [
+        "[unit] When `RunnersService.update(actorId, id, { enabled: false })` updates an enabled runner, then it calls `FleetJobsService.cancelForRunnerDisabled` once with `id` and `actorId` after the repository's `updateRunner` call.",
+        "[unit] When `RunnersService.update(actorId, id, { enabled: false })` updates an already disabled runner, then it does not call `cancelForRunnerDisabled`.",
+        "[unit] When `RunnersService.update(actorId, id, { enabled: true })` updates a disabled runner, then it does not call `cancelForRunnerDisabled`.",
+        "[unit] When `RunnersService.update(actorId, id, { labels: ['x'] })` updates runner labels, then it does not call `cancelForRunnerDisabled`.",
+        "[unit] When a disabling update's `cancelForRunnerDisabled` returns `live: [event]`, then `FleetJobLivePublisher.publish` receives `[event]` after the update's transaction resolves.",
+        "[unit] When a disabling update's `cancelForRunnerDisabled` returns `wake: ['r1']`, then `RunnerNotifier.notify` is called with `r1` after the update's transaction resolves.",
+        "[unit] When the update transaction rejects after its callback collected `live: [event]` from `cancelForRunnerDisabled`, then `FleetJobLivePublisher.publish` is not called for that event."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The update and module wiring reuse existing transaction and post-commit collaborators, so a controllable transaction stub can verify sequencing without changing route authorization.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/runners/runners.service.ts",
+        "apps/api/src/fleet/runners/runners.module.ts",
+        "apps/api/src/fleet/budgets/budget-evaluator.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/fleet-job-live.publisher.ts"
+      ],
+      "suggestedCriteria": [
+        "When an outer approval transaction rolls back after its nested disabling update completes, then no cancellation live event reaches subscribers.",
+        "When the enclosing transaction for a disabling update rolls back after cancellation results are collected, then the runner is not notified."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/runners/runners.service.spec.ts",
+          "reason": "the positional `new RunnersService(...)` construction gains stubs for `FleetJobsService`, `FleetJobLivePublisher` and `RunnerNotifier`; its existing `enabled: false` update case now also sees one `cancelForRunnerDisabled` call."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5904a1c99743c3ec5a35f64902e09d0a1a048086"
+    }
+  ],
+  "analysis": "Existing TypeScript Bun/Turborepo project: apps/runner owns nax execution and uses bun:test; apps/api owns state, placement and credentials via NestJS/Fastify, Prisma/PostgreSQL and Vitest. This is limited to the 2026-11-19 owner rulings 3 and 5 re-checked in the spec against main 670c3070e. The original proposals in docs/20261114-review-whole-repo.md:154–167 differ from the final rulings: AGENT is included and THREAD is excluded for sandbox forcing; held jobs follow cancellation semantics, not a blanket CRASHED transition. Other rulings are separate. Codebase-memory MCP was unavailable in this session, so references below come from repository reads and text search.\n\nUS-001 — apps/runner/src/executor/job-profile.ts:55–80 currently adds execution only for the relay and writes via atomic 0600 replacement. Add the optional trailing sandbox argument without changing existing positional meanings or adding execution for a no-relay, non-forced job. Preserve relay timeout, approvals and interaction, cost, model aliases, rules and publish overlays. Emit only the enabled leaf so nax's deep merge retains the configured network allowlist. apps/runner/src/executor/nax-process.ts:30,71 appends the job profile for the initial and FIX subprocesses; apps/runner/src/executor/host-executor.ts:133–156 runs the job check after checkout and returns its reason before writing the initial profile; :236–251 rewrites it for FIX, so changing only the first writer loses the sandbox in the second step. apps/runner/src/supervisor/job-run.ts:268–274 does not spawn after failed prepare. apps/runner/src/capabilities/job-check.ts:25–36,64–84 resolves only assignment profiles and already checks protocol and providers before sandbox; keep trust, config parsing, interaction and credential failures in their current order, then force the sandbox requirement for the exact same assign.command set used by the writer. The null report bypass only covers capability checks, not earlier trust or parse failures. Production nax mode wires the latest reporter through RetryingJobCheck at apps/runner/src/daemon/daemon.ts:214–229; static/test no-check mode is unchanged. apps/api/src/fleet/jobs/placement-rules.ts:113 still approximates the sandbox requirement from profiles, so a job can still be assigned and then refused by the upgraded runner. Extend apps/runner/src/executor/job-profile.spec.ts:44–80, apps/runner/src/capabilities/job-check.spec.ts:10–26,73–74 and apps/runner/test/unit/host-executor.spec.ts:410–425,842–848,1232–1264; the first shared capabilities fixture in job-check.spec.ts should become available, retaining an explicit unavailable fixture for the existing negative case. Update the gated RUN deep-equality expectation and inspect the real profile after the FIX rewrite. No actual host sandbox is needed for injected unit cases.\n\nUS-002 — apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:357–369 reads the existing runner row before updating heartbeat; select enabled alongside bootId and extend the contract at apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:457. Runner.enabled is already stored with a true default (apps/api/prisma/schema.prisma:794–808). apps/api/src/fleet/sync/sync.service.ts:80–85,125–139 is the production caller: pass the same snapshot into both grant paths, without disabling heartbeat, reports, fencing or command delivery. At :145–190 keep the state/fence priority and mint outside the transaction; include repoId in scoped refusals when supplied because apps/runner/src/credentials/token-cache.ts:115–138 matches responses by jobId and repoId. At apps/api/src/fleet/sync/sync.service.ts:202–264 keep the provider batch's sorted lock acquisition and do not resolve, decrypt or record an issue on refusal; issue activity currently originates at :282–292. Refusals remain protocol-compatible: packages/fleet-protocol/src/index.ts:390,410–411 defines a free-string GitTokenError.reason and a closed provider union; apps/runner/src/sync/sync-loop.ts:162–163 forwards both. Within-sync changes to enabled are intentionally not re-read, and previously issued credentials are not revoked. Update all recordRunnerSync mocks including the bookkeeping override at apps/api/src/fleet/sync/sync-token-fence.spec.ts:31,69–74, the provider harness at apps/api/src/fleet/sync/sync-provider-credentials.spec.ts:35 and the purpose harness at apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts:24. The existing token suite exercises scope branches, fences and legacy mint shape (:86–222), and the provider suite covers vault-off, locked scope, activity and refusal without long polling (:84–251). Add the real disabled-row repository check to the existing Postgres suite at apps/api/test/integration/fleet/fleet-job-repository.integration.spec.ts:14–49 with an isolated fixture or restored state; run the scoped DB tests on the host via the declared RunCommand testScoped command, not as a sandbox skip.\n\nUS-003 — apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:344–347 finds held jobs in id order. apps/api/src/fleet/jobs/fleet-jobs.service.ts:306–335 is the reference for locking and re-reading jobs, pending ASSIGN checks at the current epoch, CANCEL and lifecycle/activity writes, and collecting live/wake results inside the caller's transaction. Recheck ownership and eligibility under the job lock, not only at the list read, because a report or ack may race the sweep. Unlike budget cancellation, never act on QUEUED; mirror the budget command allowlist at apps/api/src/fleet/budgets/prisma-budget.repository.ts:22 without changing budget eligibility. Use apps/api/src/fleet/jobs/job-transitions.service.ts:45–74,83–97 for pending-ASSIGN terminal cancellation, including the existing held lease bump, command withdrawal and terminal effects; a cancellation request does not itself end the job. Use the disabling user for the SYSTEM job.cancel_requested activity; retain normal terminal-transition effects. Add unit cases in the existing fleet-jobs.service.spec.ts; apps/api/src/fleet/jobs/fleet-jobs.project-deletion.spec.ts:34–109 shows a sibling transition harness, and apps/api/test/integration/fleet/fleet-budget-cancel.integration.spec.ts:73–90 covers the budget pattern on PG. US-002 and US-003 have no binding dependency but both need the same exported RUNNER_DISABLED_REASON beside PROJECT_DELETED_REASON (apps/api/src/fleet/jobs/fleet-jobs.service.ts:56). Each must build on its own: reuse the declaration if present; otherwise add the identical export at the same location using the same one-line declaration, and retain just one on integration. Do not use a sync-local literal or import the new cancellation method from US-002.\n\nUS-004 — apps/api/src/fleet/runners/runners.service.ts:43–56 currently loads the row for existence, normalizes the patch, writes it, records activity and audit, and returns the RunnerDto. Compare the prior enabled value with the explicit disabling patch; preserve existing audit, normalization and DTO. Persist disabled before scanning jobs. apps/api/src/fleet/runners/prisma-runner.repository.ts:69–83 currently reads without a row lock and updates through Prisma. Do not assume that the initial read serializes competing disable requests: if needed for transition detection, serialize the previous-value read with competing runner-row writes; rechecking each job also avoids duplicate or overwritten cancellation requests. Placement takes the runner lock and re-reads enabled (apps/api/src/fleet/jobs/placement.service.ts:145–173,187–193,229–233; apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:375–386), so placement either sees disabled or commits an assignment before the disable scans. This does not require modifying placement. apps/api/src/fleet/jobs/fleet-jobs.module.ts:37–54 exports the service, publisher and notifier and has no RunnersModule dependency; import it in apps/api/src/fleet/runners/runners.module.ts:19. PATCH is approval-gated (apps/api/src/fleet/runners/runners.controller.ts:51–64), and the registered command calls the same service (apps/api/src/fleet/runners/runner-route.commands.ts:43–50). After awaiting the update transaction, follow apps/api/src/fleet/budgets/budget-evaluator.ts:76–91 for publishing and wakes. The existing FleetJobLivePublisher.publish takes an event array and already defers emission via committedEffect (apps/api/src/fleet/jobs/fleet-job-live.publisher.ts:23–31); RunnerNotifier.notify likewise defers waking (apps/api/src/fleet/jobs/runner-notifier.ts:13–17). Both join the outer commit scope in apps/api/src/approvals/approval-execution.service.ts:277–309 and drop effects on outer rollback (apps/api/src/common/committed-effects.ts:5–24). Reuse these collaborators without adding another transaction wrapper or constructor dependency. Extend apps/api/src/fleet/runners/runners.service.spec.ts:14–18,45–53 with the three stubs and a transaction harness that separates callback return from transaction resolution; keep the route and DTO unchanged and do not add an HTTP-level held-job test.\n\nRollout: no database migration or backfill, wire version bump, app-client regeneration or new files. Existing disabled runners lose new grants on the next sync after the API rollout but their already-held jobs are not retroactively swept; cancellation is triggered by a committed true-to-false update. Deploy the API and runner independently; forced profiles apply when a job is prepared or its FIX profile is rewritten by an upgraded runner. Before rollout check probe health on hosts expected to run forced kinds to avoid avoidable refusals. Re-enabling does not undo cancellations. Completion is the four scoped implementations and their listed behavior verified in the existing Bun/Vitest suites, with the repository assertion exercised against Postgres.",
+  "outOfScope": [
+    "Adding `runner_disabled` to `ProviderKeyErrorReason` in `packages/fleet-protocol`.",
+    "A per-runner or per-repo opt-out from the forced sandbox.",
+    "Forcing the sandbox for PLAN, CONFIG_EDIT, CONFIG_DRIFT or THREAD jobs.",
+    "Placement awareness of the forced sandbox: `placement-rules.ts` still approximates from the job's profiles, and the runner's job check is the refusal point.",
+    "Re-reading `Runner.enabled` inside the grant transaction: a disable that commits during a sync takes effect on the next sync.",
+    "Revoking credentials already issued to a runner before it was disabled: they stay valid until they expire.",
+    "Cancelling QUEUED jobs pinned to a disabled runner, its UPLOADING jobs, or its CONFIG_EDIT and CONFIG_DRIFT jobs.",
+    "An HTTP-level integration test of `PATCH /fleet/runners/:id` with a held job."
+  ],
+  "routingProfile": "native-codex-ds"
+}

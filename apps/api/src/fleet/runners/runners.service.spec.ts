@@ -11,12 +11,21 @@ const row = (over = {}) => ({
 });
 
 describe('RunnersService', () => {
-  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForUpdate: vi.fn(), lockForNoKeyUpdate: vi.fn(), countUnfinishedJobs: vi.fn() };
   const activity = { record: vi.fn() };
+  const jobs = { cancelForRunnerDisabled: vi.fn() };
+  const live = { publish: vi.fn() };
+  const notifier = { notify: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-  const service = new RunnersService(repo as never, activity as never, tx as never, testFleetConfig({ runnerOfflineSec: 90 }), mockAuditRecorder);
+  const service = new RunnersService(repo as never, activity as never, tx as never, testFleetConfig({ runnerOfflineSec: 90 }), mockAuditRecorder, jobs as never, live as never, notifier as never);
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    jobs.cancelForRunnerDisabled.mockReset().mockResolvedValue({ cancelled: [], requested: [], live: [], wake: [] });
+    live.publish.mockReset();
+    notifier.notify.mockReset();
+    tx.run = <T>(fn: () => Promise<T>) => fn();
+  });
 
   it('404s an unknown runner', async () => {
     repo.findRunnerById.mockResolvedValue(null);
@@ -47,8 +56,75 @@ describe('RunnersService', () => {
     const dto = await service.update('u9', 'r1', { enabled: false, labels: ['b', 'a', 'a'], capacity: 2 });
     expect(repo.updateRunner).toHaveBeenCalledWith('r1', { enabled: false, labels: ['a', 'b'], capacity: 2 });
     expect(dto.enabled).toBe(false);
+    expect(live.publish).toHaveBeenCalledWith([]);
+    expect(notifier.notify).not.toHaveBeenCalled();
+    expect(jobs.cancelForRunnerDisabled).toHaveBeenCalledTimes(1);
+    expect(jobs.cancelForRunnerDisabled).toHaveBeenCalledWith('r1', 'u9', expect.any(Date));
+    expect(repo.updateRunner.mock.invocationCallOrder[0]).toBeLessThan(jobs.cancelForRunnerDisabled.mock.invocationCallOrder[0]);
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'u9', action: 'runner.updated', entityId: 'r1', payload: { enabled: false, labels: ['a', 'b'], capacity: 2 } }));
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'fields: capacity, enabled, labels' });
+  });
+
+  it('locks the runner row before reading enabled, so a concurrent enable cannot slip between the read and the write (review B1)', async () => {
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ enabled: false }));
+    await service.update('u9', 'r1', { enabled: false });
+    expect(repo.lockForNoKeyUpdate).toHaveBeenCalledWith('r1');
+    // Review B4: an edit takes the key-share-compatible mode; only deletion keeps FOR UPDATE.
+    expect(repo.lockForUpdate).not.toHaveBeenCalled();
+    // The read only sees the state the lock held, and that read is what decides the cancellation.
+    expect(repo.lockForNoKeyUpdate.mock.invocationCallOrder[0]).toBeLessThan(repo.findRunnerById.mock.invocationCallOrder[0]);
+    expect(repo.findRunnerById.mock.invocationCallOrder[0]).toBeLessThan(repo.updateRunner.mock.invocationCallOrder[0]);
+  });
+
+  it('does not cancel when the runner was already disabled', async () => {
+    repo.findRunnerById.mockResolvedValue(row({ enabled: false }));
+    repo.updateRunner.mockResolvedValue(row({ enabled: false }));
+    await service.update('u9', 'r1', { enabled: false });
+    expect(jobs.cancelForRunnerDisabled).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel when re-enabling a disabled runner', async () => {
+    repo.findRunnerById.mockResolvedValue(row({ enabled: false }));
+    repo.updateRunner.mockResolvedValue(row({ enabled: true }));
+    await service.update('u9', 'r1', { enabled: true });
+    expect(jobs.cancelForRunnerDisabled).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel on a labels-only update', async () => {
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ labels: ['x'] }));
+    await service.update('u9', 'r1', { labels: ['x'] });
+    expect(jobs.cancelForRunnerDisabled).not.toHaveBeenCalled();
+  });
+
+  it('publishes live events and wakes runners after the update transaction resolves', async () => {
+    const event = { id: 'e1' };
+    let committed = false;
+    tx.run = async <T>(fn: () => Promise<T>) => {
+      const value = await fn();
+      committed = true;
+      return value;
+    };
+    jobs.cancelForRunnerDisabled.mockResolvedValue({ cancelled: [], requested: [], live: [event], wake: ['r1'] });
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ enabled: false }));
+    live.publish.mockImplementation(() => expect(committed).toBe(true));
+    notifier.notify.mockImplementation(() => expect(committed).toBe(true));
+    await service.update('u9', 'r1', { enabled: false });
+    expect(live.publish).toHaveBeenCalledWith([event]);
+    expect(notifier.notify).toHaveBeenCalledWith('r1');
+  });
+
+  it('does not publish cancellation effects when the update transaction rejects', async () => {
+    const event = { id: 'e1' };
+    tx.run = async <T>(fn: () => Promise<T>) => { await fn(); throw new Error('commit failed'); };
+    jobs.cancelForRunnerDisabled.mockResolvedValue({ cancelled: [], requested: [], live: [event], wake: ['r1'] });
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ enabled: false }));
+    await expect(service.update('u9', 'r1', { enabled: false })).rejects.toThrow('commit failed');
+    expect(live.publish).not.toHaveBeenCalled();
+    expect(notifier.notify).not.toHaveBeenCalled();
   });
 
   it('carries threadCapacity through update to the repository and the response (US-002 AC5)', async () => {
@@ -63,7 +139,7 @@ describe('RunnersService', () => {
     repo.findRunnerById.mockResolvedValue(row());
     repo.countUnfinishedJobs.mockResolvedValue(0);
     await service.remove('u9', 'r1');
-    expect(repo.lockForDelete).toHaveBeenCalledWith('r1');
+    expect(repo.lockForUpdate).toHaveBeenCalledWith('r1');
     expect(repo.deleteRunner).toHaveBeenCalledWith('r1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'runner.deleted', entityId: 'r1', payload: { name: 'box' } }));
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.runner.delete', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'deleted' });
