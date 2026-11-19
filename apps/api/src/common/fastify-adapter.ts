@@ -18,7 +18,15 @@ export const MAX_PATH_PARAM_LENGTH = 256;
  *
  * The limit goes through `routerOptions` — the shape Fastify 5 asks for — rather than the deprecated top-level
  * `maxParamLength`, which logs a `FSTDEP022` warning on every boot.
+ *
+ * `forceCloseConnections: true` (#484): Fastify's default `'idle'` closes only idle keep-alive sockets, so an open
+ * SSE stream (`/me/events`, `/projects/:slug/events`) kept the shutdown's `close()` pending until the container runtime
+ * SIGKILLed the process (exit 137). Closing every connection also cuts a non-SSE request still in flight, but Nest
+ * has already run `onModuleDestroy` (Prisma disconnect) by then, so such a request could not finish anyway.
  */
 export function createFastifyAdapter(): FastifyAdapter {
-  return new FastifyAdapter({ routerOptions: { maxParamLength: MAX_PATH_PARAM_LENGTH } });
+  return new FastifyAdapter({
+    routerOptions: { maxParamLength: MAX_PATH_PARAM_LENGTH },
+    forceCloseConnections: true,
+  });
 }
