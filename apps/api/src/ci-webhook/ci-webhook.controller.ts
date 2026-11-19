@@ -1,6 +1,6 @@
 import { Controller, Post, Param, HttpCode, Headers, Req, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiHeader } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 import { CiWebhookService } from './ci-webhook.service';
@@ -36,6 +36,25 @@ export class CiWebhookController {
   @ApiResponse({ status: 200, type: CiWebhookResponseDto, description: 'Webhook processed' })
   @ApiResponse({ status: 400, description: 'Invalid payload (checked only after a valid signature)' })
   @ApiResponse({ status: 401, description: 'Unknown project, no CI webhook token, or invalid signature' })
+  // The three signature headers are optional (webhook signature v2, US-005): a v2-only sender omits
+  // `x-ci-signature`, and `x-ci-timestamp` / `x-ci-signature-v2` only exist on a v2 delivery. Declared
+  // explicitly with the reflected `@Headers` names, so swagger merges the two into one optional parameter
+  // per header instead of documenting a required one.
+  @ApiHeader({
+    name: 'x-ci-signature',
+    required: false,
+    description: 'v1 signature, `sha256=<hex>` over the raw body. Deprecated: omit it on a v2-only delivery.',
+  })
+  @ApiHeader({
+    name: 'x-ci-timestamp',
+    required: false,
+    description: 'Decimal Unix seconds covered by `x-ci-signature-v2`; must be within 300 seconds of now.',
+  })
+  @ApiHeader({
+    name: 'x-ci-signature-v2',
+    required: false,
+    description: 'v2 signature, `sha256=<hex>` over `<x-ci-timestamp>.<x-ci-delivery>.<raw body>`.',
+  })
   async handleCiWebhook(
     @Param('slug') slug: string,
     @Req() request: InboundWebhookRequest,
