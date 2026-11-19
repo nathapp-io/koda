@@ -3,7 +3,7 @@
   "feature": "review-1119-data-rulings",
   "branchName": "feat/review-1119-data-rulings",
   "createdAt": "2026-11-19T05:23:58.886Z",
-  "updatedAt": "2026-11-19T08:53:39.762Z",
+  "updatedAt": "2026-11-19T09:01:57.989Z",
   "userStories": [
     {
       "id": "US-001",
@@ -310,14 +310,17 @@
         "prisma"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A read-only filter in an existing repository with Postgres coverage; it does not change auth, policy state, or gate semantics."
+        "reasoning": "A read-only filter in an existing repository with Postgres coverage; it does not change auth, policy state, or gate semantics.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/budgets/prisma-budget.repository.ts",
@@ -334,7 +337,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ff26aaa8cb4a0770bd39958c3ab74e2d6af817e3"
     },
     {
       "id": "US-006",
