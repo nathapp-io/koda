@@ -13,6 +13,9 @@ import type { VcsConnectionDomain } from './domain/vcs.domain';
 import type { VcsIssue } from './types';
 import type { SyncResultDto } from './dto/sync-result.dto';
 
+/** How many isolated issue failures one deferred pass names in its error log before it summarises. */
+const FULL_IMPORT_LOGGED_FAILURES = 10;
+
 /** External reads happen before the approval execution transaction, never in its apply callback. */
 @Injectable()
 export class VcsManualSync {
@@ -94,15 +97,19 @@ export class VcsManualSync {
    * whether the provider had more — because no preview can know that before the request executes.
    *
    * A rejected deferred pass is not the approval's failure: the approval is already durable, so the pass
-   * reports through the log. `defer` answering false means no transaction owns this call — nothing has
-   * committed, so a failure there is the caller's.
+   * reports through the log — as do the per-issue failures `isolate` collects instead of rejecting.
+   * `defer` answering false means no transaction owns this call — nothing has committed, so a failure
+   * there is the caller's.
    */
   async prepareSyncAll(slug: string): Promise<() => Promise<SyncResultDto>> {
     const { project, connection, key } = await this.target(slug);
     const provider = providerForConnection(connection, decryptToken(connection.encryptedToken, key), this.config);
     const { issues, capped } = await provider.fetchIssues();
     const filtered = this.sync.filterByAllowedAuthors(issues, connection.allowedAuthors);
-    const importIssues = () => this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: true });
+    const importIssues = async () => {
+      const { errors } = await this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: true });
+      this.logImportFailures(project.id, errors);
+    };
     return async () => {
       await this.assertTarget(project.id, connection, true);
       const deferred = this.afterCommit.defer(async () => {
@@ -119,6 +126,22 @@ export class VcsManualSync {
         fetchedIssues: filtered.length, capped,
       };
     };
+  }
+
+  /**
+   * `isolate` turns a failed issue write into an entry of the summary instead of a rejection, so these
+   * entries are the only report a partially failed import gives: without this, a pass that imported
+   * nothing but skipped every issue would look like a successful one. The message is bounded because the
+   * array can hold one entry per fetched issue (up to a thousand).
+   */
+  private logImportFailures(projectId: string, errors: string[]): void {
+    if (errors.length === 0) return;
+    const shown = errors.slice(0, FULL_IMPORT_LOGGED_FAILURES).join('; ');
+    const rest = errors.length - FULL_IMPORT_LOGGED_FAILURES;
+    this.logger.error(
+      `VCS full import for project ${projectId} failed ${errors.length} issue(s): ${shown}` +
+      (rest > 0 ? `; … and ${rest} more` : ''),
+    );
   }
 
   async syncPr(slug: string): Promise<ApplyPrStatusesResult> {

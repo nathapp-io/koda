@@ -136,6 +136,30 @@ describe('VcsManualSync', () => {
         expect.stringContaining('import blew up'),
       );
     });
+    it('AC-7: a partially failed deferred pass logs the isolated issue failures', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      // `isolate` collects a failed issue write in the summary instead of rejecting the pass.
+      sync.syncIssues.mockResolvedValue({
+        issuesSynced: 1, issuesSkipped: 2, createdTickets: [],
+        errors: ['Issue 8: write failed', 'Issue 9: write failed'],
+      });
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+      expect(errorLog.mock.calls.map((call) => String(call[0]))).toContainEqual(
+        expect.stringContaining('Issue 8: write failed'),
+      );
+    });
+    it('AC-7: a clean deferred pass logs no import error', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      errorLog.mockClear();
+      sync.syncIssues.mockResolvedValue({ issuesSynced: 3, issuesSkipped: 0, createdTickets: [], errors: [] });
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+      expect(errorLog.mock.calls.map((call) => String(call[0]))).not.toContainEqual(
+        expect.stringContaining('VCS full import'),
+      );
+    });
     it('AC-8: with no enclosing scope the closure imports before it resolves', async () => {
       let imported = false;
       sync.syncIssues.mockImplementation(async () => {
