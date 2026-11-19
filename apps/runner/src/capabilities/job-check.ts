@@ -72,8 +72,10 @@ export class NaxJobCheck implements JobCheck {
     ]);
     if (!trust.trusted) return trust.reason;
     if (!json.ok) return `capability mismatch: profile resolve failed (${json.code})`;
-    const requirements = parseRequirements(json.value);
-    if (!requirements) return 'capability mismatch: profile resolve failed (NAX_OUTPUT_UNPARSEABLE)';
+    const parsedRequirements = parseRequirements(json.value);
+    if (!parsedRequirements) return 'capability mismatch: profile resolve failed (NAX_OUTPUT_UNPARSEABLE)';
+    const forceSandbox = ['RUN', 'REVIEW', 'FIX', 'AGENT'].includes(assign.command);
+    const requirements = forceSandbox ? { ...parsedRequirements, sandbox: true } : parsedRequirements;
     // #207 spec §3.3: nax merged the job's real chain (repo config included), so this is the exact check; placement's
     // per-profile check is an approximation. An absent or unknown result (older nax) passes.
     const interaction = parseInteraction(json.value);

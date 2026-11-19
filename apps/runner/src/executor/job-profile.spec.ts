@@ -35,6 +35,20 @@ describe('projectNameFor (design §2 step 5)', () => {
   });
 });
 
+describe('forced sandbox overlay (review-1119 US-001)', () => {
+  test('AC-1: a sandboxed profile has only execution.sandbox.enabled', () => {
+    expect(jobProfileContent('/out', 'p', undefined, undefined, undefined, undefined, undefined, true).execution)
+      .toEqual({ sandbox: { enabled: true } });
+  });
+
+  test('AC-2/3: sandbox coexists with gated relay approvals', () => {
+    const gatedRelay = { bashMode: 'gated' as const, approvalTimeoutSec: 60, endpoint: { url: 'http://127.0.0.1/ask', secret: 's'.repeat(64) } };
+    const execution = jobProfileContent('/out', 'p', gatedRelay, undefined, undefined, undefined, undefined, true).execution;
+    expect(execution).toMatchObject({ sandbox: { enabled: true }, bashApproval: 'gated' });
+    expect(execution).toEqual({ sandbox: { enabled: true }, bashApproval: 'gated', approvalTimeout: 60_000 });
+  });
+});
+
 describe('relay overlay (spec §4.1, plan D275)', () => {
   let naxHome!: string;
   beforeEach(async () => { naxHome = await tmp.make('profile-relay'); });

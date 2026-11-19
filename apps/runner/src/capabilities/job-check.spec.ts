@@ -7,26 +7,40 @@ import { NaxJobCheck, firstMismatch } from './job-check';
 
 const REPO = '/w/acme/app';
 const CAPS: RunnerCapabilities = {
-  nax: { version: '0.83.1', protocols: ['native'] }, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' },
+  nax: { version: '0.83.1', protocols: ['native'] }, sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' },
   profiles: {}, credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'],
 };
 const DEEPSEEK = { providerId: 'deepseek', stored: { kind: 'api-key', expired: false }, ambient: false, available: true };
 const NONE = { transport: 'native' as const, providers: [], sandbox: false };
 
 /** The row the check is asked about: C10 reads `jobId`/`leaseEpoch` to resolve a provider through the job's socket. */
-const row = (profiles: readonly string[] = []): JobRow => ({
-  jobId: 'job-1', leaseEpoch: 2, command: 'RUN', state: 'ASSIGNED', repoKey: 'acme/app', branch: null, pid: null, pgid: null,
+const row = (profiles: readonly string[] = [], command: JobRow['command'] = 'RUN'): JobRow => ({
+  jobId: 'job-1', leaseEpoch: 2, command, state: 'ASSIGNED', repoKey: 'acme/app', branch: null, pid: null, pgid: null,
   naxRunId: null, logPath: null, jobDir: '/w/.jobs/job-1', cancelRequestedAt: null, resultBranch: null, resultSha: null,
   createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', doneAt: null,
-  assign: { profiles: [...profiles] } as unknown as AssignPayload,
+  assign: { command, profiles: [...profiles] } as unknown as AssignPayload,
 });
 
-function checker(answers: NaxAnswers) {
+function checker(answers: NaxAnswers, capabilities: RunnerCapabilities | null = CAPS) {
   const nax = new FakeNaxCli(answers);
-  return { nax, check: (profiles: string[] = []) => new NaxJobCheck({ nax, capabilities: () => CAPS }).check(row(profiles), REPO) };
+  return { nax, check: (profiles: string[] = [], command: JobRow['command'] = 'RUN') => new NaxJobCheck({ nax, capabilities: () => capabilities }).check(row(profiles, command), REPO) };
 }
 
 describe('NaxJobCheck (D104)', () => {
+  test.each(['RUN', 'REVIEW', 'FIX', 'AGENT'] as const)('US-001 sandbox requirement applies to %s even if its profile chain says false', async (command) => {
+    const unavailable = { ...CAPS, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' } };
+    expect(await checker({ config: { default: NONE } }, unavailable).check([], command)).toBe('capability mismatch: sandbox');
+  });
+
+  test('US-001 PLAN does not force a sandbox requirement', async () => {
+    const unavailable = { ...CAPS, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' } };
+    expect(await checker({ config: { default: NONE } }, unavailable).check([], 'PLAN')).toBeNull();
+  });
+
+  test('US-001 a missing capability report still passes the forced sandbox check', async () => {
+    expect(await checker({ config: { default: NONE } }, null).check([], 'RUN')).toBeNull();
+  });
+
   test('no profiles: trust, then the clone\'s default config (no --profile); nothing needed means no auth listing', async () => {
     const c = checker({ config: { default: NONE } });
     expect(await c.check()).toBeNull();
@@ -71,7 +85,8 @@ describe('NaxJobCheck (D104)', () => {
     expect(await checker({ ...needs, auth: naxError('CREDENTIAL_FILE_UNREADABLE') }).check(['fast'])).toBe('capability mismatch: auth list failed (CREDENTIAL_FILE_UNREADABLE)');
   });
   test('a sandbox chain on a machine whose sandbox is unavailable is `sandbox`', async () => {
-    expect(await checker({ config: { safe: { transport: 'native', providers: [], sandbox: true } } }).check(['safe'])).toBe('capability mismatch: sandbox');
+    const unavailable = { ...CAPS, sandbox: { available: false, error: 'bwrap', probedAt: '2026-10-01T00:00:00.000Z' } };
+    expect(await checker({ config: { safe: { transport: 'native', providers: [], sandbox: true } } }, unavailable).check(['safe'])).toBe('capability mismatch: sandbox');
   });
   test('the trust check and the chain resolve overlap, so a job is not serialized behind nax', async () => {
     const inner = new FakeNaxCli({ config: { default: NONE } });

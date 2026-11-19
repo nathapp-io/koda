@@ -52,17 +52,22 @@ const contextOverlay = (context?: JobProfileContext): Record<string, unknown> =>
 const publishOverlay = (publishPr?: boolean): Record<string, unknown> => publishPr === true ? { workflow: { publish: 'pr' } } : {};
 
 /** Spec §4.1 / plan D275. Profiles deep-merge after the repo config, so these keys win; callbackPort 0 overrides a pinned one. */
-export function jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>, context?: JobProfileContext, publishPr?: boolean): Record<string, unknown> {
+export function jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>, context?: JobProfileContext, publishPr?: boolean, sandbox?: boolean): Record<string, unknown> {
   const bot = botCostLimitUsd === undefined ? {} : { bot: { costLimit: botCostLimitUsd } };
   // fleet-agent-job US-008: a flow passes `model: 'reviewer'` with `modelAliases: { reviewer: 'acp:claude' }`; nax
   // resolves the alias in this profile. An absent or empty map adds no key, so every other job's profile is unchanged.
   const agent = modelAliases === undefined || Object.keys(modelAliases).length === 0 ? {} : { agent: { modelAliases: { ...modelAliases } } };
   const ctx = contextOverlay(context);
   const publish = publishOverlay(publishPr);
-  if (!relay) return { outputDir, name: projectName, ...bot, ...agent, ...ctx, ...publish };
+  const execution = {
+    ...(sandbox === true ? { sandbox: { enabled: true } } : {}),
+    ...(relay === undefined ? {} : { bashApproval: relay.bashMode, approvalTimeout: relay.approvalTimeoutSec * 1000 }),
+  };
+  const executionOverlay = Object.keys(execution).length === 0 ? {} : { execution };
+  if (!relay) return { outputDir, name: projectName, ...bot, ...agent, ...ctx, ...publish, ...executionOverlay };
   return {
     outputDir, name: projectName, ...bot, ...agent, ...ctx, ...publish,
-    execution: { bashApproval: relay.bashMode, approvalTimeout: relay.approvalTimeoutSec * 1000 },
+    execution,
     interaction: {
       plugin: 'webhook',
       config: { url: relay.endpoint.url, secret: relay.endpoint.secret, requireSecret: true, callbackPort: 0 },
@@ -72,11 +77,11 @@ export function jobProfileContent(outputDir: string, projectName: string, relay?
 }
 
 /** A raw overlay is appended last to the chain; it must exist until nax exits (SP-1). Mode 0600: it may hold the relay secret. */
-export async function writeJobProfile(naxHome: string, jobId: string, outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>, context?: JobProfileContext, publishPr?: boolean): Promise<string> {
+export async function writeJobProfile(naxHome: string, jobId: string, outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number, modelAliases?: Readonly<Record<string, string>>, context?: JobProfileContext, publishPr?: boolean, sandbox?: boolean): Promise<string> {
   const path = jobProfilePath(naxHome, jobId);
   await mkdir(join(naxHome, 'profiles'), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(jobProfileContent(outputDir, projectName, relay, botCostLimitUsd, modelAliases, context, publishPr), null, 2)}\n`, { mode: 0o600 });
+  await writeFile(tmp, `${JSON.stringify(jobProfileContent(outputDir, projectName, relay, botCostLimitUsd, modelAliases, context, publishPr, sandbox), null, 2)}\n`, { mode: 0o600 });
   await rename(tmp, path);
   return path;
 }
