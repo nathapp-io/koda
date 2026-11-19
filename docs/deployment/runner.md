@@ -8,7 +8,14 @@
 - macOS or Linux, arm64 or x64.
 - git 2.30 or newer; `gh` (GitHub) or `glab` (GitLab) for the pull request nax opens.
 - nax **0.83.1 or newer** on the service user's PATH. The runner refuses to start with an older nax.
-- Linux: `bwrap` (bubblewrap) for the nax sandbox.
+- Linux: `bwrap` (bubblewrap) for the nax sandbox. The sandbox is required: RUN, REVIEW, FIX and AGENT jobs always
+  run sandboxed, and a runner that reports no sandbox refuses them (`capability mismatch: sandbox`).
+- Every repository a FIX job works on has its **default branch protected**, with the bot unable to push to it
+  (GitHub and GitLab). This is a deployment prerequisite, not a runner check: FIX pushes through nax, so koda's
+  token broker refuses a FIX token for an unprotected default branch (`default_branch_unprotected`). The per-repo
+  `fixAllowUnprotected` override (`PATCH /fleet/repos/:id/fix-unprotected`, global `fleet.repo.fix.unprotected`,
+  approval-gated and audited) skips that check; use it only on purpose.
+  GitLab details: [gitlab.md](gitlab.md#fix-and-default-branch-protection).
 
 ## Service user
 
