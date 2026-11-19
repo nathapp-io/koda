@@ -1,9 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ProjectsService } from '../projects/projects.service';
 import { VCS_CFG, type IVcsConfig } from '../config/vcs.config';
 import { decryptToken } from '../common/utils/encryption.util';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { VcsConnectionService, vcsTestTarget } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService, type ApplyPrStatusesResult } from './vcs-pr-sync.service';
@@ -15,12 +16,15 @@ import type { SyncResultDto } from './dto/sync-result.dto';
 /** External reads happen before the approval execution transaction, never in its apply callback. */
 @Injectable()
 export class VcsManualSync {
+  private readonly logger = new Logger(VcsManualSync.name);
+
   constructor(
     private readonly projects: ProjectsService,
     private readonly connections: VcsConnectionService,
     private readonly sync: VcsSyncService,
     @Inject(VCS_CFG) private readonly config: IVcsConfig,
     private readonly prSync: VcsPrSyncService,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   private encryptionKey(): string {
@@ -79,15 +83,41 @@ export class VcsManualSync {
     return this.summary(project, await this.sync.fullSync(project, connection, key));
   }
 
+  /**
+   * Review 2026-11-14 (BUG-2): an approved full import runs as its own isolated pass after the approval
+   * transaction commits, instead of inside that transaction with `isolate: false`.
+   *
+   * The fetch of up to a thousand issues cannot be undone by a rollback, and one failed issue write rolled
+   * the whole import back. So the prepared closure only rechecks the target and queues the pass with
+   * `AfterCommitService.defer`: it runs once the approval committed, and every issue write is isolated.
+   * What the approval records is what the fetch learned — how many issues the import will process and
+   * whether the provider had more — because no preview can know that before the request executes.
+   *
+   * A rejected deferred pass is not the approval's failure: the approval is already durable, so the pass
+   * reports through the log. `defer` answering false means no transaction owns this call — nothing has
+   * committed, so a failure there is the caller's.
+   */
   async prepareSyncAll(slug: string): Promise<() => Promise<SyncResultDto>> {
     const { project, connection, key } = await this.target(slug);
     const provider = providerForConnection(connection, decryptToken(connection.encryptedToken, key), this.config);
-    const { issues } = await provider.fetchIssues();
+    const { issues, capped } = await provider.fetchIssues();
     const filtered = this.sync.filterByAllowedAuthors(issues, connection.allowedAuthors);
+    const importIssues = () => this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: true });
     return async () => {
       await this.assertTarget(project.id, connection, true);
-      const result = await this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: false });
-      return this.summary(project, result);
+      const deferred = this.afterCommit.defer(async () => {
+        try {
+          await importIssues();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.error(`VCS full import failed for project ${project.id}: ${message}`);
+        }
+      });
+      if (!deferred) await importIssues();
+      return {
+        syncType: 'manual', issuesSynced: 0, issuesSkipped: 0, tickets: [],
+        fetchedIssues: filtered.length, capped,
+      };
     };
   }
 

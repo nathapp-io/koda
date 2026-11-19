@@ -5,6 +5,7 @@ import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/a
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { GitHubProvider } from '../../../src/vcs/providers/github.provider';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
+import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import type { VcsIssue } from '../../../src/vcs/types';
 import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
@@ -14,7 +15,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 interface Pending { id: string; permissionKey: string; projectId: string }
-interface Settled { status: string; result: { issuesSynced?: number; error?: string } }
+interface Settled {
+  status: string;
+  result: {
+    syncType?: string; issuesSynced?: number; issuesSkipped?: number; tickets?: unknown[]
+    fetchedIssues?: number; capped?: boolean; error?: string;
+  };
+}
 
 describeIntegration('gated manual VCS sync', () => {
   let app: NathApplication;
@@ -85,11 +92,14 @@ describeIntegration('gated manual VCS sync', () => {
     expect((await approve(req.id)).status).toBe('failed');
     expect(await tickets()).toHaveLength(1);
   });
-  it('AC-5: deferred full sync imports both issues and stores the count', async () => {
+  it('AC-5: the approved full sync imports both issues after commit and stores the fetch result', async () => {
     const fetch = vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(8), issue(9)], cursor: null, capped: false });
     const req = pending(await post());
     expect(fetch).not.toHaveBeenCalled();
-    expect(await approve(req.id)).toMatchObject({ status: 'executed', result: { issuesSynced: 2 } });
+    expect(await approve(req.id)).toMatchObject({
+      status: 'executed',
+      result: { syncType: 'manual', issuesSynced: 0, issuesSkipped: 0, tickets: [], fetchedIssues: 2, capped: false },
+    });
     expect(fetch).toHaveBeenCalledOnce();
     expect((await tickets()).map((t) => t.externalVcsId).sort()).toEqual([`acme/${p.slug}#8`, `acme/${p.slug}#9`]);
   });
@@ -100,12 +110,12 @@ describeIntegration('gated manual VCS sync', () => {
       return original.apply(this, args);
     });
   }
-  it('AC-6: deferred full sync rolls back the first write when the second fails', async () => {
+  it('AC-6: the approved full sync keeps the first write when the second fails', async () => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(8), issue(9)], cursor: null, capped: false });
     failSecondWrite();
     const req = pending(await post());
-    expect((await approve(req.id)).status).toBe('failed');
-    expect(await tickets()).toEqual([]);
+    expect(await approve(req.id)).toMatchObject({ status: 'executed', result: { issuesSynced: 0, fetchedIssues: 2 } });
+    expect(await tickets()).toMatchObject([{ externalVcsId: `acme/${p.slug}#8` }]);
   });
   it('AC-7: no-policy agent full sync is best effort with no approval request', async () => {
     await db.approvalPolicy.deleteMany({ where: { projectId: p.id } });
@@ -130,19 +140,24 @@ describeIntegration('gated manual VCS sync', () => {
     expect((await approve(req.id)).status).toBe('failed');
     expect(await tickets()).toEqual([]);
   });
+  function lockProbe(mutation: 'update' | 'delete') {
+    // A separate session must not inherit the approval transaction's Prisma proxy.
+    const url = new URL(testDatabaseUrl());
+    url.searchParams.set('options', '-c lock_timeout=200ms');
+    return {
+      client: createTestPrismaClient(url.toString()),
+      sql: mutation === 'update'
+        ? `UPDATE "VcsConnection" SET "repoName" = 'changed', "allowedAuthors" = '["bob"]' WHERE "projectId" = $1`
+        : 'DELETE FROM "VcsConnection" WHERE "projectId" = $1',
+    };
+  }
   it.each([
-    ['/7', 'update'], ['/7', 'delete'], ['', 'update'], ['', 'delete'],
+    ['/7', 'update'], ['/7', 'delete'],
   ] as const)('F2: deferred sync%s holds the connection lock against concurrent %s through writes', async (suffix, mutation) => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssue').mockResolvedValue(issue(7));
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(7)], cursor: null, capped: false });
     const req = pending(await post(suffix));
-    // A separate session must not inherit the approval transaction's Prisma proxy.
-    const url = new URL(testDatabaseUrl());
-    url.searchParams.set('options', '-c lock_timeout=200ms');
-    const concurrent = createTestPrismaClient(url.toString());
-    const sql = mutation === 'update'
-      ? `UPDATE "VcsConnection" SET "repoName" = 'changed', "allowedAuthors" = '["bob"]' WHERE "projectId" = $1`
-      : 'DELETE FROM "VcsConnection" WHERE "projectId" = $1';
+    const { client: concurrent, sql } = lockProbe(mutation);
     let concurrentError: unknown;
     const original = PrismaVcsRepository.prototype.createTicketFromIssue;
     const write = vi.spyOn(PrismaVcsRepository.prototype, 'createTicketFromIssue').mockImplementation(async function (...args) {
@@ -167,6 +182,49 @@ describeIntegration('gated manual VCS sync', () => {
     } finally {
       await concurrent.$disconnect();
     }
+  });
+  it.each([
+    ['update', 1], ['delete', 0],
+  ] as const)('F2: a deferred full import writes after the approval released the connection lock (%s)', async (mutation, rerunRows) => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(7)], cursor: null, capped: false });
+    const req = pending(await post());
+    const { client: concurrent, sql } = lockProbe(mutation);
+    let concurrentError: unknown;
+    const original = PrismaVcsRepository.prototype.createTicketFromIssue;
+    const write = vi.spyOn(PrismaVcsRepository.prototype, 'createTicketFromIssue').mockImplementation(async function (...args) {
+      // The import runs after the approval committed, so nothing holds the connection row any more.
+      try {
+        await concurrent.$executeRawUnsafe(sql, p.id);
+      } catch (error) {
+        concurrentError = error;
+      }
+      return original.apply(this, args);
+    });
+    await concurrent.$connect();
+    try {
+      expect((await approve(req.id)).status).toBe('executed');
+      expect(write).toHaveBeenCalledOnce();
+      expect(concurrentError).toBeUndefined();
+      expect(await tickets()).toMatchObject([{ externalVcsId: `acme/${p.slug}#7` }]);
+      // The mutation already landed: the same statement has nothing left to change.
+      expect(await concurrent.$executeRawUnsafe(sql, p.id)).toBe(rerunRows);
+    } finally {
+      await concurrent.$disconnect();
+    }
+  });
+  it('AC-11: a failing deferred import leaves the approval executed with the fetch result', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues')
+      .mockResolvedValue({ issues: [issue(8), issue(9), issue(10)], cursor: null, capped: true });
+    vi.spyOn(VcsSyncService.prototype, 'syncIssues').mockRejectedValue(new Error('import blew up'));
+    const req = pending(await post());
+    const expected = {
+      status: 'executed',
+      result: { syncType: 'manual', issuesSynced: 0, issuesSkipped: 0, tickets: [], fetchedIssues: 3, capped: true },
+    };
+    expect(await approve(req.id)).toMatchObject(expected);
+    const persisted = await db.approvalRequest.findUniqueOrThrow({ where: { id: req.id }, select: { status: true, result: true } });
+    expect(persisted).toEqual(expected);
+    expect(await tickets()).toEqual([]);
   });
   it('AC-14: provider fetch failure settles failed with execution-failed', async () => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockRejectedValue(new Error('fetch failed'));
