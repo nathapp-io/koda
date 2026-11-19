@@ -14,6 +14,7 @@ import { CiWebhookController } from './ci-webhook.controller';
 import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto } from './ci-webhook.dto';
 import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
+import { MAX_DELIVERY_ID_BYTES } from '../webhook-security/webhook-signature';
 import type { InboundWebhookRequest } from '../webhook-security/inbound-webhook-request';
 
 const SECRET = 'test-secret';
@@ -49,6 +50,9 @@ describe('CiWebhookController route authorization', () => {
 
 describe('CiWebhookController', () => {
   let controller: CiWebhookController;
+  // Retained and closed per test: the injector graph is not garbage-collected on its own, and this
+  // file compiles a module for every case (`.nax/rules/api-testing.md`).
+  let moduleRef: TestingModule | undefined;
 
   const mockCiWebhookService = {
     findInboundTarget: vi.fn(),
@@ -87,8 +91,14 @@ describe('CiWebhookController', () => {
         RequiresGuard,
       ],
     }).compile();
+    moduleRef = module;
 
     controller = module.get<CiWebhookController>(CiWebhookController);
+  });
+
+  afterEach(async () => {
+    await moduleRef?.close();
+    moduleRef = undefined;
   });
 
   /** The 401 a caller gets for a bad signature on an existing project: the reference shape. */
@@ -236,6 +246,14 @@ describe('CiWebhookController', () => {
     const nowTimestamp = () => String(Math.floor(Date.now() / 1000));
     const independentlySignV2 = (secret: string, timestamp: string, deliveryId: string, body = rawBody) =>
       `sha256=${createHmac('sha256', secret).update(`${timestamp}.${deliveryId}.${body}`).digest('hex')}`;
+    /** The same scheme over explicit bytes, as a sender holding a non-UTF-8 body would compute it. */
+    const independentlySignV2Bytes = (secret: string, timestamp: string, deliveryId: string, body: Buffer) =>
+      `sha256=${createHmac('sha256', secret)
+        .update(Buffer.from(`${timestamp}.${deliveryId}.`, 'utf8'))
+        .update(body)
+        .digest('hex')}`;
+    /** A wire body that is not valid UTF-8: `0xff` continues no UTF-8 sequence. */
+    const nonUtf8Bytes = () => Buffer.concat([Buffer.from('{"failures":['), Buffer.from([0xff]), Buffer.from(']}')]);
 
     it('AC-1: accepts v2-only and forwards the validated payload', async () => {
       const timestamp = nowTimestamp();
@@ -313,6 +331,126 @@ describe('CiWebhookController', () => {
         timestamp, independentlySignV2(SECRET, timestamp, 'd-1')));
       expect(err).toBeInstanceOf(AuthException);
       expect(err.getStatus()).toBe(401);
+    });
+
+    it('review B1: signs the raw body bytes, so a non-UTF-8 body verifies as received', async () => {
+      const timestamp = nowTimestamp();
+      const delivery = 'd-raw-bytes';
+      const bytes = nonUtf8Bytes();
+      const request: InboundWebhookRequest = { rawBody: bytes, body: validPayload };
+
+      await controller.handleCiWebhook(
+        'koda',
+        request,
+        undefined,
+        delivery,
+        undefined,
+        timestamp,
+        independentlySignV2Bytes(SECRET, timestamp, delivery, bytes),
+      );
+
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledWith('koda', expect.any(CiWebhookPayloadDto));
+    });
+
+    it('review B1: refuses a signature computed over the UTF-8 decoding of a non-UTF-8 body', async () => {
+      const timestamp = nowTimestamp();
+      const delivery = 'd-decoded-bytes';
+      const bytes = nonUtf8Bytes();
+      const request: InboundWebhookRequest = { rawBody: bytes, body: validPayload };
+      const decodedBytes = Buffer.from(bytes.toString('utf8'), 'utf8');
+      // The decoded text is different bytes (`0xff` became the U+FFFD replacement), so this signature
+      // matches the body only if the controller decodes before hashing.
+      expect(decodedBytes.equals(bytes)).toBe(false);
+
+      const err = await rejectionOf(controller.handleCiWebhook(
+        'koda',
+        request,
+        undefined,
+        delivery,
+        undefined,
+        timestamp,
+        independentlySignV2Bytes(SECRET, timestamp, delivery, decodedBytes),
+      ));
+
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+      expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
+    });
+
+    it('review B1: refuses v2 when the raw bytes were not captured instead of re-serializing the payload', async () => {
+      const timestamp = nowTimestamp();
+      const delivery = 'd-no-raw-body';
+
+      const err = await rejectionOf(controller.handleCiWebhook(
+        'koda',
+        { body: validPayload },
+        undefined,
+        delivery,
+        undefined,
+        timestamp,
+        independentlySignV2(SECRET, timestamp, delivery),
+      ));
+
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+      expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
+    });
+
+    it('review B2: refuses an oversized delivery id that is correctly signed, before the replay guard', async () => {
+      const timestamp = nowTimestamp();
+      const delivery = 'd'.repeat(MAX_DELIVERY_ID_BYTES + 1);
+
+      const err = await rejectionOf(controller.handleCiWebhook(
+        'koda',
+        requestOf(validPayload, rawBody),
+        undefined,
+        delivery,
+        undefined,
+        timestamp,
+        independentlySignV2(SECRET, timestamp, delivery),
+      ));
+
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+      expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
+      expect(mockCiWebhookService.processCiWebhook).not.toHaveBeenCalled();
+    });
+
+    it('review B2: accepts a delivery id exactly at the byte limit', async () => {
+      const timestamp = nowTimestamp();
+      const delivery = 'd'.repeat(MAX_DELIVERY_ID_BYTES);
+
+      await controller.handleCiWebhook(
+        'koda',
+        requestOf(validPayload, rawBody),
+        undefined,
+        delivery,
+        undefined,
+        timestamp,
+        independentlySignV2(SECRET, timestamp, delivery),
+      );
+
+      expect(mockReplayGuard.assertFresh).toHaveBeenCalledWith(
+        expect.objectContaining({ deliveryId: delivery }),
+      );
+    });
+
+    it('review B2: refuses an empty delivery id instead of failing later in the replay guard', async () => {
+      const timestamp = nowTimestamp();
+
+      const err = await rejectionOf(controller.handleCiWebhook(
+        'koda',
+        requestOf(validPayload, rawBody),
+        undefined,
+        '',
+        undefined,
+        timestamp,
+        independentlySignV2(SECRET, timestamp, ''),
+      ));
+
+      expect(err).toBeInstanceOf(AuthException);
+      expect(err.getStatus()).toBe(401);
+      expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
     });
   });
 

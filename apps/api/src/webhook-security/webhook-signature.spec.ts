@@ -1,8 +1,11 @@
 import { createHmac } from 'node:crypto';
 import {
+  isAcceptableDeliveryId,
   isFreshTimestamp,
+  MAX_DELIVERY_ID_BYTES,
   signatureV1,
   signatureV2,
+  signatureV2Bytes,
   signaturesMatch,
   WEBHOOK_TIMESTAMP_TOLERANCE_SEC,
 } from './webhook-signature';
@@ -72,5 +75,47 @@ describe('webhook signature primitives', () => {
 
   it('AC-14: rejects a 13-digit timestamp', () => {
     expect(isFreshTimestamp('1700000000000', 1700000000000)).toBe(false);
+  });
+
+  it('signs the exact body bytes when given a buffer (review B1)', () => {
+    // `0xff` is not valid UTF-8: decoding it first would sign U+FFFD instead of the byte received.
+    const rawBody = Buffer.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0xff, 0x7d]);
+    const independentlyExpected = `sha256=${createHmac('sha256', 's3cret')
+      .update(Buffer.from('1700000000.d-1.', 'utf8'))
+      .update(rawBody)
+      .digest('hex')}`;
+
+    expect(signatureV2Bytes('s3cret', '1700000000', 'd-1', rawBody)).toBe(independentlyExpected);
+    expect(signatureV2Bytes('s3cret', '1700000000', 'd-1', rawBody)).not.toBe(
+      signatureV2('s3cret', '1700000000', 'd-1', rawBody.toString('utf8')),
+    );
+  });
+
+  it('signs a buffer body and the same text body identically when the bytes are valid UTF-8', () => {
+    const body = '{"a":"é"}';
+
+    expect(signatureV2Bytes('s3cret', '1700000000', 'd-1', Buffer.from(body, 'utf8'))).toBe(
+      signatureV2('s3cret', '1700000000', 'd-1', body),
+    );
+  });
+
+  describe('isAcceptableDeliveryId (review B2)', () => {
+    it('accepts a delivery id at the byte limit and rejects the next byte', () => {
+      expect(MAX_DELIVERY_ID_BYTES).toBeLessThan(2704);
+      expect(isAcceptableDeliveryId('d'.repeat(MAX_DELIVERY_ID_BYTES))).toBe(true);
+      expect(isAcceptableDeliveryId('d'.repeat(MAX_DELIVERY_ID_BYTES + 1))).toBe(false);
+    });
+
+    it('counts bytes, not characters, so a multi-byte id is measured on the wire', () => {
+      // Each 'é' is two UTF-8 bytes: 127 of them are 254 bytes, 128 are 256 and over the limit.
+      expect(Buffer.byteLength('é'.repeat(127), 'utf8')).toBe(254);
+      expect(isAcceptableDeliveryId('é'.repeat(127))).toBe(true);
+      expect(isAcceptableDeliveryId('é'.repeat(128))).toBe(false);
+    });
+
+    it('rejects a missing and an empty delivery id', () => {
+      expect(isAcceptableDeliveryId(undefined)).toBe(false);
+      expect(isAcceptableDeliveryId('')).toBe(false);
+    });
   });
 });

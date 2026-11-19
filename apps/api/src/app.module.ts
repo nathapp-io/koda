@@ -1,8 +1,8 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
+import { I18nCoreModule } from '@nathapp/nestjs-common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
@@ -51,32 +51,14 @@ import { PermissionsApiModule } from './permissions/permissions-api.module';
 import { AuditLogModule } from './audit/audit-log.module';
 import { ApprovalEngineModule } from './approvals/approval-engine.module';
 import { ApprovalApiModule } from './approvals/approval-api.module';
-import { appConfig } from './config/app.config';
-import { authConfig } from './config/auth.config';
-import { DATABASE_CFG, IDatabaseConfig, databaseConfig } from './config/database.config';
-import { ragConfig } from './config/rag.config';
-import { vcsConfig } from './config/vcs.config';
-import { outboxConfig } from './config/outbox.config';
-import { retentionConfig } from './config/retention.config';
-import { webhookSignatureConfig } from './config/webhook-signature.config';
-import { notificationsConfig } from './config/notifications.config';
-import { emailConfig } from './config/email.config';
+import { DATABASE_CFG, IDatabaseConfig } from './config/database.config';
+import { AppConfigModule } from './config/app-config.module';
 import { globalThrottleLimit } from './config/throttle-limit';
-import { liveConfig } from './config/live.config';
-import { webhookConfig } from './config/webhook.config';
-import { fleetConfig } from './config/fleet.config';
-import { providerCredentialsConfig } from './config/provider-credentials.config';
-import { validate } from './config/env.validation';
 import { ConfigBridgeModule } from './config/config-bridge.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, retentionConfig, webhookSignatureConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, emailConfig, providerCredentialsConfig, ServerSecurityConfig],
-      validate: validate,
-    }),
+    AppConfigModule,
     ConfigBridgeModule,
     ScheduleModule.forRoot(),
     // In-process trigger events (fleet/common/knowledge-events.ts); global, so emitters need no module import.

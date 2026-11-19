@@ -16,9 +16,11 @@
  */
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
+import type { FastifyInstance } from 'fastify';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { canRunDbTests } from '../../helpers/test-environment';
+import { MAX_DELIVERY_ID_BYTES } from '../../../src/webhook-security/webhook-signature';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 import { fixtureDb } from '../../helpers/action-context';
@@ -41,6 +43,7 @@ describeIntegration('CI webhook v2-only delivery over HTTP (US-005)', () => {
   let app: NathApplication;
   let db: PrismaClient;
   let server: Parameters<typeof request>[0];
+  let projectId: string;
   let deliveries = 0;
 
   /** Decimal Unix seconds, fresh on every call, as the scheme requires. */
@@ -84,6 +87,7 @@ describeIntegration('CI webhook v2-only delivery over HTTP (US-005)', () => {
     await request(server).post('/api/projects').set({ Authorization: `Bearer ${token}` })
       .send({ name: 'CI Webhook Signature v2', slug: SLUG, key: KEY }).expect(201);
     const project = await db.project.findUniqueOrThrow({ where: { slug: SLUG } });
+    projectId = project.id;
     await db.project.update({ where: { id: project.id }, data: { ciWebhookToken: SECRET } });
   });
 
@@ -112,5 +116,70 @@ describeIntegration('CI webhook v2-only delivery over HTTP (US-005)', () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  /**
+   * Review B2: the replay table is unique on (projectId, source, deliveryId), and Postgres caps one
+   * B-tree index entry well below the HTTP header limit. A correctly signed oversized id must be
+   * refused as a 401 at authentication, not accepted and then failed by the replay insert (a 5xx that
+   * would also make the sender retry a request that can never succeed).
+   */
+  it('review B2: a correctly signed oversized delivery id answers 401 and records nothing', async () => {
+    const oversizedId = `ci-v2-${'d'.repeat(MAX_DELIVERY_ID_BYTES)}`;
+
+    const response = await deliverV2(failedPayload('pl-v2-1003'), { deliveryId: oversizedId });
+
+    expect(response.status).toBe(401);
+    const recorded = await db.webhookDelivery.findUnique({
+      where: { projectId_source_deliveryId: { projectId, source: 'ci', deliveryId: oversizedId } },
+    });
+    expect(recorded).toBeNull();
+  });
+
+  /**
+   * Review B1: v2 signs the bytes on the wire. This body carries a `0xff` byte inside a JSON string,
+   * which is not valid UTF-8 but still parses as JSON after the parser replaces it — so the received
+   * bytes and the decoded text differ. Signing the received bytes must be accepted; signing the
+   * decoded text must not be.
+   *
+   * Sent through `fastify.inject` with a Buffer payload: supertest's `.send()` turns a Buffer into an
+   * object, so it cannot put non-UTF-8 bytes on the wire. The inject call still runs the whole route,
+   * including the `preParsing` raw-body hook this assertion depends on.
+   */
+  it('review B1: verifies the raw body bytes, not their UTF-8 decoding', async () => {
+    const rawBody = Buffer.concat([
+      Buffer.from('{"event":"pipeline_failed","pipeline":{"id":"pl-v2-1004","url":"https://ci.example.test/pl-v2-1004"},"commit":{"sha":"abc123def456b1","message":"feat: '),
+      Buffer.from([0xff]),
+      Buffer.from('"},"failures":[{"test":"T","line":1}]}'),
+    ]);
+    const inject = (deliveryId: string, timestamp: string, signature: string) =>
+      app.getHttpAdapter().getInstance<FastifyInstance>().inject({
+        method: 'POST',
+        url: ROUTE,
+        headers: {
+          'content-type': 'application/json',
+          'x-ci-timestamp': timestamp,
+          'x-ci-signature-v2': signature,
+          'x-ci-delivery': deliveryId,
+        },
+        payload: rawBody,
+      });
+
+    const deliveryId = `ci-v2-raw-bytes-${++deliveries}`;
+    const timestamp = freshTimestamp();
+    const signedOverBytes = `sha256=${createHmac('sha256', SECRET)
+      .update(Buffer.from(`${timestamp}.${deliveryId}.`, 'utf8'))
+      .update(rawBody)
+      .digest('hex')}`;
+
+    const accepted = await inject(deliveryId, timestamp, signedOverBytes);
+    expect(accepted.statusCode).toBe(200);
+
+    const decodedTimestamp = freshTimestamp();
+    const decodedId = `ci-v2-decoded-bytes-${++deliveries}`;
+    const signedOverText = signedV2(decodedTimestamp, decodedId, rawBody.toString('utf8'));
+
+    const refused = await inject(decodedId, decodedTimestamp, signedOverText);
+    expect(refused.statusCode).toBe(401);
   });
 });

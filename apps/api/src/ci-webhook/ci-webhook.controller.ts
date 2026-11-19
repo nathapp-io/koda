@@ -15,7 +15,13 @@ import {
   signedBytesOf,
 } from '../webhook-security/inbound-webhook-request';
 import { WEBHOOK_SIGNATURE_CFG } from '../config/webhook-signature.config';
-import { isFreshTimestamp, signatureV1, signatureV2, signaturesMatch } from '../webhook-security/webhook-signature';
+import {
+  isAcceptableDeliveryId,
+  isFreshTimestamp,
+  signatureV1,
+  signatureV2Bytes,
+  signaturesMatch,
+} from '../webhook-security/webhook-signature';
 
 @ApiTags('ci-webhooks')
 @Controller()
@@ -67,12 +73,11 @@ export class CiWebhookController {
     // One lookup. An unknown slug, a missing token and a bad signature all get
     // the same 401, so the route does not reveal which slugs exist.
     const target = await this.ciWebhookService.findInboundTarget(slug);
-    const rawBody = signedBytesOf(request);
     const config = this.config.get<{ ciRequireV2: boolean }>(WEBHOOK_SIGNATURE_CFG);
     const validSignature = signatureV2Header !== undefined
-      ? Boolean(deliveryId !== undefined && timestamp !== undefined && isFreshTimestamp(timestamp, Date.now()) &&
-        signaturesMatch(signatureV2(target?.secret ?? '', timestamp, deliveryId, rawBody), signatureV2Header))
-      : !config?.ciRequireV2 && Boolean(target && this.verifySignature(rawBody, signature ?? '', target.secret));
+      ? this.verifySignatureV2(target?.secret ?? '', request.rawBody, timestamp, deliveryId, signatureV2Header)
+      : !config?.ciRequireV2 &&
+        Boolean(target && this.verifySignature(signedBytesOf(request), signature ?? '', target.secret));
     if (!target || !validSignature) {
       throw new AuthException({}, 'ci_webhook');
     }
@@ -103,6 +108,41 @@ export class CiWebhookController {
   private verifySignature(payload: string, signature: string, secret: string): boolean {
     try {
       return signaturesMatch(signatureV1(secret, payload), signature);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * v2 decides alone when `x-ci-signature-v2` is present (webhook signature v2 US-004).
+   *
+   * It signs the bytes the sender signed: the raw body buffer the `preParsing` hook captured, hashed
+   * as received. A body that is not valid UTF-8 is never decoded first (a decode replaces the invalid
+   * bytes and would verify the replacement text), and a delivery without a captured buffer is refused
+   * rather than re-serialized from the parsed payload (review B1).
+   *
+   * The delivery id must also be short enough for the replay table's unique index: a longer one would
+   * authenticate and then fail the replay insert with a 5xx, so it is refused here, before the guard,
+   * and never consumes a delivery id (review B2).
+   */
+  private verifySignatureV2(
+    secret: string,
+    rawBody: Buffer | undefined,
+    timestamp: string | undefined,
+    deliveryId: string | undefined,
+    signature: string,
+  ): boolean {
+    if (
+      !rawBody ||
+      timestamp === undefined ||
+      !isAcceptableDeliveryId(deliveryId) ||
+      !isFreshTimestamp(timestamp, Date.now())
+    ) {
+      return false;
+    }
+
+    try {
+      return signaturesMatch(signatureV2Bytes(secret, timestamp, deliveryId, rawBody), signature);
     } catch {
       return false;
     }
