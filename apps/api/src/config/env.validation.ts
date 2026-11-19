@@ -52,6 +52,14 @@ const envSchema = Joi.object({
     .truthy('true')
     .falsy('false')
     .optional(),
+  WEBHOOK_SIGNATURE_V1_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .optional(),
+  CI_WEBHOOK_REQUIRE_V2: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .optional(),
   OUTBOX_RETENTION_DAYS: Joi.number()
     .integer()
     .min(0)

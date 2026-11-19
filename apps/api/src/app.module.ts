@@ -58,6 +58,7 @@ import { ragConfig } from './config/rag.config';
 import { vcsConfig } from './config/vcs.config';
 import { outboxConfig } from './config/outbox.config';
 import { retentionConfig } from './config/retention.config';
+import { webhookSignatureConfig } from './config/webhook-signature.config';
 import { notificationsConfig } from './config/notifications.config';
 import { emailConfig } from './config/email.config';
 import { globalThrottleLimit } from './config/throttle-limit';
@@ -73,7 +74,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, retentionConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, emailConfig, providerCredentialsConfig, ServerSecurityConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, retentionConfig, webhookSignatureConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, emailConfig, providerCredentialsConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,
