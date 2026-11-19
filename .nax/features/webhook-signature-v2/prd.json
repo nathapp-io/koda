@@ -3,7 +3,7 @@
   "feature": "webhook-signature-v2",
   "branchName": "feat/webhook-signature-v2",
   "createdAt": "2026-11-19T12:16:26.397Z",
-  "updatedAt": "2026-11-19T12:40:41.223Z",
+  "updatedAt": "2026-11-19T12:46:23.431Z",
   "userStories": [
     {
       "id": "US-001",
@@ -141,14 +141,17 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "An existing handler and two test fixtures consume established seams; outbound signing is cryptography."
+        "reasoning": "An existing handler and two test fixtures consume established seams; outbound signing is cryptography.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/webhook/webhook-delivery.handler.ts",
@@ -174,7 +177,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9b547398677b091c1dcd07e2435dbe644b963784"
     },
     {
       "id": "US-004",
