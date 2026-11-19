@@ -20,6 +20,34 @@ export interface SyncIssueResult {
   reason?: string;
 }
 
+/**
+ * Review-1119 US-006 (B1): the target an approved full import captured no longer matches, proven inside
+ * an issue write's own transaction. It is a refusal, not a failed write: every remaining issue would be
+ * refused the same way, so the pass stops instead of reporting one failure per fetched issue.
+ */
+export class VcsTargetDriftError extends Error {
+  constructor(message = 'VCS connection or allowed authors changed after approval') {
+    super(message);
+    this.name = 'VcsTargetDriftError';
+  }
+}
+
+/**
+ * Revalidates the caller's captured import target. The repository runs it inside each issue write's
+ * transaction, before that write, so the check and the write share one lock.
+ */
+export type VcsTargetRevalidation = () => Promise<void>;
+
+export interface SyncIssuesOptions {
+  isolate: boolean;
+  /**
+   * Review-1119 US-006 (B1): run before every issue write, inside its transaction. A deferred import
+   * reaches its writes after the approval committed, so the target check that ran there holds no lock
+   * any more; this one does.
+   */
+  revalidate?: VcsTargetRevalidation;
+}
+
 @Injectable()
 export class VcsSyncService {
   constructor(
@@ -33,6 +61,9 @@ export class VcsSyncService {
    *
    * Permissions P2 US-002: `auditKey` is the entry point that ran this (a sync route, the poller or the
    * webhook intake), so an import's entry names where the outside write came from.
+   *
+   * Review-1119 US-006 (B1): `revalidate` proves the caller's captured target unchanged inside the
+   * write's transaction; a throw from it writes nothing.
    */
   async syncIssue(
     project: { id: string },
@@ -40,6 +71,7 @@ export class VcsSyncService {
     syncMode: 'manual' | 'polling' | 'webhook',
     repo: VcsRepoRef,
     auditKey: VcsIssueAuditKey,
+    revalidate?: VcsTargetRevalidation,
   ): Promise<SyncIssueResult> {
     const externalVcsId = externalVcsIdFor(repo, issue.number);
 
@@ -64,7 +96,7 @@ export class VcsSyncService {
         projectId: project.id,
         summary: `imported issue #${issue.number}`,
       });
-    });
+    }, revalidate);
 
     // Review P2 remainder (US-003): another import of this issue won the race between the pre-check and
     // the insert. Outside a transaction that attempt is already rolled back, so this is a plain skip —
@@ -136,7 +168,7 @@ export class VcsSyncService {
     issues: VcsIssue[],
     repo: VcsRepoRef,
     auditKey: VcsIssueAuditKey,
-    { isolate }: { isolate: boolean },
+    { isolate, revalidate }: SyncIssuesOptions,
   ) {
     const createdTickets: Array<{ id: string; number: number; title: string }> = [];
     const errors: string[] = [];
@@ -144,7 +176,7 @@ export class VcsSyncService {
     let issuesSkipped = 0;
     for (const issue of issues) {
       try {
-        const result = await this.syncIssue(project, issue, 'manual', repo, auditKey);
+        const result = await this.syncIssue(project, issue, 'manual', repo, auditKey, revalidate);
         if (result.action === 'created') {
           issuesSynced++;
           if (result.ticketId && result.ticketNumber) {
@@ -155,6 +187,12 @@ export class VcsSyncService {
         }
       } catch (error) {
         if (!isolate) throw error;
+        if (error instanceof VcsTargetDriftError) {
+          // Review-1119 US-006 (B1): the target is gone or changed. Each remaining write would be refused
+          // the same way, so stop here and report the refusal once instead of once per fetched issue.
+          errors.push(`import stopped: ${error.message}`);
+          break;
+        }
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         errors.push(`Issue ${issue.number}: ${errorMsg}`);
         issuesSkipped++;

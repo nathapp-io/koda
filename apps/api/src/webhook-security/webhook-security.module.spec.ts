@@ -4,6 +4,7 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AbstractPrismaRepository } from '@nathapp/nestjs-prisma';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
+import { WEBHOOK_DELIVERY_REPOSITORY } from './domain/webhook-delivery.domain';
 import { PrismaWebhookDeliveryRepository } from './prisma-webhook-delivery.repository';
 import { WebhookDeliveryRetentionProcessor } from './webhook-delivery-retention.processor';
 import { WebhookReplayGuard } from './webhook-replay.guard';
@@ -30,6 +31,20 @@ describe('WebhookSecurityModule (DI wiring, no database)', () => {
     expect(moduleRef.get(WebhookReplayGuard)).toBeInstanceOf(WebhookReplayGuard);
     expect(moduleRef.get(PrismaWebhookDeliveryRepository, { strict: false }))
       .toBeInstanceOf(PrismaWebhookDeliveryRepository);
+  });
+
+  /**
+   * B3: every repository is registered behind a symbol token in its module — here a module-private one,
+   * because nothing outside this module may depend on the replay guard's storage.
+   */
+  it('B3: binds the delivery repository behind a module-private token and exports neither', async () => {
+    moduleRef = await compile();
+    const repository = moduleRef.get(PrismaWebhookDeliveryRepository, { strict: false });
+
+    expect(moduleRef.get(WEBHOOK_DELIVERY_REPOSITORY, { strict: false })).toBe(repository);
+    const exported = Reflect.getMetadata('exports', WebhookSecurityModule) as unknown[];
+    expect(exported).not.toContain(WEBHOOK_DELIVERY_REPOSITORY);
+    expect(exported).not.toContain(PrismaWebhookDeliveryRepository);
   });
 
   it('F1: builds the delivery repository as an AbstractPrismaRepository over the transaction manager', async () => {

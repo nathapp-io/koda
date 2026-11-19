@@ -1,5 +1,6 @@
 import { createTestPrismaClient, testDatabaseUrl } from '../../helpers/test-prisma';
 import request from 'supertest';
+import { Logger } from '@nestjs/common';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
@@ -183,16 +184,22 @@ describeIntegration('gated manual VCS sync', () => {
       await concurrent.$disconnect();
     }
   });
+  /**
+   * Review-1119 US-006 (B1): the approval's target check and its lock end with the approval transaction,
+   * so a connection change that commits before the deferred write must still stop that write. Each issue
+   * write revalidates the captured target inside its own transaction, picks up the change and refuses.
+   */
   it.each([
     ['update', 1], ['delete', 0],
-  ] as const)('F2: a deferred full import writes after the approval released the connection lock (%s)', async (mutation, rerunRows) => {
+  ] as const)('B1: a deferred full import refuses stale-target writes after the approval committed (%s)', async (mutation, rerunRows) => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(7)], cursor: null, capped: false });
     const req = pending(await post());
     const { client: concurrent, sql } = lockProbe(mutation);
     let concurrentError: unknown;
     const original = PrismaVcsRepository.prototype.createTicketFromIssue;
     const write = vi.spyOn(PrismaVcsRepository.prototype, 'createTicketFromIssue').mockImplementation(async function (...args) {
-      // The import runs after the approval committed, so nothing holds the connection row any more.
+      // The import runs after the approval committed, so nothing holds the connection row any more: this
+      // change lands before the write's own target revalidation reads the row under its lock.
       try {
         await concurrent.$executeRawUnsafe(sql, p.id);
       } catch (error) {
@@ -200,12 +207,17 @@ describeIntegration('gated manual VCS sync', () => {
       }
       return original.apply(this, args);
     });
+    const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    errorLog.mockClear();
     await concurrent.$connect();
     try {
       expect((await approve(req.id)).status).toBe('executed');
       expect(write).toHaveBeenCalledOnce();
       expect(concurrentError).toBeUndefined();
-      expect(await tickets()).toMatchObject([{ externalVcsId: `acme/${p.slug}#7` }]);
+      // The captured connection and author filter no longer match, so no ticket is written from the old
+      // target, and the refusal is reported once for the whole pass.
+      expect(await tickets()).toEqual([]);
+      expect(errorLog.mock.calls.map((call) => String(call[0])).join('\n')).toContain('import stopped');
       // The mutation already landed: the same statement has nothing left to change.
       expect(await concurrent.$executeRawUnsafe(sql, p.id)).toBe(rerunRows);
     } finally {

@@ -6,7 +6,7 @@ import { VCS_CFG, type IVcsConfig } from '../config/vcs.config';
 import { decryptToken } from '../common/utils/encryption.util';
 import { AfterCommitService } from '../permissions/after-commit.service';
 import { VcsConnectionService, vcsTestTarget } from './vcs-connection.service';
-import { VcsSyncService } from './vcs-sync.service';
+import { VcsSyncService, VcsTargetDriftError } from './vcs-sync.service';
 import { VcsPrSyncService, type ApplyPrStatusesResult } from './vcs-pr-sync.service';
 import { providerForConnection } from './provider-for-connection';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
@@ -100,14 +100,30 @@ export class VcsManualSync {
    * reports through the log — as do the per-issue failures `isolate` collects instead of rejecting.
    * `defer` answering false means no transaction owns this call — nothing has committed, so a failure
    * there is the caller's.
+   *
+   * Review-1119 (US-006, B1): the target check the closure runs happens inside the approval's transaction,
+   * and that lock is released with it. The pass therefore revalidates the same captured connection and
+   * author filter inside every issue write's own transaction (`revalidateTarget`), so a disconnect, a
+   * repository change or a tightened `allowedAuthors` that commits in between lands before a write that
+   * would import from the old target: that write is refused, nothing is written, and the pass stops.
    */
   async prepareSyncAll(slug: string): Promise<() => Promise<SyncResultDto>> {
     const { project, connection, key } = await this.target(slug);
     const provider = providerForConnection(connection, decryptToken(connection.encryptedToken, key), this.config);
     const { issues, capped } = await provider.fetchIssues();
     const filtered = this.sync.filterByAllowedAuthors(issues, connection.allowedAuthors);
+    const revalidateTarget = async () => {
+      try {
+        await this.assertTarget(project.id, connection, true);
+      } catch (error) {
+        if (error instanceof ValidationAppException) throw new VcsTargetDriftError();
+        throw error;
+      }
+    };
     const importIssues = async () => {
-      const { errors } = await this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: true });
+      const { errors } = await this.sync.syncIssues(
+        project, filtered, connection, 'vcs.sync.all', { isolate: true, revalidate: revalidateTarget },
+      );
       this.logImportFailures(project.id, errors);
     };
     return async () => {

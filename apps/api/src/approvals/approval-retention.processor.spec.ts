@@ -34,9 +34,15 @@ function setup(retention: IRetentionConfig | undefined) {
   return { processor, repository, configService, audit, recorded };
 }
 
-/** The error messages the processor logged during `fn`, isolated from earlier tests in this file. */
+/**
+ * The error messages the processor logged during `fn`, isolated from earlier tests in this file.
+ *
+ * `test-setup.ts` already no-ops `Logger.prototype.error` for the whole run, so this reuses that spy and
+ * only clears it: installing a second implementation would leave it mocked for the rest of the file, since
+ * `vi.clearAllMocks()` drops call history without restoring anything.
+ */
 async function errorMessagesOf(fn: () => Promise<void>): Promise<unknown[]> {
-  const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+  const errorLog = vi.mocked(Logger.prototype.error);
   errorLog.mockClear();
 
   await fn();

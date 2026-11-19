@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsManualSync } from './vcs-manual-sync.service';
+import { VcsTargetDriftError } from './vcs-sync.service';
 import type { ProjectsService } from '../projects/projects.service';
 import type { VcsConnectionService } from './vcs-connection.service';
 import type { VcsPrSyncService } from './vcs-pr-sync.service';
@@ -85,7 +86,7 @@ describe('VcsManualSync', () => {
     expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
     expect(provider.fetchIssues).toHaveBeenCalledOnce();
     expect(provider.fetchIssue).not.toHaveBeenCalled();
-    expect(sync.syncIssues).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, [issue], expect.objectContaining({ id: 'c' }), 'vcs.sync.all', { isolate: true });
+    expect(sync.syncIssues).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, [issue], expect.objectContaining({ id: 'c' }), 'vcs.sync.all', { isolate: true, revalidate: expect.any(Function) });
   });
   describe('approved full import of three eligible issues from a capped fetch', () => {
     const issues = [issue, { ...issue, number: 8 }, { ...issue, number: 9 }];
@@ -118,7 +119,7 @@ describe('VcsManualSync', () => {
       const apply = await prepare();
       await afterCommit.scope(() => apply());
       expect(sync.syncIssues).toHaveBeenCalledExactlyOnceWith(
-        { id: 'p', key: 'ALPHA' }, issues, connection, 'vcs.sync.all', { isolate: true },
+        { id: 'p', key: 'ALPHA' }, issues, connection, 'vcs.sync.all', { isolate: true, revalidate: expect.any(Function) },
       );
     });
     it('AC-6: a failing deferred pass leaves the enclosing scope resolved', async () => {
@@ -170,9 +171,29 @@ describe('VcsManualSync', () => {
       const result = await (await prepare())();
       expect(imported).toBe(true);
       expect(sync.syncIssues).toHaveBeenCalledExactlyOnceWith(
-        { id: 'p', key: 'ALPHA' }, issues, connection, 'vcs.sync.all', { isolate: true },
+        { id: 'p', key: 'ALPHA' }, issues, connection, 'vcs.sync.all', { isolate: true, revalidate: expect.any(Function) },
       );
       expect(result).toMatchObject({ issuesSynced: 0, fetchedIssues: 3 });
+    });
+    /**
+     * Review-1119 US-006 (B1): the closure's own target check runs inside the approval transaction and its
+     * lock dies with it, so the pass it queues hands `syncIssues` a revalidation that reads the connection
+     * again under a lock — inside each issue write's transaction.
+     */
+    it('B1: the deferred import revalidates the captured connection and author filter under a lock', async () => {
+      const apply = await prepare();
+      await afterCommit.scope(() => apply());
+
+      const options = sync.syncIssues.mock.calls[0]?.[4] as { isolate: boolean; revalidate: () => Promise<void> };
+      expect(options.isolate).toBe(true);
+
+      // The captured target still matches: the revalidation passes through the locking read.
+      await expect(options.revalidate()).resolves.toBeUndefined();
+      expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
+
+      // A repository change and a tightened author filter commit after the approval: the write is refused.
+      connections.getFullByProject.mockResolvedValue({ ...connection, repoName: 'changed', allowedAuthors: '["bob"]' });
+      await expect(options.revalidate()).rejects.toBeInstanceOf(VcsTargetDriftError);
     });
   });
   it('AC-9: the immediate full sync keeps the fullSync synced count', async () => {

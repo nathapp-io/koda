@@ -58,7 +58,30 @@ export class ApprovalDecisionDto {
 export class ApprovalRequestDto extends ApprovalRequestFields {
   @ApiProperty({ type: 'object', additionalProperties: true, nullable: true }) details!: Record<string, unknown> | null;
   @ApiProperty({ type: Object, nullable: true }) input!: unknown;
-  @ApiProperty({ type: Object, nullable: true }) result!: unknown;
+  /**
+   * Review-1119 US-006 (B2): the executed command's recorded answer, `null` until it executes. The shape
+   * belongs to the command, so it cannot be one schema — but the approved full import is the operation
+   * whose answer a client needs to read, and it is not reachable through any sync response (that one has
+   * already answered `202 pending`): this field is where its fetch result is reported.
+   */
+  @ApiProperty({
+    type: Object,
+    nullable: true,
+    description: 'The executed command\'s recorded result, null until the request executes; the shape is the '
+      + 'command\'s own. An executed `vcs.sync.all` records the approved full import\'s fetch result — '
+      + '`syncType` `manual`, `issuesSynced` 0 and `issuesSkipped` 0 (the import itself runs after this '
+      + 'commit), the created `tickets`, `fetchedIssues` (issues the import will process, after the '
+      + 'allowedAuthors filter) and `capped` (the provider had more issues than the fetch returned).',
+    example: {
+      syncType: 'manual',
+      issuesSynced: 0,
+      issuesSkipped: 0,
+      tickets: [],
+      fetchedIssues: 3,
+      capped: true,
+    },
+  })
+  result!: unknown;
   @ApiProperty({ type: [ApprovalDecisionDto] }) decisions!: ApprovalDecisionDto[];
 
   static from(detail: ApprovalRequestDetail): ApprovalRequestDto {

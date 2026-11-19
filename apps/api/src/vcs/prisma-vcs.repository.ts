@@ -19,6 +19,7 @@ import {
   MergedPrTransitionInput,
   OutboxDedupQuery,
   OnTicketCreated,
+  BeforeTicketInsert,
   PrStateWriteOutcome,
   TicketLinkData,
   UpdateVcsConnectionData,
@@ -233,16 +234,27 @@ export class PrismaVcsRepository implements IVcsRepository {
    * transaction, so answering null would hide a doomed transaction — it is rethrown instead. The ambient
    * state is captured before the retry helper runs, because the helper's own `run` would report the
    * attempt's transaction rather than the caller's.
+   *
+   * Review-1119 (US-006, B1): `beforeInsert` runs first, inside the attempt, and takes its own lock. A
+   * deferred import reaches this after the approval committed, so this is the only place its target can
+   * still be proven unchanged: the lock it takes is the one the connection writes wait on, and a throw
+   * here leaves the attempt with nothing to roll back.
    */
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
     externalVcsId: string,
     onCreated?: OnTicketCreated,
+    beforeInsert?: BeforeTicketInsert,
   ): Promise<CreateTicketFromIssueResult | null> {
     const inTransaction = this.txManager.isInTransaction();
     try {
       return await runWithTicketNumberRetry(this.txManager, async () => {
+        // The connection lock is taken before the project's: a connection write locks its own row and
+        // then reaches the project through the audit entry's foreign key, so this order cannot deadlock
+        // against it.
+        if (beforeInsert) await beforeInsert();
+
         // Fence every import entry point against project deletion. The delete's UPDATE takes
         // this same row lock, so either the import (including audit) commits first, or a
         // stale fetch observes the tombstone after waiting and cannot allocate/insert.

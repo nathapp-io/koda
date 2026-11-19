@@ -205,13 +205,23 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
   /**
    * review-1119 US-002 AC-15: the audit purge and its entry are one transaction, so a rejected record
    * rolls the delete back and the entries live to the next night's run.
+   *
+   * B4: the assertion has to prove the rollback happened, not that nothing did — the recorder must have
+   * been reached with the retention entry for the row the delete found.
    */
   it('AC-15: a rejected record rolls the audit retention delete back', async () => {
     const entry = await createAgedAuditEntry();
-    rejectFirstRecord(AUDIT_KEY);
+    const record = rejectFirstRecord(AUDIT_KEY);
 
     await expect(purgeAudit()).resolves.toBeUndefined();
 
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      key: AUDIT_KEY,
+      resourceType: 'audit-entry',
+      resourceId: 'all',
+      projectId: null,
+      summary: 'purged 1 audit entries',
+    }));
     expect(await db.auditEntry.findUnique({ where: { id: entry.id } })).not.toBeNull();
     expect(await count(AUDIT_KEY)).toBe(0);
   });
