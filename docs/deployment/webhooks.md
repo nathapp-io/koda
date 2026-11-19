@@ -18,7 +18,7 @@ Verify v2 using the webhook's secret and the exact timestamp text, delivery ID t
 
 To send a CI delivery, sign the exact raw JSON request body with the project's CI webhook token. The v2 signed string is `<timestamp>.<X-CI-Delivery>.<body>`, where `<timestamp>` is the text sent in `X-CI-Timestamp`, `X-CI-Delivery` is the delivery ID header value, and `<body>` is the raw request body. Send the resulting HMAC-SHA256 as `sha256=<hex>` in `X-CI-Signature-V2`. The timestamp must be decimal Unix seconds and within 300 seconds of the API's clock.
 
-`<body>` is the bytes sent, not a decoded or re-serialized copy: sign the body exactly as it goes on the wire, byte for byte, even when it is not valid UTF-8. Koda verifies against the bytes it received and refuses a delivery whose raw body it could not capture.
+`<body>` is the bytes sent, not a decoded or re-serialized copy: sign the body exactly as it goes on the wire, byte for byte, even when it is not valid UTF-8. Koda verifies against the bytes it received and refuses a delivery whose raw body it could not capture. A request that sends no body signs the empty string, not the `{}` some servers substitute so their JSON parser has a document.
 
 On a v2 delivery, `X-CI-Delivery` must be non-empty and at most 255 bytes (UTF-8). Koda records the delivery ID in a table whose unique index over the project, source and delivery ID cannot hold a longer value, so an oversized ID is refused with the same 401 as a bad signature. UUIDs and short pipeline-run identifiers are well within the limit.
 

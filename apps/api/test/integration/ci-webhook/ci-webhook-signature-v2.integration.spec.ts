@@ -75,6 +75,29 @@ describeIntegration('CI webhook v2-only delivery over HTTP (US-005)', () => {
       .send(body);
   };
 
+  /**
+   * A delivery injected straight into Fastify, bypassing supertest: the only way to send a body that is
+   * absent (`payload` omitted) or not valid UTF-8 (`payload` a Buffer — superagent's `.send()` turns a
+   * Buffer into an object). `inject` runs the whole route, including the `preParsing` raw-body hook.
+   */
+  const injectV2 = (
+    deliveryId: string,
+    timestamp: string,
+    signature: string,
+    payload?: Buffer,
+  ) =>
+    app.getHttpAdapter().getInstance<FastifyInstance>().inject({
+      method: 'POST',
+      url: ROUTE,
+      headers: {
+        'content-type': 'application/json',
+        'x-ci-timestamp': timestamp,
+        'x-ci-signature-v2': signature,
+        'x-ci-delivery': deliveryId,
+      },
+      ...(payload === undefined ? {} : { payload }),
+    });
+
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: true });
@@ -152,18 +175,6 @@ describeIntegration('CI webhook v2-only delivery over HTTP (US-005)', () => {
       Buffer.from([0xff]),
       Buffer.from('"},"failures":[{"test":"T","line":1}]}'),
     ]);
-    const inject = (deliveryId: string, timestamp: string, signature: string) =>
-      app.getHttpAdapter().getInstance<FastifyInstance>().inject({
-        method: 'POST',
-        url: ROUTE,
-        headers: {
-          'content-type': 'application/json',
-          'x-ci-timestamp': timestamp,
-          'x-ci-signature-v2': signature,
-          'x-ci-delivery': deliveryId,
-        },
-        payload: rawBody,
-      });
 
     const deliveryId = `ci-v2-raw-bytes-${++deliveries}`;
     const timestamp = freshTimestamp();
@@ -172,14 +183,38 @@ describeIntegration('CI webhook v2-only delivery over HTTP (US-005)', () => {
       .update(rawBody)
       .digest('hex')}`;
 
-    const accepted = await inject(deliveryId, timestamp, signedOverBytes);
+    const accepted = await injectV2(deliveryId, timestamp, signedOverBytes, rawBody);
     expect(accepted.statusCode).toBe(200);
 
     const decodedTimestamp = freshTimestamp();
     const decodedId = `ci-v2-decoded-bytes-${++deliveries}`;
     const signedOverText = signedV2(decodedTimestamp, decodedId, rawBody.toString('utf8'));
 
-    const refused = await inject(decodedId, decodedTimestamp, signedOverText);
+    const refused = await injectV2(decodedId, decodedTimestamp, signedOverText, rawBody);
     expect(refused.statusCode).toBe(401);
+  });
+
+  /**
+   * Review B1 (empty body): a JSON request with no body is still handed the synthetic `{}` by the
+   * `preParsing` hook, so the parser has a document and DTO validation answers 400. The sender wrote
+   * nothing, though, so v2 must cover the zero-length wire body: a signature over that synthetic `{}`
+   * authenticates bytes that were never sent and is refused as 401, while the signature over the empty
+   * body verifies and the request then fails payload validation — which is why a bodyless delivery
+   * never succeeds.
+   */
+  it('review B1: an empty wire body is signed as empty, not as the synthetic {} parser input', async () => {
+    const parserInputTimestamp = freshTimestamp();
+    const parserInputId = `ci-v2-empty-parser-input-${++deliveries}`;
+    const refused = await injectV2(
+      parserInputId,
+      parserInputTimestamp,
+      signedV2(parserInputTimestamp, parserInputId, '{}'),
+    );
+    expect(refused.statusCode).toBe(401);
+
+    const emptyTimestamp = freshTimestamp();
+    const emptyId = `ci-v2-empty-wire-body-${++deliveries}`;
+    const validated = await injectV2(emptyId, emptyTimestamp, signedV2(emptyTimestamp, emptyId, ''));
+    expect(validated.statusCode).toBe(400);
   });
 });

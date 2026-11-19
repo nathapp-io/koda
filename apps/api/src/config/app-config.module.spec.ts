@@ -1,20 +1,43 @@
 /**
- * US-002 AC-8 without a database: the registered `WEBHOOK_SIGNATURE_CFG` namespace.
+ * US-002 AC-8 without a database: the registered `WEBHOOK_SIGNATURE_CFG` namespace, resolved through
+ * the `ConfigModule.forRoot` registration `AppModule` itself imports.
  *
- * `AppConfigModule` is the exact `ConfigModule` registration `AppModule` imports, so dropping
- * `webhookSignatureConfig` from the load array — or the whole registration from `AppModule` — fails
- * here, in the DB-free unit suite (`.nax/rules/api-testing.md`: module wiring is a unit test). The
- * full boot check stays in `test/integration/config/webhook-signature-config.integration.spec.ts`.
- *
- * Only the config namespaces are compiled, so no unrelated infrastructure (Prisma, HTTP) is needed;
- * every factory in the list reads `process.env`, which `test-setup.ts` fills from `.env.test`.
+ * Compiling `AppConfigModule` on its own would keep passing if `AppModule` stopped importing it, so the
+ * wiring is asserted from `AppModule`'s own `@Module()` metadata, and the registration this spec
+ * compiles comes from that metadata too (review B3). Both assertions are DB-free: no application graph
+ * is built — `ConfigModule` is instantiated alone, and every factory in the load array reads
+ * `process.env`, which `test-setup.ts` fills from `.env.test`. The full boot check stays in
+ * `test/integration/config/webhook-signature-config.integration.spec.ts` (`.nax/rules/api-testing.md`:
+ * module wiring is a unit test).
  */
-import { ConfigService } from '@nestjs/config';
+import type { DynamicModule } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { AppModule } from '../app.module';
 import { AppConfigModule } from './app-config.module';
 import { IWebhookSignatureConfig, WEBHOOK_SIGNATURE_CFG } from './webhook-signature.config';
 
 const SWITCHES = ['WEBHOOK_SIGNATURE_V1_ENABLED', 'CI_WEBHOOK_REQUIRE_V2'] as const;
+
+/** What `AppModule` imports, exactly as its `@Module()` decorator recorded it. */
+function appModuleImports(): unknown[] {
+  return (Reflect.getMetadata('imports', AppModule) as unknown[] | undefined) ?? [];
+}
+
+/**
+ * The config registration `AppModule` imports. `ConfigModule.forRoot` is async in @nestjs/config 12, so
+ * `AppConfigModule` is a promise Nest resolves as an async dynamic module; this spec resolves the very
+ * entry AppModule holds instead of the constant on its own.
+ */
+async function appModuleConfigRegistration(): Promise<DynamicModule> {
+  const registration = appModuleImports().find((entry) => entry === AppConfigModule);
+  if (registration === undefined) {
+    throw new Error('AppModule does not import the app config registration');
+  }
+  const resolved = (await registration) as DynamicModule;
+  expect(resolved.module).toBe(ConfigModule);
+  return resolved;
+}
 
 describe('app config registration (US-002 AC-8)', () => {
   let moduleRef: TestingModule | undefined;
@@ -34,8 +57,14 @@ describe('app config registration (US-002 AC-8)', () => {
     }
   });
 
+  it('AC-8: AppModule imports the config registration that carries the signature switches', () => {
+    expect(appModuleImports()).toContain(AppConfigModule);
+  });
+
   it('AC-8: resolves the signature switches with their documented defaults', async () => {
-    moduleRef = await Test.createTestingModule({ imports: [AppConfigModule] }).compile();
+    moduleRef = await Test.createTestingModule({
+      imports: [await appModuleConfigRegistration()],
+    }).compile();
 
     const config = moduleRef.get(ConfigService).get<IWebhookSignatureConfig>(WEBHOOK_SIGNATURE_CFG);
 

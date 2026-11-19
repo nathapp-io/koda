@@ -21,6 +21,13 @@ export const DEFAULT_RAW_BODY_LIMIT_BYTES = 1 * 1024 * 1024 // 1 MiB
  *
  * The hook only buffers application/json requests; all other content
  * types fall through unchanged so the framework parser sees the stream.
+ *
+ * A request that sends no body at all still reaches the parser as `{}`, because
+ * Fastify rejects an empty `application/json` payload — but `request.rawBody`
+ * stays the zero-length capture, so a v2 signature covers the bytes that were
+ * really sent rather than that synthetic parser input (webhook signature v2,
+ * review B1). The legacy v1 path keeps signing the re-serialized `{}` through
+ * `signedBytesOf`, which treats an empty capture as "no captured bytes".
  */
 export function registerRawBodyHook(
   fastify: FastifyInstance,
@@ -60,12 +67,17 @@ export function registerRawBodyHook(
       throw err
     }
 
-    const body = chunks.length > 0 ? Buffer.concat(chunks) : Buffer.from('{}')
+    // The bytes the sender put on the wire, and nothing else: an empty capture is a zero-length
+    // buffer, which is what a v2 signature has to cover (webhook signature v2, review B1).
+    const wireBody = chunks.length > 0 ? Buffer.concat(chunks) : Buffer.alloc(0)
+    // The JSON parser rejects an empty payload, so a bodyless request is still handed `{}` — the
+    // fallback keeps the legacy behaviour (a 400 from DTO validation instead of a parser error).
+    const parserBody = wireBody.length > 0 ? wireBody : Buffer.from('{}')
 
     const headers = request['headers'] as Record<string, unknown> | undefined
-    if (headers) headers['content-length'] = String(body.length)
-    request['rawBody'] = body
+    if (headers) headers['content-length'] = String(parserBody.length)
+    request['rawBody'] = wireBody
 
-    return Readable.from([body])
+    return Readable.from([parserBody])
   })
 }
