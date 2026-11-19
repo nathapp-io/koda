@@ -44,6 +44,13 @@ describe('signedBytesOf', () => {
     expect(signedBytesOf({ body: { a: 1 } })).toBe('{"a":1}');
   });
 
+  it('treats an empty capture as the bodyless fallback, so the legacy v1 bytes are unchanged', () => {
+    // The hook records the zero-length wire body for a bodyless JSON request but still hands the parser
+    // `{}`. v1 has always signed that re-serialized `{}` for such a request (webhook signature v2,
+    // review B1): only v2 reads the capture as bytes, through `request.rawBody` directly.
+    expect(signedBytesOf({ rawBody: Buffer.alloc(0), body: {} })).toBe('{}');
+  });
+
   it('serializes a missing body as {}', () => {
     expect(signedBytesOf({})).toBe('{}');
   });

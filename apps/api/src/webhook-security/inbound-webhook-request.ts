@@ -9,9 +9,17 @@ export type InboundWebhookRequest = { rawBody?: Buffer; body?: unknown };
  * The bytes the sender signed. Prefer the raw bytes captured by the preParsing
  * hook (KODA-02). Without the hook (Express-based test setups) fall back to the
  * re-serialized body, which the platform round-trips from the same JSON.
+ *
+ * A captured-but-empty body is treated as absent: the hook records the zero-length
+ * wire body for a bodyless JSON request, and this legacy path has always signed the
+ * `{}` the parser was handed for it (webhook signature v2, review B1 — only v2 reads
+ * the capture as bytes, straight from `request.rawBody`).
  */
 export function signedBytesOf(request: InboundWebhookRequest): string {
-  return request.rawBody ? request.rawBody.toString('utf8') : JSON.stringify(request.body ?? {});
+  const rawBody = request.rawBody;
+  return rawBody && rawBody.length > 0
+    ? rawBody.toString('utf8')
+    : JSON.stringify(request.body ?? {});
 }
 
 /**

@@ -15,6 +15,8 @@ import type { Mock, Mocked } from 'vitest';
  * instantiation, matching `src/outbox/fan-out-publisher.spec.ts`.
  */
 import * as crypto from 'crypto';
+import type { ConfigService } from '@nestjs/config';
+import { WEBHOOK_SIGNATURE_CFG } from '../config/webhook-signature.config';
 import { WebhookDeliveryHandler } from './webhook-delivery.handler';
 import type { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { WebhookDomain } from './domain/webhook.domain';
@@ -51,14 +53,18 @@ interface HandlerHarness {
   webhookRepo: Mocked<PrismaWebhookRepository>;
 }
 
-function makeHandler(): HandlerHarness {
+function makeHandler(configValue: unknown = undefined): HandlerHarness {
   const webhookRepo = makeWebhookRepo();
   const post: PostMock = vi.fn<(...args: [string, Record<string, string>, string]) => Promise<void>>(
     (): Promise<void> => Promise.resolve(),
   );
   const http = { post } as unknown as OutboundHttpClient;
 
-  return { handler: new WebhookDeliveryHandler(webhookRepo, http), post, webhookRepo };
+  const config = {
+    get: vi.fn((key: string) => (key === WEBHOOK_SIGNATURE_CFG ? configValue : undefined)),
+  } as unknown as ConfigService;
+
+  return { handler: new WebhookDeliveryHandler(webhookRepo, http, config), post, webhookRepo };
 }
 
 function hmacHex(secret: string, body: string): string {
@@ -86,8 +92,77 @@ describe('WebhookDeliveryHandler', () => {
     }
   });
 
+  describe('US-003 outbound signatures', () => {
+    it('AC-1: posts the Unix timestamp for the send time', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-11-19T12:00:00Z'));
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+
+      await harness.handler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } });
+
+      expect(harness.post.mock.calls[0][1]['X-Koda-Timestamp']).toBe('1795089600');
+      vi.useRealTimers();
+    });
+
+    it('AC-2: independently recomputes v2 signature from the posted inputs', async () => {
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+      await harness.handler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } });
+      const [, headers, body] = harness.post.mock.calls[0];
+
+      const signedText = `${headers['X-Koda-Timestamp']}.${headers['X-Koda-Delivery-Id']}.${body}`;
+      const independentlyComputed = `sha256=${crypto.createHmac('sha256', 's3cret').update(signedText).digest('hex')}`;
+      expect(headers['X-Koda-Signature-V2']).toBe(independentlyComputed);
+    });
+
+    it('AC-3: signs the body with v1 when enabled', async () => {
+      harness = makeHandler({ v1Enabled: true, ciRequireV2: false });
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+      await harness.handler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } });
+      const [, headers, body] = harness.post.mock.calls[0];
+      expect(headers['X-Koda-Signature']).toBe(`sha256=${hmacHex('s3cret', body)}`);
+    });
+
+    it('AC-4 and AC-5: disabling v1 omits it but keeps v2', async () => {
+      harness = makeHandler({ v1Enabled: false, ciRequireV2: false });
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+      await harness.handler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } });
+      const [, headers] = harness.post.mock.calls[0];
+      expect(headers).not.toHaveProperty('X-Koda-Signature');
+      expect(headers['X-Koda-Signature-V2']).toMatch(/^sha256=[a-f0-9]{64}$/);
+    });
+
+    it('AC-6: defaults to v1 when the signature config is undefined', async () => {
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+      await harness.handler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } });
+      expect(harness.post.mock.calls[0][1]).toHaveProperty('X-Koda-Signature');
+    });
+
+    it('AC-7 and AC-8: retries retain the delivery id but receive a fresh timestamp', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-11-19T12:00:00Z'));
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+      const input = { webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } };
+      await harness.handler.handle(input);
+      vi.advanceTimersByTime(100_000);
+      await harness.handler.handle(input);
+      const [first, second] = harness.post.mock.calls.map(([, headers]) => headers);
+      expect(first['X-Koda-Delivery-Id']).toBe(second['X-Koda-Delivery-Id']);
+      expect(Number(second['X-Koda-Timestamp']) - Number(first['X-Koda-Timestamp'])).toBe(100);
+      vi.useRealTimers();
+    });
+
+    it('AC-9: default config posts exactly the six required headers', async () => {
+      harness.webhookRepo.findById.mockResolvedValue(makeWebhook());
+      await harness.handler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } });
+      expect(Object.keys(harness.post.mock.calls[0][1]).sort()).toEqual([
+        'Content-Type', 'X-Koda-Delivery-Id', 'X-Koda-Event', 'X-Koda-Signature',
+        'X-Koda-Signature-V2', 'X-Koda-Timestamp',
+      ].sort());
+    });
+  });
+
   describe('AC11: an active webhook is delivered through OutboundHttpClient.post', () => {
-    it('AC11: handle calls post once with the webhook url, JSON.stringify(payload) and the four signed headers', async () => {
+    it('AC11: handle calls post once with the webhook url, JSON.stringify(payload) and the six signed headers', async () => {
       harness.webhookRepo.findById.mockResolvedValue(
         makeWebhook({ url: 'https://example.com/hook', secret: 's3cret' }),
       );
@@ -109,6 +184,8 @@ describe('WebhookDeliveryHandler', () => {
           .createHash('sha256')
           .update(`w1:STATUS_CHANGE:${expectedBody}`)
           .digest('hex'),
+        'X-Koda-Timestamp': expect.any(String),
+        'X-Koda-Signature-V2': expect.stringMatching(/^sha256=[a-f0-9]{64}$/),
       });
     });
 

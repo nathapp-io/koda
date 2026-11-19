@@ -1,4 +1,5 @@
 import type { Mock, Mocked } from 'vitest';
+import type { ConfigService } from '@nestjs/config';
 /**
  * US-004 — the delivery seam: `FanOutPublisher.publish` → `WebhookOutboxSubscriber`
  * → `WebhookDeliveryHandler` → `OutboundHttpClient` → `OutboundUrlGuard`.
@@ -77,7 +78,8 @@ function makeSeam(
 
   const guard = new OutboundUrlGuard(config, { resolve });
   const client = new OutboundHttpClient(guard, config);
-  const handler = new WebhookDeliveryHandler(makeWebhookRepo(url), client);
+  const signatureConfig = { get: vi.fn(() => undefined) } as unknown as ConfigService;
+  const handler = new WebhookDeliveryHandler(makeWebhookRepo(url), client, signatureConfig);
 
   new WebhookOutboxSubscriber(publisher, handler).onModuleInit();
 

@@ -29,6 +29,13 @@ function replySpy(): { code: Mock; send: Mock } {
   return { code: vi.fn().mockReturnThis(), send: vi.fn() }
 }
 
+/** What the hook hands the JSON parser, as text. */
+async function drain(stream: AsyncIterable<Buffer>): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 function makeRequest(headers: Record<string, string>): HookRequest {
   return { headers } as unknown as HookRequest
 }
@@ -59,14 +66,31 @@ describe('registerRawBodyHook', () => {
     expect(Buffer.isBuffer(result) || result instanceof Readable).toBe(true)
   })
 
-  it('falls back to empty {} when no JSON body is sent', async () => {
+  it('records the zero-length wire body and still hands the parser {} when no JSON body is sent', async () => {
     const recorder: CapturedPayload = { hook: async () => undefined }
     registerRawBodyHook(makeFastify(recorder) as never)
 
     const request = makeRequest({ 'content-type': 'application/json' })
-    await recorder.hook(request, replySpy(), Readable.from([]))
+    const result = await recorder.hook(request, replySpy(), Readable.from([]))
 
-    expect(request.rawBody).toEqual(Buffer.from('{}'))
+    // v2 signs the bytes that were sent, and here none were: storing the synthetic `{}` parser input
+    // as rawBody would verify bytes the sender never wrote (webhook signature v2, review B1).
+    expect(request.rawBody).toEqual(Buffer.alloc(0))
+    expect(request.rawBody?.length).toBe(0)
+    // The JSON parser still needs a document, so it keeps receiving the `{}` fallback (unchanged).
+    expect(request.headers?.['content-length']).toBe('2')
+    expect(await drain(result as AsyncIterable<Buffer>)).toBe('{}')
+  })
+
+  it('hands the parser the wire bytes when a JSON body is sent', async () => {
+    const recorder: CapturedPayload = { hook: async () => undefined }
+    registerRawBodyHook(makeFastify(recorder) as never)
+
+    const request = makeRequest({ 'content-type': 'application/json' })
+    const result = await recorder.hook(request, replySpy(), asPayload(Buffer.from('{"a":1}')))
+
+    expect(request.rawBody).toEqual(Buffer.from('{"a":1}'))
+    expect(await drain(result as AsyncIterable<Buffer>)).toBe('{"a":1}')
   })
 
   it('default limit is 1 MiB', () => {

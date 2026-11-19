@@ -1,0 +1,11 @@
+{
+  "kind": "captured",
+  "source": "preflight",
+  "capturedAt": "2026-11-19T12:19:25.679Z",
+  "baseRef": "87d0fabe8f6a0243c98470cec6da0284adfe57ce",
+  "packageDirs": [
+    ".",
+    "apps/api"
+  ],
+  "entries": []
+}

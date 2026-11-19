@@ -6296,8 +6296,9 @@
           },
           {
             "name": "x-ci-signature",
-            "required": true,
+            "required": false,
             "in": "header",
+            "description": "v1 signature, `sha256=<hex>` over the raw body. Deprecated: omit it on a v2-only delivery.",
             "schema": {
               "type": "string"
             }
@@ -6314,6 +6315,24 @@
             "name": "date",
             "required": true,
             "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-ci-timestamp",
+            "required": false,
+            "in": "header",
+            "description": "Decimal Unix seconds covered by `x-ci-signature-v2`; must be within 300 seconds of now.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-ci-signature-v2",
+            "required": false,
+            "in": "header",
+            "description": "v2 signature, `sha256=<hex>` over `<x-ci-timestamp>.<x-ci-delivery>.<raw body>`.",
             "schema": {
               "type": "string"
             }

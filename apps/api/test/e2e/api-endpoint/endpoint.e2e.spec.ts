@@ -2964,6 +2964,40 @@ describeIntegration('API Integration Tests', () => {
       expect(data.message).toBeTruthy();
     });
 
+    /**
+     * US-005 (webhook signature v2): a v2-only sender omits `x-ci-signature` and signs
+     * `<x-ci-timestamp>.<x-ci-delivery>.<raw body>`. The signature is computed here over the exact
+     * timestamp text and the exact JSON string sent, so a 200 proves the route verifies v2 on its own.
+     */
+    it('POST /api/projects/:slug/ci-webhook — a v2-only delivery answers 200 (US-005)', async () => {
+      const payload = {
+        event: 'pipeline_failed',
+        pipeline: { id: '12350', url: 'https://github.com/org/repo/actions/runs/12350' },
+        commit: { sha: 'abc123def461', message: 'feat: v2-only CI delivery' },
+        failures: [
+          { test: 'AuthService.verifyV2', file: 'apps/api/src/auth/auth.service.ts', line: 88 },
+        ],
+      };
+      const rawBody = JSON.stringify(payload);
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const deliveryId = 'e2e-ci-delivery-v2-only';
+      const signatureV2 =
+        `sha256=${createHmac('sha256', ciWebhookSecret).update(`${timestamp}.${deliveryId}.${rawBody}`).digest('hex')}`;
+
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('Content-Type', 'application/json')
+        .set('x-ci-timestamp', timestamp)
+        .set('x-ci-signature-v2', signatureV2)
+        .set('x-ci-delivery', deliveryId)
+        .send(rawBody)
+        .expect(200);
+
+      const data = body<{ success: boolean; ticketRef: string }>(res);
+      expect(data.success).toBe(true);
+      expect(data.ticketRef).toMatch(/^KT-\d+$/);
+    });
+
     it('POST /api/projects/:slug/ci-webhook — accepts pipeline_succeeded and creates no ticket (P2 US-006)', async () => {
       const prisma = fixtureDb(app);
       const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
