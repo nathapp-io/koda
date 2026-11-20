@@ -26,11 +26,12 @@ jobs:
     outputs:
       tag: ${{ steps.info.outputs.tag }}
       version: ${{ steps.info.outputs.version }}
-      npm_tag: ${{ steps.info.outputs.npm_tag }}
+      npm_tag: ${{ steps.channels.outputs.npm_tag }}
       prerelease: ${{ steps.info.outputs.prerelease }}
       notify: ${{ steps.info.outputs.notify }}
-      docker_tags_api: ${{ steps.docker.outputs.tags_api }}
-      docker_tags_web: ${{ steps.docker.outputs.tags_web }}
+      docker_tags_api: ${{ steps.channels.outputs.tags_api }}
+      docker_tags_web: ${{ steps.channels.outputs.tags_web }}
+      latest: ${{ steps.channels.outputs.latest }}
     steps:
       # Review E/SEC-9: workflow inputs reach scripts through env, never through ${{ }} inside run:.
       - name: Set release info
@@ -48,11 +49,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           if [[ "$TAG" == *"-canary."* ]]; then
-            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "notify=false" >> "$GITHUB_OUTPUT"
           else
-            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "notify=true" >> "$GITHUB_OUTPUT"
           fi
@@ -74,20 +73,68 @@ jobs:
           fi
           echo "✅ Version match: $TAG"
 
-      - name: Compute Docker tags
-        id: docker
+      - name: Compute release channels
+        id: channels
         env:
           TAG: ${{ steps.info.outputs.tag }}
           VERSION: ${{ steps.info.outputs.version }}
         run: |
+          set -euo pipefail
+          remote_tags=$(git ls-remote --tags --refs origin 'v*')
+
           if [[ "$TAG" == *"-canary."* ]]; then
             echo "tags_api=nathapp/koda-api:canary" >> "$GITHUB_OUTPUT"
             echo "tags_web=nathapp/koda-web:canary" >> "$GITHUB_OUTPUT"
-          else
-            MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
-            echo "tags_api=nathapp/koda-api:${TAG},nathapp/koda-api:${MAJOR_MINOR},nathapp/koda-api:latest" >> "$GITHUB_OUTPUT"
-            echo "tags_web=nathapp/koda-web:${TAG},nathapp/koda-web:${MAJOR_MINOR},nathapp/koda-web:latest" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          is_older() {
+            local left_major left_minor left_patch right_major right_minor right_patch
+            IFS=. read -r left_major left_minor left_patch <<< "${1#v}"
+            IFS=. read -r right_major right_minor right_patch <<< "${2#v}"
+            if ((10#$left_major < 10#$right_major)); then return 0; fi
+            if ((10#$left_major > 10#$right_major)); then return 1; fi
+            if ((10#$left_minor < 10#$right_minor)); then return 0; fi
+            if ((10#$left_minor > 10#$right_minor)); then return 1; fi
+            ((10#$left_patch < 10#$right_patch))
+          }
+
+          latest=true
+          minor_latest=true
+          while IFS=$'\t' read -r _ remote_ref; do
+            remote_tag="${remote_ref#refs/tags/}"
+            [[ "$remote_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            remote_minor="$(printf '%s' "${remote_tag#v}" | cut -d. -f1-2)"
+            if is_older "$TAG" "$remote_tag"; then
+              latest=false
+              if [[ "$VERSION" == "$remote_minor".* ]]; then
+                minor_latest=false
+              fi
+            fi
+          done <<< "$remote_tags"
+
+          major_minor="$(printf '%s' "$VERSION" | cut -d. -f1-2)"
+          tags_api="nathapp/koda-api:${TAG}"
+          tags_web="nathapp/koda-web:${TAG}"
+          if [[ "$minor_latest" == true ]]; then
+            tags_api+=",nathapp/koda-api:${major_minor}"
+            tags_web+=",nathapp/koda-web:${major_minor}"
+          fi
+          if [[ "$latest" == true ]]; then
+            tags_api+=",nathapp/koda-api:latest"
+            tags_web+=",nathapp/koda-web:latest"
+            npm_tag=latest
+          elif [[ "$minor_latest" == true ]]; then
+            npm_tag="release-${major_minor}"
+          else
+            npm_tag="backport-${VERSION}"
+          fi
+          echo "tags_api=${tags_api}" >> "$GITHUB_OUTPUT"
+          echo "tags_web=${tags_web}" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=${npm_tag}" >> "$GITHUB_OUTPUT"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
 
   # ─── CLI: npm publish ─────────────────────────────────────────────────────────
 
@@ -252,6 +299,7 @@ jobs:
           name: ${{ needs.info.outputs.tag }}
           prerelease: ${{ needs.info.outputs.prerelease }}
           generate_release_notes: true
+          make_latest: ${{ needs.info.outputs.latest }}
 
   # ─── Notify ───────────────────────────────────────────────────────────────────
 
