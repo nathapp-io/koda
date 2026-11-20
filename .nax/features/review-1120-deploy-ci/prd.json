@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T02:53:12.842Z",
+  "updatedAt": "2026-11-20T02:57:57.952Z",
   "userStories": [
     {
       "id": "US-001",
@@ -129,15 +129,18 @@
         "ci"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "no-test",
         "reasoning": "Four files with standard Compose interpolation and a scoped Turbo override, without new runtime abstractions.",
-        "noTestJustification": "The changes are declarative forwarding of existing options with unchanged defaults, cache inputs, and one docs line; they do not change signature logic. Review checks both mappings and the Turbo override; no Docker render test is in scope."
+        "noTestJustification": "The changes are declarative forwarding of existing options with unchanged defaults, cache inputs, and one docs line; they do not change signature logic. Review checks both mappings and the Turbo override; no Docker render test is in scope.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "turbo.json",
@@ -167,7 +170,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bdfff29aab4521c97b7d97c5b1d4d7a70421c293"
     },
     {
       "id": "US-004",
