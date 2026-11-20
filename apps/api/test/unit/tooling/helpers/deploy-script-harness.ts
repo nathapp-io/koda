@@ -96,13 +96,36 @@ const STUB_DIR = join(__dirname, 'deploy-script-stubs');
 const CURL_STUB = '#!/bin/bash\nexit 0\n';
 const BASH_SHIM = '#!/bin/sh\nexec /bin/bash "$@"\n';
 /**
- * Pass-through `gzip`, except when `KODA_DEPLOY_HARNESS_GZIP_CORRUPT` is set: compressing then writes a
- * valid gzip followed by trailing garbage, which is the shape of a dump file that was corrupted after it
- * was written. The shell has no way to corrupt the script's own output otherwise, and the script's
- * verification has to reject the archive. Decompression and `-t` always run the real `gzip`, so the check
- * the script makes is the real one.
+ * Pass-through `gzip`, with two on-demand observations:
+ *
+ * - With `KODA_DEPLOY_HARNESS_GZIP_CORRUPT` set, compressing writes a valid gzip followed by trailing
+ *   garbage, which is the shape of a dump file that was corrupted after it was written. The shell has no way
+ *   to corrupt the script's own output otherwise, and the script's verification has to reject the archive.
+ *   Decompression and `-t` always run the real `gzip`, so the check the script makes is the real one.
+ * - Every decompression appends a snapshot to `$KODA_DEPLOY_HARNESS_VERIFY_MOMENT`: whether its stdout is a
+ *   pipe or a regular file it was redirected into, and every entry in the script's `backups/` directory with
+ *   its kind (gzip or plaintext) and mode. Decompression is where a verifier either streams the dump or
+ *   writes it out first, so this is what sees a plaintext copy that the script deletes again afterwards.
  */
 const gzipShim = (realGzip: string): string => `#!/bin/bash
+file_mode() {
+  if [[ "$(uname -s)" = Darwin ]]; then command stat -f '%Lp' "$1"; else command stat -c '%a' "$1"; fi
+}
+if [[ -n "\${KODA_DEPLOY_HARNESS_VERIFY_MOMENT-}" ]] &&
+   [[ "\${1-}" = "-dc" || "\${1-}" = "-d" || "\${1-}" = "--decompress" ]]; then
+  # Decided before the block below redirects stdout, which would otherwise make /dev/stdout that file.
+  if [[ -f /dev/stdout ]]; then stdout_kind=file; else stdout_kind=pipe; fi
+  {
+    printf 'stdout %s\\n' "$stdout_kind"
+    for entry in "\${KODA_DEPLOY_HARNESS_DIR-}"/backups/* "\${KODA_DEPLOY_HARNESS_DIR-}"/backups/.*; do
+      [[ -e "$entry" ]] || continue
+      entry_name="\${entry##*/}"
+      case "$entry_name" in .|..) continue ;; esac
+      if [[ "$(head -c 2 "$entry")" = $'\\x1f\\x8b' ]]; then entry_kind=gzip; else entry_kind=plaintext; fi
+      printf '%s %s %s\\n' "$entry_name" "$entry_kind" "$(file_mode "$entry")"
+    done
+  } >> "$KODA_DEPLOY_HARNESS_VERIFY_MOMENT"
+fi
 if [[ "\${KODA_DEPLOY_HARNESS_GZIP_CORRUPT-}" = 1 && $# -eq 0 ]]; then
   scratch="$(mktemp)"
   trap 'rm -f "$scratch"' EXIT
@@ -242,6 +265,7 @@ export function runDeployScript(
   const recordFile = join(harnessDir, 'docker-calls');
   const outputFile = join(harnessDir, 'output');
   const pgDumpFile = join(harnessDir, 'pg-dump');
+  const verifyMomentFile = join(harnessDir, 'verify-moment');
   writeFileSync(pgDumpFile, opts.docker?.pgDump ?? DEFAULT_PG_DUMP);
 
   writeExecutable(join(binDir, 'docker'), readFileSync(join(STUB_DIR, 'docker'), 'utf8'));
@@ -266,6 +290,7 @@ export function runDeployScript(
     KODA_DEPLOY_HARNESS_PG_DUMP: pgDumpFile,
     KODA_DEPLOY_HARNESS_PG_DUMP_EXIT: String(opts.docker?.pgDumpExit ?? 0),
     KODA_DEPLOY_HARNESS_FAIL_ON: (opts.docker?.failOn ?? []).join('\n'),
+    KODA_DEPLOY_HARNESS_VERIFY_MOMENT: verifyMomentFile,
   };
   const childUmask = opts.umask;
   if (childUmask !== undefined && !/^[0-7]{1,4}$/.test(childUmask)) {
@@ -274,6 +299,8 @@ export function runDeployScript(
 
   const run = (scriptArgs: string[]): ScriptRun => {
     writeFileSync(recordFile, '');
+    // Every run starts with no observation of its own, so a reading belongs to the run that made it.
+    writeFileSync(verifyMomentFile, '');
     // Both streams go to one file so the output keeps the order the script wrote it in.
     const outputFd = openSync(outputFile, 'w');
     let status: number;

@@ -67,6 +67,31 @@ function moment(run: ScriptRun, name: 'dump-moment' | 'archive-moment'): Record<
   );
 }
 
+/**
+ * What the `gzip` shim saw while it decompressed the dump: the kind of its stdout (a pipe, or a regular
+ * file it was redirected into) and every entry the script's `backups/` directory held at that instant.
+ */
+interface VerifyMoment {
+  stdout: 'file' | 'pipe';
+  entries: { name: string; kind: 'gzip' | 'plaintext'; mode: string }[];
+}
+
+function verifyMoment(run: ScriptRun): VerifyMoment | undefined {
+  const file = join(run.dir, '.harness', 'verify-moment');
+  if (!existsSync(file)) return undefined;
+  const lines = readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '');
+  const header = lines.shift() ?? '';
+  return {
+    stdout: header === 'stdout file' ? 'file' : 'pipe',
+    entries: lines.map((line) => {
+      const [name = '', kind = '', mode = ''] = line.split(' ');
+      return { name, kind: kind === 'gzip' ? 'gzip' : 'plaintext', mode };
+    }),
+  };
+}
+
 function callIndex(calls: DockerCall[], predicate: (argv: string[]) => boolean): number {
   return calls.findIndex((call) => predicate(call.argv));
 }
@@ -128,9 +153,16 @@ describe('backup-db.sh', () => {
   it('AC-2: verifies the SQL gzip without writing a plaintext copy of the dump', () => {
     const run = runDeployScript('backup-db.sh', [], { umask: OPERATOR_UMASK });
 
+    // What the verifier itself saw while it read the dump: the decompressed stream went into the pipe that
+    // greps it, and the only thing in the backups directory was the compressed dump. A verifier that wrote
+    // the plaintext out and deleted it again fails here, not only in a listing taken after it cleaned up.
+    const dump = only(dumpFiles(run));
+    const verify = verifyMoment(run);
+    expect(verify?.stdout).toBe('pipe');
+    expect(verify?.entries).toEqual([{ name: dump, kind: 'gzip', mode: '600' }]);
+
     expect(run.status).toBe(0);
-    // Exactly the two compressed artifacts: no `.check` file and no temporary plaintext dump survives,
-    // and nothing plaintext is left behind under another name.
+    // Nothing plaintext survives either: exactly the two compressed artifacts, under no other name.
     expect(backupEntries(run)).toHaveLength(2);
     for (const name of backupEntries(run)) {
       expect(name).toMatch(/\.(sql|tar)\.gz$/);
