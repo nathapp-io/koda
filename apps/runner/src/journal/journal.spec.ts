@@ -130,6 +130,16 @@ describe('commands and abandon', () => {
     expect(j.getCommand('c1')).toMatchObject({ result: 'ok', detail: null });
     expect(j.getCommand('nope')).toBeNull();
   });
+  test('AC-13: updateCommandOutcome changes outcome and timestamp but preserves command identity', () => {
+    const appliedAt = '2026-11-20T00:00:00.000Z';
+    j.recordCommand(rec('update-me'));
+    j.updateCommandOutcome('update-me', { result: 'rejected', detail: 'x', appliedAt });
+    expect(j.getCommand('update-me')).toMatchObject({ commandId: 'update-me', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, result: 'rejected', detail: 'x', appliedAt });
+  });
+  test('AC-14: updateCommandOutcome does not insert unknown ids', () => {
+    j.updateCommandOutcome('nope', { result: 'ok', detail: null, appliedAt: '2026-11-20T00:00:00.000Z' });
+    expect(j.getCommand('nope')).toBeNull();
+  });
   test('abandon drops that epoch only and keeps the applied-command row', () => {
     j.insertJob(job('j1', 1));
     j.insertJob(job('j1', 2));

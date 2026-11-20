@@ -56,6 +56,20 @@ export class CommandHandler {
     const prior = this.deps.journal.getCommand(command.commandId);
     if (prior) {
       if (prior.type === 'ASSIGN' && prior.result === 'ok') this.resumeStranded(prior.jobId, prior.leaseEpoch);
+      if (prior.type === 'READOPT' && prior.result === 'ok') {
+        const row = this.deps.journal.getJob(prior.jobId, prior.leaseEpoch);
+        if (row && row.doneAt === null) {
+          try {
+            const outcome = await this.deps.supervisor.readopt(prior.jobId, prior.leaseEpoch);
+            this.deps.journal.updateCommandOutcome(command.commandId, {
+              result: outcome.result, detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString(),
+            });
+            return this.ack(command, outcome);
+          } catch {
+            return this.ack(command, { result: 'rejected', detail: 'runner error' });
+          }
+        }
+      }
       return this.ack(command, { result: prior.result, ...(prior.detail ? { detail: prior.detail } : {}) });
     }
     let outcome: Outcome;

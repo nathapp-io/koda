@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { FleetCommandOut } from '@nathapp/fleet-protocol';
+import type { CommandAck, FleetCommandOut } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
 import { assignFor } from '../../test/helpers/assign';
@@ -115,6 +115,76 @@ describe('ASSIGN', () => {
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.ex.calls).toEqual([]);
     expect(b.journal.getCommand('c11')).toMatchObject({ result: 'rejected', detail: 'invalid handoff' });
+  });
+});
+
+describe('READOPT replay after restart (K10)', () => {
+  const seedReadopt = (kind: 'REVIEW' | 'RUN' | 'THREAD' = 'RUN') => {
+    const b = build();
+    b.journal.insertJob({ assign: assignFor(kind, { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, ...(kind === 'RUN' ? { naxRunId: 'run-1' } : {}) });
+    b.journal.recordCommand({ commandId: 'r1', jobId: 'j1', leaseEpoch: 1, type: 'READOPT', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    return b;
+  };
+  const readopt = (): FleetCommandOut => other('READOPT', 'r1');
+
+  test('AC-1/2: resumes a live REVIEW watcher and acks ok', async () => {
+    const b = seedReadopt('REVIEW');
+    b.ex.alive = true;
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'ok' }]);
+    await waitFor(() => b.ex.calls.includes('resumeCredentials:j1'));
+    expect(b.ex.calls).toContain('resumeCredentials:j1');
+    b.ex.dieAfterTicks(b.ex.ticks + 1);
+    await b.supervisor.idle();
+  });
+  test('AC-3/4/5: persists a rejection and replays the updated rejection', async () => {
+    const b = seedReadopt();
+    b.journal.updateJob('j1', 1, { naxRunId: null });
+    const expected: CommandAck[] = [{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }];
+    expect(await b.handler.handle([readopt()])).toEqual(expected);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'rejected', detail: 'run id mismatch' });
+    expect(await b.handler.handle([readopt()])).toEqual(expected);
+  });
+  test('AC-6: rejects THREAD replay as an ended session', async () => {
+    const b = seedReadopt('THREAD');
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'thread session ended by a runner restart' }]);
+  });
+  test('AC-7/8: keeps stored ack for done or missing rows without readoption', async () => {
+    for (const action of ['done', 'gone'] as const) {
+      const b = seedReadopt('REVIEW');
+      if (action === 'done') b.journal.markDone('j1', 1);
+      else b.journal.abandon('j1', 1);
+      const spy = mock(b.supervisor.readopt.bind(b.supervisor));
+      b.supervisor.readopt = spy;
+      expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'ok' }]);
+      expect(spy).not.toHaveBeenCalled();
+      expect(b.ex.calls).not.toContain('readStatus:j1');
+    }
+  });
+  test('AC-9: rejected record replays without readoption', async () => {
+    const b = seedReadopt();
+    b.journal.updateCommandOutcome('r1', { result: 'rejected', detail: 'process gone', appliedAt: b.time.now().toISOString() });
+    const spy = mock(b.supervisor.readopt.bind(b.supervisor));
+    b.supervisor.readopt = spy;
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'process gone' }]);
+    expect(spy).not.toHaveBeenCalled();
+    expect(b.ex.calls).not.toContain('readStatus:j1');
+  });
+  test('AC-10: second replay finds the in-memory run and does not start another watcher', async () => {
+    const b = seedReadopt('REVIEW');
+    b.ex.alive = true;
+    await b.handler.handle([readopt()]);
+    await waitFor(() => b.ex.calls.includes('resumeCredentials:j1'));
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'ok' }]);
+    expect(b.ex.calls.filter((call) => call === 'resumeCredentials:j1')).toHaveLength(1);
+    b.ex.dieAfterTicks(b.ex.ticks + 1);
+    await b.supervisor.idle();
+  });
+  test('AC-11/12: readopt throw acks runner error and leaves journal unchanged', async () => {
+    const b = seedReadopt();
+    b.ex.statusError = new Error('failure');
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'ok', detail: null });
   });
 });
 
