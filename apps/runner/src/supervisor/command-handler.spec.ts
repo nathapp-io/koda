@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { FleetCommandOut } from '@nathapp/fleet-protocol';
+import type { CommandAck, FleetCommandOut } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
+import type { JobRow } from '../journal/types';
 import { createMemoryLogger } from '../logger';
 import { assignFor } from '../../test/helpers/assign';
 import { FakeExecutor } from '../../test/helpers/fake-executor';
@@ -16,17 +17,28 @@ function build() {
   const journal = Journal.open(':memory:', time.now);
   const ex = new FakeExecutor();
   const log = createMemoryLogger();
+  // K11: exposed so a test can hold a repo lock (another job's long RUN) and read the warnings.
+  const mutex = new RepoMutex();
   const supervisor = new Supervisor({
-    journal, executor: ex, mutex: new RepoMutex(), log, now: time.now, sleep: time.sleep,
+    journal, executor: ex, mutex, log, now: time.now, sleep: time.sleep,
     uploader: { upload: async () => ({ kind: 'ok' }) }, tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
     logs: NO_LOG_SHIPPING,
   });
   const approvals = { answer: mock(async (): Promise<{ result: 'ok' | 'rejected'; detail?: string }> => ({ result: 'ok' })) };
   const handler = new CommandHandler({ journal, supervisor, workspaceRoot: '/work/space', log, now: time.now, approvals });
-  return { time, journal, ex, supervisor, handler, approvals };
+  return { time, journal, ex, supervisor, handler, approvals, mutex, log };
 }
 const assignCmd = (id = 'c1', jobId = 'j1', epoch = 1): FleetCommandOut => ({ commandId: id, type: 'ASSIGN', jobId, leaseEpoch: epoch, payload: assignFor('RUN', { jobId }) });
 const other = (type: FleetCommandOut['type'], id: string, epoch = 1): FleetCommandOut => ({ commandId: id, type, jobId: 'j1', leaseEpoch: epoch, payload: {} });
+
+/**
+ * K11: a command that must not wait for the repo lock the test holds. A regression that does wait fails on the race
+ * instead of hanging the suite, and the caller still releases the lock in `finally`.
+ */
+async function settlesWithin<T>(work: Promise<T>, ms = 500): Promise<{ done: true; value: T } | { done: false }> {
+  const timeout = new Promise<{ done: false }>((resolve) => { setTimeout(() => resolve({ done: false }), ms); });
+  return Promise.race([work.then((value) => ({ done: true as const, value })), timeout]);
+}
 
 describe('ASSIGN', () => {
   test('inserts the job and the applied-command row, acks ok, and starts preparing', async () => {
@@ -85,13 +97,22 @@ describe('ASSIGN', () => {
   });
   test('a higher epoch of the same job abandons the lower one first: it is killed and dropped, and its cleanup is left to the new epoch (D64)', async () => {
     const b = build();
+    // K11: epoch 1's abandon completes in the background, so its kill and its drop are observed in the order of a
+    // sequence the harness records, not by the time `handle` returns.
+    const order: string[] = [];
+    const kill = b.ex.kill.bind(b.ex);
+    b.ex.kill = (pgid, signal) => { order.push(`kill:${signal}`); return kill(pgid, signal); };
+    const prepare = b.ex.prepare.bind(b.ex);
+    b.ex.prepare = async (job) => { order.push(b.journal.getJob('j1', 1) === null ? 'prepare:dropped' : 'prepare:present'); return prepare(job); };
     await b.handler.handle([assignCmd('c1', 'j1', 1)]);
     await waitFor(() => b.ex.ticks >= 1);                        // epoch 1 is running, pid 4242
     b.ex.dieAfterTicks(b.ex.ticks + 2);                          // epoch 2 will finish quickly once it runs
     expect((await b.handler.handle([assignCmd('c2', 'j1', 2)]))[0].result).toBe('ok');
+    await b.supervisor.idle();
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGKILL' }]);
-    await b.supervisor.idle();
+    // The invariant K11 keeps: epoch 1 is killed and dropped before epoch 2's prepare.
+    expect(order).toEqual(['prepare:present', 'kill:SIGKILL', 'prepare:dropped']);
     expect(b.journal.getJob('j1', 2)?.state).toBe('COMPLETED');
     const secondPrepare = b.ex.calls.lastIndexOf('prepare:j1');
     expect(b.ex.calls.filter((c) => c === 'prepare:j1')).toHaveLength(2);
@@ -115,6 +136,281 @@ describe('ASSIGN', () => {
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.ex.calls).toEqual([]);
     expect(b.journal.getCommand('c11')).toMatchObject({ result: 'rejected', detail: 'invalid handoff' });
+  });
+});
+
+describe('requeue ASSIGN retires older epochs without blocking (K11)', () => {
+  /** The older row as a requeue finds it: a finished attempt whose run already ran `executor.cleanup`. */
+  const seedFinished = (b: ReturnType<typeof build>, epoch: number): void => {
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: epoch, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', epoch, { state: 'COMPLETED' });
+    b.journal.markDone('j1', epoch);
+  };
+  /** The older row as a requeue finds it after a restart: RUNNING on the journal, no run in memory. */
+  const seedUnfinished = (b: ReturnType<typeof build>, epoch: number): void => {
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: epoch, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', epoch, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+  };
+
+  test('AC-1/2: a finished older row is dropped at once, so the requeue acks while the test still holds the repo lock', async () => {
+    const b = build();
+    seedFinished(b, 1);
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const release = await b.mutex.acquire('acme/app');                    // another job's long RUN
+    try {
+      expect(await settlesWithin(b.handler.handle([assignCmd('c2', 'j1', 2)])))
+        .toEqual({ done: true, value: [{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }] });
+      expect(b.journal.getJob('j1', 1)).toBeNull();
+    } finally {
+      release();
+    }
+    await b.supervisor.idle();
+    expect(b.journal.getJob('j1', 2)?.state).toBe('COMPLETED');
+  });
+
+  test('AC-3/4/5/6/7: an unfinished older row is retired behind the repo lock, before the new epoch prepares', async () => {
+    const b = build();
+    seedUnfinished(b, 1);
+    b.ex.alive = true;                                                    // AC-7: a live process of ours
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    let olderAtPrepare: JobRow | null | undefined;
+    const prepare = b.ex.prepare.bind(b.ex);
+    b.ex.prepare = async (job) => { olderAtPrepare = b.journal.getJob('j1', 1); return prepare(job); };
+    const release = await b.mutex.acquire('acme/app');
+    try {
+      expect(await settlesWithin(b.handler.handle([assignCmd('c2', 'j1', 2)])))
+        .toEqual({ done: true, value: [{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }] });
+      expect(b.ex.calls).not.toContain('prepare:j1');
+    } finally {
+      release();
+    }
+    await b.supervisor.idle();
+    expect(olderAtPrepare).toBeNull();                                    // the older row was gone when prepare ran
+    expect(b.journal.getJob('j1', 2)?.state).toBe('COMPLETED');
+    expect(b.ex.killed).toContainEqual({ pgid: 4242, signal: 'SIGKILL' });
+  });
+
+  test('AC-8/9/10: a CANCEL for the new epoch while it waits ends it at once, and nothing is ever prepared', async () => {
+    const b = build();
+    seedUnfinished(b, 1);
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const cancel: FleetCommandOut = { commandId: 'c3', type: 'CANCEL', jobId: 'j1', leaseEpoch: 2, payload: {} };
+    const release = await b.mutex.acquire('acme/app');
+    try {
+      expect(await settlesWithin(b.handler.handle([assignCmd('c2', 'j1', 2)])))
+        .toEqual({ done: true, value: [{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }] });
+      expect(await b.handler.handle([cancel])).toEqual([{ commandId: 'c3', leaseEpoch: 2, result: 'ok' }]);
+      expect(b.journal.getJob('j1', 2)).toMatchObject({ state: 'CANCELLED', doneAt: expect.any(String) });
+    } finally {
+      release();
+    }
+    await b.supervisor.idle();
+    expect(b.ex.calls).not.toContain('prepare:j1');
+  });
+
+  test('AC-11: an older epoch that is running is killed and dropped, and its own requeue still completes', async () => {
+    const b = build();
+    await b.handler.handle([assignCmd('c1', 'j1', 1)]);
+    await waitFor(() => b.ex.ticks >= 1);                                 // epoch 1 is running, pid 4242
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    expect((await b.handler.handle([assignCmd('c2', 'j1', 2)]))[0].result).toBe('ok');
+    // The ack did not wait for the abandon: epoch 1 still holds the repo mutex, so its retirement is in flight.
+    expect(b.journal.getJob('j1', 1)).not.toBeNull();
+    await b.supervisor.idle();
+    expect(b.journal.getJob('j1', 1)).toBeNull();
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGKILL' }]);
+  });
+
+  test('AC-12/13: a failing older-epoch abandon is warned about and the new epoch still prepares', async () => {
+    const b = build();
+    seedUnfinished(b, 1);
+    b.supervisor.abandon = async () => { throw new Error('boom'); };
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    expect((await b.handler.handle([assignCmd('c2', 'j1', 2)]))[0].result).toBe('ok');
+    await b.supervisor.idle();
+    expect(b.ex.calls).toContain('prepare:j1');
+    expect(b.log.lines.some((line) => line.level === 'warn' && line.message === 'older epoch abandon failed')).toBe(true);
+  });
+
+  test('AC-14/15: a finished row is dropped at once while a second older row is retired in the background', async () => {
+    const b = build();
+    seedFinished(b, 1);
+    seedUnfinished(b, 2);
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const release = await b.mutex.acquire('acme/app');
+    try {
+      expect(await settlesWithin(b.handler.handle([assignCmd('c3', 'j1', 3)])))
+        .toEqual({ done: true, value: [{ commandId: 'c3', leaseEpoch: 3, result: 'ok' }] });
+      expect(b.journal.getJob('j1', 1)).toBeNull();
+    } finally {
+      release();
+    }
+    await b.supervisor.idle();
+    expect(b.journal.getJob('j1', 2)).toBeNull();
+    expect(b.ex.calls.filter((call) => call === 'prepare:j1')).toHaveLength(1);
+  });
+});
+
+describe('READOPT replay after restart (K10)', () => {
+  const seedReadopt = (kind: 'REVIEW' | 'RUN' | 'THREAD' = 'RUN') => {
+    const b = build();
+    b.journal.insertJob({ assign: assignFor(kind, { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, ...(kind === 'RUN' ? { naxRunId: 'run-1' } : {}) });
+    b.journal.recordCommand({ commandId: 'r1', jobId: 'j1', leaseEpoch: 1, type: 'READOPT', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    return b;
+  };
+  const readopt = (): FleetCommandOut => other('READOPT', 'r1');
+
+  test('AC-1/2: resumes a live REVIEW watcher and acks ok', async () => {
+    const b = seedReadopt('REVIEW');
+    b.ex.alive = true;
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'ok' }]);
+    await waitFor(() => b.ex.calls.includes('resumeCredentials:j1'));
+    expect(b.ex.calls).toContain('resumeCredentials:j1');
+    b.ex.dieAfterTicks(b.ex.ticks + 1);
+    await b.supervisor.idle();
+  });
+  test('AC-3/4/5: persists a rejection and replays the updated rejection', async () => {
+    const b = seedReadopt();
+    b.journal.updateJob('j1', 1, { naxRunId: null });
+    const expected: CommandAck[] = [{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }];
+    expect(await b.handler.handle([readopt()])).toEqual(expected);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'rejected', detail: 'run id mismatch' });
+    expect(await b.handler.handle([readopt()])).toEqual(expected);
+  });
+  test('AC-6: rejects THREAD replay as an ended session', async () => {
+    const b = seedReadopt('THREAD');
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'thread session ended by a runner restart' }]);
+  });
+  test('AC-7/8: keeps stored ack for done or missing rows without readoption', async () => {
+    for (const action of ['done', 'gone'] as const) {
+      const b = seedReadopt('REVIEW');
+      if (action === 'done') b.journal.markDone('j1', 1);
+      else b.journal.abandon('j1', 1);
+      const spy = mock(b.supervisor.readopt.bind(b.supervisor));
+      b.supervisor.readopt = spy;
+      expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'ok' }]);
+      expect(spy).not.toHaveBeenCalled();
+      expect(b.ex.calls).not.toContain('readStatus:j1');
+    }
+  });
+  test('AC-9: rejected record replays without readoption', async () => {
+    const b = seedReadopt();
+    b.journal.updateCommandOutcome('r1', { result: 'rejected', detail: 'process gone', appliedAt: b.time.now().toISOString() });
+    const spy = mock(b.supervisor.readopt.bind(b.supervisor));
+    b.supervisor.readopt = spy;
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'process gone' }]);
+    expect(spy).not.toHaveBeenCalled();
+    expect(b.ex.calls).not.toContain('readStatus:j1');
+  });
+  test('AC-10: second replay finds the in-memory run and does not start another watcher', async () => {
+    const b = seedReadopt('REVIEW');
+    b.ex.alive = true;
+    await b.handler.handle([readopt()]);
+    await waitFor(() => b.ex.calls.includes('resumeCredentials:j1'));
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'ok' }]);
+    expect(b.ex.calls.filter((call) => call === 'resumeCredentials:j1')).toHaveLength(1);
+    b.ex.dieAfterTicks(b.ex.ticks + 1);
+    await b.supervisor.idle();
+  });
+  test('AC-11/12: readopt throw acks runner error and leaves journal unchanged', async () => {
+    const b = seedReadopt();
+    b.ex.statusError = new Error('failure');
+    expect(await b.handler.handle([readopt()])).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'ok', detail: null });
+  });
+});
+
+describe('a restart reconstructs the older-epoch retirement (B1)', () => {
+  /**
+   * The two rows a daemon crash between "ASSIGN acked" and "older epochs retired" leaves behind: epoch 1 RUNNING with
+   * the detached process it spawned, epoch 2 ASSIGNED with no pid. The retirement promise lasted only in the process
+   * that died with it.
+   */
+  const seedCrashedRequeue = (b: ReturnType<typeof build>): void => {
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 2, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+  };
+  /** D64 kept across the restart: epoch 1 is killed and gone before epoch 2 prepares, and epoch 2 finishes normally. */
+  const expectRetiredBeforePrepare = (b: ReturnType<typeof build>, atPrepare: () => JobRow | null | undefined): void => {
+    expect(atPrepare()).toBeNull();
+    expect(b.journal.getJob('j1', 1)).toBeNull();
+    expect(b.ex.killed).toContainEqual({ pgid: 4242, signal: 'SIGKILL' });
+    expect(b.journal.getJob('j1', 2)?.state).toBe('COMPLETED');
+  };
+  const watchPrepare = (b: ReturnType<typeof build>): (() => JobRow | null | undefined) => {
+    let olderAtPrepare: JobRow | null | undefined;
+    const prepare = b.ex.prepare.bind(b.ex);
+    b.ex.prepare = async (job) => { olderAtPrepare = b.journal.getJob('j1', 1); return prepare(job); };
+    return () => olderAtPrepare;
+  };
+
+  test('B1: a READOPT replay of the new ASSIGNED epoch retires the older row before it prepares', async () => {
+    const b = build();
+    seedCrashedRequeue(b);
+    b.journal.recordCommand({ commandId: 'r1', jobId: 'j1', leaseEpoch: 2, type: 'READOPT', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    b.ex.alive = true;                                             // epoch 1's detached nax is still ours and running
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const atPrepare = watchPrepare(b);
+    expect(await b.handler.handle([other('READOPT', 'r1', 2)])).toEqual([{ commandId: 'r1', leaseEpoch: 2, result: 'ok' }]);
+    await b.supervisor.idle();
+    expectRetiredBeforePrepare(b, atPrepare);
+  });
+
+  test('B1: an ASSIGN replay (resumeStranded) retires the older row before it prepares', async () => {
+    const b = build();
+    seedCrashedRequeue(b);
+    b.journal.recordCommand({ commandId: 'c2', jobId: 'j1', leaseEpoch: 2, type: 'ASSIGN', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    b.ex.alive = true;
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const atPrepare = watchPrepare(b);
+    expect(await b.handler.handle([assignCmd('c2', 'j1', 2)])).toEqual([{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }]);
+    await b.supervisor.idle();
+    expectRetiredBeforePrepare(b, atPrepare);
+  });
+});
+
+describe('a READOPT rejection is durable with its finalization (B2)', () => {
+  /** The r1 record acked `ok` before the restart, over a RUN row whose journaled run id is gone: readopt rejects. */
+  const seed = () => {
+    const b = build();
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, naxRunId: null });
+    b.journal.recordCommand({ commandId: 'r1', jobId: 'j1', leaseEpoch: 1, type: 'READOPT', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    return b;
+  };
+  const replay = [other('READOPT', 'r1')];
+
+  test('B2: a crash right after readopt returns leaves the rejection journaled, never a stale ok', async () => {
+    const b = seed();
+    const real = b.supervisor.readopt.bind(b.supervisor);
+    // The daemon dies between readopt's answer and the handler's own write: nothing after the call runs.
+    b.supervisor.readopt = async (jobId, leaseEpoch, finalize) => {
+      await real(jobId, leaseEpoch, finalize);
+      throw new Error('daemon died here');
+    };
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'rejected', detail: 'run id mismatch' });
+    // The next boot replays the rejection, so the API marks the job CRASHED instead of recording it as adopted.
+    b.supervisor.readopt = real;
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }]);
+  });
+
+  test('B2: a crash inside the finalization rolls back doneAt and the outcome together, so the next boot re-applies', async () => {
+    const b = seed();
+    const markDone = b.journal.markDone.bind(b.journal);
+    b.journal.markDone = (jobId, leaseEpoch) => {
+      markDone(jobId, leaseEpoch);
+      throw new Error('daemon died here');
+    };
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+    // One durable step: the row is not done either, so no boot can see a done row beside the stale ok.
+    expect(b.journal.getJob('j1', 1)?.doneAt).toBeNull();
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'ok' });
+    b.journal.markDone = markDone;
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }]);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'rejected', detail: 'run id mismatch' });
   });
 });
 

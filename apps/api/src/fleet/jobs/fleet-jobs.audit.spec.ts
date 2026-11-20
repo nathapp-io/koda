@@ -1,4 +1,5 @@
 import { FleetJobsService } from './fleet-jobs.service';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { FleetJobRecord } from './domain/fleet-job.domain';
 
 describe('FleetJobsService transactional audit', () => {
@@ -42,11 +43,39 @@ describe('FleetJobsService transactional audit', () => {
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ summary: 'RUN on repo r, thread t, schedule s' }));
   });
 
-  it.each(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING'])('audits cancel from %s', async (state) => {
+  it.each(['QUEUED', 'ASSIGNED', 'RUNNING'])('audits cancel from %s', async (state) => {
     const { service, record, repo } = setup({ ...job, state, runnerId: 'runner' });
     if (state === 'ASSIGNED') repo.findPendingCommand.mockResolvedValue({ id: 'assign' });
     await service.cancel('u', 'p', 'j', true);
     expect(record).toHaveBeenCalledExactlyOnceWith({ key: 'fleet.job.cancel', resourceType: 'fleet-job', resourceId: 'j', projectId: 'p', summary: `${['QUEUED', 'ASSIGNED'].includes(state) ? 'cancelled from' : 'cancel requested in'} ${state}` });
+  });
+
+  describe('cancel while UPLOADING (US-004)', () => {
+    it('AC-1/2/3/4: rejects before command, update, or audit side effects', async () => {
+      const { service, record, repo } = setup({ ...job, state: 'UPLOADING', runnerId: 'runner' });
+      await expect(service.cancel('u', 'p', 'j', true)).rejects.toSatisfy((error: unknown) =>
+        error instanceof ConflictAppException
+          && error.prefix === 'fleet.jobState'
+          && error.args.state === 'UPLOADING',
+      );
+      expect(repo.createCommand).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(record).not.toHaveBeenCalled();
+    });
+
+    it('AC-5: rejects even when cancel was already requested', async () => {
+      const { service } = setup({ ...job, state: 'UPLOADING', runnerId: 'runner', cancelRequestedAt: new Date() });
+      await expect(service.cancel('u', 'p', 'j', true)).rejects.toSatisfy((error: unknown) =>
+        error instanceof ConflictAppException && error.prefix === 'fleet.jobState',
+      );
+    });
+
+    it('AC-6: requests one CANCEL for a RUNNING job', async () => {
+      const { service, repo } = setup({ ...job, state: 'RUNNING', runnerId: 'runner' });
+      await service.cancel('u', 'p', 'j', true);
+      expect(repo.createCommand).toHaveBeenCalledTimes(1);
+      expect(repo.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'CANCEL' }));
+    });
   });
 
   describe('cancelBeforeRunner (#428)', () => {

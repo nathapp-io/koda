@@ -3,6 +3,7 @@ import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, CommandAck, FleetCommandOut, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
+import { systemSleep } from '../time';
 import { ServerError, NetworkError } from './http';
 import { SyncLoop, PENDING_ACK_TTL_MS, type CapabilityReport, type StopReason, type SyncLoopDeps } from './sync-loop';
 
@@ -178,6 +179,71 @@ describe('failures', () => {
     now = 100;
     await makeLoop().run();
     expect(sleeps).toEqual([250, 500]);
+  });
+});
+
+describe('stop during sleep (US-003)', () => {
+  test('AC-1, AC-2, AC-3: retry sleep receives a live abort signal and stop ends run', async () => {
+    script.push(async () => { throw new ServerError(500, 'x', null); });
+    let entered = (): void => undefined;
+    const sleeping = new Promise<void>((resolve) => { entered = resolve; });
+    let sleepSignal: AbortSignal | undefined;
+    let abortedAtCall: boolean | undefined;
+    const loop = makeLoop({ sleep: (_ms, signal) => {
+      sleepSignal = signal;
+      abortedAtCall = signal?.aborted;
+      entered();
+      return new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+    } });
+    const running = loop.run();
+    await sleeping;
+    expect(sleepSignal).toBeInstanceOf(AbortSignal);
+    expect(abortedAtCall).toBe(false);
+    loop.stop();
+    expect(sleepSignal?.aborted).toBe(true);
+    await running;
+    expect(calls).toHaveLength(1);
+  });
+
+  test('AC-4, AC-5, AC-8, AC-9: stopping the 250 ms min-gap resolves the running loop after one sync', async () => {
+    script.push(ok());
+    let entered = (): void => undefined;
+    const sleeping = new Promise<void>((resolve) => { entered = resolve; });
+    let sleepMs: number | undefined;
+    let sleepSignal: AbortSignal | undefined;
+    const loop = makeLoop({ sleep: (ms, signal) => {
+      sleepMs = ms;
+      sleepSignal = signal;
+      entered();
+      return new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+    } });
+    const running = loop.run();
+    await sleeping;
+    expect(sleepMs).toBe(250);
+    loop.stop();
+    expect(sleepSignal?.aborted).toBe(true);
+    await running;
+    expect(calls).toHaveLength(1);
+  });
+
+  test('AC-6, AC-7: stopping during the real retry sleep resolves promptly without another sync', async () => {
+    script.push(async () => { throw new ServerError(500, 'x', null); });
+    let entered = (): void => undefined;
+    const sleeping = new Promise<void>((resolve) => { entered = resolve; });
+    const loop = makeLoop({ sleep: (ms, signal) => {
+      entered();
+      return systemSleep(60_000, signal);
+    } });
+    const running = loop.run();
+    await sleeping;
+    loop.stop();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([running, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('run did not stop')), 1_000); })]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+    expect(calls).toHaveLength(1);
   });
 });
 

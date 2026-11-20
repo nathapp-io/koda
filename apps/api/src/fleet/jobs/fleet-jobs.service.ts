@@ -208,7 +208,8 @@ export class FleetJobsService {
   /**
    * Spec §5.3 cancel. QUEUED: server-side. ASSIGNED with the ASSIGN never acked: server-side,
    * the assign withdrawn and the epoch bumped (plan D4). Otherwise: cancelRequestedAt + one
-   * CANCEL; the runner reports CANCELLED. Repeating a pending cancel is a no-op.
+   * CANCEL; the runner reports CANCELLED. UPLOADING and terminal jobs refuse cancellation.
+   * Repeating a pending cancel is a no-op before UPLOADING.
    */
   async cancel(actorId: string, projectId: string, jobId: string, canOperate: boolean): Promise<FleetJobDto> {
     const now = new Date();
@@ -220,6 +221,7 @@ export class FleetJobsService {
       // it nor the job is refused with the permission code the route family uses.
       if (!canOperate && current.requestedById !== actorId) throw new ForbiddenAppException({}, 'permissions');
       if (isTerminal(current.state)) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
+      if (current.state === FleetJobState.UPLOADING) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
 
       if (current.state === FleetJobState.QUEUED) {
         const r = await this.transitions.apply({ job: current, to: 'CANCELLED', by: 'server', now, actor, reason: 'cancelled before assignment' });
@@ -235,7 +237,7 @@ export class FleetJobsService {
         }
       }
       if (current.cancelRequestedAt) return { job: current, live: null, wake: null };
-      // Reachable only in ASSIGNED (assign acked) / RUNNING / UPLOADING, all of which have a
+      // Reachable only in ASSIGNED (assign acked) / RUNNING, both of which have a
       // runner assigned by casAssign. Fail fast if a future state change breaks that
       // invariant (DB FK on FleetCommand.runnerId would surface as a less obvious 500).
       if (!current.runnerId) throw new Error(`cancel path reached without runnerId for job ${jobId} (state ${current.state})`);

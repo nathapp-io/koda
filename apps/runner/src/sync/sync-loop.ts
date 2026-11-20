@@ -61,6 +61,7 @@ export class SyncLoop {
   private failures = 0;
   private capsRejected: string | null = null;
   private inflight: AbortController | null = null;
+  private readonly stopController = new AbortController();
   private inflightIdle = false;
   private dirty = false;
   private acksExcluded = false;
@@ -99,6 +100,7 @@ export class SyncLoop {
   stop(): void {
     this.stopped = true;
     this.unsubscribe();
+    this.stopController.abort('stop');
     this.inflight?.abort('stop');
   }
 
@@ -112,8 +114,8 @@ export class SyncLoop {
         this.deps.onStop(outcome.reason);
         return;
       }
-      if (outcome.kind === 'retry') await this.deps.sleep(outcome.delayMs);
-      else if (outcome.kind !== 'again' && !this.dirty) await this.deps.sleep(Math.max(0, this.deps.minGapMs - (this.deps.nowMs() - started)));
+      if (outcome.kind === 'retry') await this.deps.sleep(outcome.delayMs, this.stopController.signal);
+      else if (outcome.kind !== 'again' && !this.dirty) await this.deps.sleep(Math.max(0, this.deps.minGapMs - (this.deps.nowMs() - started)), this.stopController.signal);
     }
   }
 

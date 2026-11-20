@@ -75,6 +75,16 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     expect(await prisma.fleetCommand.count({ where: { jobId: job.id, type: 'CANCEL', ackedAt: null } })).toBe(1);
   });
 
+  it('US-004 AC-7/8/9: refuses UPLOADING cancellation without persisted side effects', async () => {
+    const runner = await insertRunner(prisma);
+    const job = await insertJob('c-uploading', {
+      state: 'UPLOADING', runnerId: runner.id, leaseEpoch: 1,
+    });
+    await post('dev', job.id, 'cancel').expect(409);
+    expect(await reload(job.id)).toEqual(expect.objectContaining({ cancelRequestedAt: null }));
+    expect(await prisma.fleetCommand.count({ where: { jobId: job.id, type: 'CANCEL' } })).toBe(0);
+  });
+
   it('refuses to cancel a finished job with 409, lets a requester cancel, and forbids other viewers', async () => {
     const done = await insertJob('c-done', { state: 'COMPLETED' });
     await post('dev', done.id, 'cancel').expect(409);

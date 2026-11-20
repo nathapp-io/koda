@@ -200,6 +200,11 @@ export class Journal {
     return result.changes > 0;
   }
 
+  updateCommandOutcome(commandId: string, outcome: { result: 'ok' | 'rejected'; detail: string | null; appliedAt: string }): void {
+    this.db.query('UPDATE applied_commands SET result = ?, detail = ?, applied_at = ? WHERE command_id = ?')
+      .run(outcome.result, outcome.detail, outcome.appliedAt, commandId);
+  }
+
   getCommand(commandId: string): CommandRecord | null {
     const row = this.db.query('SELECT * FROM applied_commands WHERE command_id = ?').get(commandId) as Row | null;
     return row ? toCommand(row) : null;
