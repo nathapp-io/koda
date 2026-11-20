@@ -79,6 +79,7 @@ describeDb('password reset request (PG)', () => {
   let providerSend: ReturnType<typeof vi.spyOn>;
   let sendOne: ReturnType<typeof vi.spyOn>;
   let warn: ReturnType<typeof vi.spyOn>;
+  let delayedProviderCompleted: boolean;
   let userId: string;
   let userEmail: string;
   const previous = {
@@ -87,9 +88,18 @@ describeDb('password reset request (PG)', () => {
     WEB_PUBLIC_URL: process.env['WEB_PUBLIC_URL'],
   };
 
-  const requestReset = (address: string, acceptLanguage?: string) => {
+  const requestedDeliveryCounts = new Map<string, number>();
+  const requestReset = async (address: string, acceptLanguage?: string, expectedStatus = 200) => {
     const call = request(server).post('/api/auth/password-reset').send({ email: address });
-    return acceptLanguage === undefined ? call : call.set('Accept-Language', acceptLanguage);
+    if (acceptLanguage !== undefined) call.set('Accept-Language', acceptLanguage);
+    const response = await call.expect(expectedStatus);
+    if (response.status === 200 && email.configured) {
+      const user = await db.user.findUnique({ where: { email: address }, select: { disabled: true } });
+      if (user && !user.disabled) {
+        requestedDeliveryCounts.set(address, (requestedDeliveryCounts.get(address) ?? 0) + 1);
+      }
+    }
+    return response;
   };
   const tokenRows = (id: string) => db.passwordResetToken.findMany({ where: { userId: id } });
   const unusedRows = (id: string) => db.passwordResetToken.findMany({ where: { userId: id, usedAt: null } });
@@ -135,7 +145,19 @@ describeDb('password reset request (PG)', () => {
     sendOne.mockRestore();
   });
 
+  afterEach(async () => {
+    const terminal = new Set(['SENT', 'FAILED', 'SKIPPED']);
+    for (const [address, expectedCount] of requestedDeliveryCounts) {
+      await waitFor(async () => {
+        const rows = await scheduleRows(address);
+        return rows.length >= expectedCount && rows.every((row) => terminal.has(row.status)) ? true : null;
+      }, `all ${expectedCount} detached reset send(s) for ${address} to finish`);
+    }
+    requestedDeliveryCounts.clear();
+  });
+
   beforeEach(async () => {
+    requestedDeliveryCounts.clear();
     resetThrottle(app);
     userEmail = `${randomUUID()}@example.test`;
     userId = await createUser(userEmail);
@@ -146,9 +168,25 @@ describeDb('password reset request (PG)', () => {
     warn.mockClear();
   });
 
+  it('leaves a delayed detached provider call for teardown to drain', async () => {
+    delayedProviderCompleted = false;
+    providerSend.mockImplementation(async () => {
+      await sleep(500);
+      delayedProviderCompleted = true;
+      return { providerMessageId: 'delayed-reset' };
+    });
+
+    await requestReset(userEmail);
+    await waitFor(async () => providerSend.mock.calls.length > 0, 'the delayed detached provider call');
+  });
+
+  it('does not begin the next test until the prior detached provider call completes', () => {
+    expect(delayedProviderCompleted).toBe(true);
+  });
+
   it('AC-1: answers 200 {} and writes one unused token expiring in 30 minutes', async () => {
     const requestedAt = Date.now();
-    const response = await requestReset(userEmail).expect(200);
+    const response = await requestReset(userEmail);
 
     expect(response.body).toEqual({ ret: 0, data: {} });
 
@@ -163,7 +201,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-2: stores the lowercase sha256 hex of the emailed token and no raw token anywhere', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     const [row] = await waitFor(async () => {
       const rows = await unusedRows(userId);
       return rows.length > 0 ? rows : null;
@@ -184,7 +222,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-3: sends PASSWORD_RESET through sendOne with the web url and retry disabled', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     const [call] = await waitFor(async () => {
       const calls = sendOne.mock.calls as unknown as [
         { id: string; kind: string }, string, { url: string; expiresAt: string }, string | null, Date, boolean,
@@ -208,7 +246,7 @@ describeDb('password reset request (PG)', () => {
       data: { userId, tenantId: 'default', channel: 'email', enabled: false },
     });
 
-    const response = await requestReset(userEmail, 'zh-CN').expect(200);
+    const response = await requestReset(userEmail, 'zh-CN');
     expect(response.body).toEqual({ ret: 0, data: {} });
 
     const row = await waitFor(async () => {
@@ -235,7 +273,7 @@ describeDb('password reset request (PG)', () => {
       data: { userId, tenantId: 'default', channel: 'email', enabled: true },
     });
 
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     const row = await waitFor(async () => {
       const rows = await scheduleRows(userEmail);
       return rows.find((entry) => entry.status === 'SENT') ?? null;
@@ -264,7 +302,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-4: writes one PASSWORD_RESET schedule row for the user and ends it SENT', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
 
     const row = await waitFor(async () => {
       const rows = await scheduleRows(userEmail);
@@ -279,7 +317,7 @@ describeDb('password reset request (PG)', () => {
   it('AC-5: a throwing email channel still answers 200 {} and ends the row FAILED, logged as a warning', async () => {
     providerSend.mockRejectedValue(new Error('smtp refused the connection'));
 
-    const response = await requestReset(userEmail).expect(200);
+    const response = await requestReset(userEmail);
     expect(response.body).toEqual({ ret: 0, data: {} });
 
     const row = await waitFor(async () => {
@@ -294,7 +332,7 @@ describeDb('password reset request (PG)', () => {
 
   it('AC-6: an unknown address answers 200 {} and writes nothing across the full observation window', async () => {
     const unknown = `nobody-${randomUUID()}@example.test`;
-    const response = await requestReset(unknown).expect(200);
+    const response = await requestReset(unknown);
     expect(response.body).toEqual({ ret: 0, data: {} });
 
     // The specified wait, spent on the unknown address itself: it is watched for the whole bound the
@@ -330,7 +368,7 @@ describeDb('password reset request (PG)', () => {
     const disabledEmail = `${randomUUID()}@example.test`;
     const disabledId = await createUser(disabledEmail, true);
 
-    await requestReset(disabledEmail).expect(200);
+    await requestReset(disabledEmail);
     await sleep(250);
 
     expect(await tokenRows(disabledId)).toEqual([]);
@@ -341,7 +379,7 @@ describeDb('password reset request (PG)', () => {
   it('AC-8: with email unconfigured it answers 200 {} and writes nothing', async () => {
     const configured = vi.spyOn(email, 'configured', 'get').mockReturnValue(false);
 
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await sleep(250);
     configured.mockRestore();
 
@@ -353,8 +391,8 @@ describeDb('password reset request (PG)', () => {
   it('AC-9: known and unknown addresses answer the same body and neither is an unaudited write', async () => {
     const unknown = `nobody-${randomUUID()}@example.test`;
 
-    const known = await requestReset(userEmail).expect(200);
-    const anonymous = await requestReset(unknown).expect(200);
+    const known = await requestReset(userEmail);
+    const anonymous = await requestReset(unknown);
 
     expect(known.body).toEqual(anonymous.body);
     expect(known.body).toEqual({ ret: 0, data: {} });
@@ -364,9 +402,9 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-10: a second request leaves exactly one unused token row', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await waitFor(async () => (await scheduleRows(userEmail)).length === 1, 'the first reset');
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await waitFor(async () => (await scheduleRows(userEmail)).length === 2, 'the second reset');
 
     expect(await unusedRows(userId)).toHaveLength(1);
@@ -374,7 +412,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-11: Accept-Language zh-CN writes locale zh and fr writes en', async () => {
-    await requestReset(userEmail, 'zh-CN,zh;q=0.9').expect(200);
+    await requestReset(userEmail, 'zh-CN,zh;q=0.9');
     const chinese = await waitFor(async () => {
       const rows = await scheduleRows(userEmail);
       return rows.find((entry) => entry.locale === 'zh') ?? null;
@@ -383,7 +421,7 @@ describeDb('password reset request (PG)', () => {
 
     const frenchEmail = `${randomUUID()}@example.test`;
     await createUser(frenchEmail);
-    await requestReset(frenchEmail, 'fr-FR,fr;q=0.8').expect(200);
+    await requestReset(frenchEmail, 'fr-FR,fr;q=0.8');
     const english = await waitFor(async () => {
       const rows = await scheduleRows(frenchEmail);
       return rows.length > 0 ? rows[0] : null;
@@ -392,12 +430,12 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-12: is throttled like login', async () => {
-    for (let i = 0; i < AUTH_LOGIN_LIMIT; i += 1) await requestReset(userEmail).expect(200);
-    await requestReset(userEmail).expect(429);
+    for (let i = 0; i < AUTH_LOGIN_LIMIT; i += 1) await requestReset(userEmail);
+    await requestReset(userEmail, undefined, 429);
   });
 
   it('AC-14: a successful password change deletes the outstanding reset token', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await waitFor(async () => (await unusedRows(userId)).length === 1, 'the reset token row');
 
     const login = await request(server)
@@ -416,10 +454,10 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-15: a body that is not an email address answers localized 400 and writes nothing', async () => {
-    const english = await requestReset('not-an-address').expect(400);
+    const english = await requestReset('not-an-address', undefined, 400);
     expect(english.body.message).toBe('Must be a valid email address');
 
-    const chinese = await requestReset('not-an-address', 'zh-CN').expect(400);
+    const chinese = await requestReset('not-an-address', 'zh-CN', 400);
     expect(chinese.body.message).toBe('必须是有效的邮箱地址');
     expect(chinese.body.errors.email).toEqual(['必须是有效的邮箱地址']);
     expect(JSON.stringify(chinese.body)).not.toContain('$t(');
