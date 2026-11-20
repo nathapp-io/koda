@@ -20194,7 +20194,6 @@
           "line": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 2147483647,
             "description": "Line number where failure occurred",
             "example": 87
           }

@@ -339,6 +339,50 @@ describe('CiWebhookService', () => {
     });
 
     /**
+     * Review D-2: `encodeURIComponent` throws on an unpaired UTF-16 surrogate, and a failure's `file`
+     * is only validated as a string, so a signed delivery can carry one. Encoding must not cost the
+     * ticket: the encodable failures keep their URL line and the poisoned one loses only its own.
+     */
+    it('D-2: an unencodable file name omits only that failure URL and still creates the ticket', async () => {
+      const poisoned = `src/a${String.fromCharCode(0xd800)}b.ts`;
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [
+          { test: 'good', file: 'src/a.ts', line: 7 },
+          { test: 'poisoned', file: poisoned, line: 9 },
+        ],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      const urlLines = mockRepo.createTicket.mock.calls[0][1].description
+        .split('\n')
+        .filter((line) => line.startsWith('  - URL:'));
+      expect(urlLines).toEqual(['  - URL: https://github.com/acme/app/blob/abc123/src/a.ts#L7']);
+    });
+
+    it('D-2: an unencodable file name on a project without a remote still creates the ticket', async () => {
+      const poisoned = `src/a${String.fromCharCode(0xd800)}b.ts`;
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: null });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'T', file: poisoned, line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(mockRepo.createTicket).toHaveBeenCalledTimes(1);
+      expect(
+        mockRepo.createTicket.mock.calls[0][1].description.split('\n').some((line) => line.startsWith('  - URL:')),
+      ).toBe(false);
+    });
+
+    /**
      * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous` (US-002).
      * Creating the ticket is the system's own write, so `processCiWebhook` overrides it with `SYSTEM/ci`.
      */

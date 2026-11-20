@@ -30,8 +30,19 @@ function encodeGitSegment(segment: string): string {
   );
 }
 
-function encodeGitPath(filePath: string): string {
-  return filePath.split('/').map((segment) => encodeGitSegment(segment)).join('/');
+/**
+ * `encodeURIComponent` throws a `URIError` for an unpaired UTF-16 surrogate, and a failure's `file`
+ * is only validated as a string, so a correctly signed delivery can carry one. Encoding is best
+ * effort: a path that cannot be encoded answers `null` and only that failure's URL line is omitted,
+ * rather than the whole ticket intake failing before `createTicket` runs.
+ */
+function encodeGitPath(filePath: string): string | null {
+  try {
+    return filePath.split('/').map((segment) => encodeGitSegment(segment)).join('/');
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
+  }
 }
 
 @Injectable()
@@ -145,8 +156,11 @@ export class CiWebhookService {
       const parts: string[] = [`- **${f.test}**`];
       if (f.file) parts.push(`  - File: \`${f.file}\``);
       if (f.line) parts.push(`  - Line: ${f.line}`);
-      if (f.file && payload.commit.sha) {
-        const url = buildGitUrl(project.gitRemoteUrl, payload.commit.sha, encodeGitPath(f.file), f.line);
+      if (f.file && payload.commit.sha && project.gitRemoteUrl) {
+        // Encode only when `buildGitUrl` will use the path: no remote means no link, and a path that
+        // cannot be encoded drops its own URL line instead of the whole ticket.
+        const encodedPath = encodeGitPath(f.file);
+        const url = encodedPath === null ? null : buildGitUrl(project.gitRemoteUrl, payload.commit.sha, encodedPath, f.line);
         if (url) parts.push(`  - URL: ${url}`);
       }
       return parts;

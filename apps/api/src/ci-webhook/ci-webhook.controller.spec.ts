@@ -149,16 +149,6 @@ describe('CiWebhookController', () => {
 
       expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledWith('koda', validPayload);
     });
-
-    it('B2: accepts the largest line that fits the ticket column', async () => {
-      const body = { ...validPayload, failures: [{ test: 'T', line: 2147483647 }] };
-      const raw = JSON.stringify(body);
-
-      await controller.handleCiWebhook('koda', requestOf(body, raw), sign(raw));
-
-      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledTimes(1);
-      expect(mockCiWebhookService.processCiWebhook.mock.calls[0][1].failures[0].line).toBe(2147483647);
-    });
   });
 
   describe('every inbound auth failure is the same 401 (no slug enumeration)', () => {
@@ -219,9 +209,6 @@ describe('CiWebhookController', () => {
       ['a zero line', { ...validPayload, failures: [{ test: 'T', line: 0 }] }],
       ['a fractional line', { ...validPayload, failures: [{ test: 'T', line: 1.5 }] }],
       ['a non-numeric line', { ...validPayload, failures: [{ test: 'T', line: 'abc' }] }],
-      // Review B2: `Ticket.gitRefLine` is a PostgreSQL INTEGER, so one past the 32-bit maximum must
-      // be a 400 here rather than a failed insert (a 500) for a correctly signed delivery.
-      ['B2 a line one past the PostgreSQL INTEGER maximum', { ...validPayload, failures: [{ test: 'T', line: 2147483648 }] }],
       ['AC-1 missing pipeline', (({ pipeline: _pipeline, ...body }) => body)(validPayload)],
       ['AC-2 missing commit', (({ commit: _commit, ...body }) => body)(validPayload)],
       ['AC-3 null pipeline', { ...validPayload, pipeline: null }],

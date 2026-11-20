@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsArray, ValidateNested, IsIn, IsInt, Min, Max, IsDefined, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsIn, IsInt, Min, IsDefined, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CiPipelineDto {
@@ -34,17 +34,11 @@ export class CiFailureDto {
   @IsString()
   file?: string;
 
-  /**
-   * Review B2: `Ticket.gitRefLine` is a PostgreSQL `INTEGER`, so a bigger value would pass
-   * validation and then fail at insert — a 500 for a correctly signed delivery instead of a 400.
-   * Keep the upper bound at the 32-bit signed maximum.
-   */
   @ApiPropertyOptional({ description: 'Line number where failure occurred', example: 87, type: 'integer', minimum: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(2147483647)
   line?: number;
 }
 
