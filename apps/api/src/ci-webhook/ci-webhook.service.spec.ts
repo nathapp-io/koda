@@ -299,6 +299,10 @@ describe('CiWebhookService', () => {
       ['src/part#2.ts', 'src/part%232.ts'],
       ['docs/why?.md', 'docs/why%3F.md'],
       ['src/a b.ts', 'src/a%20b.ts'],
+      ['src/a(b.ts', 'src/a%28b.ts'],
+      ['src/a)b.ts', 'src/a%29b.ts'],
+      ["src/it's!.ts", 'src/it%27s%21.ts'],
+      ['src/a*b.ts', 'src/a%2Ab.ts'],
     ])('B3: encodes %s in the source URL, keeping the line fragment separate', async (file, encoded) => {
       mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
       mockRepo.createTicket.mockResolvedValue(mockTicket);
@@ -309,6 +313,29 @@ describe('CiWebhookService', () => {
       expect(mockRepo.createTicket.mock.calls[0][1].description).toContain(
         `  - URL: https://github.com/acme/app/blob/abc123/${encoded}#L7`,
       );
+    });
+
+    /**
+     * Review B3 (follow-up): the ticket's Markdown renderer ends a bare link at a parenthesis it
+     * balances against nothing, so an unmatched `(` in a file name truncates the rendered href even
+     * though `encodeURIComponent` leaves it alone. The whole URL line is asserted, not a substring,
+     * because a truncated link still contains the start of the correct one.
+     */
+    it('B3: renders the whole href for a file name with an unmatched parenthesis', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'T', file: 'src/a(b.ts', line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      const urlLine = mockRepo.createTicket.mock.calls[0][1].description
+        .split('\n')
+        .find((line) => line.startsWith('  - URL:'));
+      expect(urlLine).toBe('  - URL: https://github.com/acme/app/blob/abc123/src/a%28b.ts#L7');
     });
 
     /**

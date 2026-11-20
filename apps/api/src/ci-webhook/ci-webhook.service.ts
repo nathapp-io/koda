@@ -14,9 +14,24 @@ import { AuditRecorder } from '../audit/audit-recorder.service';
  * valid Git filename with a reserved character (`src/part#2.ts`, `docs/why?.md`, `src/a b.ts`) one
  * path segment instead of ending the pathname there and turning the rest into a fragment or query.
  * The line stays `buildGitUrl`'s separate `#L<n>` fragment.
+ *
+ * The description is Markdown and the URL is bare, so the renderer also ends the link at punctuation
+ * it treats as prose: `encodeURIComponent` leaves `!`, `'`, `(`, `)` and `*` alone, and an unmatched
+ * `(` in a file name (`src/a(b.ts`) truncates the rendered href at that character while the stored
+ * URL looks right. Those five reserved characters are percent-encoded too, so the rendered link
+ * covers the whole path.
  */
+const MARKDOWN_UNSAFE_PUNCTUATION = /[!'()*]/g;
+
+function encodeGitSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(
+    MARKDOWN_UNSAFE_PUNCTUATION,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
 function encodeGitPath(filePath: string): string {
-  return filePath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+  return filePath.split('/').map((segment) => encodeGitSegment(segment)).join('/');
 }
 
 @Injectable()
