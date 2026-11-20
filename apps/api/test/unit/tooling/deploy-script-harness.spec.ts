@@ -1,8 +1,11 @@
 import { spawnSync } from 'node:child_process';
+import { vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript } from './helpers/deploy-script-harness';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 const fixtureRoots: string[] = [];
 

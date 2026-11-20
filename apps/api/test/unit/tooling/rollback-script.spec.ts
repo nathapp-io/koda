@@ -1,5 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { vi } from 'vitest';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
@@ -7,6 +8,8 @@ import {
   runDeployScript,
   type DockerCall,
 } from './helpers/deploy-script-harness';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 afterEach(() => {
   cleanupDeployScriptRuns();

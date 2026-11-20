@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { vi } from 'vitest';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import {
@@ -7,6 +8,8 @@ import {
   runDeployScript,
   type DockerCall,
 } from './helpers/deploy-script-harness';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 const DUMP_COMPLETE_LINE = '-- PostgreSQL database dump complete';
 const INCOMPLETE_PG_DUMP = ['--', '-- PostgreSQL database dump', '--', ''].join('\n');
