@@ -113,7 +113,13 @@ export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
         }
         continue;
       }
-      await this.sendOne(row, row.kind, content.data, content.userId, now);
+      try {
+        await this.sendOne(row, row.kind, content.data, content.userId, now);
+      } catch (error) {
+        this.logger.error(
+          `email ${row.id} (${row.kind}) dispatch settlement failed: ${messageOf(error)}`,
+        );
+      }
     }
   }
 

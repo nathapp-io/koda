@@ -210,6 +210,23 @@ describe('EmailDispatcher preparation failures (US-004)', () => {
     expect(schedule.retryAt).not.toHaveBeenCalled();
   });
 
+  it('continues the batch when terminal transport failure settlement throws (F1)', async () => {
+    const { dispatcher, schedule, builder, notify } = setup();
+    schedule.claimDue.mockResolvedValue([row({ id: 'terminal', attempts: 5 }), row({ id: 'next', toEmail: 'next@example.com' })]);
+    builder.build.mockResolvedValue({ data: {}, userId: 'u1' });
+    notify.send.mockRejectedValueOnce(new Error('terminal transport failure'));
+    schedule.markFailed.mockRejectedValueOnce(new Error('terminal settlement failure'));
+    const logger = (dispatcher as unknown as { logger: { error: Mock } }).logger;
+    const log = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+    await tick(dispatcher, NOW);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('terminal settlement failure'));
+    expect(notify.send).toHaveBeenCalledTimes(2);
+    expect(notify.send).toHaveBeenLastCalledWith(expect.objectContaining({ recipient: 'next@example.com' }));
+    expect(schedule.markSent).toHaveBeenCalledWith('next', NOW);
+  });
+
   it('logs failed build settlement and continues with the next row (AC-8, AC-9)', async () => {
     const { dispatcher, schedule, builder, notify } = setup();
     schedule.claimDue.mockResolvedValue([row({ id: 'broken', attempts: 5 }), row({ id: 'next', toEmail: 'next@example.com' })]);
