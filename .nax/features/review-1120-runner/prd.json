@@ -3,7 +3,7 @@
   "feature": "review-1120-runner",
   "branchName": "feat/review-1120-runner",
   "createdAt": "2026-11-20T11:48:47.927Z",
-  "updatedAt": "2026-11-20T12:31:02.234Z",
+  "updatedAt": "2026-11-20T12:36:13.104Z",
   "userStories": [
     {
       "id": "US-001",
@@ -174,14 +174,17 @@
         "reliability"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized runtime cancellation wiring across two existing files reuses the established optional Sleep signal and does not change authentication, tokens or access control."
+        "reasoning": "Localized runtime cancellation wiring across two existing files reuses the established optional Sleep signal and does not change authentication, tokens or access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/sync/sync-loop.ts",
@@ -202,7 +205,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "279cafb6359b982dada67c99d8eb76a3e95d147b"
     },
     {
       "id": "US-004",
