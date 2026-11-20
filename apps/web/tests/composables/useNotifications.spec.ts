@@ -21,6 +21,43 @@ async function load(api: { get: jest.Mock; post?: jest.Mock }) {
   return (await import('~/composables/useNotifications')).useNotifications()
 }
 
+interface Deferred<T> { promise: Promise<T>; resolve: (value: T) => void; reject: (err: unknown) => void }
+
+/** A promise the test settles by hand, so it decides whose refresh answers first. */
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (err: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+/**
+ * An api double whose reads stay pending until the test answers them, one pair per refresh: that is what lets a test
+ * let a refresh that started first answer last, which is the race K16 is about.
+ */
+function controlledApi() {
+  const pending: Array<{ path: string; answer: Deferred<unknown> }> = []
+  const get = jest.fn((path: string) => {
+    const answer = deferred<unknown>()
+    pending.push({ path, answer })
+    return answer.promise
+  })
+  const settle = (each: (call: { path: string; answer: Deferred<unknown> }) => void): void => { pending.splice(0).forEach(each) }
+  return {
+    get,
+    /** Answers both outstanding reads of one refresh with `count` and `records`. */
+    answer: (count: number, records: NotificationDto[]) => settle((call) => {
+      call.answer.resolve(call.path.endsWith('/unread-count') ? { count } : page(records))
+    }),
+    fail: (err: unknown) => settle((call) => { call.answer.reject(err) }),
+  }
+}
+
+/** Let a settled promise's continuations run: markAllRead's post, then its refresh's two reads. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) await Promise.resolve()
+}
+
 describe('useNotifications (S4a §5)', () => {
   afterEach(() => { delete g.useApi; delete g.useState; delete g.useAuth; state.clear(); signedIn = { id: 'u1' } })
 
@@ -80,5 +117,67 @@ describe('useNotifications (S4a §5)', () => {
     const second = await load({ get: jest.fn(async () => new Promise(() => undefined)) })
     expect(second.unreadCount.value).toBe(0)
     expect(second.latest.value).toEqual([])
+  })
+
+  // K16: a bell refresh that started earlier must not put the badge back to unread after a newer refresh answered.
+  test('a bell refresh that started first cannot undo a newer inbox refresh', async () => {
+    const bell = controlledApi()
+    const bellInbox = await load({ get: bell.get })
+    const bellRun = bellInbox.refresh()
+    const inbox = controlledApi()
+    const inboxPage = await load({ get: inbox.get })
+    const inboxRun = inboxPage.refresh()
+    inbox.answer(0, [])
+    await inboxRun
+    expect(inboxPage.unreadCount.value).toBe(0)
+    bell.answer(5, [])
+    await bellRun
+    expect(bellInbox.unreadCount.value).toBe(0)
+  })
+
+  test('the newest refresh owns the records, not just the count', async () => {
+    const bell = controlledApi()
+    const bellInbox = await load({ get: bell.get })
+    const bellRun = bellInbox.refresh()
+    const inbox = controlledApi()
+    const inboxPage = await load({ get: inbox.get })
+    const inboxRun = inboxPage.refresh()
+    inbox.answer(0, [row('inbox')])
+    await inboxRun
+    bell.answer(5, [row('bell')])
+    await bellRun
+    expect(bellInbox.latest.value.map((r) => r.id)).toEqual(['inbox'])
+  })
+
+  test('Mark all read on one instance is not undone by a pending refresh of the other', async () => {
+    const bell = controlledApi()
+    const bellInbox = await load({ get: bell.get })
+    const bellRun = bellInbox.refresh()
+    const inbox = controlledApi()
+    const inboxPage = await load({ get: inbox.get })
+    const readAll = inboxPage.markAllRead()
+    await flush()
+    expect(inbox.get).toHaveBeenCalledTimes(2)
+    inbox.answer(0, [])
+    await readAll
+    expect(inboxPage.unreadCount.value).toBe(0)
+    bell.answer(5, [])
+    await bellRun
+    expect(bellInbox.unreadCount.value).toBe(0)
+  })
+
+  test('a failed newest refresh still supersedes the older one', async () => {
+    state.set('notifications-unread:u1', ref(2))
+    const bell = controlledApi()
+    const bellInbox = await load({ get: bell.get })
+    const bellRun = bellInbox.refresh()
+    const inbox = controlledApi()
+    const inboxPage = await load({ get: inbox.get })
+    const inboxRun = inboxPage.refresh()
+    inbox.fail(new Error('offline'))
+    await expect(inboxRun).rejects.toThrow('offline')
+    bell.answer(5, [])
+    await bellRun
+    expect(bellInbox.unreadCount.value).toBe(2)
   })
 })

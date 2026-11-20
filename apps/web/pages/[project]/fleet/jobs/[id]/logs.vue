@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
+import { startLogDownload } from '~/lib/fleet-log-download'
 import { entriesQuery, hasActiveFilter, logViewQuery, parseLogViewQuery, type LogFilters, type LogViewParams } from '~/lib/fleet-log-query'
 import { LOG_STREAMS, type FleetJobLogListDto, type LogStream } from '~/lib/fleet-log-types'
 import { createLogViewer, type LogViewer, type LogViewerState } from '~/lib/fleet-log-viewer'
@@ -54,6 +55,34 @@ const downloadHref = computed(() => (activeEpoch.value !== null && summary.value
   ? logsApi.downloadHref(params.value.stream, activeEpoch.value)
   : null))
 const timelineHref = `/${slug}/fleet/jobs/${jobId}#timeline`
+/** K17: a refused session probe's message, shown beside the Download control. */
+const downloadError = ref<string | null>(null)
+
+/**
+ * K17: the anchor's `href` and `download` stay, so copy-link and middle-click still work, but the left click renews the
+ * session first — the browser's own request for the file never passes through `$api`, so an expired access cookie
+ * would answer 401. `logsApi.list()` is the probe: one `$api` GET, which refreshes and retries once on a 401 (M22).
+ */
+async function onDownload(event: MouseEvent): Promise<void> {
+  event.preventDefault()
+  const href = downloadHref.value
+  if (!href) return
+  downloadError.value = null
+  try {
+    await startLogDownload(href, {
+      probe: () => logsApi.list(),
+      open: (target) => {
+        const link = document.createElement('a')
+        link.href = target
+        link.setAttribute('download', '')
+        link.click()
+      },
+    })
+  }
+  catch (err) {
+    downloadError.value = extractApiError(err)
+  }
+}
 
 /** Final review #2 (D355): a tab or filter change keeps the attempt being read, even after a requeue reorders the list. */
 function navigate(next: LogViewParams): void {
@@ -153,12 +182,14 @@ useProjectEvents(slug, {
     <template v-else>
       <PageHeader :title="t('fleet.logs.title')" :subtitle="`${job.feature} | ${job.command}`">
         <template #actions>
+          <span v-if="downloadError" class="text-sm text-status-rejected" data-testid="fleet-log-download-error">{{ downloadError }}</span>
           <a
             v-if="downloadHref"
             :href="downloadHref"
             download
             class="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm hover:bg-muted"
             data-testid="fleet-log-download"
+            @click="onDownload"
           >{{ t('fleet.logs.download') }}</a>
           <NuxtLink :to="`/${slug}/fleet/jobs/${jobId}`" class="inline-flex h-9 items-center px-3 text-sm text-link underline-offset-4 hover:underline" data-testid="fleet-log-back">
             {{ t('fleet.logs.back') }}
