@@ -113,7 +113,9 @@ cd deployments/example
 ./rollback.sh v0.3.0 --restore-db ./backups/koda_data-YYYYMMDD-HHMMSS-PID.tar.gz
 ```
 
-Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz` (the gzip stream is checked explicitly, so a plain tar with a `.tar.gz` name is refused), then pulls the target images. If either preflight check fails, the running services are left untouched. A stop that cannot be confirmed also aborts before any data is replaced.
+Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz` (a plain tar with a `.tar.gz` name is refused), pulls the target images, and prepares and validates the updated `.env` with Compose. A preflight failure leaves running services untouched. The new `.env` replaces the old one only after any requested restore succeeds.
+
+Before using `--restore-db`, stop all other containers or processes that can write to the named `/data` volume, including services in other Compose projects, and keep them stopped until rollback completes. The script stops this project's API and web, then checks the Docker daemon for any running containers with writable mounts of that volume. If any remain, it names them and aborts without replacing data or restarting services; stop those writers and retry. If the stop or writer check cannot be confirmed, no data is replaced. The check is a snapshot; the rollback lock does not prevent other tools from starting new writers.
 
 The archive is copied to a staging directory next to the scripts and mounted from there, so a backup that is a symlink to a file outside its own directory still restores. The restore extracts the archive **once**, into a staging directory on the data volume itself: a backup that fits on the volume therefore does not also need room in Docker's storage, and the swap into `/data` only starts after that extraction has succeeded. Every top-level entry of the volume — dotfiles, names with two leading dots and symlinks whose target is gone included — is moved aside until the restored content is in place.
 

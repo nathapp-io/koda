@@ -232,6 +232,13 @@ describe('rollback.sh restore and portable .env update', () => {
       expect(existsSync(join(run.dataDir, 'z'))).toBe(false);
     }
     expect(run.output).toContain('Keep the services stopped');
+    const lock = join(run.dir, '.harness', 'koda-rollback-lock-koda-local_koda_data');
+    expect(existsSync(lock)).toBe(true);
+    const contender = run.rerun(['v0.4.0']);
+    expect(contender.status).toBe(1);
+    expect(contender.output).toContain('Could not acquire rollback lock');
+    expect(contender.dockerCalls.some((call) => call.argv.includes('stop') || call.argv.includes('up'))).toBe(false);
+    expect(existsSync(lock)).toBe(true);
   });
   it('B14: protects the winning restore from a different project sharing its resolved volume', () => {
     const { archive } = backupShapedArchive();
@@ -254,13 +261,17 @@ describe('rollback.sh restore and portable .env update', () => {
   });
   it('B16: restores the root metadata from a backup-shaped archive', () => {
     const { archive, root } = backupShapedArchive();
+    const archived = statSync(root);
+    // Seed different live numeric IDs in the Docker stub, even on hosts without permission to chown.
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive], {
-      seedVolume: (dir) => chmodSync(dir, 0o700),
+      seedVolume: (dir) => {
+        chmodSync(dir, 0o700);
+        writeFileSync(join(dir, '..', 'live-owner'), `${archived.uid + 1}:${archived.gid + 1}\n`);
+      },
     });
     expect(run.status).toBe(0);
-    const restored = statSync(run.dataDir);
-    const archived = statSync(root);
-    expect([restored.uid, restored.gid, restored.mode & 0o7777]).toEqual([archived.uid, archived.gid, 0o750]);
+    expect(statSync(run.dataDir).mode & 0o7777).toBe(0o750);
+    expect(readFileSync(join(run.dir, '.harness', 'live-owner'), 'utf8').trim()).toBe(`${archived.uid}:${archived.gid}`);
   });
   it('B16: preserves the volume root metadata when there is no root archive entry', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
@@ -297,6 +308,44 @@ describe('rollback.sh restore and portable .env update', () => {
     });
 
     expect(run.status).not.toBe(0);
+    expect(restoreRuns(run.dockerCalls)).toEqual([]);
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
+  });
+  it('refuses to replace a shared volume while another project still has a writable mount', () => {
+    const original = 'KODA_VERSION=v0.4.2\n';
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      envFile: original,
+      env: { KODA_DEPLOY_HARNESS_VOLUME_NAME: 'shared-data', KODA_DEPLOY_HARNESS_MOUNT_MODE: 'rw' },
+      seedVolume: (dir) => writeFileSync(join(dir, 'keep'), 'live data'),
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.output).toContain('/other-project-api-1');
+    expect(run.output).toContain('shared-data');
+    const stop = run.dockerCalls.findIndex((call) => call.argv.includes('stop'));
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(run.dockerCalls.findIndex((call) => call.argv[0] === 'ps')).toBeGreaterThan(stop);
+    expect(restoreRuns(run.dockerCalls)).toEqual([]);
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
+    expect(volumeEntries(run)).toEqual(['keep']);
+    expect(readFileSync(join(run.dataDir, 'keep'), 'utf8')).toBe('live data');
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe(original);
+    expect(existsSync(join(run.dir, '.harness', 'koda-rollback-lock-shared-data'))).toBe(false);
+  });
+  it('allows restoring when the remaining mount is read-only', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      env: { KODA_DEPLOY_HARNESS_MOUNT_MODE: 'ro' },
+    });
+    expect(run.status).toBe(0);
+    expect(run.dockerCalls.some((call) => call.argv.includes('inspect'))).toBe(true);
+    expect(restoreRuns(run.dockerCalls)).toHaveLength(1);
+  });
+  it.each(['ps --no-trunc', 'container inspect'])('refuses to restore if the writer check fails: %s', (failOn) => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      docker: { failOn: [failOn] },
+      env: { KODA_DEPLOY_HARNESS_MOUNT_MODE: 'rw' },
+    });
+    expect(run.status).toBe(1);
     expect(restoreRuns(run.dockerCalls)).toEqual([]);
     expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
   });
@@ -349,6 +398,29 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(run.status).toBe(0);
     expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe(multiline + doubleQuoted + 'KODA_VERSION=v0.4.1\n');
     expect(statSync(join(run.dir, '.env')).mode & 0o777).toBe(0o600);
+  });
+  it.each(['"', "'"])('preserves a quoted value ending with two backslashes (%s)', (quote) => {
+    const unrelated = `OTHER=${quote}value${'\\'.repeat(2)}${quote}\n`;
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      envFile: unrelated + 'KODA_VERSION=v0.4.2\n', envFileMode: 0o600,
+    });
+    expect(run.status).toBe(0);
+    expect(restoreRuns(run.dockerCalls)).toHaveLength(1);
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(true);
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe(unrelated + 'KODA_VERSION=v0.4.1\n');
+    expect(statSync(join(run.dir, '.env')).mode & 0o777).toBe(0o600);
+  });
+  it('validates the staged .env with Compose before stopping or restoring', () => {
+    const original = 'KODA_VERSION=v0.4.2\n';
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      envFile: original,
+      docker: { failOn: ['--env-file /.env.tmp.'] },
+    });
+    expect(run.status).toBe(1);
+    expect(run.output).toContain('Could not validate the staged .env');
+    expect(run.dockerCalls.some((call) => ['stop', 'run', 'up'].some((verb) => call.argv.includes(verb)))).toBe(false);
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe(original);
+    expect(readdirSync(run.dir).some((entry) => entry.startsWith('.env.tmp.'))).toBe(false);
   });
   it('B6: restarts the services on the requested version, not an inherited one', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1'], {

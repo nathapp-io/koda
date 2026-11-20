@@ -63,6 +63,8 @@ export interface ScriptRun {
    * mounts, so a test can assert the files a restore leaves behind (review B12, B13).
    */
   dataDir: string;
+  /** Runs the same script again against the same deployment and Docker stub state, with a fresh call log. */
+  rerun: (args: string[]) => ScriptRun;
 }
 
 /** A complete `pg_dump` output: the last comment line is what `backup-db.sh` verifies. */
@@ -170,8 +172,6 @@ export function runDeployScript(
   const recordFile = join(harnessDir, 'docker-calls');
   const outputFile = join(harnessDir, 'output');
   const pgDumpFile = join(harnessDir, 'pg-dump');
-  writeFileSync(recordFile, '');
-  writeFileSync(outputFile, '');
   writeFileSync(pgDumpFile, opts.docker?.pgDump ?? DEFAULT_PG_DUMP);
 
   writeExecutable(join(binDir, 'docker'), readFileSync(join(STUB_DIR, 'docker'), 'utf8'));
@@ -197,28 +197,33 @@ export function runDeployScript(
     KODA_DEPLOY_HARNESS_FAIL_ON: (opts.docker?.failOn ?? []).join('\n'),
   };
 
-  // Both streams go to one file so the output keeps the order the script wrote it in.
-  const outputFd = openSync(outputFile, 'w');
-  let status: number;
-  try {
-    const result = spawnSync('/bin/bash', [join(dir, script), ...placeFixtureArguments(dir, args)], {
-      cwd: dir,
-      env,
-      stdio: ['ignore', outputFd, outputFd],
-      timeout: RUN_TIMEOUT_MS,
-    });
-    status = result.status ?? 1;
-  } finally {
-    closeSync(outputFd);
-  }
+  const run = (scriptArgs: string[]): ScriptRun => {
+    writeFileSync(recordFile, '');
+    // Both streams go to one file so the output keeps the order the script wrote it in.
+    const outputFd = openSync(outputFile, 'w');
+    let status: number;
+    try {
+      const result = spawnSync('/bin/bash', [join(dir, script), ...placeFixtureArguments(dir, scriptArgs)], {
+        cwd: dir,
+        env,
+        stdio: ['ignore', outputFd, outputFd],
+        timeout: RUN_TIMEOUT_MS,
+      });
+      status = result.status ?? 1;
+    } finally {
+      closeSync(outputFd);
+    }
 
-  return {
-    status,
-    output: readFileSync(outputFile, 'utf8'),
-    dockerCalls: readDockerCalls(recordFile),
-    dir,
-    dataDir,
+    return {
+      status,
+      output: readFileSync(outputFile, 'utf8'),
+      dockerCalls: readDockerCalls(recordFile),
+      dir,
+      dataDir,
+      rerun: run,
+    };
   };
+  return run(args);
 }
 
 /** Removes every per-test copy; call it from the suite's `afterEach`. */

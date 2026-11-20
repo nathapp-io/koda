@@ -153,14 +153,18 @@ describe('rollback.sh preflight', () => {
     }
   });
 
-  it('B1: selects the same Compose project as deploy for every call when .env exists', () => {
+  it('B1: pins the deployment .env for service calls and only renders the staged replacement', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchiveFixture()], {
       envFile: 'POSTGRES_PASSWORD=pw\n',
       env: { COMPOSE_ENV_FILES: decoyEnvFile() },
     });
 
     expect(run.status).toBe(0);
-    for (const call of run.dockerCalls.filter(({ argv }) => argv[0] === 'compose')) {
+    const composeCalls = run.dockerCalls.filter(({ argv }) => argv[0] === 'compose');
+    const [staged] = composeCalls.filter(({ argv }) => argv[2]?.startsWith(`${run.dir}/.env.tmp.`));
+    expect(staged?.argv.slice(3)).toEqual(['-f', `${run.dir}/docker-compose.yml`, 'config']);
+    expect(staged?.kodaVersion).toBe('');
+    for (const call of composeCalls.filter((call) => call !== staged)) {
       expect(call.argv.slice(0, 5)).toEqual([
         'compose',
         '--env-file',
@@ -189,6 +193,18 @@ describe('rollback.sh preflight', () => {
     });
 
     expect(run.status).toBe(1);
+    expect(run.dockerCalls.map((call) => call.argv.at(-1))).toEqual(['config', 'config']);
+  });
+
+  it('rejects a version-dependent /data volume even when the project is unchanged', () => {
+    const run = runDeployScript('rollback.sh', ['pinned', '--restore-db', validArchiveFixture()], {
+      envFile: 'COMPOSE_PROJECT_NAME=koda-staging\nKODA_VERSION=current\n',
+      env: { KODA_DEPLOY_HARNESS_VOLUME_NAME: 'data-${KODA_VERSION}' },
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.output).toContain('changes the resolved Compose project or data volume');
+    // No pull, stop, lock creation, or restore.
     expect(run.dockerCalls.map((call) => call.argv.at(-1))).toEqual(['config', 'config']);
   });
 

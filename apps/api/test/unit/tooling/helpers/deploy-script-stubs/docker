@@ -80,22 +80,42 @@ case "$1" in
     rmdir "$KODA_DEPLOY_HARNESS_DIR/.harness/$2"
     exit "$?"
     ;;
+  ps)
+    if [[ -n "${KODA_DEPLOY_HARNESS_MOUNT_MODE-}" && "$*" == *"volume=${KODA_DEPLOY_HARNESS_VOLUME_NAME:-koda-local_koda_data}" ]]; then
+      echo fixture-container-id
+    fi
+    exit 0
+    ;;
+  container)
+    if [[ "$2" = inspect && "${@: -1}" = fixture-container-id ]]; then
+      if [[ "$4" == *".Name \"${KODA_DEPLOY_HARNESS_VOLUME_NAME:-koda-local_koda_data}\""* ]] &&
+         [[ "${KODA_DEPLOY_HARNESS_MOUNT_MODE-}" = rw || "$4" != *'.RW'* ]]; then
+        echo /other-project-api-1
+      fi
+      exit 0
+    fi
+    exit 1
+    ;;
 esac
 if [[ "$joined" == *' config' ]]; then
+  env_file="$KODA_DEPLOY_HARNESS_DIR/.env"
+  if [[ "$2" = --env-file ]]; then env_file="$3"; fi
   project="${COMPOSE_PROJECT_NAME:-}"
-  if [[ -z "$project" && -f "$KODA_DEPLOY_HARNESS_DIR/.env" ]]; then
-    project="$(grep '^COMPOSE_PROJECT_NAME=' "$KODA_DEPLOY_HARNESS_DIR/.env" | cut -d= -f2-)"
+  if [[ -z "$project" && -f "$env_file" ]]; then
+    project="$(grep '^COMPOSE_PROJECT_NAME=' "$env_file" | cut -d= -f2-)"
   fi
   project="${project:-koda-local}"
   version="${KODA_VERSION:-}"
-  if [[ -z "$version" && -f "$KODA_DEPLOY_HARNESS_DIR/.env" ]]; then
-    version="$(grep '^KODA_VERSION=' "$KODA_DEPLOY_HARNESS_DIR/.env" | cut -d= -f2- | tail -n 1)"
+  if [[ -z "$version" && -f "$env_file" ]]; then
+    version="$(grep '^KODA_VERSION=' "$env_file" | cut -d= -f2- | tail -n 1)"
   fi
   project="${project//'${PROJECT_SUFFIX}'/${version:-default}}"
   project="${project//'${KODA_VERSION}'/${version:-latest}}"
   if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then exit 1; fi
+  volume_name="${KODA_DEPLOY_HARNESS_VOLUME_NAME:-${project}_koda_data}"
+  volume_name="${volume_name//'${KODA_VERSION}'/${version:-latest}}"
   printf 'name: %s\nservices:\n  api:\n    image: nathapp/koda-api:%s\n    volumes:\n      - type: volume\n        source: koda_data\n        target: /data\nvolumes:\n  koda_data:\n    name: %s\n' \
-    "$project" "${version:-latest}" "${KODA_DEPLOY_HARNESS_VOLUME_NAME:-${project}_koda_data}"
+    "$project" "${version:-latest}" "$volume_name"
   exit 0
 fi
 
@@ -130,12 +150,37 @@ if [[ "$command_index" -ge 0 && "$command_index" -lt "$(( ${#args[@]} - 1 ))" ]]
   else
     translated="$(printf '%s' "$command" | sed -e "s#/data#$volume#g")"
   fi
-  helpers='stat() {
-    if [ "$(uname -s)" = Darwin ] && [ "$1" = "-c" ] && [ "$2" = "%u:%g %a" ]; then
-      command stat -f "%u:%g %Lp" "$3"
+  helpers='# Simulate ownership only when a fixture supplies a different live owner; modes and extraction remain real.
+  owner_file() {
+    case "$1" in
+      "$KODA_DEPLOY_HARNESS_VOLUME") echo "$KODA_DEPLOY_HARNESS_DIR/.harness/live-owner" ;;
+      "$KODA_DEPLOY_HARNESS_VOLUME/.koda-restore-staging/tree") echo "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner" ;;
+      *) return 1 ;;
+    esac
+  }
+  stat() {
+    if [ "$1" != "-c" ] || [ "$2" != "%u:%g %a" ]; then command stat "$@"; return; fi
+    if [ "$(uname -s)" = Darwin ]; then
+      metadata=$(command stat -f "%u:%g %Lp" "$3") || return
     else
-      command stat "$@"
+      metadata=$(command stat "$@") || return
     fi
+    if owner=$(owner_file "$3") && [ -f "$owner" ]; then
+      metadata="$(cat "$owner") ${metadata#* }"
+    fi
+    printf "%s\n" "$metadata"
+  }
+  chown() {
+    if [ -f "$KODA_DEPLOY_HARNESS_DIR/.harness/live-owner" ] && owner=$(owner_file "$2"); then
+      printf "%s\n" "$1" > "$owner"
+    else
+      command chown "$@"
+    fi
+  }
+  tar() {
+    command tar "$@" || return
+    # This fixture archives the actual host uid/gid. After extraction stat can read them from disk.
+    rm -f "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner"
   }
   mv() {
     case "$2" in

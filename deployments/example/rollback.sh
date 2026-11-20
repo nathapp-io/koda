@@ -153,7 +153,7 @@ fi
 # Read the canonical config, not the source expressions. This also resolves an explicit
 # Docker volume name (two Compose projects can point at the same volume).
 compose_identity() {
-  docker compose "${COMPOSE_ARGS[@]}" config | awk '
+  docker compose "$@" config | awk '
     /^[^[:space:]]/ { section = $1; key = ""; mount_type = "" }
     function scalar(value) { if (value ~ /^"[a-zA-Z0-9_.-]+"$/) return substr(value, 2, length(value)-2); return value }
     /^name: / { project = scalar($2) }
@@ -172,7 +172,8 @@ compose_identity() {
     }
   '
 }
-if ! current_identity="$(compose_identity)" || ! target_identity="$(KODA_VERSION="$TARGET_VERSION" compose_identity)"; then
+if ! current_identity="$(compose_identity "${COMPOSE_ARGS[@]}")" ||
+   ! target_identity="$(KODA_VERSION="$TARGET_VERSION" compose_identity "${COMPOSE_ARGS[@]}")"; then
   echo "❌ Could not resolve the Compose project, API image and named /data volume." >&2
   exit 1
 fi
@@ -213,38 +214,23 @@ if ! LOCK_ID="$(docker create --name "$LOCK_NAME" --entrypoint /bin/true "$targe
   exit 1
 fi
 
-echo "==> Stopping app services"
-# A stop that cannot be confirmed leaves the API writing to the volume, so the restore (which replaces the
-# data) must not run. A failure here aborts before anything is deleted (review B3).
-if ! docker compose "${COMPOSE_ARGS[@]}" stop api web; then
-  echo "❌ Could not stop the app services — refusing to restore data while they may be running"
+# Prepare the replacement under the lock, but do not publish it until the restore succeeds.
+if [[ -e "$ENV_FILE" && ! -f "$ENV_FILE" ]]; then
+  echo "❌ .env is not a regular file." >&2
   exit 1
 fi
-
-if [[ -n "$RESTORE_DB_FILE" ]]; then
-  echo "==> Restoring DB volume from: $RESTORE_DB_FILE"
-  # A failed/disconnected Docker client does not prove the worker stopped. Retain the
-  # lock on any restore failure so no rollback starts the API on partially replaced data.
-  KEEP_LOCK=1
-  if ! KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps --user root --entrypoint sh \
-    --name "koda-rollback-worker-$volume" -v "$RESTORE_STAGE_DIR:/backup:ro" \
-    api -c "$RESTORE_INSTALL_SCRIPT" koda-restore "$STAGED_ARCHIVE_NAME"; then
-    echo "❌ Restore failed. Keep the services stopped; rollback lock $LOCK_NAME was retained." >&2
-    echo "   Follow the interrupted-restore steps in README.md before releasing the lock." >&2
-    exit 1
-  fi
-  KEEP_LOCK=0
-fi
-
 ENV_FILE_TMP="$(mktemp "$ENV_FILE.tmp.XXXXXXXX")"
 if [[ -f "$ENV_FILE" ]]; then
   cp -p "$ENV_FILE" "$ENV_FILE_TMP"
   # Compose accepts export, colon and multiline quoted values. Track the closing quote
   # before treating a physical line as a new assignment. Keep unrelated bytes as-is.
-  KODA_ROLLBACK_VERSION="$TARGET_VERSION" LC_ALL=C awk -v final_nl="$(tail -c 1 "$ENV_FILE" | wc -l)" '
-    function quote_end(text, start,    i) {
+  if ! KODA_ROLLBACK_VERSION="$TARGET_VERSION" LC_ALL=C awk -v final_nl="$(tail -c 1 "$ENV_FILE" | wc -l)" '
+    function quote_end(text, start,    i, ch, backslashes) {
+      backslashes = 0
       for (i = start; i <= length(text); i++) {
-        if (substr(text, i, 1) == quote && (i == 1 || substr(text, i-1, 1) != "\\")) return i
+        ch = substr(text, i, 1)
+        if (ch == quote && backslashes % 2 == 0) return i
+        backslashes = (ch == "\\" ? backslashes + 1 : 0)
       }
       return 0
     }
@@ -277,12 +263,68 @@ if [[ -f "$ENV_FILE" ]]; then
       if (!found) emit(version)
       if (pending) printf "%s%s", last, (final_nl || !found ? "\n" : "")
     }
-  ' "$ENV_FILE" > "$ENV_FILE_TMP"
+  ' "$ENV_FILE" > "$ENV_FILE_TMP"; then
+    echo "❌ Could not prepare the staged .env." >&2
+    exit 1
+  fi
 else
   printf '%s\n' "KODA_VERSION=$TARGET_VERSION" > "$ENV_FILE_TMP"
 fi
+
+# Validate what Compose will read on a future run without the shell version override.
+if ! staged_identity="$(unset KODA_VERSION; compose_identity --env-file "$ENV_FILE_TMP" -f "$COMPOSE_FILE")" ||
+   [[ "$staged_identity" != "$target_identity" ]]; then
+  echo "❌ Could not validate the staged .env against the target Compose project, volume and API image." >&2
+  exit 1
+fi
+
+volume_writers() {
+  local containers container names mount_format
+  containers=$(docker ps --no-trunc --quiet --filter "volume=$volume") || return 1
+  # The volume filter selects candidates, including read-only mounts. Inspect the
+  # actual mount name and access mode, and ignore containers that have since stopped.
+  mount_format='{{if .State.Running}}{{range .Mounts}}{{if and (eq .Type "volume") (eq .Name "'"$volume"'") .RW}}{{println $.Name}}{{end}}{{end}}{{end}}'
+  while IFS= read -r container; do
+    [[ -n "$container" ]] || continue
+    names=$(docker container inspect --format "$mount_format" "$container") || return 1
+    if [[ -n "$names" ]]; then printf '%s\n' "$names"; fi
+  done <<< "$containers"
+}
+
+echo "==> Stopping app services"
+# A stop that cannot be confirmed leaves the API writing to the volume, so the restore (which replaces the
+# data) must not run. A failure here aborts before anything is deleted (review B3).
+if ! docker compose "${COMPOSE_ARGS[@]}" stop api web; then
+  echo "❌ Could not stop the app services — refusing to restore data while they may be running"
+  exit 1
+fi
+
+if [[ -n "$RESTORE_DB_FILE" ]]; then
+  if ! writers="$(volume_writers)"; then
+    echo "❌ Could not check for running writers to $volume — refusing to restore." >&2
+    exit 1
+  fi
+  if [[ -n "$writers" ]]; then
+    printf '❌ Refusing to restore %s: running containers still have writable mounts:\n%s\n' "$volume" "$writers" >&2
+    exit 1
+  fi
+  echo "==> Restoring DB volume from: $RESTORE_DB_FILE"
+  # A failed/disconnected Docker client does not prove the worker stopped. Retain the
+  # lock on any restore failure so no rollback starts the API on partially replaced data.
+  KEEP_LOCK=1
+  if ! KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps --user root --entrypoint sh \
+    --name "koda-rollback-worker-$volume" -v "$RESTORE_STAGE_DIR:/backup:ro" \
+    api -c "$RESTORE_INSTALL_SCRIPT" koda-restore "$STAGED_ARCHIVE_NAME"; then
+    echo "❌ Restore failed. Keep the services stopped; rollback lock $LOCK_NAME was retained." >&2
+    echo "   Follow the interrupted-restore steps in README.md before releasing the lock." >&2
+    exit 1
+  fi
+  KEEP_LOCK=0
+fi
+
 mv "$ENV_FILE_TMP" "$ENV_FILE"
 ENV_FILE_TMP=""
+COMPOSE_ARGS=( --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --project-name "$project" )
 
 echo "==> Starting app services on KODA_VERSION=$TARGET_VERSION"
 # Pin the version for the restart too: an exported KODA_VERSION (or an assignment this script did not read)
