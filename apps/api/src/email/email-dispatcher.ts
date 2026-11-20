@@ -87,24 +87,33 @@ export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
     await this.schedule.closeAbandonedInvites(now);
     const rows = await this.schedule.claimDue(now, CLAIM_LIMIT);
     for (const row of rows) {
+      let content;
       try {
-        const content = await this.builder.build(row);
-        if ('skip' in content) {
-          await this.schedule.markSkipped(row.id, content.skip);
-          continue;
-        }
-        await this.sendOne(row, row.kind, content.data, content.userId, now);
+        content = await this.builder.build(row);
       } catch (error) {
-        // A builder or repository failure for one owned row backs it off; the rest of the batch continues.
-        // retryAt itself can throw (DB blip) — log it so a transient scheduling failure does not drop the rest of the batch.
+        const message = messageOf(error);
         try {
-          await this.schedule.retryAt(row.id, this.backoffDue(row.attempts, now), messageOf(error));
-        } catch (retryError) {
+          if (row.attempts >= this.email.config().maxAttempts) {
+            await this.schedule.markFailed(row.id, message);
+          } else {
+            await this.schedule.retryAt(row.id, this.backoffDue(row.attempts, now), message);
+          }
+        } catch (settlementError) {
           this.logger.error(
-            `email ${row.id} (${row.kind}) could not be backed off after a build/send failure: ${messageOf(retryError)}`,
+            `email ${row.id} (${row.kind}) could not be settled after a build failure: ${messageOf(settlementError)}`,
           );
         }
+        continue;
       }
+      if ('skip' in content) {
+        try {
+          await this.schedule.markSkipped(row.id, content.skip);
+        } catch (error) {
+          this.logger.error(`email ${row.id} (${row.kind}) could not be marked skipped: ${messageOf(error)}`);
+        }
+        continue;
+      }
+      await this.sendOne(row, row.kind, content.data, content.userId, now);
     }
   }
 

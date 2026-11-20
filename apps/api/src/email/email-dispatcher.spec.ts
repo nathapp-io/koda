@@ -173,6 +173,59 @@ describe('EmailDispatcher (S4b US-002)', () => {
   });
 });
 
+describe('EmailDispatcher preparation failures (US-004)', () => {
+  it.each([5, 6])('fails an exhausted builder error at attempt %s without retrying (AC-1, AC-3)', async (attempts) => {
+    const { dispatcher, schedule, builder } = setup();
+    const error = new Error('preference lookup failed');
+    schedule.claimDue.mockResolvedValue([row({ attempts })]);
+    builder.build.mockRejectedValueOnce(error);
+
+    await tick(dispatcher, NOW);
+
+    expect(schedule.markFailed).toHaveBeenCalledExactlyOnceWith('s1', error.message);
+    expect(schedule.retryAt).not.toHaveBeenCalled();
+  });
+
+  it('backs off a builder error before the attempt limit (AC-4)', async () => {
+    const { dispatcher, schedule, builder } = setup();
+    schedule.claimDue.mockResolvedValue([row({ attempts: 1 })]);
+    builder.build.mockRejectedValueOnce(new Error('preference lookup failed'));
+
+    await tick(dispatcher, NOW);
+
+    expect(schedule.retryAt).toHaveBeenCalledExactlyOnceWith('s1', plusMin(NOW, 2), 'preference lookup failed');
+    expect(schedule.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('continues after exhausted preparation failure and delivers the next eligible row once (AC-5, AC-6)', async () => {
+    const { dispatcher, schedule, builder, notify } = setup();
+    schedule.claimDue.mockResolvedValue([row({ id: 'exhausted', attempts: 5 }), row({ id: 'next', toEmail: 'next@example.com', attempts: 5 })]);
+    builder.build.mockRejectedValueOnce(new Error('preparation failed')).mockResolvedValueOnce({ data: {}, userId: 'u1' });
+
+    await tick(dispatcher, NOW);
+
+    expect(schedule.markFailed).toHaveBeenCalledExactlyOnceWith('exhausted', 'preparation failed');
+    expect(notify.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recipient: 'next@example.com' }));
+    expect(schedule.markSent).toHaveBeenCalledExactlyOnceWith('next', NOW);
+    expect(schedule.retryAt).not.toHaveBeenCalled();
+  });
+
+  it('logs failed build settlement and continues with the next row (AC-8, AC-9)', async () => {
+    const { dispatcher, schedule, builder, notify } = setup();
+    schedule.claimDue.mockResolvedValue([row({ id: 'broken', attempts: 5 }), row({ id: 'next', toEmail: 'next@example.com' })]);
+    builder.build.mockRejectedValueOnce(new Error('preparation failed')).mockResolvedValueOnce({ data: {}, userId: 'u1' });
+    schedule.markFailed.mockRejectedValueOnce(new Error('settlement failed'));
+    const logger = (dispatcher as unknown as { logger: { error: Mock } }).logger;
+    const log = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+    await tick(dispatcher, NOW);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('settlement failed'));
+    expect(notify.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recipient: 'next@example.com' }));
+    expect(schedule.markSent).toHaveBeenCalledWith('next', NOW);
+  });
+});
+
 describe('EmailDispatcher scheduled ticks (S4b US-002)', () => {
   it('US-003 AC-1..AC-9: suspends the entire disabled schedule and resumes retained notifications after restart', async () => {
     vi.useFakeTimers();

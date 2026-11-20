@@ -20,6 +20,7 @@ function setup() {
       dueAt: data['dueAt'] as Date,
     })),
     updateMany: vi.fn(async () => ({ count: 1 })),
+    update: vi.fn(async (_args: { where: { id: string }; data: Record<string, unknown> }) => undefined),
   };
   const repo = new EmailScheduleRepository({ client: { emailSchedule } } as never);
   return { repo, emailSchedule };
@@ -27,6 +28,15 @@ function setup() {
 
 describe('EmailScheduleRepository (S4b US-001 invite recovery)', () => {
   const now = new Date('2026-10-10T10:00:00Z');
+
+  it('US-004 AC-10: persists a failed error capped to LAST_ERROR_MAX', async () => {
+    const { repo, emailSchedule } = setup();
+    await repo.markFailed('row-1', 'x'.repeat(600));
+    expect(emailSchedule.update).toHaveBeenCalledWith({
+      where: { id: 'row-1' },
+      data: { status: 'FAILED', lastError: 'x'.repeat(500), lockedUntil: null },
+    });
+  });
 
   it('US-001: startInviteSend records the row SENDING, attempts 1 and a fresh 2-minute lock', async () => {
     const { repo, emailSchedule } = setup();
