@@ -1,0 +1,436 @@
+{
+  "project": "koda",
+  "feature": "review-1120-deploy-ci",
+  "branchName": "feat/review-1120-deploy-ci",
+  "createdAt": "2026-11-20T02:33:55.236Z",
+  "updatedAt": "2026-11-20T02:33:55.236Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Keep CI gates enabled for large PRs and tooling-only changes",
+      "description": "**Goal** — Keep the gated CI jobs running for code changes regardless of path-list size, and include deployment and SDK tooling paths on PRs and main pushes (K7, K19).\n\n**Motivation** — The pipeline then counts as false, the step writes `code=false`, and quality, test and smoke are skipped, which counts as passing.\n\n**Approach** — **No early-exit reader on a pipe under `pipefail`.** K7's defect class: `grep -q`, `head` and similar readers that exit before EOF make the writer die with SIGPIPE. Feed such readers with a here-string or a file, or read the whole stream.\n\nTarget: `if grep -qE \"$CODE_PATHS\" <<< \"$changed\"; then`. `CODE_PATHS`'s directory group gains `deployments/` and its exact-file group gains `openapi-ts\\.config\\.ts` and `docker-compose\\.yml`. `on.push.paths` gains `\"deployments/**\"`, `\"docker-compose.yml\"` and `\"openapi-ts.config.ts\"`. Nothing else in `.github/workflows/ci.yml` changes; the `integration-shards` job and its test remain read-only.\n\n**Workflow steps are tested by running them.** A test extracts the `run: |` body of a named step from the workflow text (the step is the YAML list item, starting at its `- ` line and ending at the next sibling `- ` item or a dedent, that contains the given `id:` or `name:` line; the body is the indented block after `run: |`), writes it to a temp file and runs it, with `GITHUB_OUTPUT` pointing at a temp file and a stub `git` first on `PATH`. The assertions read the `key=value` lines written to `GITHUB_OUTPUT`. Expressions `${{ ... }}` never appear inside these bodies (review E/SEC-9 already routes inputs through `env:`), so the extracted text runs as is. The extractor removes the block's common indentation, and the test runs the body with `/bin/bash -e <file>`, which is how GitHub runs a `run:` step with no `shell:` key (`bash -e {0}`), using `/bin/bash` explicitly so a newer bash earlier on `PATH` cannot hide a bash 3.2 incompatibility. Structural assertions about the workflow (job outputs, a step's `with:` key) slice the workflow text, as `ci-integration-shards.spec.ts` does: no YAML parser is a direct dependency of `apps/api`. Put `ci-change-filter.spec.ts` in `apps/api/test/unit/tooling/`, under `bun run test`.\n\n**Scope** — In: modify only `.github/workflows/ci.yml` as described and add the unit suite. Out: release publishing (US-002), Turbo test cache inputs (US-003), changes to the existing integration shard job or its tests, and changes to `scripts/smoke-test-cli.sh`.\n\n**Interface** — `changes` / `id: filter`; input env `EVENT_NAME`, `BASE_SHA`, `HEAD_SHA`; `GITHUB_OUTPUT` contains `code=true` or `code=false`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When the ci.yml `filter` step body runs with `EVENT_NAME=pull_request` and stub `git diff --name-only` prints 5,000 distinct paths under `apps/` totaling more than 64 KiB, then `GITHUB_OUTPUT` contains `code=true`.",
+        "AC-2 [unit] When the same PR step receives only `README.md` and `docs/guide.md` from the git stub, then `GITHUB_OUTPUT` contains `code=false`.",
+        "AC-3 [unit] When the same PR step receives only `openapi-ts.config.ts`, then `GITHUB_OUTPUT` contains `code=true`.",
+        "AC-4 [unit] When the same PR step receives only `deployments/example/rollback.sh`, then `GITHUB_OUTPUT` contains `code=true`.",
+        "AC-5 [unit] When the same PR step receives only `docker-compose.yml`, then `GITHUB_OUTPUT` contains `code=true`.",
+        "AC-6 [unit] When the same step runs with `EVENT_NAME=push`, then the observed `(code output, git calls)` pair is `('code=true', [])`.",
+        "AC-7 [unit] Given every entry in ci.yml's `on.push.paths`, when each `**` is replaced with `a/b.ts` and then each remaining `*` with `x`, then every sample path matches the filter step's `CODE_PATHS` expression.",
+        "AC-8 [unit] When ci.yml's `on.push.paths` is inspected, then it includes `openapi-ts.config.ts`, `docker-compose.yml`, and `deployments/**`."
+      ],
+      "tags": [
+        "ci",
+        "tooling",
+        "bugfix"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized filter and path wiring with shell-execution and configuration regression tests."
+      },
+      "contextFiles": [
+        ".github/workflows/ci.yml",
+        "apps/api/test/unit/tooling/ci-integration-shards.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/unit/tooling/ci-change-filter.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "reason": "the `filter` step's `printf | grep -qE` becomes a here-string; `CODE_PATHS` gains the deployments directory and the escaped openapi-ts config and root Compose file names; `on.push.paths` gains the deployments glob, the root Compose file and the openapi-ts config file; nothing else in the file changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Promote release channels only for eligible stable versions",
+      "description": "**Goal** — Prevent older releases from moving newer Docker aliases, npm dist-tags, or the GitHub latest flag backwards (K8).\n\n**Motivation** — A `workflow_dispatch` re-publish of an existing tag (its documented purpose) or a pushed back-port tag (`v0.3.5` after `v0.4.2`) moves all three backwards.\n\n**Approach** — **Release logic stays inline in `release.yml`, not in a script file.** A `workflow_dispatch` re-publish runs the workflow from `main` but checks out the old tag's commit, where a new script would not exist. Inline logic always runs the current rule.\n\n**Release channel rule.** A stable tag matches `^v[0-9]+\\.[0-9]+\\.[0-9]+$`. The remote stable tags come from `git ls-remote --tags --refs origin 'v*'` (lines `<sha>\trefs/tags/<tag>`; canary and other non-stable tags are ignored). Versions compare numerically per component, so `v0.10.0` is newer than `v0.9.9`. For a stable `TAG`:\n- `latest=true` when `TAG` is equal to or newer than every remote stable tag.\n- the `<major>.<minor>` alias moves when `TAG` is equal to or newer than every remote stable tag with the same major and minor.\n- npm dist-tag: `latest` when `latest=true`; else `release-<major>.<minor>` when the `<major>.<minor>` alias moves; else `backport-<version>` (for example `backport-0.4.1`), a tag no other version uses. An older version must still be published under some dist-tag, npm rejects a dist-tag that parses as a semver range, and a shared tag must never move to an older version.\n- Docker tags: always `:<TAG>`, plus `:<major>.<minor>` when the alias moves, plus `:latest` when `latest=true`.\n- A canary tag keeps today's behaviour: Docker `:canary` only, npm `canary`, and `latest=false`.\n- When `git ls-remote` fails, the step fails, so nothing is published under a floating tag on a guess. The step body starts with `set -euo pipefail` and captures the listing into a variable (`remote_tags=$(git ls-remote ...)`) before parsing it; a process substitution or a pipe into a loop would hide the failure.\n- Version components are compared as base-10 integers (`10#<n>` in bash arithmetic), so a leading zero is never read as octal.\n\n**Workflow steps are tested by running them.** A test extracts the `run: |` body of a named step from the workflow text (the step is the YAML list item, starting at its `- ` line and ending at the next sibling `- ` item or a dedent, that contains the given `id:` or `name:` line; the body is the indented block after `run: |`), writes it to a temp file and runs it, with `GITHUB_OUTPUT` pointing at a temp file and a stub `git` first on `PATH`. The assertions read the `key=value` lines written to `GITHUB_OUTPUT`. Expressions `${{ ... }}` never appear inside these bodies (review E/SEC-9 already routes inputs through `env:`), so the extracted text runs as is. The extractor removes the block's common indentation, and the test runs the body with `/bin/bash -e <file>`, which is how GitHub runs a `run:` step with no `shell:` key (`bash -e {0}`), using `/bin/bash` explicitly so a newer bash earlier on `PATH` cannot hide a bash 3.2 incompatibility. Structural assertions about the workflow (job outputs, a step's `with:` key) slice the workflow text, as `ci-integration-shards.spec.ts` does: no YAML parser is a direct dependency of `apps/api`.\n\n**Bash 3.2.** The deploy scripts and the workflow step bodies must run under the `/bin/bash` 3.2 that macOS ships, because the tests run them on macOS hosts (koda-wk and the nax runner) as well as on CI's Ubuntu: no `${var,,}`, `mapfile`, associative arrays or `|&`, and no `\"${arr[@]}\"` on a possibly empty array under `set -u` (bash 3.2 reports it unbound).\n\nFor each run assertion, set `TAG` and `VERSION` (the tag without its `v`) and stub `git ls-remote` with `<sha>\\trefs/tags/<tag>` lines. For each successful run, compare the complete sorted list of written `key=value` lines as one assertion, including `latest=true` in AC-5 and AC-6. For the failed run, assert the exit status and absence of output assignments separately. Use separate mapping and action-wiring assertions.\n\n**Scope** — In: modify `.github/workflows/release.yml` and add `apps/api/test/unit/tooling/release-channels.spec.ts`. Out: CI path filtering (US-001), re-pointing Docker `latest`, the `<major>.<minor>` aliases or npm dist-tags already published; changes to `scripts/bump-version.sh`, registry credentials, tag checkout, or the existing guard against republishing immutable npm versions.\n\n**Interface** — The step `Compute Docker tags` is renamed `Compute release channels` (`id: channels`) and writes `tags_api`, `tags_web`, `npm_tag` and `latest`. The `info` job takes its `npm_tag`, `docker_tags_api`, `docker_tags_web` and a new `latest` output from it. `Set release info` stops writing `npm_tag`. The `release` job passes `make_latest: ${{ needs.info.outputs.latest }}` to `softprops/action-gh-release`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When the `channels` body runs for `TAG=v0.4.3` with remote tags `v0.4.0`, `v0.4.1`, `v0.4.2`, then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:v0.4.3,nathapp/koda-api:0.4,nathapp/koda-api:latest`, `tags_web=nathapp/koda-web:v0.4.3,nathapp/koda-web:0.4,nathapp/koda-web:latest`, `npm_tag=latest`, `latest=true`.",
+        "AC-2 [unit] When the `channels` body runs for `TAG=v0.4.2` with remote tags `v0.4.0`, `v0.4.1`, `v0.4.2` (a re-publish of the newest), then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:v0.4.2,nathapp/koda-api:0.4,nathapp/koda-api:latest`, `tags_web=nathapp/koda-web:v0.4.2,nathapp/koda-web:0.4,nathapp/koda-web:latest`, `npm_tag=latest`, `latest=true`.",
+        "AC-3 [unit] When the `channels` body runs for `TAG=v0.4.1` with remote tags `v0.4.0`, `v0.4.1`, `v0.4.2`, then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:v0.4.1`, `tags_web=nathapp/koda-web:v0.4.1`, `npm_tag=backport-0.4.1`, `latest=false`.",
+        "AC-4 [unit] When the `channels` body runs for `TAG=v0.3.5` with remote tags `v0.3.4`, `v0.4.2`, then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:v0.3.5,nathapp/koda-api:0.3`, `tags_web=nathapp/koda-web:v0.3.5,nathapp/koda-web:0.3`, `npm_tag=release-0.3`, `latest=false`.",
+        "AC-5 [unit] When the `channels` body runs for `TAG=v0.10.0` with remote tag `v0.9.9`, then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:v0.10.0,nathapp/koda-api:0.10,nathapp/koda-api:latest`, `tags_web=nathapp/koda-web:v0.10.0,nathapp/koda-web:0.10,nathapp/koda-web:latest`, `npm_tag=latest`, `latest=true`.",
+        "AC-6 [unit] When the `channels` body runs for `TAG=v0.4.3` with remote tags `v0.4.2`, `v0.5.0-canary.2`, then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:v0.4.3,nathapp/koda-api:0.4,nathapp/koda-api:latest`, `tags_web=nathapp/koda-web:v0.4.3,nathapp/koda-web:0.4,nathapp/koda-web:latest`, `npm_tag=latest`, `latest=true`.",
+        "AC-7 [unit] When the `channels` body runs for `TAG=v0.5.0-canary.1` with remote tag `v0.4.2`, then `GITHUB_OUTPUT` contains exactly the set `tags_api=nathapp/koda-api:canary`, `tags_web=nathapp/koda-web:canary`, `npm_tag=canary`, `latest=false`.",
+        "AC-8 [unit] When the `channels` body runs for `TAG=v0.4.3` and stub `git ls-remote` exits 128, then the step exits non-zero.",
+        "AC-9 [unit] When the relevant `info.outputs` entries in `release.yml` are read as one mapping, then `npm_tag`, `docker_tags_api`, `docker_tags_web`, and `latest` map respectively to `${{ steps.channels.outputs.npm_tag }}`, `${{ steps.channels.outputs.tags_api }}`, `${{ steps.channels.outputs.tags_web }}`, and `${{ steps.channels.outputs.latest }}`.",
+        "AC-10 [unit] When the `release` job's `softprops/action-gh-release` step is read, then its `with:` block sets `make_latest: ${{ needs.info.outputs.latest }}`.",
+        "AC-11 [unit] When `git ls-remote` fails as in AC-8, then the channels step writes no release channel assignments to `GITHUB_OUTPUT`."
+      ],
+      "tags": [
+        "release",
+        "ci",
+        "docker",
+        "npm"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A numeric comparison and a stubbed Git lookup fit in one existing workflow step and one unit suite; the existing publishing jobs consume the revised outputs without new integrations."
+      },
+      "contextFiles": [
+        ".github/workflows/release.yml",
+        "apps/api/test/unit/tooling/ci-integration-shards.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/unit/tooling/release-channels.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": ".github/workflows/release.yml",
+          "reason": "step `Compute Docker tags` (`id: docker`) becomes `Compute release channels` (`id: channels`) writing `tags_api`, `tags_web`, `npm_tag` and `latest`; `Set release info` stops writing `npm_tag`; the `info` job outputs read `steps.channels.outputs` and add `latest`; the `release` job passes `make_latest`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Forward webhook switches and invalidate stale API test results",
+      "description": "**Goal** — Forward both webhook signature switches to Compose API containers and hash the root tooling inputs for API tests (K1).\n\n**Motivation** — Both Compose files whitelist API environment variables and omit `CI_WEBHOOK_REQUIRE_V2` and `WEBHOOK_SIGNATURE_V1_ENABLED`, so an operator who follows `docs/deployment/webhooks.md` gets the defaults (`ciRequireV2: false`, `v1Enabled: true`) regardless of what they set.\n\n**Approach** — **Compose switches (K1).** Both `docker-compose.yml` (root) and `deployments/example/docker-compose.yml` add, under `services.api.environment`, `WEBHOOK_SIGNATURE_V1_ENABLED: ${WEBHOOK_SIGNATURE_V1_ENABLED:-true}` and `CI_WEBHOOK_REQUIRE_V2: ${CI_WEBHOOK_REQUIRE_V2:-false}`. The defaults are the API's own defaults.\n\n**Turbo test inputs.** A new `apps/api/turbo.json` (`\"extends\": [\"//\"]`) sets `tasks.test.inputs` to `$TURBO_DEFAULT$` plus `$TURBO_ROOT$/.github/workflows/**`, `$TURBO_ROOT$/deployments/**`, `$TURBO_ROOT$/scripts/**`, `$TURBO_ROOT$/docker-compose.yml` and `$TURBO_ROOT$/openapi-ts.config.ts`. `$TURBO_ROOT$` was checked on turbo 2.11.4: a dry run of `@nathapp/koda-api#test` lists `../../.github/workflows/ci.yml` as an input. Only the `test` task is overridden; the root `turbo.json` keeps `dependsOn`, `env` and `outputs` through `extends`.\n\n`docs/deployment/webhooks.md` — section \"Deprecation window\" gains one sentence that both Compose files pass the two switches to the API. **No-test:** Compose and turbo configuration and one docs line; no test loads these files.\n\n**Scope** — In: modify `docker-compose.yml`, `deployments/example/docker-compose.yml`, and `docs/deployment/webhooks.md`; add `apps/api/turbo.json`. Out: the CI trigger/filter (US-001), API signature code, the root `docker-compose.yml` `DATABASE_URL`, and a `docker compose config` render test.\n\n**Interface** — `services.api.environment.WEBHOOK_SIGNATURE_V1_ENABLED: ${WEBHOOK_SIGNATURE_V1_ENABLED:-true}`; `services.api.environment.CI_WEBHOOK_REQUIRE_V2: ${CI_WEBHOOK_REQUIRE_V2:-false}`; `@nathapp/koda-api#test` inherits the root task with only its `inputs` extended.",
+      "acceptanceCriteria": [
+        "AC-1 [review] When root `docker-compose.yml` is reviewed, then `services.api.environment` contains the mapping `WEBHOOK_SIGNATURE_V1_ENABLED: ${WEBHOOK_SIGNATURE_V1_ENABLED:-true}` and `CI_WEBHOOK_REQUIRE_V2: ${CI_WEBHOOK_REQUIRE_V2:-false}`.",
+        "AC-2 [review] When `deployments/example/docker-compose.yml` is reviewed, then `services.api.environment` contains the same mapping `WEBHOOK_SIGNATURE_V1_ENABLED: ${WEBHOOK_SIGNATURE_V1_ENABLED:-true}` and `CI_WEBHOOK_REQUIRE_V2: ${CI_WEBHOOK_REQUIRE_V2:-false}`.",
+        "AC-3 [review] When `apps/api/turbo.json` is reviewed, then its package override is `\"extends\": [\"//\"]` with only `tasks.test.inputs` set to the list `$TURBO_DEFAULT$`, `$TURBO_ROOT$/.github/workflows/**`, `$TURBO_ROOT$/deployments/**`, `$TURBO_ROOT$/scripts/**`, `$TURBO_ROOT$/docker-compose.yml`, and `$TURBO_ROOT$/openapi-ts.config.ts`, with no other task key set.",
+        "AC-4 [review] When the Deprecation window section of `docs/deployment/webhooks.md` is read, then it states that both Compose files forward `WEBHOOK_SIGNATURE_V1_ENABLED` (default `true`) and `CI_WEBHOOK_REQUIRE_V2` (default `false`) to the API."
+      ],
+      "tags": [
+        "config",
+        "compose",
+        "ci"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "no-test",
+        "reasoning": "Four files with standard Compose interpolation and a scoped Turbo override, without new runtime abstractions.",
+        "noTestJustification": "The changes are declarative forwarding of existing options with unchanged defaults, cache inputs, and one docs line; they do not change signature logic. Review checks both mappings and the Turbo override; no Docker render test is in scope."
+      },
+      "contextFiles": [
+        "turbo.json",
+        "docker-compose.yml",
+        "deployments/example/docker-compose.yml",
+        "docs/deployment/webhooks.md",
+        "apps/api/src/config/webhook-signature.config.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/turbo.json"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "docker-compose.yml",
+          "reason": "`services.api.environment` gains `WEBHOOK_SIGNATURE_V1_ENABLED: ${WEBHOOK_SIGNATURE_V1_ENABLED:-true}` and `CI_WEBHOOK_REQUIRE_V2: ${CI_WEBHOOK_REQUIRE_V2:-false}`."
+        },
+        {
+          "path": "deployments/example/docker-compose.yml",
+          "reason": "`services.api.environment` gains the same two entries with the same defaults."
+        },
+        {
+          "path": "docs/deployment/webhooks.md",
+          "reason": "section \"Deprecation window\" gains one sentence that both Compose files pass the two switches to the API."
+        }
+      ],
+      "workdir": ".",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Require a verified Postgres backup and archive the active project's volume",
+      "description": "**Goal** — Always make and verify a Postgres dump before archiving the active Compose project's data, and provide the shared deploy-script harness (K3, K6).\n\n**Motivation** — A stopped stack keeps its database volume, and `deploy.sh` then runs `prisma migrate deploy` (which starts Postgres through `depends_on`) with no dump taken.\n\n**Approach** — **Backup always dumps (K6).** `backup-db.sh` runs `docker compose -f \"$COMPOSE_FILE\" up -d --wait postgres` first, then dumps. On a first install this initialises the database and writes a near-empty but valid dump, which removes the \"not running, skip\" branch. The dump is complete when its decompressed text contains the line `-- PostgreSQL database dump complete` anywhere (pg_dump writes it as the last comment). The script checks the gzip and that line, reading the whole decompressed stream (no `grep -q` on a pipe, per the SIGPIPE rule above), and on any failure deletes the partial `koda-db-<ts>.sql.gz`, prints `❌ Postgres dump failed`, and exits 1. Postgres is left running afterwards. If `up -d --wait postgres` fails, exit non-zero without attempting a dump; if the data archive `run` fails, exit non-zero.\n\n**Compose project resolution (K3).** Backup and restore of the data volume run inside the Compose project's own `api` service: `docker compose -f \"$COMPOSE_FILE\" run --rm --no-deps --user root --entrypoint sh -v \"<host dir>:/backup\" api -c \"<tar command>\"`. Compose mounts the project's `koda_data` volume at `/data`, whatever the project name is, so no volume name appears in either script. This mirrors `deploy.sh`'s existing `run --rm --no-deps --user root --entrypoint chown api` call. The api image is Alpine (busybox `tar`, `find`, `sh`). Use `tar -czf /backup/koda_data-<timestamp>.tar.gz -C /data .` for this story.\n\n**Deploy scripts are tested with a recording `docker` stub.** A test copies `deployments/example/` into a per-test temp dir, puts stub `docker` and `curl` executables first on `PATH`, runs the script with `bash`, and asserts on the recorded calls. No real Docker is needed, so the tests run inside the nax sandbox. The harness is a test helper created by US-004 (skeleton below). No test in the repo runs a shell script against a stub. The helper's shape is fixed here; the stub's internals are the implementer's. For the rollback fixtures, keep the `args: string[]` interface: a test can create a text or gzip-tar fixture at an absolute source path, which the harness copies under `dir` and passes to the script before spawning it. Resolve the missing-file case under `dir` without creating a fixture. This keeps archive creation out of production code and does not require a new public helper or option.\n\n**Bash 3.2.** The deploy scripts and the workflow step bodies must run under the `/bin/bash` 3.2 that macOS ships, because the tests run them on macOS hosts (koda-wk and the nax runner) as well as on CI's Ubuntu: no `${var,,}`, `mapfile`, associative arrays or `|&`, and no `\"${arr[@]}\"` on a possibly empty array under `set -u` (bash 3.2 reports it unbound).\n\n**No early-exit reader on a pipe under `pipefail`.** K7's defect class: `grep -q`, `head` and similar readers that exit before EOF make the writer die with SIGPIPE. Feed such readers with a here-string or a file, or read the whole stream.\n\n**Scope** — In: modify `deployments/example/backup-db.sh` and create the harness and backup suite under `apps/api/test/unit/tooling/` for `bun run test`. Out: rollback preflight/restore (US-005/US-006), deploy entry-point validation (US-007), operator docs (US-008), backup rotation or pruning of `deployments/example/backups/`, and automated Postgres restore.\n\n**Interface**\n```ts\n// apps/api/test/unit/tooling/helpers/deploy-script-harness.ts\nexport interface DockerCall {\n  argv: string[];          // the arguments after `docker`, one entry per argument\n  kodaVersion: string;     // KODA_VERSION in the stub's environment, '' when unset\n}\nexport interface StubBehaviour {\n  failOn?: string[];       // the stub exits 1 for a call whose joined argv contains one of these substrings\n  pgDump?: string;         // stdout for the call that runs pg_dump (default: a dump ending in the completion line)\n  pgDumpExit?: number;     // exit code for that call (default 0)\n}\n// The stub reads pgDump from a file the harness writes under `dir` (a dump over 1 MiB cannot travel through the\n// environment). \"A call whose argv contains X\" in the ACs means an argv element equal to X, except `pg_dump`, which\n// is a substring of the `sh -lc` command element. `failOn` matches the call's argv joined with spaces, after every\n// occurrence of `dir` is removed, so a random temp-dir suffix never matches by accident.\nexport interface ScriptRun {\n  status: number;\n  output: string;          // stdout and stderr, interleaved\n  dockerCalls: DockerCall[];\n  dir: string;             // the temp copy of deployments/example, as a real path (macOS /var -> /private/var),\n                           // so it equals the SCRIPT_DIR the script resolves for itself\n}\n// Copies deployments/example into a mkdtemp dir (keeping each script's executable bit: deploy.sh checks\n// `-x backup-db.sh`), writes `.env` when envFile is given, puts stub docker + curl first on PATH, and runs\n// `/bin/bash <dir>/<script> ...args`. The stub dir also holds a `bash` shim that execs `/bin/bash`, so a script\n// that deploy.sh runs through its `#!/usr/bin/env bash` line also runs under bash 3.2. `.env` is written with\n// envFileMode (default 0o644) before the script starts. The child's environment is built from PATH (stub dir first) and HOME only,\n// plus opts.env: an operator's exported POSTGRES_PASSWORD, KODA_VERSION, DATABASE_URL or COMPOSE_PROJECT_NAME\n// never reaches the script. Fixture files a test passes as arguments (an archive, a text file) are created inside\n// `dir`, so every path the script resolves with `cd ... && pwd` is a real path. Nothing is removed until\n// cleanupDeployScriptRuns() runs in the test's afterEach.\nexport function runDeployScript(\n  script: 'backup-db.sh' | 'rollback.sh' | 'deploy.sh',\n  args: string[],\n  opts?: { envFile?: string; envFileMode?: number; env?: Record<string, string>; docker?: StubBehaviour },\n): ScriptRun;\nexport function cleanupDeployScriptRuns(): void;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When `runDeployScript('backup-db.sh', [])` uses the default stub, then the recorded `compose -f <dir>/docker-compose.yml up -d --wait postgres` call precedes the call whose argv contains `pg_dump`.",
+        "AC-2 [unit] When backup runs as in AC-1, then it exits 0.",
+        "AC-3 [unit] When backup runs as in AC-1, then decompressing the one `backups/koda-db-<timestamp>.sql.gz` file yields exactly the stub's pg_dump output.",
+        "AC-4 [unit] When backup runs as in AC-1, then the archive call has exactly the argv `['compose', '-f', '<dir>/docker-compose.yml', 'run', '--rm', '--no-deps', '--user', 'root', '--entrypoint', 'sh', '-v', '<dir>/backups:/backup', 'api', '-c', 'tar -czf /backup/koda_data-<timestamp>.tar.gz -C /data .']`.",
+        "AC-5 [unit] When backup runs as in AC-1, then every recorded docker call's first argument is `compose`.",
+        "AC-6 [unit] When `runDeployScript('backup-db.sh', [])` uses `pgDumpExit: 1`, then it exits 1.",
+        "AC-7 [unit] When backup runs as in AC-6, then output includes `❌ Postgres dump failed`.",
+        "AC-8 [unit] When backup runs as in AC-6, then `<dir>/backups` contains no `koda-db-*.sql.gz` file.",
+        "AC-9 [unit] When `runDeployScript('backup-db.sh', [])` uses `pgDump` text without `-- PostgreSQL database dump complete` as a line, then it exits 1.",
+        "AC-10 [unit] When backup runs as in AC-9, then `<dir>/backups` contains no `koda-db-*.sql.gz` file.",
+        "AC-11 [unit] When `runDeployScript('backup-db.sh', [])` uses `pgDump` with the `-- PostgreSQL database dump complete` line followed by more than 1 MiB of further text, then it exits 0.",
+        "AC-12 [unit] When `runDeployScript('backup-db.sh', [])` uses `failOn: ['up -d --wait postgres']`, then it exits non-zero.",
+        "AC-13 [unit] When backup runs as in AC-12, then no recorded call has argv containing `pg_dump`.",
+        "AC-14 [unit] When `runDeployScript('backup-db.sh', [])` uses `failOn: ['tar -czf']`, then it exits non-zero.",
+        "AC-15 [unit] When backup runs as in AC-9, then output includes `❌ Postgres dump failed`."
+      ],
+      "tags": [
+        "deployment",
+        "postgres",
+        "backup",
+        "tooling"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Combines fail-closed dump verification, Compose project scoping and a new reusable shell/stub filesystem harness."
+      },
+      "contextFiles": [
+        "deployments/example/backup-db.sh",
+        "deployments/example/deploy.sh",
+        "deployments/example/docker-compose.yml",
+        "apps/api/Dockerfile"
+      ],
+      "expectedFiles": [
+        "apps/api/test/unit/tooling/helpers/deploy-script-harness.ts",
+        "apps/api/test/unit/tooling/backup-db-script.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/backup-db.sh",
+          "reason": "the running-service check and its skip branch are removed; Postgres is started with `up -d --wait postgres`, dumped and verified; the data volume is archived through `compose run --rm --no-deps --user root --entrypoint sh ... api` instead of `docker run -v koda-local_koda_data`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Preflight rollback before stopping app services",
+      "description": "**Goal** — Validate the requested restore archive and pull the target images before stopping any app service (K4).\n\n**Motivation** — `rollback.sh` runs `docker compose stop api web` before it checks that the `--restore-db` file exists, so a typo exits 1 with both services stopped.\n\n**Approach** — **Rollback order (K4, N1).** Parse arguments, then:\n1. With `--restore-db`: the file must exist and be readable (else `❌ Backup file not found: <path>`, exit 1), and `tar -tzf` on the host must list it (else `❌ Backup file is not a valid .tar.gz: <path>`, exit 1).\n2. Pull the target images with `KODA_VERSION=<target>` in the environment (`docker compose -f \"$COMPOSE_FILE\" pull api web`); a failed pull exits 1.\n3. Stop `api` and `web` (unchanged, `|| true`).\n\nThe archive checks and the target-image pull move before `stop api web`; the restore and `.env` update are left to US-006. Consume `runDeployScript` and `cleanupDeployScriptRuns` from US-004; run `apps/api/test/unit/tooling/rollback-script.spec.ts` under `bun run test`, using real host archive validation and recorded Docker calls. Retain `/bin/bash` 3.2 compatibility on macOS and Ubuntu.\n\n**Scope** — In: modify `deployments/example/rollback.sh` for ordering and early failures, and add its preflight tests. Out: Compose-scoped restore, `.env` replacement (US-006), and restoring Postgres from the `koda-db-<ts>.sql.gz` dump inside `rollback.sh`.\n\n**Interface** — `./rollback.sh <version> [--restore-db <backup-tar-gz>]`; preflight calls `KODA_VERSION=<target> docker compose -f \"$COMPOSE_FILE\" pull api web` before `docker compose -f \"$COMPOSE_FILE\" stop api web || true`.\n\n**Bash 3.2.** `rollback.sh` must run under the `/bin/bash` 3.2 that macOS ships, because the tests run it on macOS hosts as well as on CI's Ubuntu: no `${var,,}`, `mapfile`, associative arrays or `|&`, and no `\"${arr[@]}\"` on a possibly empty array under `set -u` (bash 3.2 reports it unbound).",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When `runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', '<dir>/missing.tar.gz'])` runs, then it exits 1.",
+        "AC-2 [unit] When rollback runs as in AC-1, then output includes `❌ Backup file not found: <dir>/missing.tar.gz`, with `<dir>` resolved to the harness deployment directory.",
+        "AC-3 [unit] When rollback runs as in AC-1, then no recorded docker call has argv containing `stop` or `run`.",
+        "AC-4 [unit] When `runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', <path of a plain text file inside <dir>>])` runs, then it exits 1.",
+        "AC-5 [unit] When rollback runs as in AC-4, then output includes `❌ Backup file is not a valid .tar.gz: <path>`, with `<path>` resolved to the text fixture inside `<dir>`.",
+        "AC-6 [unit] When rollback runs as in AC-4, then no recorded docker call has argv containing `stop` or `run`.",
+        "AC-7 [unit] When `runDeployScript('rollback.sh', ['v0.4.1'])` uses `failOn: ['pull']`, then it exits 1.",
+        "AC-8 [unit] When rollback runs as in AC-7, then no recorded docker call has argv containing `stop`.",
+        "AC-9 [unit] When `runDeployScript('rollback.sh', ['v0.4.1'])` uses the default stub, then the recorded `compose -f <dir>/docker-compose.yml pull api web` call precedes `compose -f <dir>/docker-compose.yml stop api web`.",
+        "AC-10 [unit] When rollback runs as in AC-9, then the recorded `pull api web` call has `kodaVersion` `v0.4.1`."
+      ],
+      "tags": [
+        "deployment",
+        "rollback",
+        "bugfix"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized validation and ordering changes with a supplied harness and explicit failure boundaries."
+      },
+      "contextFiles": [
+        "deployments/example/rollback.sh",
+        "deployments/example/docker-compose.yml",
+        "apps/api/test/unit/tooling/helpers/deploy-script-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/unit/tooling/rollback-script.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/rollback.sh",
+          "reason": "the archive checks and the target-image pull move before `stop api web`; the restore and `.env` update are left to US-006."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Restore the active project's data and update .env portably",
+      "description": "**Goal** — Restore via the target API image in the selected Compose project and update `.env` without GNU-only `sed -i` (K3, N1).\n\n**Motivation** — BSD sed on macOS reads the script as a backup suffix and fails (`invalid command code`), so under `set -e` the rollback dies after stopping the services and restoring the data.\n\n**Approach** — **Compose project resolution (K3).** Backup and restore of the data volume run inside the Compose project's own `api` service: `docker compose -f \"$COMPOSE_FILE\" run --rm --no-deps --user root --entrypoint sh -v \"<host dir>:/backup\" api -c \"<tar command>\"`. Compose mounts the project's `koda_data` volume at `/data`, whatever the project name is, so no volume name appears in either script. This mirrors `deploy.sh`'s existing `run --rm --no-deps --user root --entrypoint chown api` call. The api image is Alpine (busybox `tar`, `find`, `sh`).\n\nAfter the US-005 preflight and stop, finish the specified rollback order:\n4. With `--restore-db`: restore through the api service, as above, with `KODA_VERSION=<target>` and the archive's directory mounted read-only at `/backup`. The command empties `/data` including dot-entries (`find /data -mindepth 1 -delete`), then `tar -xzf /backup/<basename> -C /data`. A failed restore call still stops the script under `set -e`, before updating `.env` or restarting services.\n5. Update `.env`: replace every existing `KODA_VERSION=` line with `KODA_VERSION=<target>`, append one when absent (on a new line even when the file does not end in a newline), or create the file. Copy `.env` to a temp file in the same directory with `cp -p` (which keeps its mode), write the new content into that temp file, and `mv` it over `.env`; other lines keep their text and order, and a 0600 `.env` stays 0600.\n6. Start `api` and `web` (unchanged).\n\n**Bash 3.2.** The deploy scripts and the workflow step bodies must run under the `/bin/bash` 3.2 that macOS ships, because the tests run them on macOS hosts (koda-wk and the nax runner) as well as on CI's Ubuntu: no `${var,,}`, `mapfile`, associative arrays or `|&`, and no `\"${arr[@]}\"` on a possibly empty array under `set -u` (bash 3.2 reports it unbound). Consume the US-004 helper and write `apps/api/test/unit/tooling/rollback-restore-script.spec.ts` under `bun run test`. Some `.env` regressions already pass on GNU sed; preserve them and use macOS coverage for N1.\n\n**Scope** — In: modify `deployments/example/rollback.sh` restore and `.env` mutation; cover them in the new suite. Out: changing preflight (US-005), operator docs (US-008), or restoring Postgres from the `koda-db-<ts>.sql.gz` dump inside `rollback.sh`: it stays the documented manual step in `deployments/example/README.md`.\n\n**Interface** — The existing `./rollback.sh <version> [--restore-db <backup-tar-gz>]` restores the data volume with `find /data -mindepth 1 -delete && tar -xzf /backup/<archive basename> -C /data`; the version setting remains `KODA_VERSION=<target>` in `.env`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When `runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', <path of a valid .tar.gz inside <dir>>])` runs, then the recorded calls include `pull api web`, `stop api web`, the restore `run` call, and `up -d api web` in that order.",
+        "AC-2 [unit] When rollback runs as in AC-1, then the restore call has exactly the argv `['compose', '-f', '<dir>/docker-compose.yml', 'run', '--rm', '--no-deps', '--user', 'root', '--entrypoint', 'sh', '-v', '<archive dir>:/backup:ro', 'api', '-c', 'find /data -mindepth 1 -delete && tar -xzf /backup/<archive basename> -C /data']`.",
+        "AC-3 [unit] When rollback runs as in AC-1, then the restore call has `kodaVersion` `v0.4.1`.",
+        "AC-4 [unit] When `runDeployScript('rollback.sh', ['v0.4.1'])` runs without `--restore-db`, then no recorded call has argv containing `run`.",
+        "AC-5 [unit] When `runDeployScript('rollback.sh', ['v0.4.1'])` runs with `envFile` `POSTGRES_PASSWORD=pw\nKODA_VERSION=v0.4.2\nWEB_PORT=3101\n`, then `.env` has exactly the lines `POSTGRES_PASSWORD=pw`, `KODA_VERSION=v0.4.1`, `WEB_PORT=3101` in that order.",
+        "AC-6 [unit] When the same rollback runs with `envFile` `POSTGRES_PASSWORD=pw\n`, then `.env` has exactly the lines `POSTGRES_PASSWORD=pw`, `KODA_VERSION=v0.4.1` in that order.",
+        "AC-7 [unit] When the same rollback runs with `envFile` `POSTGRES_PASSWORD=pw` (no trailing newline), then `.env` has exactly the lines `POSTGRES_PASSWORD=pw`, `KODA_VERSION=v0.4.1` in that order.",
+        "AC-8 [unit] When the same rollback runs with `envFile` `KODA_VERSION=v0.3.0\nX=1\nKODA_VERSION=v0.4.2\n`, then `.env` has exactly the lines `KODA_VERSION=v0.4.1`, `X=1`, `KODA_VERSION=v0.4.1` in that order.",
+        "AC-9 [unit] When the same rollback runs with no `envFile`, then it creates `.env` with exactly the line `KODA_VERSION=v0.4.1`.",
+        "AC-10 [unit] When the same rollback runs with `envFile` `KODA_VERSION=v0.4.2\n` and `envFileMode` `0o600`, then `.env` retains mode `0600`."
+      ],
+      "tags": [
+        "deployment",
+        "rollback",
+        "portability"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The restore reuses the Compose one-off pattern and the env update uses standard same-directory replacement; a focused suite on the existing harness covers both without new abstractions."
+      },
+      "contextFiles": [
+        "deployments/example/rollback.sh",
+        "deployments/example/docker-compose.yml",
+        "apps/api/test/unit/tooling/helpers/deploy-script-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/unit/tooling/rollback-restore-script.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When rollback is given a valid restore archive whose basename contains spaces, the restored data volume contains that archive's contents.",
+        "When rollback runs with the valid archive from AC-1 and `failOn: ['find /data -mindepth 1 -delete']` makes the restore call fail, then it records no `up -d api web` call, preserving the existing abort-before-restart behavior."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/rollback.sh",
+          "reason": "the restore goes through `compose run ... api` instead of `docker run -v koda-local_koda_data`; `sed -i` is replaced by a `cp -p` temp file and `mv`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Reject example .env database overrides and guard migrations",
+      "description": "**Goal** — Reject a `DATABASE_URL` assignment in the example deployment's `.env` and ensure its migration never runs after a failed pre-deploy backup (K5, K6).\n\n**Motivation** — `deployments/example/README.md` tells operators to set `DATABASE_URL` in `.env` for an external Postgres, but the Compose file sets `DATABASE_URL` explicitly from the bundled `postgres` host, so the `.env` value is ignored, and migration and backup target the bundled service too.\n\n**Approach** — **`DATABASE_URL` refusal (K5).** `deploy.sh` reads `.env` (when present) and refuses any active line that assigns `DATABASE_URL` (optional leading whitespace, an optional `export ` prefix, `DATABASE_URL`, optional whitespace, `=`, with any value, including an empty or quoted one), printing `❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service` and exiting 1 before any `docker` call. Commented lines are ignored. A `DATABASE_URL` exported in the operator's shell is not refused: Compose never passes it to the API (the `environment:` mapping sets it), and refusing it would break deploys from a shell that has a development `DATABASE_URL`.\n\nTarget: the refusal above, placed after the `POSTGRES_PASSWORD` check and before the `docker` presence check. The existing `POSTGRES_PASSWORD` safety parse is the precedent for reading `.env` lines without sourcing the file and is unchanged, as is the rest of the script. Keep Bash 3.2 compatibility.\n\nUS-007 AC-9 and AC-10 drive `deploy.sh` (the entry point an operator runs) with the backup's pg_dump failing, which proves US-004's verified backup is on the deploy path, not only reachable from `backup-db.sh` directly. They are regression guards: `deploy.sh` already runs the backup under `set -e`, so they pass once US-004 lands. The same holds for US-007 AC-7 and AC-8. Use US-004's `runDeployScript` and `cleanupDeployScriptRuns` in `apps/api/test/unit/tooling/deploy-script.spec.ts` under `bun run test`.\n\n**Scope** — In: modify `deployments/example/deploy.sh` with the refusal and add operator entry-point tests for existing backup gating. Out: backup implementation (US-004), operator docs (US-008), external Postgres support in the example deployment, and changes to the current password guard or `--no-backup` behavior.\n\n**Interface** — `./deploy.sh [--no-backup]`; an active `.env` `DATABASE_URL` assignment emits `❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service` and exits 1.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When `runDeployScript('deploy.sh', [])` runs with `envFile` lines `POSTGRES_PASSWORD=pw` and `DATABASE_URL=postgresql://db.example/koda`, then it exits 1.",
+        "AC-2 [unit] When deploy runs as in AC-1, then output includes `❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service`.",
+        "AC-3 [unit] When deploy runs as in AC-1, then no docker call is recorded.",
+        "AC-4 [unit] When `runDeployScript('deploy.sh', [])` runs with `envFile` lines `POSTGRES_PASSWORD=pw` and `  DATABASE_URL = postgresql://db.example/koda`, then no docker call is recorded.",
+        "AC-5 [unit] When `runDeployScript('deploy.sh', [])` runs with `envFile` lines `POSTGRES_PASSWORD=pw` and `export DATABASE_URL=\"postgresql://db.example/koda\"`, then no docker call is recorded.",
+        "AC-6 [unit] When `runDeployScript('deploy.sh', [])` runs with `envFile` lines `POSTGRES_PASSWORD=pw` and `DATABASE_URL=`, then no docker call is recorded.",
+        "AC-7 [unit] When `runDeployScript('deploy.sh', [])` runs with `envFile` lines `POSTGRES_PASSWORD=pw` and `# DATABASE_URL=postgresql://db.example/koda`, then a recorded call's argv contains both `migrate` and `deploy`.",
+        "AC-8 [unit] When `runDeployScript('deploy.sh', [])` runs with only `POSTGRES_PASSWORD=pw` in `envFile` and `env.DATABASE_URL=postgresql://db.example/koda`, then it exits 0.",
+        "AC-9 [unit] When `runDeployScript('deploy.sh', [])` runs with `envFile` line `POSTGRES_PASSWORD=pw` and `pgDumpExit: 1`, then it exits non-zero.",
+        "AC-10 [unit] When deploy runs as in AC-9, then no recorded call's argv contains `migrate`."
+      ],
+      "tags": [
+        "deployment",
+        "postgres",
+        "bugfix"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A localized configuration-assignment guard and end-to-end regression through the existing backup call, without changing credential validation."
+      },
+      "contextFiles": [
+        "deployments/example/deploy.sh",
+        "deployments/example/backup-db.sh",
+        "apps/api/test/unit/tooling/helpers/deploy-script-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/unit/tooling/deploy-script.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/deploy.sh",
+          "reason": "gains the `.env` `DATABASE_URL` refusal after the `POSTGRES_PASSWORD` check; the rest of the script is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Document supported deployment behavior and retire the broken seed script",
+      "description": "**Goal** — Remove the obsolete seed script and align operator docs with the supported bundled Postgres, backup, and rollback behavior (K5, K20).\n\n**Motivation** — No operator documentation directs users to the broken seed script, and the first registered user is the admin (`apps/api/src/config/auth.config.ts`), so it has no remaining job.\n\n**Approach** — `deployments/example/README.md` — the \"Notes\" bullet that suggests an external `DATABASE_URL` is replaced by a bundled-only statement and the backup and rollback sections describe the new behaviour; leave the documented `.env` lines for `JWT_SECRET`, `JWT_REFRESH_SECRET` and `API_KEY_SECRET` intact, because the API's environment validation spec reads them from this README.\n\n`docs/deployment/postgresql.md` — the external-Postgres paragraph states that the example deployment scripts support only the bundled `postgres` service.\n\n`scripts/seed.sh` — deleted.\n\n**No-test:** documentation and one file deletion. Keep the existing manual SQL restore instructions and distinguish the LanceDB archive accepted by `--restore-db` from the Postgres dump. In \"Notes\" state that `deploy.sh` refuses `DATABASE_URL` in `.env`; in \"Backup strategy (database volume)\" state that `backup-db.sh` starts stopped Postgres, verifies the dump, and fails when no dump can be taken; in \"Rollback strategy\" state that `rollback.sh` checks the archive and pulls the target images before stopping any service.\n\n**Scope** — In: modify the two operator docs and delete `scripts/seed.sh`. Out: script behavior (US-004 through US-007), external Postgres support in the example deployment, restoring Postgres from the `koda-db-<ts>.sql.gz` dump inside `rollback.sh`, and `apps/api/package.json` `seed:prod` and `apps/api/prisma/seed.ts`: they stay for development and e2e use; only `scripts/seed.sh` is deleted.\n\n**Interface** — Document existing `./backup-db.sh`, `./deploy.sh [--no-backup]`, and `./rollback.sh <version> [--restore-db <backup-tar-gz>]` operator behavior; no replacement `scripts/seed.sh` command is introduced.",
+      "acceptanceCriteria": [
+        "AC-1 [review] When the Notes section of `deployments/example/README.md` is read, then the external-Postgres suggestion is replaced with a statement that the example uses only bundled `postgres` and `deploy.sh` refuses `DATABASE_URL` set in `.env`.",
+        "AC-2 [review] When Backup strategy (database volume) in `deployments/example/README.md` is read, then it states that `backup-db.sh` starts Postgres when stopped, verifies the dump, and fails when it cannot take one.",
+        "AC-3 [review] When Rollback strategy in `deployments/example/README.md` is read, then it states that `rollback.sh` checks the archive and pulls the target images before it stops any service.",
+        "AC-4 [review] When the external-Postgres paragraph in `docs/deployment/postgresql.md` is read, then it states that the `deployments/example` scripts support only the bundled `postgres` service.",
+        "AC-5 [review] When the branch diff is inspected, then it shows `scripts/seed.sh` deleted.",
+        "AC-6 [review] When the README diff is inspected, then the copy-paste `.env` lines for `JWT_SECRET`, `JWT_REFRESH_SECRET`, and `API_KEY_SECRET` are unchanged, preserving the inputs read by the existing API environment validation spec."
+      ],
+      "tags": [
+        "deployment",
+        "docs",
+        "cleanup"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "no-test",
+        "reasoning": "Three directly related operator-facing files, with no new abstractions or application behavior.",
+        "noTestJustification": "Review confirms two documentation updates and deletion of an already non-functional, unreferenced script. Preserve the README values consumed by existing API validation tests; no new runtime path is introduced."
+      },
+      "contextFiles": [
+        "deployments/example/README.md",
+        "docs/deployment/postgresql.md",
+        "apps/api/src/config/env.validation.spec.ts",
+        "deployments/example/rollback.sh",
+        "scripts/seed.sh"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/README.md",
+          "reason": "the \"Notes\" bullet that suggests an external `DATABASE_URL` is replaced by a bundled-only statement and the backup and rollback sections describe the new behaviour; leave the documented `.env` lines for `JWT_SECRET`, `JWT_REFRESH_SECRET` and `API_KEY_SECRET` intact, because the API's environment validation spec reads them from this README."
+        },
+        {
+          "path": "docs/deployment/postgresql.md",
+          "reason": "the external-Postgres paragraph states that the example deployment scripts support only the bundled `postgres` service."
+        },
+        {
+          "path": "scripts/seed.sh",
+          "reason": "deleted."
+        }
+      ],
+      "workdir": ".",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "This is a brownfield operations hardening feature for Koda's Bun/Turborepo monorepo, not a change to application APIs, generated SDK code, or the database schema. The review anchors are docs/20261120-review-whole-repo-consolidated.md:53 (K1), :61 (K3), :69 (K4), :77 (K5), :85 (K6), :93 (K20), :111 (K7), :119 (K8), and :127 (K19); N1 is the separately grounded BSD sed failure. Codebase findings were checked by direct reads and text search (no codebase-memory tool was available).\n\nCI: .github/workflows/ci.yml:5-22 limits main pushes but intentionally triggers all main-targeted PRs so required checks report. The changes job output (ci.yml:43-44) gates quality (:77-79), tests (:145-148), integration shards (:191-194), smoke (:521-524), and other jobs. The filter (ci.yml:51-68) passes base/head/event through env, uses the early push return, logs paths, and incorrectly treats a successful early grep as a false condition if printf gets SIGPIPE under pipefail. A here-string preserves early matching without a pipe writer; keep the anchored exact-file alternatives and push patterns in sync without changing required-check names, the integration job, or docs-only behavior. openapi-ts.config.ts:3-18 determines CLI SDK output and request behavior, and package.json:21 wires it into generate:cli, run by both CI (ci.yml:179-183) and release (.github/workflows/release.yml:138-140).\n\nCache and test discovery: CI runs turbo test (.github/workflows/ci.yml:182-183); root package.json:13 and :34 identify the workspace test command and Turbo 2.11.4. Root turbo.json:3-10 and :20-24 don't track the required root file set for the API test and define inherited dependsOn, env, and outputs. No apps/api/turbo.json exists yet. A package-local inputs override keeps defaults and affects only the API test task, avoiding a cache bypass or global invalidation. US-001 ensures the job runs; US-003 ensures a tooling-only change doesn't replay a stale green. apps/api/package.json:12 excludes integration/e2e from the default Vitest run; apps/api/vitest.config.ts:28 and :65 include unit tooling specs. apps/api/test/unit/tooling/ci-integration-shards.spec.ts:4-14 is the existing workflow text-slice precedent and does not read either modified step. There is no existing deploy-shell test harness. Extract workflow bodies and run them under /bin/bash -e with recording stubs; slice workflow text only for wiring assertions. Test scripts with real host bash/gzip/tar and fake Docker/curl; no actual DB, Docker, GitHub, or registry required. Ensure large fixtures travel via file/stdout rather than a process argument or environment variable. Verify 3.2 behavior explicitly, especially inherited shell shims, strict mode, and read-to-EOF pipelines.\n\nRelease: .github/workflows/release.yml:3-12 supports pushes and dispatch of existing tags; :34-75 validates the tag, then checks out the historical tag and checks package.json. :77-91 currently promotes every stable build, while :49-57 chooses npm's channel without checking newer versions. The consumers are npm publish (:145-152), API and web build/push (:186 and :228), and the GitHub Release action (:242-254). Keep tag/version validation, pinned actions, prerequisites, prerelease and notification behavior, tag checkout, and the already-published npm skip (:116-128) intact. Inline rules run from the current workflow even on a historical checkout; remote origin refs, not the shallow checkout's local tags or version text sorting, determine channel eligibility. Exact stable re-publishes remain supported; canary behavior is unchanged; stable backports still get version tags and a usable dist-tag without moving newer aliases. A remote listing failure must fail info before publishing. This rule compares a snapshot of remote tags; publication-time coordination across simultaneous release runs and repair of existing pointers are not part of the specified change. No registry or GitHub data migration is needed.\n\nCompose: docker-compose.yml:20-37 and deployments/example/docker-compose.yml:11-24 explicitly map API environment variables and mount koda_data at /data; both keep the bundled database URL. apps/api/src/config/webhook-signature.config.ts:24-28 defines the defaults, tested by apps/api/src/config/webhook-signature.config.spec.ts:25-46; consumers are the outbound handler (apps/api/src/webhook/webhook-delivery.handler.ts:41-50) and inbound CI controller (apps/api/src/ci-webhook/ci-webhook.controller.ts:76-79). Add only the two environment mappings, not signature implementation changes. Defaults preserve compatibility; operators who already set non-default values will see their settings take effect when API containers are recreated. The compatibility/rollout warning in docs/deployment/webhooks.md:29-36 remains relevant, especially checking sender readiness before requiring v2. Review YAML and the test input override without rendering Compose in the sandbox.\n\nDeployment: deployments/example/docker-compose.yml:1, :5, :24, and :36-49 show the default project name, version interpolation, project-local /data mount and health-checked Postgres with its own persistent volume. apps/api/Dockerfile:4, :108-118, and :138 show the Alpine runtime lineage, shipped runtime files and non-root user; the example deploy already uses a root API one-off for volume ownership (deployments/example/deploy.sh:106-110). Compose one-offs replace literal volume names so normal Compose project selection, including COMPOSE_PROJECT_NAME, consistently scopes the data; keep the API entrypoint overridden and no-deps for archive work. A usable target API image is needed for the data archive/restore; backup intentionally needs Compose wait support and leaves Postgres running, including on first install. The old backup skip branch and hardcoded archive volume are in deployments/example/backup-db.sh:18-40. Preserve backup names and formats, verify the output stream completely and remove a failed dump so migration never mistakes it for a recovery point. The caller uses set -e and invokes the executable backup before its image pull/migration (deployments/example/deploy.sh:1-8, :90-115), so failed-backup gating is a regression test, not a backup call-site rewrite. Keep the explicit --no-backup escape hatch.\n\nRollback baseline (deployments/example/rollback.sh:45-86) stops before validation, uses a hardcoded volume and GNU sed syntax, then pulls and starts. Preflight moves archive and target-pull failures before service disruption; archive listing checks readability/format but is not a transactional restore or a guarantee against later I/O errors. Keep target image selection explicit for pull and restore, treat the archive basename as a literal shell argument/value when composing the in-container command, and keep .env replacement on the same filesystem with its existing mode so publishing the new version is portable and doesn't expose an existing private env file. Stub tests verify command order/arguments and local file effects; they do not run the image's BusyBox tools. Use operator-created backup archives; SQL restore remains manual. No volume renames or automated schema downgrade are required; operators using a custom project should back up and restore under that same project.\n\nAdoption and docs: deployments/example/deploy.sh:38-84 is the read-without-sourcing password guard precedent. deployments/example/docker-compose.yml:11-16 sets DATABASE_URL directly, so the old advice in deployments/example/README.md:116-123 and docs/deployment/postgresql.md:75-76 never configured this script-managed stack. Remove stale DATABASE_URL assignments from the example .env before deploying; an exported development-shell URL alone remains allowed. Keep README secret examples at :28-30 because apps/api/src/config/env.validation.spec.ts:120-127 reads them; preserve the manual SQL recovery instructions at deployments/example/README.md:94-98. scripts/seed.sh:20 assumes a container name Compose doesn't create and a source seed file absent from the runtime image. Repo search found only the script itself and the historical review reference (docs/20261120-review-whole-repo-consolidated.md:93-95), not operator instructions or a caller. The bootstrap admin path remains (apps/api/src/config/auth.config.ts:13-18); apps/api/package.json:29 and its Prisma seed source remain for development/e2e.\n\nOrder: US-001, US-002, US-003, and US-004 may start independently; US-004 provides the shared isolated helper and verified backup for US-005 and US-007; US-006 builds on US-005 and consumes the helper transitively; US-008 follows all four deployment stories to document shipped behavior. Coordinate merges for the shared rollback file. US-003 and US-008 are review-only per spec. Feature completion means the eight story behaviors are evidenced by executable regressions or explicit config/docs review, not by altering separate whole-repo review features.",
+  "outOfScope": [
+    "Restoring Postgres from the `koda-db-<ts>.sql.gz` dump inside `rollback.sh`: it stays the documented manual step in `deployments/example/README.md`.",
+    "External Postgres support in the example deployment: the owner ruled bundled Postgres only (2026-11-20).",
+    "The root `docker-compose.yml` `DATABASE_URL`: it is the local build file and keeps the bundled `postgres` URL; only the two signature switches are added to it.",
+    "A `docker compose config` render test: it needs Docker, which the nax sandbox withholds; the Compose change is checked in review.",
+    "Re-pointing Docker `latest`, the `<major>.<minor>` aliases or npm dist-tags already published: no backwards move has happened yet.",
+    "Backup rotation or pruning of `deployments/example/backups/`.",
+    "`apps/api/package.json` `seed:prod` and `apps/api/prisma/seed.ts`: they stay for development and e2e use; only `scripts/seed.sh` is deleted.",
+    "`scripts/smoke-test-cli.sh` and `scripts/bump-version.sh`: unchanged.",
+    "The other 2026-11-20 review findings (K2, K9 to K18): they are separate features."
+  ],
+  "routingProfile": "native-codex-ds"
+}
