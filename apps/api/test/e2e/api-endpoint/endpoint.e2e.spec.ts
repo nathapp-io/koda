@@ -3168,6 +3168,95 @@ describeIntegration('API Integration Tests', () => {
       expect(seen).toHaveLength(1);
       expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
     });
+
+    /**
+     * Issue #489: a failure `file` holding an unpaired UTF-16 surrogate cannot be percent-encoded. The lone
+     * surrogate travels as a `\ud800` JSON escape inside the signed raw body. PostgreSQL stores it as U+FFFD,
+     * so the description's `File:` line shows the substituted character; that substitution is why the ref
+     * must be dropped (a link built from it would point at a different file) and why this round trip needs an
+     * e2e assertion rather than only the mocked service tests. The shared project has no remote, so these
+     * cases set one and restore it afterwards.
+     */
+    describe('an unencodable failure file name (#489)', () => {
+      const remoteUrl = 'https://github.com/acme/app';
+      const poisonedFailure = { test: 'poisoned', file: 'src/a\ud800b.ts', line: 9 };
+      let originalRemoteUrl: string | null = null;
+
+      beforeAll(async () => {
+        const prisma = fixtureDb(app);
+        const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+        originalRemoteUrl = project.gitRemoteUrl;
+        await prisma.project.update({ where: { slug: projectSlug }, data: { gitRemoteUrl: remoteUrl } });
+      });
+
+      afterAll(async () => {
+        await fixtureDb(app).project.update({
+          where: { slug: projectSlug },
+          data: { gitRemoteUrl: originalRemoteUrl },
+        });
+      });
+
+      async function deliverAndLoadTicket(
+        deliveryId: string,
+        sha: string,
+        failures: Array<{ test: string; file: string; line: number }>,
+      ) {
+        const payload = {
+          event: 'pipeline_failed',
+          pipeline: { id: deliveryId, url: `https://github.com/acme/app/actions/runs/${deliveryId}` },
+          commit: { sha, message: 'fix: unencodable file name' },
+          failures,
+        };
+        const rawBody = JSON.stringify(payload);
+        // The lone surrogate must be sent as a JSON escape, never as raw (invalid UTF-8) bytes.
+        expect(rawBody).toContain('\\ud800');
+        const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(rawBody).digest('hex')}`;
+
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/ci-webhook`)
+          .set('Content-Type', 'application/json')
+          .set('x-ci-signature', signature)
+          .set('x-ci-delivery', deliveryId)
+          .send(rawBody)
+          .expect(200);
+
+        const data = body<{ success: boolean; ticketRef: string }>(res);
+        expect(data.success).toBe(true);
+        expect(data.ticketRef).toMatch(/^KT-\d+$/);
+
+        const prisma = fixtureDb(app);
+        const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+        const number = Number(data.ticketRef.split('-')[1]);
+        return prisma.ticket.findFirstOrThrow({ where: { projectId: project.id, number } });
+      }
+
+      it('POST /api/projects/:slug/ci-webhook — a poisoned primary failure keeps the ticket without a git ref or URL line', async () => {
+        const ticket = await deliverAndLoadTicket('e2e-ci-delivery-poisoned-primary', 'abc123def470', [
+          poisonedFailure,
+        ]);
+
+        expect(ticket.gitRefFile).toBeNull();
+        const lines = ticket.description?.split('\n') ?? [];
+        expect(lines.some((line) => line.startsWith('  - URL:'))).toBe(false);
+        expect(ticket.description).toContain('poisoned');
+        // The stored row holds U+FFFD where the lone surrogate was, never the surrogate itself.
+        expect(ticket.description).toContain('src/a�b.ts');
+        expect(ticket.description).not.toContain('\ud800');
+      });
+
+      it('POST /api/projects/:slug/ci-webhook — a poisoned second failure omits only its own URL line', async () => {
+        const sha = 'abc123def471';
+        const ticket = await deliverAndLoadTicket('e2e-ci-delivery-poisoned-second', sha, [
+          { test: 'good', file: 'src/a.ts', line: 7 },
+          poisonedFailure,
+        ]);
+
+        expect(ticket.gitRefFile).toBe('src/a.ts');
+        const urlLines = (ticket.description?.split('\n') ?? []).filter((line) => line.startsWith('  - URL:'));
+        expect(urlLines).toEqual([`  - URL: ${remoteUrl}/blob/${sha}/src/a.ts#L7`]);
+        expect(ticket.description).toContain('poisoned');
+      });
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────
