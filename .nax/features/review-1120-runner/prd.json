@@ -1,0 +1,261 @@
+{
+  "project": "koda",
+  "feature": "review-1120-runner",
+  "branchName": "feat/review-1120-runner",
+  "createdAt": "2026-11-20T11:48:47.927Z",
+  "updatedAt": "2026-11-20T11:48:47.927Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Re-apply READOPT replay to an unsupervised row",
+      "description": "**Goal** \u2014 Restore supervision after a second restart by repeating a previously successful READOPT for a journaled row that is not done, persisting its latest outcome.\n\n**Motivation** \u2014 `CommandHandler.handleOne` answers a command id it has already journaled from the journal. Only an ASSIGN replay calls `resumeStranded`; a READOPT replay just repeats the stored ack.\n\n**Approach** \u2014 **K10.** In `CommandHandler.handleOne`, a replayed command whose record is `type === 'READOPT'` and `result === 'ok'` checks the row `journal.getJob(prior.jobId, prior.leaseEpoch)`. When the row exists and its `doneAt` is `null`, the handler calls `supervisor.readopt(prior.jobId, prior.leaseEpoch)` again, overwrites the journaled outcome with the new one through the new `Journal.updateCommandOutcome` (an absent `detail` stored as `null`, as `recordAs` already does), and acks the new outcome.\n`Supervisor.readopt` already returns `ok` without side effects when a run for that (job, epoch) is in memory, so a READOPT re-sent to the same boot is still a no-op. A row that is gone or has `doneAt` set keeps today's replay of the stored ack. A READOPT record that is `rejected` keeps today's replay. A throw from the repeated `readopt` acks `rejected` with detail `runner error` (as a throw from a first apply does) and leaves the journaled record unchanged.\nThe journaled result is overwritten so a later replay of the same id (a third restart) acks what the API must see last: once `readopt` has rejected and marked the row done, the replay acks the rejection, not the stale `ok`.\n\nNew: `Journal.updateCommandOutcome(commandId: string, outcome: { result: 'ok' | 'rejected'; detail: string | null; appliedAt: string }): void`, an `UPDATE` of the existing `applied_commands` row; an unknown id changes nothing and inserts nothing.\n\nModify only command-handler.ts, journal.ts, journal.spec.ts and command-handler.spec.ts. The existing \"READOPT is delegated and its ack replays\" test keeps passing (its row is COMPLETED, and a terminal row's first `readopt` marks it done). Supervisor.readopt and FakeExecutor are existing context, not new seams or replacement implementations. Preserve ASSIGN replay behavior.\n\nVerification setup: Every AC uses a harness built like `command-handler.spec.ts`'s `build()`: `Journal.open(':memory:', time.now)` with `fakeTime()`, a `FakeExecutor`, a real `Supervisor`, a `RepoMutex`, `createMemoryLogger()` and a `CommandHandler`, and sets up the state a restarted daemon finds: the row `(j1, 1)` inserted with `journal.insertJob` and moved to `RUNNING` with `pid` and `pgid` 4242 through `journal.updateJob`, no run started for it, and the record `{ commandId: 'r1', type: 'READOPT', result: 'ok', detail: null }` for `(j1, 1)` written with `journal.recordCommand`. \"Replaying r1\" is `handler.handle([{ commandId: 'r1', type: 'READOPT', jobId: 'j1', leaseEpoch: 1, payload: {} }])`. A test that leaves a run going ends with `ex.dieAfterTicks(ex.ticks + 1)` or `supervisor.shutdown()`, then `await supervisor.idle()`. Journal UPDATE-only cases use real in-memory SQLite in journal.spec.ts. CommandHandler.handle returns Promise<CommandAck[]>: an assertion that a command acks an object checks that command's member of the returned array, not a scalar return signature. For the failure-table cases that skip readoption, observe supervisor.readopt itself; no readStatus call alone cannot prove readopt was skipped, since terminal readoption also avoids reading status.\n\n**Scope** \u2014 In: K10 replay and durable outcome update, with unit regressions. Out: older-epoch retirement/barriers (US-002), interruptible sync sleeps (US-003), API cancel refusal (US-004). Stamping journaled command results with a boot id: the READOPT replay re-applies instead (K10). A server-side heartbeat sweeper that would mark an unsupervised RUNNING job CRASHED: the runner-side replay closes the K10 window. The API `reconcileBoot` READOPT rule: unchanged.\n\n**Interface** \u2014\n```typescript\nJournal.updateCommandOutcome(commandId: string, outcome: { result: 'ok' | 'rejected'; detail: string | null; appliedAt: string }): void\nSupervisor.readopt(jobId: string, leaseEpoch: number): Promise<ReadoptResult>\nJournal.getCommand(commandId: string): CommandRecord | null\n```",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Given the restarted-daemon harness and a REVIEW row with ex.alive = true (a live process of ours), when r1 is replayed, the executor's calls come to include resumeCredentials:j1, awaited with the spec's waitFor; the run starts from watch.",
+        "AC-2 [unit] (regression guard: passes before the change) In the AC-1 case, replaying r1 acks { commandId: 'r1', leaseEpoch: 1, result: 'ok' }.",
+        "AC-3 [unit] Given the restarted-daemon harness and a RUN row whose naxRunId is null, replaying r1 acks { commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }.",
+        "AC-4 [unit] After the AC-3 replay, journal.getCommand('r1') has result: 'rejected' and detail: 'run id mismatch'.",
+        "AC-5 [unit] After the AC-3 replay, replaying r1 a second time acks { commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }.",
+        "AC-6 [unit] Given the restarted-daemon harness and a THREAD row, replaying r1 acks rejected with detail 'thread session ended by a runner restart'.",
+        "AC-7 [unit] (regression guard: passes before the change) When the row's doneAt is set with journal.markDone('j1', 1), replaying r1 acks { commandId: 'r1', leaseEpoch: 1, result: 'ok' }, and neither the executor's readStatus nor supervisor.readopt is called.",
+        "AC-8 [unit] (regression guard: passes before the change) When the row is gone through journal.abandon('j1', 1), replaying r1 acks { commandId: 'r1', leaseEpoch: 1, result: 'ok' } and supervisor.readopt is not called.",
+        "AC-9 [unit] (regression guard: passes before the change) With the r1 record stored as result: 'rejected', detail: 'process gone', replaying r1 acks that rejection, and neither the executor's readStatus nor supervisor.readopt is called.",
+        "AC-10 [unit] For a REVIEW row with ex.alive = true and no dieAfterTicks until after the second replay, replaying r1, waiting until calls include resumeCredentials:j1, then replaying r1 again leaves exactly one resumeCredentials:j1 in calls, and the second replay acks { commandId: 'r1', leaseEpoch: 1, result: 'ok' } (it finds the run in memory).",
+        "AC-11 [unit] For a RUN row whose naxRunId is 'run-1' and with ex.statusError set to an Error, replaying r1 acks { commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }.",
+        "AC-12 [unit] (regression guard: passes before the change) After the AC-11 replay, journal.getCommand('r1') still has result: 'ok'.",
+        "AC-13 [unit] When Journal.updateCommandOutcome('r1', { result: 'rejected', detail: 'x', appliedAt: '2026-11-20T00:00:00.000Z' }) is called on a stored record, getCommand('r1') returns result: 'rejected', detail: 'x' and that appliedAt, with its type, jobId and leaseEpoch unchanged.",
+        "AC-14 [unit] When Journal.updateCommandOutcome('nope', { result: 'ok', detail: null, appliedAt: '2026-11-20T00:00:00.000Z' }) is called for an id with no record, getCommand('nope') remains null."
+      ],
+      "tags": [
+        "runner",
+        "reliability",
+        "journal",
+        "readopt",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four existing files and a narrow durable replay update use established patterns; strict isolated TDD applies because replay reattaches credential/approval restoration and THREAD session restart handling."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/command-handler.ts",
+        "apps/runner/src/supervisor/supervisor.ts",
+        "apps/runner/src/journal/journal.ts",
+        "apps/runner/src/supervisor/command-handler.spec.ts",
+        "apps/runner/test/helpers/fake-executor.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/supervisor/command-handler.ts",
+          "reason": "`handleOne`'s replay branch re-applies a `READOPT`/`ok` record whose row exists with `doneAt` null through `supervisor.readopt`, acks the new outcome and stores it with `journal.updateCommandOutcome`; a throw acks `rejected` / `runner error`."
+        },
+        {
+          "path": "apps/runner/src/journal/journal.ts",
+          "reason": "gains `updateCommandOutcome(commandId, { result, detail, appliedAt })`, an `UPDATE` of the existing `applied_commands` row that inserts nothing."
+        },
+        {
+          "path": "apps/runner/src/journal/journal.spec.ts",
+          "reason": "gains the `updateCommandOutcome` cases."
+        },
+        {
+          "path": "apps/runner/src/supervisor/command-handler.spec.ts",
+          "reason": "gains the READOPT replay cases; the existing \"READOPT is delegated and its ack replays\" test keeps passing (its row is COMPLETED, and a terminal row's first `readopt` marks it done)."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Retire older epochs without blocking requeue ASSIGN",
+      "description": "**Goal** \u2014 Ack a requeue ASSIGN without waiting on an older epoch's repo mutex while preserving retirement-before-prepare and immediate queued cancellation.\n\n**Motivation** \u2014 `CommandHandler.assign` awaits `supervisor.abandon` for every older-epoch row of the job. Both paths end in `JobRun.abandon`, which awaits `mutex.acquire(row.repoKey)`. The sync loop awaits `handleCommands` inline, so while another job holds that repo's lock (a long RUN) every sync on the runner waits: heartbeats, cancels and token refreshes for its other jobs.\n\n**Approach** \u2014 **K11.** `CommandHandler.assign` no longer awaits anything after inserting the new row. It calls `const retiring = supervisor.retireOlderEpochs(jobId, leaseEpoch)` and then `supervisor.begin(inserted.row, 'prepare', retiring)`. `retireOlderEpochs` walks `journal.jobsById(jobId)` for rows with a lower epoch: a row with `doneAt` set is dropped at once with `journal.abandon` (its run already called `executor.cleanup`, which in `HostExecutor.cleanup` closes the approval relay and releases the job's credentials, and the new epoch's prepare wipes the previous attempt's files, D53), before `retireOlderEpochs` returns; any other row goes through the existing `supervisor.abandon`, which still takes the repo mutex. It returns a promise that settles when every such abandon has settled; a rejected abandon is logged at `warn` with message `older epoch abandon failed` and never rejects the returned promise. The promise is added to the supervisor's pending set, so `idle()` waits for it, and removes itself from that set when it settles (as `track` does for a run). `Supervisor.begin` gains an optional third parameter `after: Promise<void>`. The run is put in the run map and its promise in the pending set at `begin` time, as today, so a CANCEL or ABANDON for the new epoch finds it and `idle()` waits for it. For a nax job `begin` calls `run.start(from, after)`: `JobRun.start` gains the same optional `after`, and `JobRun.run` sets its `queued` flag before it awaits `after` and then the repo mutex. A CANCEL for the new epoch that arrives while it waits therefore takes the existing D66 path at once (`endWhileQueued`: `CANCELLED`, `cancelled before start`, `doneAt` set), and the run, once it gets the lock, sees `doneAt` and lets go without calling `prepare`. A THREAD row starts at once and ignores `after`: an older THREAD row is retired with `journal.abandon` plus a credential release and never takes the repo mutex, so there is nothing to wait for. This keeps the D64 rule that the older epoch is gone before the new epoch's prepare, without holding the sync loop.\n\nTarget call: `supervisor.begin(inserted.row, 'prepare', supervisor.retireOlderEpochs(jobId, leaseEpoch))`, nothing awaited. Modify command-handler.ts, supervisor.ts, job-run.ts and command-handler.spec.ts; RepoMutex is read-only context. In the D64 test \"a higher epoch of the same job abandons the lower one first\", the assertions that `(j1, 1)` is gone and pgid 4242 got SIGKILL move after `await b.supervisor.idle()` because abandon of an unfinished row completes in the background. Preserve the invariant: epoch 1 is killed and dropped before epoch 2's second `prepare`, and its cleanup is left to epoch 2. `build()` also returns its `RepoMutex` and its memory logger (`log`) so tests can hold a repo lock and read warnings.\n\nVerification setup: Every AC uses a harness built like `command-handler.spec.ts`'s `build()` (`Journal.open(':memory:', time.now)` with `fakeTime()`, `FakeExecutor`, a real `Supervisor`, `CommandHandler`), which exposes its `RepoMutex` (`mutex`) and `createMemoryLogger()` logger (`log`). \"Holding the repo lock\" is `const release = await mutex.acquire('acme/app')` in the test before the ASSIGN (another job's run). \"The older row\" is `(j1, 1)` inserted with `journal.insertJob` for repo `acme/app`; \"the requeue\" is `handler.handle([assignCmd('c2', 'j1', 2)])`. Every test calls `ex.dieAfterTicks(ex.ticks + 2)` before the requeue so the new epoch finishes, and ends with the lock released and `await supervisor.idle()`. A wrapped prepare records observations into variables; assertions occur outside the wrapper because lifecycle try/catch can swallow callback assertions. Exercise the real Supervisor through CommandHandler.handle, not a mocked retirement implementation except for the specified rejecting-abandon case. CommandHandler.handle returns an ack array; criteria naming one CANCEL ack assert the matching member of that array. For before-unlock assertions, observe handler completion while the test still owns the lock and release the lock in cleanup even on failure, so a regression fails rather than hanging the suite.\n\n**Scope** \u2014 In: background lower-epoch retirement, synchronous finished-row removal, predecessor barrier, pending tracking and D66 cancellation. Out: READOPT replay/outcome update (US-001), interruptible sync sleeps (US-003), API cancel refusal (US-004). Releasing credentials or approvals again for a finished older row dropped by `retireOlderEpochs`: `HostExecutor.cleanup` already released them when that row finished. An ABANDON, or a further requeue, for a new epoch that is still waiting for its older abandon: it queues on the repo mutex ahead of that run's own lock request, and the run then finds its row gone and returns; no AC pins it. Deferring a requeued THREAD job's start: a THREAD row starts at once, because retiring an older THREAD row never takes the repo mutex. An ABANDON command and the `unknownJobIds` sweep (`abandonUnknown`) still await the older run's repo mutex inside the sync loop: K11 covers only the requeue ASSIGN. A daemon stop while a new epoch waits for its older abandon: the halted run still reaches `prepare` after the lock and discards it, as a run queued for the mutex already does.\n\n**Interface** \u2014\n```typescript\nSupervisor.retireOlderEpochs(jobId: string, leaseEpoch: number): Promise<void>\nbegin(row: JobRow, from: RunStart, after?: Promise<void>): void\nstart(from: RunStart, after?: Promise<void>): Promise<void>\nSupervisor.abandon(jobId: string, leaseEpoch: number): Promise<void>\nJournal.jobsById(jobId: string): JobRow[]\nJournal.abandon(jobId: string, leaseEpoch: number): void\n```",
+      "acceptanceCriteria": [
+        "AC-1 [unit] With the older row finished (state COMPLETED, doneAt set) and the repo lock held by the test, the requeue resolves with [{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }] before the test releases the lock.",
+        "AC-2 [unit] In the AC-1 case, journal.getJob('j1', 1) is null when the requeue resolves.",
+        "AC-3 [unit] With the older row not finished (state RUNNING, pid and pgid 4242, doneAt null, no run started) and the repo lock held by the test, the requeue resolves with [{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }] before the test releases the lock.",
+        "AC-4 [unit] In the AC-3 case, the executor's prepare has not run for j1 when the requeue resolves.",
+        "AC-5 [unit] In the AC-3 case, when the executor's prepare runs for (j1, 2) after the test releases the lock, journal.getJob('j1', 1) is already null (the test wraps the fake's prepare to record journal.getJob('j1', 1) into a variable at the call, and asserts on that variable after idle(), outside the wrapper).",
+        "AC-6 [unit] In the AC-3 case, after the test releases the lock and awaits supervisor.idle(), journal.getJob('j1', 2) has state COMPLETED.",
+        "AC-7 [unit] In the AC-3 case with ex.alive = true, after the test releases the lock and awaits supervisor.idle(), ex.killed includes { pgid: 4242, signal: 'SIGKILL' }.",
+        "AC-8 [unit] In the AC-3 case, handler.handle([{ commandId: 'c3', type: 'CANCEL', jobId: 'j1', leaseEpoch: 2, payload: {} }]) before the test releases the lock acks { commandId: 'c3', leaseEpoch: 2, result: 'ok' }.",
+        "AC-9 [unit] After the AC-8 cancel and before the test releases the lock, journal.getJob('j1', 2) has state CANCELLED and a non-null doneAt.",
+        "AC-10 [unit] After the AC-8 cancel, the test releasing the lock and awaiting supervisor.idle(), the executor's prepare never ran for j1.",
+        "AC-11 [unit] With epoch 1 started by assignCmd('c1', 'j1', 1) and running (ex.ticks >= 1), and no repo lock held by the test, the requeue resolves ok, and after await supervisor.idle(), journal.getJob('j1', 1) is null and ex.killed equals [{ pgid: 4242, signal: 'SIGKILL' }].",
+        "AC-12 [unit] With supervisor.abandon replaced on the instance by a function that rejects with Error('boom') and the older row not finished, after the requeue and await supervisor.idle(), the executor's prepare ran for j1.",
+        "AC-13 [unit] In the AC-12 case, log.lines holds a warn entry with message 'older epoch abandon failed'.",
+        "AC-14 [unit] With (j1, 1) finished (COMPLETED, doneAt set) and (j1, 2) not finished (RUNNING, doneAt null, no run), the requeue assignCmd('c3', 'j1', 3) with the repo lock held by the test resolves with (j1, 1) already null.",
+        "AC-14 (after release) [unit] In the AC-14 case, after the test releases the lock and awaits supervisor.idle(), (j1, 2) is null and the executor's prepare ran for j1 exactly once."
+      ],
+      "tags": [
+        "runner",
+        "concurrency",
+        "requeue",
+        "supervisor",
+        "credentials"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Concurrent epoch retirement crosses command handling, Supervisor tracking, JobRun cancellation and FIFO mutex sequencing. Credential/approval release and THREAD session retirement require strict security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/command-handler.ts",
+        "apps/runner/src/supervisor/supervisor.ts",
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/supervisor/repo-mutex.ts",
+        "apps/runner/src/supervisor/command-handler.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/supervisor/command-handler.ts",
+          "reason": "`assign` stops awaiting older-epoch abandons and calls `supervisor.begin(inserted.row, 'prepare', supervisor.retireOlderEpochs(jobId, leaseEpoch))`."
+        },
+        {
+          "path": "apps/runner/src/supervisor/supervisor.ts",
+          "reason": "gains `retireOlderEpochs(jobId, leaseEpoch)`; `begin` gains the optional `after` promise and passes it to `JobRun.start`; a `ThreadJobRun` starts at once, as today."
+        },
+        {
+          "path": "apps/runner/src/supervisor/job-run.ts",
+          "reason": "`start` and `run` take the optional `after` promise; `run` sets `queued` before awaiting it and then the repo mutex."
+        },
+        {
+          "path": "apps/runner/src/supervisor/command-handler.spec.ts",
+          "reason": "the D64 test \"a higher epoch of the same job abandons the lower one first\" asserts that `(j1, 1)` is gone and that pgid 4242 got SIGKILL right after `handle` resolves; the abandon of a row that is not done now completes in the background, so those two assertions move after `await b.supervisor.idle()` (the invariant kept: epoch 1 is killed and dropped before epoch 2's second `prepare`, and its cleanup is left to epoch 2). `build()` also returns its `RepoMutex` and its memory logger (`log`) so tests can hold a repo lock and read warnings."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Interrupt sync retry and min-gap sleeps on stop",
+      "description": "**Goal** \u2014 Make SyncLoop.stop end retry and min-gap sleeps promptly so daemon cleanup is not delayed by an API outage.\n\n**Motivation** \u2014 `SyncLoop.stop()` aborts only an in-flight request. `run()` sleeps the retry backoff and the min gap through `deps.sleep` without a signal, and the daemon's `stop` awaits the loop before any cleanup. During an API outage a SIGTERM can wait up to the 60 s backoff ceiling, and a service manager with a shorter stop timeout can kill the daemon before cleanup runs.\n\n**Approach** \u2014 **K18.** `SyncLoop` owns one `AbortController` for its lifetime. `stop()` aborts it (and still aborts the in-flight request), and `run()` passes its signal as the second argument of both `deps.sleep` calls (the retry delay and the min gap). The `Sleep` type already takes an optional signal and `systemSleep` resolves early when it aborts, so `daemon.ts` does not change.\n\nModify sync-loop.ts and sync-loop.spec.ts only. The existing `sleep` stub ignores its second argument, so no existing assertion changes. Preserve request wake semantics, retry backoff values, stop classifications and subscription cleanup.\n\nVerification setup: Every AC builds a `SyncLoop` the way `sync-loop.spec.ts`'s `makeLoop` does (an in-memory `Journal`, a scripted client, `minGapMs` 250, a clock that does not advance). Except in AC-4 and AC-5, the `sleep` override records each call's `ms`, its `signal` and `signal.aborted` as read at call time, and resolves only when that signal aborts, so the loop stays in its first sleep until the test calls `loop.stop()`. \"A failing client\" is a `script` whose steps throw `new ServerError(500, 'x', null)`. In AC-4 and AC-5 use the real systemSleep with 60,000 ms but synchronize on sleep entry before stopping, and bound completion to 1,000 ms. Tests must not leave live timers or loops after failures. Start loop.run() once, retain its promise, and await that same promise after stop; calling run() anew after stop would trivially resolve without proving the original loop exited. The failure-table requirement also applies to the successful-response min-gap case: stopping that sleep must resolve the retained run promise without a second sync.\n\n**Scope** \u2014 In: lifetime sleep abort signal and stop-during-sleep behavior. Out: READOPT replay (US-001), epoch retirement/barriers (US-002), API cancel refusal (US-004). Checking the shipped systemd unit and launchd plist stop timeouts against the sync backoff: K18 removes the wait instead. `daemon.ts` shutdown order: unchanged; it already stops the loop first.\n\n**Interface** \u2014\n```typescript\ntype Sleep = (ms: number, signal?: AbortSignal) => Promise<void>\nsystemSleep: Sleep\n```\nExisting SyncLoop.stop() and SyncLoop.run() retain their public signatures; Sleep and systemSleep are read-only integrations.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] With a failing client, the signal passed to the first retry sleep is an AbortSignal whose aborted, as recorded at call time, is false.",
+        "AC-2 [unit] With a failing client, calling loop.stop() during the first retry sleep makes that sleep's signal.aborted true.",
+        "AC-2 (run completion) [unit] With a failing client and a first retry sleep that resolves only when its signal aborts, calling loop.stop() during that sleep makes loop.run() resolve.",
+        "AC-3 [unit] With a script whose first step answers an empty response, minGapMs 250 and the clock not advancing, the first sleep is the 250 ms min-gap sleep.",
+        "AC-3 (abort) [unit] In the AC-3 case, the first min-gap sleep's signal has aborted true after loop.stop().",
+        "AC-4 [unit] With a failing client and sleep set to (ms, signal) => systemSleep(60_000, signal), loop.run() resolves within 1,000 ms of loop.stop() being called during the first retry sleep.",
+        "AC-5 [unit] In the AC-4 case, the client's sync is called exactly once.",
+        "Failure handling [unit] In the AC-3 min-gap case with sleep resolving only when its signal aborts, calling loop.stop() during that sleep makes the already-running loop.run() promise resolve.",
+        "Failure handling [unit] In the AC-3 min-gap case, after loop.stop() during that sleep and completion of the already-running loop.run() promise, the client's sync has been called exactly once."
+      ],
+      "tags": [
+        "runner",
+        "sync",
+        "shutdown",
+        "reliability"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized runtime cancellation wiring across two existing files reuses the established optional Sleep signal and does not change authentication, tokens or access control."
+      },
+      "contextFiles": [
+        "apps/runner/src/sync/sync-loop.ts",
+        "apps/runner/src/time.ts",
+        "apps/runner/src/sync/sync-loop.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/sync/sync-loop.ts",
+          "reason": "`SyncLoop` owns an `AbortController`; `stop()` aborts it and `run()` passes its signal to both `deps.sleep` calls."
+        },
+        {
+          "path": "apps/runner/src/sync/sync-loop.spec.ts",
+          "reason": "gains the stop-during-sleep cases; the existing `sleep` stub ignores its second argument, so no existing assertion changes."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Refuse API cancel once a job is UPLOADING",
+      "description": "**Goal** \u2014 Reject user cancellation of an API-known UPLOADING job with the existing fleet.jobState 409 before any cancellation side effects.\n\n**Motivation** \u2014 `FleetJobsService.cancel` accepts a cancel in UPLOADING. The runner's `requestCancel` records the flag and acks `ok`, but the finish path computed its verdict before the upload and calls `transition(verdict.state)` after it without looking at the flag again, so the user sees an accepted cancel followed by COMPLETED.\n\n**Approach** \u2014 **K13.** In `FleetJobsService.cancel`, right after the terminal-state check, a job in `UPLOADING` throws `ConflictAppException({ state: current.state }, 'fleet.jobState')`, the same 409 a finished job gets, before the `cancelRequestedAt` no-op check. A repeated cancel of an UPLOADING job whose cancel was requested while RUNNING is therefore also a 409. `cancelForBudget` and `cancelForRunnerDisabled` already skip UPLOADING and are unchanged.\n\nModify fleet-jobs.service.ts: `cancel` throws before createCommand, update, lifecycle/activity/audit writes, publishing or wake; its doc comment and the \"Reachable only in ASSIGNED / RUNNING / UPLOADING\" comment drop UPLOADING. Preserve the existing row lock, transaction, project and requester-or-permission checks. In fleet-jobs.audit.spec.ts, the test \"audits cancel from %s\" runs over QUEUED, ASSIGNED, RUNNING and UPLOADING; UPLOADING is now refused with no audit entry, so it is dropped from that list (the invariant kept: every accepted cancel records one `fleet.job.cancel` audit entry), and the UPLOADING refusal cases are added. Extend fleet-job-cancel-requeue.integration.spec.ts with the real UPLOADING 409 route case and persisted no-CANCEL checks. No new files or API/client generation are needed.\n\nVerification setup: Unit ACs construct `FleetJobsService` with mocked collaborators the way `fleet-jobs.audit.spec.ts`'s `setup()` does, with a job `{ state: 'UPLOADING', runnerId: 'runner' }` and call `service.cancel('u', 'p', 'j', true)`. Check the existing ConflictAppException's prefix and args, and use separate observations for no createCommand, update or audit. Preserve a RUNNING case that emits one CANCEL. Integration uses the existing PG-backed fixture and bootHttpApp server, inserts a runner-held UPLOADING job at leaseEpoch 1, and calls the route as dev. Keep canRunDbTests; run the modified integration spec through API test:scoped outside the sandbox, not merely skipped or compiled.\n\n**Scope** \u2014 In: K13 API state guard, existing service comments and unit/HTTP persistence regressions. Out: READOPT replay (US-001), epoch retirement/barriers (US-002), sync shutdown (US-003). A cancel the API accepted while the job was RUNNING that reaches the runner after it moved to UPLOADING locally: the runner still finishes with its verdict. The owner ruled that the API refuses a cancel in UPLOADING (2026-11-20); the runner's finish path does not change. The web Cancel button and the assistant `cancel_job` preview during UPLOADING: both still offer the action, and the 409 the API answers is shown through the existing error and refusal paths. The `@ApiResponse` 409 description of the cancel route (`Job already finished`) and the committed `openapi.json`: unchanged; only the service's doc comments are updated.\n\n**Interface** \u2014 Existing FleetJobsService.cancel signature is retained; use the existing exception call exactly:\n```typescript\nConflictAppException({ state: current.state }, 'fleet.jobState')\n```\nConflictAppException and the fleet.jobState 409 messages in apps/api/src/i18n/{en,zh}/fleet.json remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] cancel of the UPLOADING job rejects with a ConflictAppException whose prefix is 'fleet.jobState' and whose args are { state: 'UPLOADING' }.",
+        "AC-2 [unit] For the UPLOADING job, repo.createCommand is not called.",
+        "AC-3 [unit] For the UPLOADING job, repo.update is not called.",
+        "AC-4 [unit] For the UPLOADING job, the audit record is not called.",
+        "AC-5 [unit] An UPLOADING job whose cancelRequestedAt is already set also rejects with a ConflictAppException whose prefix is 'fleet.jobState'.",
+        "AC-6 [unit] (regression guard: passes before the change) For a RUNNING job, repo.createCommand is called once with type: 'CANCEL'.",
+        "AC-7 [integration] Through the real route in fleet-job-cancel-requeue.integration.spec.ts, POST /api/projects/web/fleet/jobs/:id/cancel by dev on an UPLOADING job held by a runner at leaseEpoch 1 answers 409.",
+        "AC-8 [integration] After the AC-7 request, the job's cancelRequestedAt is null.",
+        "AC-8 (command rows) [integration] After the AC-7 request, the job has no CANCEL fleetCommand row."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "cancellation",
+        "state-machine"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small transactional state guard plus existing unit and PostgreSQL HTTP regressions; strict isolation applies because this guarded mutation includes requester-or-permission access control whose ordering must remain intact."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.audit.spec.ts",
+        "apps/api/test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "`cancel` throws `ConflictAppException({ state }, 'fleet.jobState')` for `UPLOADING`, right after the terminal-state check; its doc comment and the \"Reachable only in ASSIGNED / RUNNING / UPLOADING\" comment drop UPLOADING."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.audit.spec.ts",
+          "reason": "the test \"audits cancel from %s\" runs over QUEUED, ASSIGNED, RUNNING and UPLOADING; UPLOADING is now refused with no audit entry, so it is dropped from that list (the invariant kept: every accepted cancel records one `fleet.job.cancel` audit entry), and the UPLOADING refusal cases are added."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts",
+          "reason": "gains the UPLOADING 409 route case."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Existing-code bug-fix bundle for findings K10, K11, K13 and K18, identified at docs/20261120-review-whole-repo-consolidated.md:215, :230, :240 and :248. This PRD changes runner command replay, epoch retirement and sleep cancellation, plus one API state refusal; it is not an architecture replacement. Exactly four stories are required: US-001, US-002 depending only on US-001, US-003 and US-004. No new files, dependencies, schema migrations or generated artifacts are required. Codebase-memory MCP is unavailable in this session, so discovery used direct reads and targeted text searches. No implementation or tests were executed during PRD drafting. Refine audit re-read the checked-in spec and affected source/test harnesses: all 41 numbered spec ACs remain in their original stories (US-001: 14; US-002: 14; US-003: 5; US-004: 8), with compound observations split into labeled atomic parts and every regression/unchanged/already qualifier retained. All 13 feature-level exclusions remain verbatim, all contextFiles match the spec lists, and the binding dependencies remain unchanged. Additional acceptance observations come only from the existing Failure Handling table: skipping readopt itself for missing/done/rejected replays, and resolving the original min-gap run without another sync. These close two proof gaps: no readStatus alone does not establish no readopt, and aborting a signal alone does not establish loop completion. Negative paths and regression anchors exist in every story. Retained routing follows the security override for credential/session and guarded access-control paths, with ordinary TDD for sleep cancellation; no heavier architectural routing or new dependencies are warranted.\n\nRepository architecture and constraints: apps/runner is Bun-only ESM using bun:sqlite and bun:test, while apps/api owns business rules and uses NestJS over Fastify, Prisma and Vitest. The detected web-framework summary is not authoritative: .nax/mono/apps/web/context.md is the designated app guidance, and root guidance describes Nuxt; neither web nor CLI is in this implementation scope. App guidance was read from .nax/mono/apps/runner/context.md:1 and .nax/mono/apps/api/context.md:1. Generated AGENTS.md files must not be edited. The API capability catalog at .nax/rules/nathapp-packages.md:32 points to @nathapp/nestjs-common for existing business exceptions; platform-docs MCP is also unavailable here, and no new NestJS abstraction is needed. Implementers should use the installed platform exception and existing transactional patterns rather than inventing alternatives.\n\nUS-001 / K10: apps/runner/src/supervisor/command-handler.ts:55 loads an applied command before the first-apply try/catch; its replay branch currently resumes only ASSIGN/ok and otherwise returns the stored ack. A repeated READOPT therefore needs its own guarded application/error handling, not just a change inside apply(). recordAs at :48 already converts undefined detail to null and stamps now().toISOString(); repeat READOPT must do the same through the new update operation. apps/runner/src/journal/journal.ts:194 uses INSERT OR IGNORE in recordCommand, so calling it again cannot change an outcome. Add updateCommandOutcome beside the command methods as an UPDATE of result/detail/applied_at only, preserving command identity, jobId, leaseEpoch and type and never inserting an unknown id. WAL and synchronous FULL persistence are configured at journal.ts:44; no table or schema change is necessary. journal.abandon at :244 deletes epoch-scoped job/event/approval data but deliberately keeps command records, which is why missing-row replays must still return their stored ack.\n\nSupervisor.readopt at apps/runner/src/supervisor/supervisor.ts:160 already owns all adoption validation and must remain authoritative and unchanged: an in-memory run returns ok; THREAD uses readoptThread at :147 and cannot resume a running session; PLAN/REVIEW/FIX/AGENT adopt an owned live process without a RUN status id; RUN validates its naxRunId against status. reject at :134 marks the row done after cleanup handling. Persisting a new rejected outcome is essential before another restart, since subsequent replay will see doneAt set and must not regress to stale ok. A thrown readStatus or other repeated readopt error must instead return rejected/runner error without overwriting the existing command record. The harness at apps/runner/src/supervisor/command-handler.spec.ts:15 has a real in-memory Journal, fakeTime, real Supervisor, RepoMutex and memory logger. Its terminal READOPT replay test at :143 remains valid. Journal first-write-wins and abandon behavior are covered at apps/runner/src/journal/journal.spec.ts:128; extend that file for the new UPDATE method rather than changing recordCommand semantics. FakeExecutor at apps/runner/test/helpers/fake-executor.ts:13 supplies alive, procMatches, statusError, ticks, dieAfterTicks and call recording, including readStatus at :134 and resumeCredentials at :188. Existing Supervisor readopt tests start at apps/runner/src/supervisor/supervisor.spec.ts:115 and cover in-memory idempotence at :137. Credential/approval restoration is performed when JobRun enters watch at apps/runner/src/supervisor/job-run.ts:143, so acceptance must wait for resumeCredentials rather than assuming the ack means asynchronous watch setup has finished. Risks: duplicate watchers, overwriting unrelated command metadata, losing a rejection across a third restart, bypassing existing process-identity checks, or unhandled replay exceptions. This story touches four existing implementation/test files; FakeExecutor and Supervisor are read-only context.\n\nUS-002 / K11: assign at apps/runner/src/supervisor/command-handler.ts:121 transactionally inserts a row and journals its ok ack, then :141 awaits each lower-epoch supervisor.abandon before begin. SyncLoop.apply at apps/runner/src/sync/sync-loop.ts:178 awaits handleCommands inline, so this stalls heartbeats, cancellations and token refresh for unrelated jobs when the repo is held. Add retireOlderEpochs in Supervisor, call it without awaiting in assign, and pass its settling promise into begin. Supervisor stores runs and pending promises at apps/runner/src/supervisor/supervisor.ts:26; track at :35 currently registers a run and starts it immediately, begin at :52 chooses JobRun versus ThreadJobRun, and idle at :207 waits pending work. The optional predecessor barrier must flow through nax runs only, while both the run and retirement remain tracked from begin/retirement time. Retire finished rows synchronously using journal.abandon; HostExecutor.cleanup at apps/runner/src/executor/host-executor.ts:509 already closes approvals, releases git/provider credentials and removes leftover per-job files. Do not run that cleanup or release again for a done row. Non-done rows use existing Supervisor.abandon at supervisor.ts:91; its THREAD path drops the row and releases credentials without a repo mutex, and its nax path delegates to JobRun.abandon. A rejected abandon must become a warn entry with exact message older epoch abandon failed, never a rejected predecessor barrier. All lower epochs must be accounted for, not just the first row.\n\nJobRun.start/run at apps/runner/src/supervisor/job-run.ts:100 and :110 already set queued before mutex acquisition, re-read doneAt under the lock, and skip missing/done rows. Set queued before awaiting the new after promise as well. requestCancel at :179 uses endWhileQueued at :193 to emit CANCELLED / cancelled before start and mark done immediately, even when retirement has not finished. JobRun.abandon at :226 halts a live run and then acquires the same repo lock; abandonCleanup at :243 kills only an owned process and protects a live higher epoch from reap/profile cleanup while still releasing epoch-scoped credentials and approvals. Preserve those boundaries. RepoMutex at apps/runner/src/supervisor/repo-mutex.ts:5 is FIFO and requires no implementation change. The predecessor barrier prevents the new run from queueing its own lock request before older abandon. Tests should hold acme/app explicitly, prove handler.handle resolves before release, record the prior row inside a wrapped prepare and assert outside that wrapper, then release and await supervisor.idle. command-handler.spec.ts:15 must expose mutex and log; the D64 test at :86 currently asserts deletion/SIGKILL immediately after handle, so move those asynchronous-completion assertions after idle while preserving deletion/kill before the second prepare and preserving the no-prior-cleanup assertion. Related regression coverage includes apps/runner/src/supervisor/job-run.spec.ts:1155 (higher-epoch protection), :1169 (abandon serialization), :1263 (credential release), :1284 (approval release), and supervisor.spec.ts:33 (begin/idle). Risks: mutex deadlock, starting prepare before old cleanup/kill finishes, failing to expose the new run to CANCEL while waiting, leaking pending promises, silently dropping abandonment errors, or delaying THREAD unnecessarily. US-002 depends on US-001 because both edit command-handler.ts and command-handler.spec.ts and extend the same build() harness.\n\nUS-003 / K18: SyncLoop.stop at apps/runner/src/sync/sync-loop.ts:99 sets stopped, unsubscribes and aborts only the current request. run at :105 invokes deps.sleep without a signal for retry and min-gap sleeps at :115-116. Own one lifetime AbortController, abort it in stop, and pass its signal to both sleeps; keep the separate in-flight controller and wake behavior. Sleep and systemSleep at apps/runner/src/time.ts:3 and :7 already support early resolution, including an already-aborted signal, without rejection. No change to time.ts, backoff.ts, tuning or daemon.ts is needed. The production wiring at apps/runner/src/daemon/daemon.ts:283 injects sleep and handler.handle; daemon stop at :332 awaits running before supervisor shutdown, shipper/broker/approval cleanup and journal close, so ending the sleep removes the outage delay without changing shutdown ordering. The existing scripted makeLoop at apps/runner/src/sync/sync-loop.spec.ts:34 uses a fixed clock and a sleep stub at :47 that ignores the optional signal; retain those expectations. Existing stop/probe behavior is covered at :363 and :385. New tests must synchronize on entry to sleep, capture signal.aborted at call time, and use systemSleep(60_000, signal) for the less-than-1,000-ms stop check with exactly one sync. Risks: aborting data-carrying polls on ordinary wake, accidentally reusing an inflight signal for lifetime cancellation, rejecting sleep instead of resolving, or sending one more request after stop.\n\nUS-004 / K13: cancel at apps/api/src/fleet/jobs/fleet-jobs.service.ts:213 locks the job inside txManager.run, checks project existence and requester-or-permission authorization, then rejects terminal states at :223. Add the UPLOADING ConflictAppException immediately afterward, before the cancelRequestedAt early return at :237 and before any write. The existing path at :242-251 updates cancelRequestedAt, creates CANCEL, appends a lifecycle event, records activity and audit, then publishes/notifies after commit at :254-255; none of those side effects should occur for the refused state. Preserve permission-check ordering and accepted QUEUED/ASSIGNED/RUNNING behavior. Update the doc comment at :208 and the reachable-state comment at :238 only; leave controller @ApiResponse metadata and openapi.json untouched because no controller/DTO contract changes are requested. cancelForBudget and cancelForRunnerDisabled remain unchanged. Unit fixture setup at apps/api/src/fleet/jobs/fleet-jobs.audit.spec.ts:7 mocks collaborators and transactional audit; its audits cancel from %s table at :45 currently includes UPLOADING and must remove only that state, retaining the accepted-cancel audit invariant and the RUNNING already-requested no-op at :86. Add refusal tests for fresh and already-requested UPLOADING, exact exception prefix/args, no createCommand/update/audit, and a RUNNING CANCEL regression. The existing PostgreSQL HTTP suite apps/api/test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts:16 provides insertJob (:38), reload (:45), and post (:46); add an UPLOADING fixture held by an inserted runner at epoch 1, call as dev, verify 409 and unchanged cancelRequestedAt/no CANCEL rows. Existing RUNNING idempotence and finished-state/requester/viewer regressions at :68 and :78 remain.\n\nDownstream impact: apps/api/src/fleet/jobs/fleet-job-route.commands.ts:34 delegates the approved REST cancel command to this service; apps/api/src/fleet/jobs/fleet-jobs.controller.ts:57 exposes the guarded route and :67 retains the existing 409 description. apps/api/src/fleet/assistant/tools/cancel-job-tool.ts:53 preview still offers nonterminal jobs including UPLOADING, while execute at :73 delegates to cancel and translates the existing refusal path; do not change preview. Text search also located service consumers in apps/api/src/fleet/threads/threads.service.ts:205 and apps/api/src/fleet/threads/workspace-threads.service.ts:204; they inherit the state refusal with no requested signature or consumer changes. Runner internal callers of begin/readopt remain source-compatible through optional after parameters. No fleet protocol, generated client, enrollment, reconciliation, status transition table or persisted identity format changes are required.\n\nTest/rollout plan: runner unit tests use Bun and real SQLite :memory: with injected processes/network, never installed nax or host credentials; apps/runner/package.json:11 runs bun test --timeout 30000 src test/unit. Add behavior tests in the existing files listed per story and keep every spec AC, including regression anchors. Runner generated acceptance is separate from that unit command and must be invoked from apps/runner with bun test .nax/features/review-1120-runner/.nax-acceptance.test.ts --timeout=60000 and the story AC filter when generated; never edit/copy that generated file. API uses vi, not jest; apps/api/package.json:12 excludes DB integration from the default test task and :19 provides test:scoped. Execute the modified API integration spec through bun run test:scoped test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts outside NAX_SANDBOXED=1 so PostgreSQL behavior actually runs; skips are not verification. Retain canRunDbTests at the integration file's :15, existing bootHttpApp listener, and generated Prisma fixture patterns. DB-mode tests reset their test database, so do not run conflicting suites concurrently; use a private test container/database for a second checkout. US-001 and US-002 receive strict three-session-tdd because adoption/retirement resumes or releases credentials, approval state and THREAD session boundaries; US-004 also uses strict isolation because the guarded mutation includes requester/permission checks. US-003 is medium, localized cancellation wiring with tdd-simple. Roll out compatible runner and API changes without data backfill or coordinated wire-version migration. The behavioral compatibility change is deliberate: user cancel of an API-known UPLOADING job, even one previously cancelled in RUNNING, now returns existing 409 fleet.jobState. In-flight RUNNING-to-UPLOADING cancellation races and broader abandon/sweep stalls remain explicitly deferred.",
+  "outOfScope": [
+    "A cancel the API accepted while the job was RUNNING that reaches the runner after it moved to UPLOADING locally: the runner still finishes with its verdict. The owner ruled that the API refuses a cancel in UPLOADING (2026-11-20); the runner's finish path does not change.",
+    "The web Cancel button and the assistant `cancel_job` preview during UPLOADING: both still offer the action, and the 409 the API answers is shown through the existing error and refusal paths.",
+    "Stamping journaled command results with a boot id: the READOPT replay re-applies instead (K10).",
+    "A server-side heartbeat sweeper that would mark an unsupervised RUNNING job CRASHED: the runner-side replay closes the K10 window.",
+    "Checking the shipped systemd unit and launchd plist stop timeouts against the sync backoff: K18 removes the wait instead.",
+    "Releasing credentials or approvals again for a finished older row dropped by `retireOlderEpochs`: `HostExecutor.cleanup` already released them when that row finished.",
+    "`daemon.ts` shutdown order: unchanged; it already stops the loop first.",
+    "An ABANDON, or a further requeue, for a new epoch that is still waiting for its older abandon: it queues on the repo mutex ahead of that run's own lock request, and the run then finds its row gone and returns; no AC pins it.",
+    "Deferring a requeued THREAD job's start: a THREAD row starts at once, because retiring an older THREAD row never takes the repo mutex.",
+    "The `@ApiResponse` 409 description of the cancel route (`Job already finished`) and the committed `openapi.json`: unchanged; only the service's doc comments are updated.",
+    "An ABANDON command and the `unknownJobIds` sweep (`abandonUnknown`) still await the older run's repo mutex inside the sync loop: K11 covers only the requeue ASSIGN.",
+    "A daemon stop while a new epoch waits for its older abandon: the halted run still reaches `prepare` after the lock and discards it, as a run queued for the mutex already does.",
+    "The API `reconcileBoot` READOPT rule: unchanged."
+  ],
+  "routingProfile": "native-codex-ds"
+}
