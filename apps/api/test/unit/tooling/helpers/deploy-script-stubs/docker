@@ -1,0 +1,49 @@
+#!/bin/bash
+# Recording `docker` stub for apps/api/test/unit/tooling/helpers/deploy-script-harness.ts.
+#
+# Every call appends one record to $KODA_DEPLOY_HARNESS_RECORD: the argument count, then KODA_VERSION as
+# the child saw it, then the arguments, each field NUL-terminated; the harness parses that file. The call
+# then fails (exit 1) when its argv, joined with spaces and with every occurrence of the per-test temp dir
+# removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. A call that runs pg_dump writes the
+# contents of $KODA_DEPLOY_HARNESS_PG_DUMP and exits with $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT; anything else
+# succeeds silently.
+#
+# It must stay bash 3.2 portable: macOS /bin/bash runs it in the suite.
+
+{
+  printf '%s\0' "$#"
+  printf '%s\0' "${KODA_VERSION-}"
+  for argument in "$@"; do
+    printf '%s\0' "$argument"
+  done
+} >> "$KODA_DEPLOY_HARNESS_RECORD"
+
+joined=""
+for argument in "$@"; do
+  joined="$joined $argument"
+done
+
+# Drop the temp dir first, so a random directory suffix never matches a failOn entry by accident.
+joined="${joined//"$KODA_DEPLOY_HARNESS_DIR"/}"
+
+while IFS= read -r pattern; do
+  if [[ -z "$pattern" ]]; then
+    continue
+  fi
+  case "$joined" in
+    *"$pattern"*)
+      exit 1
+      ;;
+  esac
+done <<< "${KODA_DEPLOY_HARNESS_FAIL_ON-}"
+
+case "$joined" in
+  *pg_dump*)
+    if [[ -n "${KODA_DEPLOY_HARNESS_PG_DUMP-}" ]]; then
+      cat "$KODA_DEPLOY_HARNESS_PG_DUMP"
+    fi
+    exit "${KODA_DEPLOY_HARNESS_PG_DUMP_EXIT:-0}"
+    ;;
+esac
+
+exit 0
