@@ -5,10 +5,10 @@ import { basename, join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript } from './helpers/deploy-script-harness';
 
 const fixtureRoots: string[] = [];
-function validArchive(): string {
+function validArchive(name = 'backup.tar.gz'): string {
   const root = mkdtempSync(join(tmpdir(), 'koda-rollback-archive-'));
   fixtureRoots.push(root);
-  const archive = join(root, 'backup.tar.gz');
+  const archive = join(root, name);
   writeFileSync(join(root, 'data'), 'payload');
   const tar = spawnSync('tar', ['-czf', archive, '-C', root, 'data'], { encoding: 'utf8' });
   if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
@@ -37,6 +37,14 @@ describe('rollback.sh restore and portable .env update', () => {
       'compose', '-f', `${run.dir}/docker-compose.yml`, 'run', '--rm', '--no-deps', '--user', 'root', '--entrypoint', 'sh',
       '-v', `${run.dir}:/backup:ro`, 'api', '-c', `find /data -mindepth 1 -delete && tar -xzf /backup/${basename(archive)} -C /data`,
     ]);
+  });
+  it('F1: shell-quotes archive basenames containing command separators', () => {
+    const archive = validArchive('backup.tar.gz;id');
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
+    const restoreCall = run.dockerCalls.find((call) => call.argv.includes('run'));
+    expect(restoreCall?.argv[restoreCall.argv.indexOf('-c') + 1]).toBe(
+      'find /data -mindepth 1 -delete && tar -xzf /backup/backup.tar.gz\\;id -C /data',
+    );
   });
   it('AC-3: restores using the target version', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()]);

@@ -68,9 +68,11 @@ docker compose -f "$COMPOSE_FILE" stop api web || true
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   echo "==> Restoring DB volume from: $RESTORE_DB_FILE"
   RESTORE_DIR="$(cd "$(dirname "$RESTORE_DB_FILE")" && pwd)"
+  RESTORE_ARCHIVE="$(basename "$RESTORE_DB_FILE")"
+  RESTORE_ARCHIVE_QUOTED="$(printf '%q' "$RESTORE_ARCHIVE")"
   KODA_VERSION="$TARGET_VERSION" docker compose -f "$COMPOSE_FILE" run --rm --no-deps --user root --entrypoint sh \
     -v "$RESTORE_DIR:/backup:ro" \
-    api -c "find /data -mindepth 1 -delete && tar -xzf /backup/$(basename "$RESTORE_DB_FILE") -C /data"
+    api -c "find /data -mindepth 1 -delete && tar -xzf /backup/$RESTORE_ARCHIVE_QUOTED -C /data"
 fi
 
 ENV_FILE_TMP="${ENV_FILE}.tmp.$$"
