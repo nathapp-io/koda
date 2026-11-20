@@ -78,6 +78,15 @@ describe('ciWebhookCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
+    it('points to the webhook credentials when the API returns 401', async () => {
+      mockTrigger.mockRejectedValueOnce({ statusCode: 401, message: 'Invalid signature' });
+
+      await program.parseAsync(BASE_ARGS);
+
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('KODA_CI_WEBHOOK_SECRET or --signature'));
+      expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+
     it('outputs JSON when --json is set', async () => {
       const result = { accepted: true };
       mockTrigger.mockResolvedValue({ ret: 0, data: result });
