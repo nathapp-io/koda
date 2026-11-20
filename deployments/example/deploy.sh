@@ -135,11 +135,23 @@ echo "==> Start services"
 docker compose "${COMPOSE_ARGS[@]}" up -d --wait api web
 
 echo "==> Post-deploy health checks"
-set -a
-[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
-set +a
-curl -fsS "http://localhost:${API_PORT:-3100}/api/health" >/dev/null
-curl -fsS "http://localhost:${WEB_PORT:-3101}" >/dev/null
+# Ask Compose for the published ports instead of sourcing `.env`: an environment file Compose accepts may use
+# syntax bash would run as commands (`KEY: value`, or a quoted multiline value), which fails here — after the
+# services have already been replaced (review rollback.sh:289).
+published_port() {
+  local published
+  published="$(docker compose "${COMPOSE_ARGS[@]}" port "$1" "$2" 2>/dev/null | head -n 1)" || return 1
+  if [[ -z "$published" ]]; then
+    return 1
+  fi
+  printf '%s\n' "${published##*:}"
+}
+if ! api_port="$(published_port api 3100)" || ! web_port="$(published_port web 3101)"; then
+  echo "❌ Could not resolve the published ports of api and web from Compose" >&2
+  exit 1
+fi
+curl -fsS "http://localhost:${api_port}/api/health" >/dev/null
+curl -fsS "http://localhost:${web_port}" >/dev/null
 
 echo "==> Status"
 docker compose "${COMPOSE_ARGS[@]}" ps

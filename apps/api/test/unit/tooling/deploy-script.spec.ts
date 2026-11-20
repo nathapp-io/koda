@@ -106,4 +106,20 @@ describe('deploy.sh', () => {
     const distinctSelections = new Set(run.dockerCalls.map(({ argv }) => composeSelection(argv).join(' ')));
     expect(distinctSelections).toEqual(new Set([expected.join(' ')]));
   });
+  it('B17: does not run a Compose-valid `.env` line as shell in its health checks', () => {
+    // Compose accepts `KEY: value` and quoted multiline values; bash does not. `deploy.sh` used to source `.env`
+    // to read the health-check ports, which ran such a line as a command after the services were replaced
+    // (review rollback.sh:289). It asks Compose for the published ports instead.
+    const run = runDeployScript('deploy.sh', [], {
+      envFile: lines('OLLAMA_BASE_URL: http://ollama:11434\nOLLAMA_MODEL="llama3\nmultiline"\n'),
+    });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.output).not.toContain('command not found');
+    // The ports come from Compose's own view of the running stack, for both services.
+    const ports = run.dockerCalls
+      .filter(({ argv }) => argv.includes('port'))
+      .map(({ argv }) => argv.slice(argv.indexOf('port') + 1).join(' '));
+    expect(ports).toEqual(['api 3100', 'web 3101']);
+  });
 });

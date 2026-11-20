@@ -58,11 +58,6 @@ export interface ScriptRun {
   /** The temp copy of `deployments/example`, real path, as the script's own `SCRIPT_DIR`. */
   dir: string;
   /**
-   * The Compose project every `config` render in this run resolved, in call order: the stub records it, so a
-   * test can assert which stack a script's Compose calls address without re-implementing the resolution.
-   */
-  renderedProjects: string[];
-  /**
    * The fake `koda_data` volume. A `compose run … -c <script> <args…>` call (a restore pipeline) really
    * executes its command on the host with `/data` bound here and `/backup` bound to the directory the call
    * mounts, so a test can assert the files a restore leaves behind (review B12, B13).
@@ -70,11 +65,6 @@ export interface ScriptRun {
   dataDir: string;
   /** Runs the same script again against the same deployment and Docker stub state, with a fresh call log. */
   rerun: (args: string[]) => ScriptRun;
-  /**
-   * Runs another of the deployment's scripts in the same directory, with the same environment and a fresh
-   * call log — a rollback that creates `.env` changes what `deploy.sh` and `backup-db.sh` then select.
-   */
-  runScript: (script: 'backup-db.sh' | 'rollback.sh' | 'deploy.sh', args: string[]) => ScriptRun;
 }
 
 /** A complete `pg_dump` output: the last comment line is what `backup-db.sh` verifies. */
@@ -180,7 +170,6 @@ export function runDeployScript(
   opts.seedVolume?.(dataDir);
 
   const recordFile = join(harnessDir, 'docker-calls');
-  const renderedFile = join(harnessDir, 'rendered-projects');
   const outputFile = join(harnessDir, 'output');
   const pgDumpFile = join(harnessDir, 'pg-dump');
   writeFileSync(pgDumpFile, opts.docker?.pgDump ?? DEFAULT_PG_DUMP);
@@ -208,17 +197,13 @@ export function runDeployScript(
     KODA_DEPLOY_HARNESS_FAIL_ON: (opts.docker?.failOn ?? []).join('\n'),
   };
 
-  const runWith = (
-    scriptName: 'backup-db.sh' | 'rollback.sh' | 'deploy.sh',
-    scriptArgs: string[],
-  ): ScriptRun => {
+  const run = (scriptArgs: string[]): ScriptRun => {
     writeFileSync(recordFile, '');
-    writeFileSync(renderedFile, '');
     // Both streams go to one file so the output keeps the order the script wrote it in.
     const outputFd = openSync(outputFile, 'w');
     let status: number;
     try {
-      const result = spawnSync('/bin/bash', [join(dir, scriptName), ...placeFixtureArguments(dir, scriptArgs)], {
+      const result = spawnSync('/bin/bash', [join(dir, script), ...placeFixtureArguments(dir, scriptArgs)], {
         cwd: dir,
         env,
         stdio: ['ignore', outputFd, outputFd],
@@ -233,14 +218,12 @@ export function runDeployScript(
       status,
       output: readFileSync(outputFile, 'utf8'),
       dockerCalls: readDockerCalls(recordFile),
-      renderedProjects: readFileSync(renderedFile, 'utf8').split('\n').filter((line) => line !== ''),
       dir,
       dataDir,
-      rerun: (next) => runWith(script, next),
-      runScript: runWith,
+      rerun: run,
     };
   };
-  return runWith(script, args);
+  return run(args);
 }
 
 /** Removes every per-test copy; call it from the suite's `afterEach`. */

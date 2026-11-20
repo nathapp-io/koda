@@ -150,13 +150,17 @@ if [[ -f "$ENV_FILE" ]]; then
   COMPOSE_ARGS=( --env-file "$ENV_FILE" -f "$COMPOSE_FILE" )
 fi
 
-# Without a local `.env`, `deploy.sh` passes no `--env-file` and Compose reads the `COMPOSE_ENV_FILES` list.
-# The `.env` this script creates has to reproduce that configuration: a version-only file would make this
-# script, `deploy.sh` and `backup-db.sh` pin it next time and silently drop the list, resolving the default
-# project and volume — a later restore could then replace another project's volume (review rollback.sh:156).
-COMPOSE_ENV_FILE_LIST=()
+# This script can only persist the target version into a local `.env`, and `deploy.sh` and `backup-db.sh` pin
+# that file once it exists. A deployment that keeps its configuration in files named by `COMPOSE_ENV_FILES` and
+# has no local `.env` would therefore change the resolved project and volume on its next run — or lose the
+# settings entirely — and a later restore could replace another project's volume. Copying an environment file
+# faithfully means reproducing Compose's dotenv semantics (interpolation order, `KEY: value`, multiline values,
+# BOM), so this script refuses instead of guessing (review rollback.sh:289).
 if [[ ! -f "$ENV_FILE" && -n "${COMPOSE_ENV_FILES:-}" ]]; then
-  IFS=',' read -r -a COMPOSE_ENV_FILE_LIST <<< "$COMPOSE_ENV_FILES"
+  echo "❌ No $ENV_FILE, but COMPOSE_ENV_FILES is set: $COMPOSE_ENV_FILES" >&2
+  echo "   Put those settings in $ENV_FILE — deploy.sh, backup-db.sh and rollback.sh pin that file — or unset" >&2
+  echo "   COMPOSE_ENV_FILES, then retry." >&2
+  exit 1
 fi
 
 # Read the canonical config, not the source expressions. This also resolves an explicit
@@ -281,20 +285,7 @@ if [[ -f "$ENV_FILE" ]]; then
     exit 1
   fi
 else
-  # Carry the deployment's own environment files into the new `.env`, so the file this script leaves behind
-  # keeps the project, volume and credentials the running stack uses (review rollback.sh:156).
-  if [[ ${#COMPOSE_ENV_FILE_LIST[@]} -gt 0 ]]; then
-    for compose_env_file in "${COMPOSE_ENV_FILE_LIST[@]}"; do
-      if [[ -n "$compose_env_file" && -f "$compose_env_file" ]]; then
-        cat "$compose_env_file" >> "$ENV_FILE_TMP"
-        # Keep the next file's first line from being glued onto this file's last one.
-        if [[ -s "$compose_env_file" && -n "$(tail -c 1 "$compose_env_file")" ]]; then
-          printf '\n' >> "$ENV_FILE_TMP"
-        fi
-      fi
-    done
-  fi
-  printf '%s\n' "KODA_VERSION=$TARGET_VERSION" >> "$ENV_FILE_TMP"
+  printf '%s\n' "KODA_VERSION=$TARGET_VERSION" > "$ENV_FILE_TMP"
 fi
 
 # Validate what Compose will read on a future run without the shell version override — the staged file on its

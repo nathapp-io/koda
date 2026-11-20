@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanupDeployScriptRuns, runDeployScript, type DockerCall, type ScriptRun } from './helpers/deploy-script-harness';
+import { cleanupDeployScriptRuns, runDeployScript, type DockerCall } from './helpers/deploy-script-harness';
 
 const fixtureRoots: string[] = [];
 function fixtureRoot(): string {
@@ -70,17 +70,6 @@ function mountSource(call: DockerCall): string {
   const mount = call.argv.find((argument) => argument.endsWith(BACKUP_MOUNT_SUFFIX));
   if (mount === undefined) throw new Error(`no read-only /backup mount in: ${call.argv.join(' ')}`);
   return mount.slice(0, -BACKUP_MOUNT_SUFFIX.length);
-}
-/** Every Compose render in the run resolved this project — the stack the script's `--env-file` addressed. */
-function expectOnlyProject(run: ScriptRun, project: string): void {
-  expect(run.renderedProjects.length, `no render: ${run.output}`).toBeGreaterThan(0);
-  expect(run.renderedProjects.filter((rendered) => rendered !== project)).toEqual([]);
-}
-/** The resolved `/data` volume a run locked, taken from the lock container's name. */
-function lockVolume(run: ScriptRun): string {
-  const create = run.dockerCalls.find((call) => call.argv[0] === 'create');
-  if (create === undefined) throw new Error(`the run never locked a volume: ${run.output}`);
-  return (create.argv[2] ?? '').replace('koda-rollback-lock-', '');
 }
 function envLines(run: { dir: string }): string[] {
   return readFileSync(join(run.dir, '.env'), 'utf8').split(/\r?\n/).filter(Boolean);
@@ -479,38 +468,22 @@ describe('rollback.sh restore and portable .env update', () => {
       .toBe('KODA_VERSION=v0.4.1\nOLLAMA_BASE_URL=http://ollama:${KODA_VERSION}\n');
     expect(run.dockerCalls.find((call) => call.argv.includes('up'))?.kodaVersion).toBe('v0.4.1');
   });
-  it('B1: the .env it creates keeps the project, volume and credentials of the running deployment', () => {
-    // With no local `.env`, Compose reads the COMPOSE_ENV_FILES list — and so does `deploy.sh`. A version-only
-    // `.env` here would make the *next* rollback, and every deploy or backup that pins it, drop that list and
-    // select the default project and volume, so a later restore could replace another project's volume.
+  it('B1: refuses before stopping anything when the configuration lives in COMPOSE_ENV_FILES and there is no .env', () => {
+    // The scripts can only persist the version into a local `.env`, and `deploy.sh` and `backup-db.sh` pin that
+    // file once it exists. A deployment configured only through `COMPOSE_ENV_FILES` would change project and
+    // volume on its next run — and a later restore could replace another project's volume — so nothing is
+    // copied and nothing is stopped (review rollback.sh:289).
     const configFile = join(fixtureRoot(), 'compose-env');
-    writeFileSync(configFile, 'COMPOSE_PROJECT_NAME=koda-staging\nPOSTGRES_PASSWORD=pw\nJWT_SECRET=s\n');
+    writeFileSync(configFile, 'COMPOSE_PROJECT_NAME=koda-staging\nPOSTGRES_PASSWORD=pw\n');
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
       env: { COMPOSE_ENV_FILES: configFile },
     });
 
-    expect(run.status, run.output).toBe(0);
-    // The external configuration is now the deployment's own, with the target version appended last.
-    expect(readFileSync(join(run.dir, '.env'), 'utf8'))
-      .toBe('COMPOSE_PROJECT_NAME=koda-staging\nPOSTGRES_PASSWORD=pw\nJWT_SECRET=s\nKODA_VERSION=v0.4.1\n');
-    expect(run.renderedProjects).toEqual(['koda-staging', 'koda-staging', 'koda-staging']);
-
-    // The second invocation has a local `.env` and no longer sees the exported list in the same way: it must
-    // still resolve the original project and volume.
-    const second = run.rerun(['v0.4.2']);
-    expect(second.status, second.output).toBe(0);
-    expect(second.renderedProjects).toEqual(['koda-staging', 'koda-staging', 'koda-staging']);
-    expect(lockVolume(second)).toBe('koda-staging_koda_data');
-
-    // `deploy.sh` renders the configuration it applies; both it and `backup-db.sh` pin the `.env` this
-    // rollback created, which carries the deployment's own project and credentials.
-    const deploy = run.runScript('deploy.sh', ['--no-backup']);
-    expect(deploy.status, deploy.output).toBe(0);
-    expectOnlyProject(deploy, 'koda-staging');
-    const backup = run.runScript('backup-db.sh', []);
-    expect(backup.status, backup.output).toBe(0);
-    const backupComposeCalls = backup.dockerCalls.filter((call) => call.argv[0] === 'compose');
-    expect(backupComposeCalls.length).toBeGreaterThan(0);
-    expect(backupComposeCalls.filter((call) => !call.argv.includes(join(run.dir, '.env')))).toEqual([]);
+    expect(run.status, run.output).toBe(1);
+    expect(run.output).toContain(`No ${join(run.dir, '.env')}, but COMPOSE_ENV_FILES is set`);
+    expect(run.output).toContain(join(run.dir, '.env'));
+    // Nothing was resolved, pulled, locked, stopped or restored, and no `.env` was created.
+    expect(run.dockerCalls).toEqual([]);
+    expect(existsSync(join(run.dir, '.env'))).toBe(false);
   });
 });
