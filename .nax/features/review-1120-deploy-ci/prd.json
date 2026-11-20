@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T03:24:26.934Z",
+  "updatedAt": "2026-11-20T03:31:58.850Z",
   "userStories": [
     {
       "id": "US-001",
@@ -260,14 +260,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized validation and ordering changes with a supplied harness and explicit failure boundaries."
+        "reasoning": "Localized validation and ordering changes with a supplied harness and explicit failure boundaries.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "deployments/example/rollback.sh",
@@ -287,7 +290,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8129f25fb749c8a18d7312588b6ec9f459d06e50"
     },
     {
       "id": "US-006",
