@@ -90,7 +90,7 @@ cd deployments/example
 ./backup-db.sh
 ```
 
-Backup files are saved under `deployments/example/backups/`:
+`backup-db.sh` starts the bundled Postgres service if it is stopped, then takes and verifies a Postgres dump. It fails if it cannot take a valid dump. Backup files are saved under `deployments/example/backups/`:
 - `koda-db-<ts>.sql.gz` — Postgres dump (`pg_dump`)
 - `koda_data-<ts>.tar.gz` — LanceDB volume tarball
 
@@ -113,11 +113,12 @@ cd deployments/example
 ./rollback.sh v0.3.0 --restore-db ./backups/koda_data-YYYYMMDD-HHMMSS.tar.gz
 ```
 
+Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz`, then pulls the target images. If either preflight check fails, the running services are left untouched.
+
 ## Notes
 
-- PostgreSQL is Koda's only database. This example's compose file predates the Postgres-only
-  switch and still carried the historical SQLite default; it now ships a `postgres:16` service.
-  Set `DATABASE_URL` in `.env` to point at an external Postgres instead if you prefer.
+- This example deployment uses only its bundled `postgres` service. `deploy.sh` refuses a
+  `DATABASE_URL` set in `.env`; external Postgres is not supported by these example scripts.
   With TLS, `sslmode=require` verifies the server certificate (stricter than before the Prisma 7
   upgrade); for a private CA add `sslrootcert=<path>`, or opt out of the check with `uselibpqcompat=true`.
   `connection_limit=<n>` sets the connection pool size.
