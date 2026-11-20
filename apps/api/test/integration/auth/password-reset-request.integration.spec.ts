@@ -3,7 +3,9 @@ import { Logger } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { NOTIFY_SERVICE } from '@nathapp/nestjs-notify';
+import {
+  DELIVERY_CHANNEL_REGISTRY, DeliveryChannelRegistry, INotifyService, NOTIFY_SERVICE, NotificationChannel,
+} from '@nathapp/nestjs-notify';
 import { AUTH_LOGIN_LIMIT } from '../../../src/auth/auth-throttle';
 import { PASSWORD_RESET_TTL_MS } from '../../../src/auth/password-reset/password-reset.constants';
 import { hashPasswordResetToken } from '../../../src/auth/password-reset/password-reset-token';
@@ -14,7 +16,7 @@ import { grantBaseline } from '../../../src/permissions/test-helpers/permission-
 import { canRunDbTests } from '../../helpers/test-environment';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
-import { fixtureDb } from '../../helpers/action-context';
+import { fixtureDb, withTestActor } from '../../helpers/action-context';
 
 /**
  * auth-passwords US-003 — the public reset-request route.
@@ -74,6 +76,7 @@ describeDb('password reset request (PG)', () => {
   let dispatcher: EmailDispatcher;
   let email: EmailAvailability;
   let send: ReturnType<typeof vi.spyOn>;
+  let providerSend: ReturnType<typeof vi.spyOn>;
   let sendOne: ReturnType<typeof vi.spyOn>;
   let warn: ReturnType<typeof vi.spyOn>;
   let userId: string;
@@ -113,7 +116,10 @@ describeDb('password reset request (PG)', () => {
     email = app.get(EmailAvailability);
     // File-level spies: a detached task can still be running when a test ends, and a restored spy
     // would hand that send to the real SMTP channel.
-    send = vi.spyOn(app.get<{ send: () => Promise<unknown> }>(NOTIFY_SERVICE), 'send');
+    send = vi.spyOn(app.get<INotifyService>(NOTIFY_SERVICE), 'send');
+    const channel = app.get<DeliveryChannelRegistry>(DELIVERY_CHANNEL_REGISTRY).get(NotificationChannel.EMAIL);
+    if (!channel) throw new Error('email channel not registered');
+    providerSend = vi.spyOn(channel, 'send').mockResolvedValue({ providerMessageId: 'reset-test' });
     sendOne = vi.spyOn(dispatcher, 'sendOne');
     warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
@@ -125,6 +131,7 @@ describeDb('password reset request (PG)', () => {
     }
     await app?.close();
     send.mockRestore();
+    providerSend.mockRestore();
     sendOne.mockRestore();
   });
 
@@ -133,7 +140,8 @@ describeDb('password reset request (PG)', () => {
     userEmail = `${randomUUID()}@example.test`;
     userId = await createUser(userEmail);
     // The send step runs for real; only the SMTP call is stubbed.
-    send.mockReset().mockResolvedValue({} as never);
+    send.mockClear();
+    providerSend.mockClear().mockResolvedValue({ providerMessageId: 'reset-test' });
     sendOne.mockClear();
     warn.mockClear();
   });
@@ -179,7 +187,7 @@ describeDb('password reset request (PG)', () => {
     await requestReset(userEmail).expect(200);
     const [call] = await waitFor(async () => {
       const calls = sendOne.mock.calls as unknown as [
-        { id: string; kind: string }, string, { url: string; expiresAt: string }, string, Date, boolean,
+        { id: string; kind: string }, string, { url: string; expiresAt: string }, string | null, Date, boolean,
       ][];
       return calls.length > 0 ? calls : null;
     }, 'the reset email');
@@ -190,9 +198,69 @@ describeDb('password reset request (PG)', () => {
     expect(templateCode).toBe('PASSWORD_RESET');
     expect(payload.url).toBe(email.webUrl(`/reset-password/${raw}`));
     expect(payload.expiresAt).toEqual(expect.any(String));
-    expect(recipient).toBe(userId);
+    expect(recipient).toBeNull();
     expect(now).toBeInstanceOf(Date);
     expect(retryable).toBe(false);
+  });
+
+  it('AC-1/AC-2/AC-3/AC-4: delivers opted-out reset mail through real notify with attribution and token match', async () => {
+    await db.notificationPreference.create({
+      data: { userId, tenantId: 'default', channel: 'email', enabled: false },
+    });
+
+    const response = await requestReset(userEmail, 'zh-CN').expect(200);
+    expect(response.body).toEqual({ ret: 0, data: {} });
+
+    const row = await waitFor(async () => {
+      const rows = await scheduleRows(userEmail);
+      return rows.find((entry) => entry.status === 'SENT') ?? null;
+    }, 'the opted-out reset schedule row to finish');
+    expect(row).toMatchObject({ status: 'SENT', kind: 'PASSWORD_RESET', userId, toEmail: userEmail, locale: 'zh' });
+    expect(providerSend).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    const [payload, rendered] = providerSend.mock.calls[0] as unknown as [
+      { recipient: string; locale: string; templateCode: string }, string,
+    ];
+    expect(payload).toMatchObject({ recipient: userEmail, locale: 'zh', templateCode: 'PASSWORD_RESET' });
+    const raw = rendered.match(/reset-password\/([A-Za-z0-9_-]+)/)?.[1];
+    if (!raw) throw new Error('rendered reset email did not contain its reset link');
+    expect(rendered).toContain(email.webUrl(`/reset-password/${raw}`));
+    const [token] = await unusedRows(userId);
+    expect(token.tokenHash).toBe(hashPasswordResetToken(raw));
+  });
+
+  it('AC-5: delivers one recovery email for an opted-in account through real notify', async () => {
+    await db.notificationPreference.create({
+      data: { userId, tenantId: 'default', channel: 'email', enabled: true },
+    });
+
+    await requestReset(userEmail).expect(200);
+    const row = await waitFor(async () => {
+      const rows = await scheduleRows(userEmail);
+      return rows.find((entry) => entry.status === 'SENT') ?? null;
+    }, 'the opted-in reset schedule row to finish');
+
+    expect(row).toMatchObject({ userId, toEmail: userEmail, status: 'SENT' });
+    expect((sendOne.mock.calls[0] as unknown[])[3]).toBeNull();
+    expect(providerSend).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-6: ordinary notification email still respects the opted-out preference under SYSTEM/email', async () => {
+    await db.notificationPreference.create({
+      data: { userId, tenantId: 'default', channel: 'email', enabled: false },
+    });
+
+    await withTestActor({ type: 'SYSTEM', id: 'email' }, () => app.get<INotifyService>(NOTIFY_SERVICE).send({
+      tenantId: 'default', channel: NotificationChannel.EMAIL, templateCode: 'NOTIFICATION', locale: 'en',
+      recipient: userEmail, userId, data: {
+        title: 'ordinary notice', body: '', url: 'https://koda.test', prefsUrl: 'https://koda.test/prefs',
+      },
+    }));
+
+    expect(providerSend).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('AC-4: writes one PASSWORD_RESET schedule row for the user and ends it SENT', async () => {
@@ -209,7 +277,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-5: a throwing email channel still answers 200 {} and ends the row FAILED, logged as a warning', async () => {
-    send.mockRejectedValue(new Error('smtp refused the connection'));
+    providerSend.mockRejectedValue(new Error('smtp refused the connection'));
 
     const response = await requestReset(userEmail).expect(200);
     expect(response.body).toEqual({ ret: 0, data: {} });

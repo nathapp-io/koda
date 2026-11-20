@@ -99,21 +99,24 @@ describe('PasswordResetService', () => {
     expect(schedule.startPasswordResetSend.mock.calls[0][0]).not.toHaveProperty('rawToken');
   });
 
-  it('AC-3: sends PASSWORD_RESET through sendOne with the web url and retry off', async () => {
+  it('AC-7/AC-8/AC-9: bypasses delivery preferences but keeps reset retry disabled and schedule attribution', async () => {
     await service.request(user.email, 'en');
     await vi.waitFor(() => expect(dispatcher.sendOne).toHaveBeenCalledTimes(1));
 
     const [sentRow, templateCode, payload, recipient, now, retryable] = dispatcher.sendOne.mock.calls[0] as [
-      EmailScheduleRow, string, { url: string; expiresAt: string }, string, Date, boolean,
+      EmailScheduleRow, string, { url: string; expiresAt: string }, string | null, Date, boolean,
     ];
     const raw = emailedRawToken();
     expect(sentRow).toBe(row);
     expect(templateCode).toBe('PASSWORD_RESET');
     expect(payload.url).toBe(`https://web.test/reset-password/${raw}`);
     expect(payload.expiresAt).toBe(new Date(payload.expiresAt).toISOString());
-    expect(recipient).toBe(user.id);
+    expect(recipient).toBeNull();
     expect(now).toBeInstanceOf(Date);
     expect(retryable).toBe(false);
+    expect(schedule.startPasswordResetSend).toHaveBeenCalledWith({
+      userId: user.id, toEmail: user.email, locale: 'en', now,
+    });
   });
 
   it('AC-4/AC-11: schedules one PASSWORD_RESET send for the user in the requested locale', async () => {
