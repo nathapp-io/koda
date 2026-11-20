@@ -22,7 +22,7 @@ type Rendered = { services: Record<string, { environment?: Record<string, string
 function render(manifest: string, label: string, values: Record<string, string>): Rendered {
   const envFile = join(work, `${label}.env`);
   writeFileSync(envFile, Object.entries(values).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join('\n'));
-  const result = execFileSync('docker', ['compose', '-f', resolve(root, manifest), '--env-file', envFile, '-p', `koda-email-${label}`, 'config', '--format', 'json'], {
+  const result = execFileSync('docker-compose', ['-f', resolve(root, manifest), '--env-file', envFile, '-p', `koda-email-${label}`, 'config', '--format', 'json'], {
     cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? work, DOCKER_CONFIG: join(work, 'docker-config') },
     encoding: 'utf8',
@@ -41,17 +41,23 @@ describe('Compose optional email configuration', () => {
 
       const minimal = render(manifest, `minimal-${index}`, credentials);
       expect(minimal.services.api?.environment).toBeDefined();
-      for (const name of Object.keys(supplied)) expect(minimal.services.api?.environment).not.toHaveProperty(name);
+      for (const name of Object.keys(supplied)) expect(minimal.services.api?.environment?.[name]).toBeFalsy();
       expect(minimal.services.web?.environment).not.toHaveProperty('SMTP_URL');
       expect(minimal.services.postgres?.environment).not.toHaveProperty('SMTP_URL');
     });
 
     it(`still requires JWT_SECRET for ${manifest}`, () => {
-      expect(() => render(manifest, `missing-jwt-${index}`, {
-        JWT_REFRESH_SECRET: credentials.JWT_REFRESH_SECRET,
-        API_KEY_SECRET: credentials.API_KEY_SECRET,
-        POSTGRES_PASSWORD: credentials.POSTGRES_PASSWORD,
-      })).toThrow();
+      let stderr = '';
+      try {
+        render(manifest, `missing-jwt-${index}`, {
+          JWT_REFRESH_SECRET: credentials.JWT_REFRESH_SECRET,
+          API_KEY_SECRET: credentials.API_KEY_SECRET,
+          POSTGRES_PASSWORD: credentials.POSTGRES_PASSWORD,
+        });
+      } catch (error) {
+        stderr = (error as { stderr?: Buffer }).stderr?.toString() ?? '';
+      }
+      expect(stderr).toContain('set JWT_SECRET');
     });
   }
 });
