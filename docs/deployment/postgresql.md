@@ -107,13 +107,64 @@ Then point `DATABASE_URL` at PgBouncer (`port 6432`).
 
 ## Backup
 
-```bash
-# Dump
-docker compose exec postgres pg_dump -U koda_user koda > backups/koda-$(date +%Y%m%d).sql
+Write the dump as plain SQL, gzipped, and keep the two counts the restore procedure verifies against:
 
-# Restore
-docker compose exec -T postgres psql -U koda_user koda < backups/koda-20260324.sql
+```bash
+mkdir -p backups
+stamp="$(date +%Y%m%d-%H%M%S)"
+docker compose exec -T postgres pg_dump -U koda_user -d koda | gzip > "backups/koda-${stamp}.sql.gz"
 ```
+
+The bundled deployment does the same through `deployments/example/backup-db.sh`, which also verifies the dump and
+writes it as `deployments/example/backups/koda-db-<ts>.sql.gz` before any deploy or migration. It runs as the
+`POSTGRES_USER` of that deployment's `postgres` service, so pass the same role if you run `pg_dump` by hand.
+
+## Restore
+
+**Do not replay a dump into the database the deployment is serving.** `psql < backups/koda-20260324.sql` (or
+`gunzip -c … | docker compose exec -T postgres psql -U koda_user koda`) reports SQL errors and exits `0`
+regardless: the snapshot is merged into the live database, rows written after the backup stay behind beside the
+restored ones, and nothing tells the operator that the result is a mixture. A database created from
+`template0` is the only form you can verify before anything reads it.
+
+Use the recovery procedure in
+[`deployments/example/README.md` § Restore PostgreSQL into a fresh database](../../deployments/example/README.md#restore-postgresql-into-a-fresh-database).
+It takes the Compose file, the project, the environment file, the configured role, the gzip archive, the current
+database and a **new** database name, creates the new database from `template0`, replays into it, verifies row
+counts and `_prisma_migrations` records against the baseline captured for that backup, and only then flips
+`POSTGRES_DB` (create and recreate the affected services with the same Compose project and the same volumes) —
+with a reversal that puts the original back. Two details are worth repeating here:
+
+- The project matters. Every `docker compose` call in the procedure is pinned with `-p <project>` and
+  `--env-file <file>`, because the deployment's `POSTGRES_DB` lives in that environment file and Compose
+  otherwise takes the project from `COMPOSE_PROJECT_NAME` in your shell. Get the project from
+  `docker compose ls`.
+- The role matters. Use the deployment's `POSTGRES_USER` (`koda` in the example, `koda_user` above): it is the
+  owner of the tables in the dump and the account the deployment connects as.
+
+### An existing plain SQL dump
+
+A dump you already have as plain text (`backups/koda-20260324.sql`) reaches the same fresh-target `psql` step.
+Compress it so the integrity check can refuse a truncated copy, then run the documented procedure against it:
+
+```bash
+gzip -c backups/koda-20260324.sql > backups/koda-20260324.sql.gz
+```
+
+The replay it performs is exactly
+
+```bash
+gzip -dc backups/koda-20260324.sql.gz \
+  | docker compose --env-file .env -p <project> exec -T postgres \
+      psql -X -v ON_ERROR_STOP=1 -U koda_user -d <new database> -f -
+```
+
+with the target database created from `template0` first — never the database the deployment is serving.
+`ON_ERROR_STOP=1` is what makes an error end the replay instead of scrolling past it, and the documented script
+runs under `set -euo pipefail` so a decompression failure fails the step too.
+
+The LanceDB directory under `/data` is not part of a database backup; `rollback.sh --restore-db` restores that
+volume archive and does not touch PostgreSQL.
 
 ---
 
