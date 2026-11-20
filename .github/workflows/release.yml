@@ -23,17 +23,21 @@ permissions: {}
 # tag push arrived next to, instead of dropping it; it also keeps immutable tag builds from running beside a
 # publishing run.
 #
-# A concurrency group holds one running run and ONE pending run — Actions replaces the pending one — so a third
-# release request that arrives while both slots are taken is cancelled before it publishes (review B11). GitHub
-# has no deeper, non-replacing queue to ask for, so that run is recovered by requesting the release again, which
-# is the documented re-publish path: Actions -> Release -> "Run workflow" with its tag, or
-# `gh workflow run release.yml -f tag=v0.4.3`. A cancelled run published nothing, and a repeated request
-# converges, because publishing a tag that is already out is idempotent (npm skips a version that exists,
-# Docker pushes the same tag again). To avoid the third-slot case, let the previous release finish, approvals
-# included, before requesting the next one.
+# By default a concurrency group holds one running run and a single pending one, and a new request replaces that
+# pending run, so a third release request would be cancelled before it publishes. `queue: max` asks for the
+# deeper, non-replacing queue instead: up to 100 runs stay pending and start in the order they arrived (review
+# B11). `cancel-in-progress` must stay false there — Actions rejects `queue: max` together with `true`, and
+# cancelling a running release is the very thing this group exists to prevent.
+#
+# Past that capacity a request is still dropped before it publishes, so the recovery path stays documented:
+# request the release again — Actions -> Release -> "Run workflow" with its tag, or
+# `gh workflow run release.yml -f tag=v0.4.3`. A run that never started published nothing, and a repeated
+# request converges, because publishing a tag that is already out is idempotent (npm skips a version that
+# exists, Docker pushes the same tag again).
 concurrency:
   group: release-publish
   cancel-in-progress: false
+  queue: max
 
 # ─── Shared info ──────────────────────────────────────────────────────────────
 

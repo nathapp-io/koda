@@ -246,13 +246,18 @@ describe('release workflow channels', () => {
     expect(workflow.slice(0, concurrencyStart)).not.toContain('concurrency:');
   });
 
-  it('B11: documents the one-pending-slot queue and how a cancelled release is recovered', () => {
-    // GitHub keeps one running run and ONE pending run per group, so a third request is cancelled before it
-    // publishes. That run cannot be replaced from the workflow (it never starts), so the comment must say so
-    // and name the recovery path (review B11).
+  it('B11: asks for the non-replacing release queue and documents recovery past it', () => {
+    // A group keeps ONE pending run by default, so a third request would replace (cancel) the second before it
+    // publishes. The group asks for the deeper, non-replacing queue — up to 100 pending runs, started in order —
+    // and the recovery path for runs beyond that capacity is still documented (review B11).
     const concurrencyStart = workflow.indexOf('\nconcurrency:');
+    expect(concurrencyStart).toBeGreaterThanOrEqual(0);
+    const concurrencyBlock = workflow.slice(concurrencyStart + 1).split('\n\n')[0];
+    expect(concurrencyBlock).toContain('queue: max');
+    // Actions rejects `queue: max` with `cancel-in-progress: true`, and cancelling a running release is what the
+    // shared publisher group prevents.
+    expect(concurrencyBlock).toContain('cancel-in-progress: false');
     const comment = workflow.slice(0, concurrencyStart);
-    expect(comment).toContain('ONE pending run');
     expect(comment).toContain('workflow_dispatch');
     expect(comment).toContain('gh workflow run release.yml');
   });
