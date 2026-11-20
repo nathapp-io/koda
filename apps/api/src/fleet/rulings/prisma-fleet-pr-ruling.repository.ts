@@ -82,11 +82,20 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
     if (!repo || (repo.provider !== 'github' && repo.provider !== 'gitlab')) return null;
     const ref = prNumberRepo(repo);
     // US-005: the pre-filter narrows to this forge's URL shape; `prNumberFor` confirms every match.
-    const resultPrUrl = { endsWith: prUrlSuffix(repo.provider, prNumber) };
+    // Include supported URL suffix variants because URL parsing strips query strings and fragments.
+    const suffix = prUrlSuffix(repo.provider, prNumber);
+    const urlVariants = [
+      { resultPrUrl: { endsWith: suffix } },
+      { resultPrUrl: { endsWith: `${suffix}/` } },
+      { resultPrUrl: { contains: `${suffix}?` } },
+      { resultPrUrl: { contains: `${suffix}/?` } },
+      { resultPrUrl: { contains: `${suffix}#` } },
+      { resultPrUrl: { contains: `${suffix}/#` } },
+    ];
     const pageSize = 100;
     for (let page = 0; page < 1000; page++) {
       const jobs = await this.prisma.client.fleetJob.findMany({
-        where: { repoId, command: 'RUN', resultPrUrl },
+        where: { repoId, command: 'RUN', OR: urlVariants },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: pageSize, skip: page * pageSize,
         select: { id: true, resultPrUrl: true },
       });
