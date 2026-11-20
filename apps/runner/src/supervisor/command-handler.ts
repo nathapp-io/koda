@@ -150,12 +150,10 @@ export class CommandHandler {
       this.resumeStranded(assign.jobId, command.leaseEpoch);
       return { result: 'ok' };
     }
-    // D64: the same job id at a lower epoch is the attempt this one replaces. Drop it (kill, reap and cleanup are left to this
-    // epoch's prepare, which wipes the previous attempt's files, D53) BEFORE the new run can queue for the repo.
-    for (const older of journal.jobsById(assign.jobId).filter((row) => row.leaseEpoch < command.leaseEpoch)) {
-      await supervisor.abandon(assign.jobId, older.leaseEpoch);
-    }
-    supervisor.begin(inserted.row, 'prepare');
+    // D64/K11: the same job id at a lower epoch is the attempt this one replaces. The older epoch must be gone before
+    // this epoch's prepare, but the abandon may wait on the repo mutex (another job's long run), so it is retired in the
+    // background and this run waits for it instead of the sync loop (which awaits this handler) waiting here.
+    supervisor.begin(inserted.row, 'prepare', supervisor.retireOlderEpochs(assign.jobId, command.leaseEpoch));
     return { result: 'ok' };
   }
 }

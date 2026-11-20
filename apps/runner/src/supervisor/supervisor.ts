@@ -32,9 +32,11 @@ export class Supervisor {
     return `${jobId}:${epoch}`;
   }
 
-  private track(key: string, run: ActiveRun, from: RunStart): void {
+  private track(key: string, run: ActiveRun, from: RunStart, after?: Promise<void>): void {
     this.runs.set(key, run);
-    const promise: Promise<void> = run.start(from).finally(() => {
+    // K11: a THREAD row starts at once — retiring an older THREAD row never takes the repo mutex, so it ignores `after`.
+    const started = run instanceof JobRun ? run.start(from, after) : run.start(from);
+    const promise: Promise<void> = started.finally(() => {
       this.runs.delete(key);
       this.pending.delete(promise);
     });
@@ -49,11 +51,41 @@ export class Supervisor {
     };
   }
 
-  begin(row: JobRow, from: RunStart): void {
+  /**
+   * K11/D64: the older epochs of this job, retired off the caller's path. A row that is done is dropped here and now —
+   * its run already called `executor.cleanup` (which closed the approval relay and released the job's credentials) and
+   * the new epoch's prepare wipes the previous attempt's files (D53). Any other row goes through `abandon`, which still
+   * takes the repo mutex; the caller never waits for that, and neither does `CommandHandler.assign`. The returned promise
+   * settles once every abandon has settled, never rejects (a failed abandon is reported), and is part of `idle()`.
+   */
+  retireOlderEpochs(jobId: string, leaseEpoch: number): Promise<void> {
+    const unsettled: number[] = [];
+    for (const older of this.deps.journal.jobsById(jobId)) {
+      if (older.leaseEpoch >= leaseEpoch) continue;
+      if (older.doneAt !== null) this.deps.journal.abandon(jobId, older.leaseEpoch);
+      else unsettled.push(older.leaseEpoch);
+    }
+    if (unsettled.length === 0) return Promise.resolve();
+    const retiring = (async (): Promise<void> => {
+      for (const epoch of unsettled) {
+        try {
+          await this.abandon(jobId, epoch);
+        } catch (error) {
+          this.deps.log.warn('older epoch abandon failed', { jobId, leaseEpoch: epoch, error: errorMessage(error) });
+        }
+      }
+    })();
+    const promise: Promise<void> = retiring.finally(() => this.pending.delete(promise));
+    this.pending.add(promise);
+    return promise;
+  }
+
+  /** K11: `after` settles before the new run even asks for the repo mutex, so a requeue never waits for it inline. */
+  begin(row: JobRow, from: RunStart, after?: Promise<void>): void {
     const key = this.key(row.jobId, row.leaseEpoch);
     if (this.runs.has(key)) return;
     if (!isThreadKind(row.command)) {
-      this.track(key, new JobRun(this.deps, row.jobId, row.leaseEpoch), from);
+      this.track(key, new JobRun(this.deps, row.jobId, row.leaseEpoch), from, after);
       return;
     }
     const threads = this.deps.threads;

@@ -96,9 +96,9 @@ export class JobRun {
     return row;
   }
 
-  async start(from: RunStart): Promise<void> {
+  async start(from: RunStart, after?: Promise<void>): Promise<void> {
     try {
-      await this.run(from);
+      await this.run(from, after);
     } finally {
       // Plan D327: every exit releases the job's log streams, including `stale`, a halt and a failSafe whose own
       // recording failed. Idempotent: cleanup() has normally stopped the key already, before markDone.
@@ -106,10 +106,13 @@ export class JobRun {
     }
   }
 
-  private async run(from: RunStart): Promise<void> {
+  private async run(from: RunStart, after?: Promise<void>): Promise<void> {
     const first = this.row();
     if (!first) return;
+    // D66: queued from here, so a CANCEL before the lock ends the row at once. K11: `after` (the retirement of an older
+    // epoch of this job) settles first, and this run then finds its row gone and lets go without calling prepare.
     this.queued = from === 'prepare' || from === 'reprepare';
+    if (after) await after;
     const release = await this.deps.mutex.acquire(first.repoKey);
     this.queued = false;
     try {
