@@ -111,7 +111,12 @@ if [[ "$joined" == *' config' ]]; then
     if [[ "$argument" = --env-file ]]; then expect_env_file=1; fi
   done
   if [[ ${#env_files[@]} -eq 0 ]]; then
-    env_files=( "$KODA_DEPLOY_HARNESS_DIR/.env" )
+    # No `--env-file`: Compose reads the COMPOSE_ENV_FILES list, and the local `.env` when that is unset.
+    if [[ -n "${COMPOSE_ENV_FILES:-}" ]]; then
+      IFS=',' read -r -a env_files <<< "${COMPOSE_ENV_FILES}"
+    else
+      env_files=( "$KODA_DEPLOY_HARNESS_DIR/.env" )
+    fi
   fi
   project="${COMPOSE_PROJECT_NAME:-}"
   version="${KODA_VERSION:-}"
@@ -130,6 +135,8 @@ if [[ "$joined" == *' config' ]]; then
   project="${project//'${PROJECT_SUFFIX}'/${version:-default}}"
   project="${project//'${KODA_VERSION}'/${version:-latest}}"
   if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then exit 1; fi
+  # Record the project this render resolved, so a test can assert which stack a script's Compose calls address.
+  printf '%s\n' "$project" >> "$KODA_DEPLOY_HARNESS_DIR/.harness/rendered-projects"
   volume_name="${KODA_DEPLOY_HARNESS_VOLUME_NAME:-${project}_koda_data}"
   volume_name="${volume_name//'${KODA_VERSION}'/${version:-latest}}"
   printf 'name: %s\nservices:\n  api:\n    image: nathapp/koda-api:%s\n    volumes:\n      - type: volume\n        source: koda_data\n        target: /data\nvolumes:\n  koda_data:\n    name: %s\n' \

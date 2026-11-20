@@ -121,6 +121,8 @@ The archive is copied to a staging directory next to the scripts and mounted fro
 
 Before pulling or stopping services, `rollback.sh` compares Compose's resolved project and named `/data` volume under the current and target versions. It refuses any change, including one through an intermediate variable. Use version-independent names (for example `COMPOSE_PROJECT_NAME=koda-staging`). Before stopping services it takes a Docker container-name lock for the resolved volume, shared by version-only and data rollbacks. Do not prune or remove the lock container during a rollback. Do not run deploy, backup, or manual Compose operations against the volume while a rollback is in progress.
 
+If the deployment has no local `.env` and keeps its configuration in files named by `COMPOSE_ENV_FILES`, a rollback that creates `.env` carries those files' contents into it and appends `KODA_VERSION`, then validates that the new file alone resolves the same project, volume and image. Edit the resulting `.env` from then on: `rollback.sh`, `deploy.sh` and `backup-db.sh` all pin that file and no longer read `COMPOSE_ENV_FILES`.
+
 The restore refuses archives with either reserved top-level name (`.koda-restore-previous` or `.koda-restore-staging`). It applies and verifies the archived root owner and mode before discarding the saved data, or preserves the live root owner and mode if the archive lacks a root entry.
 
 ### Recover an interrupted restore
