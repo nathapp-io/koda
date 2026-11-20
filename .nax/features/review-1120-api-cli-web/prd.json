@@ -3,7 +3,7 @@
   "feature": "review-1120-api-cli-web",
   "branchName": "feat/review-1120-api-cli-web",
   "createdAt": "2026-11-20T08:04:00.317Z",
-  "updatedAt": "2026-11-20T08:04:00.317Z",
+  "updatedAt": "2026-11-20T08:34:09.729Z",
   "userStories": [
     {
       "id": "US-001",
@@ -29,14 +29,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard DTO and projection changes, but the signed inbound boundary and replay ordering require security-isolated tests."
+        "reasoning": "Standard DTO and projection changes, but the signed inbound boundary and replay ordering require security-isolated tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/ci-webhook/ci-webhook.dto.ts",
@@ -82,7 +85,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "116319a2f3446c5ffd0ceec44fc9aa465a181618"
     },
     {
       "id": "US-002",
@@ -132,7 +139,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -188,7 +198,10 @@
       "workdirSource": "stated",
       "suggestedCriteria": [
         "(regression guard: passes before the change) When the trigger runs with `KODA_CI_WEBHOOK_SECRET` set to the empty string, then the call's headers have no `x-ci-timestamp` value, as when the variable is unset."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -247,7 +260,10 @@
         }
       ],
       "workdir": "apps/cli",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -354,7 +370,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -421,7 +440,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Scope and rollout: The review inventory is docs/20261120-review-whole-repo-consolidated.md:27 and the rollout warning is at :47. This bundle resolves K2, K9, K12, K14, K15, K16 and K17; #487 already handled deploy/CI/release, and runner work is separate. This is a TypeScript maintenance release in a Bun/Turborepo monorepo: NestJS on Fastify with Prisma/PostgreSQL and Vitest, Commander with a generated client and Jest, and Nuxt/Vue SSR with Jest (not Next.js). The six implementation slices are independent. The operational sequence is to ship the updated CLI and provision its project webhook secret before enabling CI_WEBHOOK_REQUIRE_V2; keep existing v1 callers during deprecation. No schema migration, data backfill, new dependency or generated artifact update. The MCP graph tool was unavailable, so source references were verified with direct reads and text search.\n\nUS-001: apps/api/src/ci-webhook/ci-webhook.dto.ts:50 declares pipeline and commit required in Swagger already, but only validates them as nested values. apps/api/src/webhook-security/inbound-webhook-request.ts:25 transforms and validates, throwing a ValidationAppException for the first error. apps/api/src/ci-webhook/ci-webhook.controller.ts:76 authenticates first, :87 parses, :94 asserts replay freshness, and :98 invokes processing; preserve this order so signed bad input becomes a 400 without reserving the delivery and unsigned input still gets 401. The tighter validation applies to success events too; senders missing either object must supply it, with no OpenAPI change. apps/api/prisma/schema.prisma:146 already stores nullable Project.gitRemoteUrl; apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts:15 currently omits it. apps/api/src/ci-webhook/domain/ci-webhook.domain.ts:24 defines the projection. The repository lookup serves both target resolution and processing (apps/api/src/ci-webhook/ci-webhook.service.ts:27 and :45); only ticket description rendering needs the new field. createTicket at :82 gets the real project today but its type narrows it, and buildDescription at :117 synthesizes an undefined remote while iterating all failures. Pass the real remote per failure and keep the primary failure for ticket metadata/title. apps/api/src/common/utils/git-url.util.ts:12 already formats URLs and returns null for no remote. Do not change audit, retry, transaction or replay behavior. Extend the controller's signed 400 table (apps/api/src/ci-webhook/ci-webhook.controller.spec.ts:221), service description coverage (apps/api/src/ci-webhook/ci-webhook.service.spec.ts:187), and real route block (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:3064); add the real Prisma projection test, mirroring the database gate in apps/api/test/integration/audit/audit-ci-webhook.integration.spec.ts:24.\n\nUS-002: apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:80 restricts to the repo and RUN command, then selects candidates by provider-specific suffix, pages 100 at a time, sorts createdAt then id descending, and confirms each with prNumberFor. apps/api/src/fleet/sync/pr-attribution.service.ts:27 uses URL.pathname, accepts trailing slash, checks the repo path and handles GitLab path prefixes; it must stay the arbiter when a contains condition finds an unrelated candidate, such as a query or fragment that mentions the sought path. Keep sort, paging, repo/command constraints and parser; the wider predicate can admit more candidates without changing the result for nonmatching URLs. apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:43 uses the lookup for pending FIX snapshots (called from apps/api/src/fleet/jobs/fleet-jobs.service.ts:120) and :118 uses it to reject stale ruling targets. The separate repository scan at apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:151 already parses every RUN with a URL; leave it unchanged. The DB spec at apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts:37 has a hardcoded pull/42 fixture and :56 already exercises GitLab ordering/prefix separation; isolate each new PR number and verify a ruling on the newer variant. Run API DB/e2e specs through the host scoped test command so sandbox skips do not count as verification.\n\nUS-003: apps/cli/src/commands/ci-webhook.ts:16 owns trigger help and :39 sends generated delivery, Date, optional legacy signature and a JSON body containing both required objects. apps/cli/src/generated/sdk.gen.ts:1274 spreads per-call options; apps/cli/src/generated/client/client.gen.ts:58 calls bodySerializer before constructing the fetch Request at :79. Override the serializer per call, never edit generated code or hand-wire transport, so the exact wire body is signed. apps/api/src/webhook-security/webhook-signature.ts:27 verifies timestamp/delivery/raw body HMAC; apps/api/src/ci-webhook/ci-webhook.controller.ts:76 enforces v2 when configured. Keep Date and unique delivery, support coexistence of v1 and v2, never print the secret or expose it as a flag, and treat empty env as absent. The Jest harness in apps/cli/src/commands/ci-webhook.spec.ts:40 mocks the SDK and process.exit and uses objectContaining for request assertions; isolate clock/env state per case. The route already exercises v2-only at apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:2972; the story adds CLI-side byte agreement, not a new API behavior.\n\nUS-004: apps/api/prisma/schema.prisma:853 and :885 make host part of repo identity. apps/cli/src/commands/fleet-shared.ts:60 gathers paged repos in API order, but :72 uses one find for both id and shorthand, so the earliest display-name match can win. Resolve exact id before any shorthand and reject ambiguous shorthand via the existing validation path (apps/cli/src/commands/fleet-shared.ts:104; apps/cli/src/utils/error.ts:125). The repo-list reads are necessary to decide ambiguity; do not call the target operation. Callers already handle null: apps/cli/src/commands/fleet-dispatch.ts:56, apps/cli/src/commands/fleet-job.ts:33, apps/cli/src/commands/fleet-schedule.ts:136 and apps/cli/src/commands/fleet-budget.ts:170. Stubbed process.exit can return during specs, so the null fallback still matters. Extend apps/cli/src/commands/fleet-shared.spec.ts:48 and the dispatch/job command specs. Unique case-insensitive and nested-owner shorthand still resolve; scripts using ambiguous names should switch to repo id. Display-only repoNamesOrEmpty remains unchanged (apps/cli/src/commands/fleet-shared.ts:96).\n\nUS-005: apps/web/composables/useFleetDispatchOptions.ts:11 supplies FleetRepo choices, apps/web/lib/fleet-types.ts:171 exposes host, and useFleetDispatchOptions.ts:39 supplies separate display-only names. Replace only chooser labels at apps/web/pages/[project]/fleet/dispatch.vue:79, apps/web/pages/[project]/threads/new.vue:49, apps/web/pages/[project]/fleet/schedules/index.vue:115, apps/web/pages/[project]/fleet/schedules/[id].vue:141, apps/web/pages/[project]/fleet/budgets.vue:38 and apps/web/pages/[project]/fleet/index.vue:134. The jobs page's RepoConfigList (:127) is not a chooser. apps/web/components/SettingsProviderKeysCard.vue:14 uses a local Repo type with no host declared, although the paged fleet repo read (:59) keeps whole records; share or align the input shape and leave the row heading at :132 and permission checks unchanged. Convert its REPO SelectItem loop at :141 only. Repo ids remain option values and labels stay unchanged for noncollisions; use input order, case-insensitive grouping and optional host to accommodate existing mocks. Add helper tests and mount each surface; the dispatch and schedule detail source-only specs do not verify runtime wiring. Use the dispatch runtime spec, new-thread, schedule-list, schedule approval-gates (mountScheduleDetail at apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts:319), jobs-list, budgets project and provider-key card specs. Existing Playwright selection by unique owner/name at apps/web/tests/e2e/fleet-dispatch.e2e.spec.ts:35 must remain compatible.\n\nUS-006: apps/web/composables/useNotifications.ts:18 keys shared state by owner; :22 writes both responses unconditionally, and :36 refreshes after mark-all. Independent composable instances in apps/web/components/NotificationBell.vue:88 and apps/web/pages/notifications.vue:18 share this state. Increment generation before issuing requests and gate both writes together; later rejection must not let the older result back in. Keep API methods, polling and owner isolation; exercise two instances with deferred responses in apps/web/tests/composables/useNotifications.spec.ts:70. In apps/web/pages/[project]/fleet/jobs/[id]/logs.vue:51 the raw URL is tied to current stream/lease epoch and :157 renders a native anchor. apps/web/server/utils/session-refresh.ts:29 excludes /api and requires HTML. apps/web/composables/useFleetJobLogs.ts:10 probes via $api.get, which retries after one client-side session refresh on 401 (apps/web/composables/useApi.ts:237 and :272); :287 already handles bundle downloads separately. Capture the selected href at click time, preserve the original link/download affordances, and open the streaming link only after the probe; no server refresh changes, no buffering the raw stream and no DOM access during SSR. The failure message uses existing extractApiError at apps/web/composables/useApi.ts:72. apps/web/tests/pages/fleet-job-logs-page.spec.ts:51 has a list stub and :79 pins the original href; extend with deferred/rejectable list and a document recorder for the actual click seam, restore stubbed globals, and cover the helper separately. apps/web/tests/e2e/fleet-logs.e2e.spec.ts:132 also pins the raw path and epoch. Session renewal is inherited from useApi, not newly implemented by the page.",
