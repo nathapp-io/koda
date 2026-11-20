@@ -47,6 +47,8 @@ export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    if (!this.email.configured) return;
+
     this.timer = setInterval(() => {
       void this.runScheduledTick();
     }, TICK_INTERVAL_MS);

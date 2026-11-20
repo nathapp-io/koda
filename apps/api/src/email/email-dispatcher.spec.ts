@@ -24,7 +24,17 @@ function setup() {
   };
   const builder = { build: vi.fn() };
   const notify = { send: vi.fn(async (_req?: { recipient?: string }) => undefined) };
-  const email = { configured: true, config: () => ({ maxAttempts: 5 }) };
+  const email: {
+    smtpUrl: string | null;
+    webPublicUrl: string;
+    readonly configured: boolean;
+    config: () => { maxAttempts: number };
+  } = {
+    smtpUrl: 'smtp://mail.example',
+    webPublicUrl: 'https://web.example',
+    get configured() { return this.smtpUrl !== null; },
+    config: () => ({ maxAttempts: 5 }),
+  };
   const dispatcher = new EmailDispatcher(schedule as never, builder as never, notify as never, email as never);
   const logger = (dispatcher as unknown as { logger: { warn: Mock } }).logger;
   const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
@@ -164,6 +174,74 @@ describe('EmailDispatcher (S4b US-002)', () => {
 });
 
 describe('EmailDispatcher scheduled ticks (S4b US-002)', () => {
+  it('US-003 AC-1..AC-9: suspends the entire disabled schedule and resumes retained notifications after restart', async () => {
+    vi.useFakeTimers();
+    const retainedNotification = row({ id: 'notification', attempts: 2 });
+    const expiredInvite = row({ id: 'invite', kind: 'INVITE', attempts: 1 });
+    const expiredReset = row({ id: 'reset', kind: 'PASSWORD_RESET', attempts: 1 });
+    const retained = [retainedNotification, expiredInvite, expiredReset];
+    const trace: string[] = [];
+    const disabled = setup();
+    disabled.email.smtpUrl = null;
+    expect(disabled.email.webPublicUrl).toBe('https://web.example');
+    disabled.schedule.closeAbandonedInvites.mockImplementation(async () => {
+      trace.push('close');
+      return 0;
+    });
+    disabled.schedule.claimDue.mockImplementation(async () => {
+      trace.push('claim');
+      return retained.filter((item) => item.kind === 'NOTIFICATION' && item.attempts === 2);
+    });
+    disabled.dispatcher.onModuleInit();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(retainedNotification.attempts).toBe(2);
+    expect(retainedNotification.kind).toBe('NOTIFICATION');
+    expect(disabled.notify.send).not.toHaveBeenCalled();
+    expect(disabled.schedule.closeAbandonedInvites).not.toHaveBeenCalled();
+    expect(disabled.schedule.claimDue).not.toHaveBeenCalled();
+    disabled.dispatcher.onModuleDestroy();
+
+    const enabled = setup();
+    enabled.schedule.closeAbandonedInvites.mockImplementation(async (now: Date) => {
+      trace.push('close');
+      for (const item of retained) {
+        if ((item === expiredInvite || item === expiredReset) && (item.kind === 'INVITE' || item.kind === 'PASSWORD_RESET')) {
+          (item as EmailScheduleRow & { status?: string; lastError?: string }).status = 'FAILED';
+          (item as EmailScheduleRow & { status?: string; lastError?: string }).lastError = 'abandoned';
+        }
+      }
+      expect(now).toEqual(expect.any(Date));
+      return 2;
+    });
+    enabled.schedule.claimDue.mockImplementation(async () => {
+      trace.push('claim');
+      retainedNotification.attempts += 1;
+      return [retainedNotification];
+    });
+    enabled.builder.build.mockResolvedValue({ data: { title: 'retained' }, userId: 'u1' });
+    enabled.notify.send.mockImplementation(async () => { trace.push('send'); });
+    enabled.schedule.markSent.mockImplementation(async () => {
+      trace.push('sent');
+      (retainedNotification as EmailScheduleRow & { status?: string }).status = 'SENT';
+    });
+    enabled.dispatcher.onModuleInit();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(trace.indexOf('close')).toBeLessThan(trace.indexOf('claim'));
+    expect(enabled.schedule.claimDue).toHaveBeenCalledTimes(1);
+    expect(enabled.notify.send).toHaveBeenCalledTimes(1);
+    expect(enabled.notify.send).toHaveBeenCalledWith(expect.objectContaining({ recipient: retainedNotification.toEmail }));
+    expect(enabled.schedule.markSent).toHaveBeenCalledTimes(1);
+    expect((retainedNotification as EmailScheduleRow & { status?: string }).status).toBe('SENT');
+    expect((expiredInvite as EmailScheduleRow & { status?: string; lastError?: string })).toMatchObject({ status: 'FAILED', lastError: 'abandoned' });
+    expect((expiredReset as EmailScheduleRow & { status?: string; lastError?: string })).toMatchObject({ status: 'FAILED', lastError: 'abandoned' });
+    expect(enabled.notify.send.mock.calls.every(([request]) => request?.templateCode !== 'INVITE' && request?.templateCode !== 'PASSWORD_RESET')).toBe(true);
+
+    enabled.dispatcher.onModuleDestroy();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(enabled.schedule.claimDue).toHaveBeenCalledTimes(1);
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
