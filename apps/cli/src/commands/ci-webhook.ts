@@ -79,7 +79,7 @@ export function ciWebhookCommand(program: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err);
+        handleApiError(err, { hint: 'Check the value of KODA_CI_WEBHOOK_SECRET or --signature.' });
       }
     });
 }
