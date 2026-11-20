@@ -67,22 +67,25 @@ docker compose -f "$COMPOSE_FILE" stop api web || true
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   echo "==> Restoring DB volume from: $RESTORE_DB_FILE"
-  docker run --rm \
-    -v koda-local_koda_data:/target \
-    -v "$(cd "$(dirname "$RESTORE_DB_FILE")" && pwd):/backup:ro" \
-    alpine:3.20 \
-    sh -lc "rm -rf /target/* && tar -xzf /backup/$(basename "$RESTORE_DB_FILE") -C /target"
+  RESTORE_DIR="$(cd "$(dirname "$RESTORE_DB_FILE")" && pwd)"
+  KODA_VERSION="$TARGET_VERSION" docker compose -f "$COMPOSE_FILE" run --rm --no-deps --user root --entrypoint sh \
+    -v "$RESTORE_DIR:/backup:ro" \
+    api -c "find /data -mindepth 1 -delete && tar -xzf /backup/$(basename "$RESTORE_DB_FILE") -C /data"
 fi
 
+ENV_FILE_TMP="${ENV_FILE}.tmp.$$"
 if [[ -f "$ENV_FILE" ]]; then
-  if grep -q '^KODA_VERSION=' "$ENV_FILE"; then
-    sed -i "s/^KODA_VERSION=.*/KODA_VERSION=$TARGET_VERSION/" "$ENV_FILE"
-  else
-    echo "KODA_VERSION=$TARGET_VERSION" >> "$ENV_FILE"
-  fi
+  cp -p "$ENV_FILE" "$ENV_FILE_TMP"
+  awk -v version="KODA_VERSION=$TARGET_VERSION" '
+    /^KODA_VERSION=/ { print version; found = 1; next }
+    { print }
+    END { if (!found) print version }
+  ' "$ENV_FILE" > "$ENV_FILE_TMP"
 else
-  echo "KODA_VERSION=$TARGET_VERSION" > "$ENV_FILE"
+  : > "$ENV_FILE_TMP"
+  printf '%s\n' "KODA_VERSION=$TARGET_VERSION" > "$ENV_FILE_TMP"
 fi
+mv "$ENV_FILE_TMP" "$ENV_FILE"
 
 echo "==> Starting app services on KODA_VERSION=$TARGET_VERSION"
 docker compose -f "$COMPOSE_FILE" up -d api web
