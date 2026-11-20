@@ -383,6 +383,30 @@ describe('CiWebhookService', () => {
     });
 
     /**
+     * Review f-613a: `gitRefFile` is stored, not the encoded URL, and `TicketsService.computeGitRefUrl`
+     * rebuilds the link from it. An unencodable path survives storage only as a U+FFFD-substituted
+     * copy, so it must not become the ticket's git ref — otherwise the later source link names a file
+     * that does not exist. The description still reports the failure.
+     */
+    it('f-613a: an unencodable file name is not stored as the ticket git ref', async () => {
+      const poisoned = `src/a${String.fromCharCode(0xd800)}b.ts`;
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'poisoned', file: poisoned, line: 9 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      const stored = mockRepo.createTicket.mock.calls[0][1];
+      expect(stored.gitRefFile).toBeNull();
+      expect(stored.gitRefVersion).toBe('abc123');
+      expect(stored.description).toContain('- **poisoned**');
+    });
+
+    /**
      * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous` (US-002).
      * Creating the ticket is the system's own write, so `processCiWebhook` overrides it with `SYSTEM/ci`.
      */

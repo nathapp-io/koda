@@ -127,6 +127,11 @@ export class CiWebhookService {
     // Build description with details
     const description = this.buildDescription(project, payload);
 
+    // Review f-613a: a path that cannot be encoded reaches the database only as a U+FFFD-substituted
+    // copy, so `TicketsService.computeGitRefUrl` would later render it as a link naming a different
+    // file. The ref is dropped for such a path; the description still names the reported file.
+    const gitRefFile = failure.file && encodeGitPath(failure.file) !== null ? failure.file : null;
+
     return this.repo.createTicket(
       project.id,
       {
@@ -136,7 +141,7 @@ export class CiWebhookService {
         status: 'CREATED',
         priority: Priority.HIGH,
         gitRefVersion: payload.commit.sha,
-        gitRefFile: failure.file || null,
+        gitRefFile,
         gitRefLine: failure.line || null,
       },
       async (ticket) => {
