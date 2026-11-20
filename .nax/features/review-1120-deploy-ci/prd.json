@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T03:43:12.140Z",
+  "updatedAt": "2026-11-20T03:48:46.510Z",
   "userStories": [
     {
       "id": "US-001",
@@ -378,14 +378,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A localized configuration-assignment guard and end-to-end regression through the existing backup call, without changing credential validation."
+        "reasoning": "A localized configuration-assignment guard and end-to-end regression through the existing backup call, without changing credential validation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "deployments/example/deploy.sh",
@@ -405,7 +408,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "815852fe02b18646914381afd767836ce25b9f41"
     },
     {
       "id": "US-008",
