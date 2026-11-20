@@ -42,20 +42,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -n "$RESTORE_DB_FILE" ]]; then
+  if [[ ! -f "$RESTORE_DB_FILE" || ! -r "$RESTORE_DB_FILE" ]]; then
+    echo "❌ Backup file not found: $RESTORE_DB_FILE"
+    exit 1
+  fi
+
+  if ! tar -tzf "$RESTORE_DB_FILE" >/dev/null 2>&1; then
+    echo "❌ Backup file is not a valid .tar.gz: $RESTORE_DB_FILE"
+    exit 1
+  fi
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "❌ docker is required"
   exit 1
 fi
 
+echo "==> Pull target images"
+KODA_VERSION="$TARGET_VERSION" docker compose -f "$COMPOSE_FILE" pull api web
+
 echo "==> Stopping app services"
 docker compose -f "$COMPOSE_FILE" stop api web || true
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
-  if [[ ! -f "$RESTORE_DB_FILE" ]]; then
-    echo "❌ Backup file not found: $RESTORE_DB_FILE"
-    exit 1
-  fi
-
   echo "==> Restoring DB volume from: $RESTORE_DB_FILE"
   docker run --rm \
     -v koda-local_koda_data:/target \
@@ -73,9 +83,6 @@ if [[ -f "$ENV_FILE" ]]; then
 else
   echo "KODA_VERSION=$TARGET_VERSION" > "$ENV_FILE"
 fi
-
-echo "==> Pull target images"
-docker compose -f "$COMPOSE_FILE" pull api web
 
 echo "==> Starting app services on KODA_VERSION=$TARGET_VERSION"
 docker compose -f "$COMPOSE_FILE" up -d api web
