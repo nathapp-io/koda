@@ -1,44 +1,68 @@
 #!/bin/bash
 # Recording `docker` stub for apps/api/test/unit/tooling/helpers/deploy-script-harness.ts.
 #
-# Every call appends one record to $KODA_DEPLOY_HARNESS_RECORD: the argument count, then KODA_VERSION as
-# the child saw it, then the arguments, each field NUL-terminated; the harness parses that file.
+# Every call appends one record to $KODA_DEPLOY_HARNESS_RECORD: the argument count, then KODA_VERSION as the
+# child saw it, then the umask the script runs with, then the mode of the script's `backups/` directory (`-`
+# when it does not exist yet), then the arguments, each field NUL-terminated; the harness parses that file.
+# The per-call umask and directory mode are what let a test assert that the directory was already private
+# when the first dump output started (review finding 4).
 #
-# Before deciding the exit code, the stub writes the files a real container would leave on the host: a
-# `tar -czf /backup/<name>` call writes <name> under $KODA_DEPLOY_HARNESS_DIR/backups, and a pg_dump call
-# writes $KODA_DEPLOY_HARNESS_PG_DUMP. Both happen even for a call that fails, so a script that writes an
-# archive straight to its restore-ready name leaves a partial file a test can catch (review B9).
+# A call whose stdout a container would stream writes to stdout, like the container it stands in for:
 #
-# The call then fails (exit 1) when its argv, joined with spaces and with every occurrence of the per-test
-# temp dir removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. A pg_dump call exits with
-# $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT.
+# - a `tar` call whose arguments are `-czf -` streams the archive to stdout, so the script has to redirect it
+#   into a host-created file. A failing call writes only the prefix a container writes before it dies, so a
+#   script that puts those bytes straight into its restore-ready name leaves a partial file a test can catch
+#   (review B9). While it runs, the mode of `backups/.koda_data-*.tar.gz.partial` is recorded in
+#   `.harness/archive-moment`.
+# - a pg_dump call writes $KODA_DEPLOY_HARNESS_PG_DUMP to stdout and exits with
+#   $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT. While it runs, the mode of `backups/` and of every
+#   `backups/koda-db-*.sql.gz` the script's redirect already created are recorded in `.harness/dump-moment`,
+#   which is how a test sees the state at the moment the dump output starts.
+#
+# Every other call fails (exit 1) when its argv, joined with spaces and with every occurrence of the
+# per-test temp dir removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. The two streaming calls
+# above match the same list, so injecting a failure there exercises the partial-output path.
 #
 # A `compose run … -c <script> <arg>…` call that passes positional arguments is a restore pipeline, and the
 # stub really runs it on the host: `/data` is bound to the fake volume $KODA_DEPLOY_HARNESS_VOLUME and
 # `/backup` to the host directory the call mounts, with the trailing arguments as the command's `$@`, exactly
 # like `docker compose run … api -c '<script>' koda-restore <archive>`. A test can then assert the files a
 # restore leaves in the volume, not only the arguments it passed (review B12, B13). The call exits with the
-# command's own status. Every other call succeeds silently (the pg_dump and archive cases below decide first).
+# command's own status. Every other call succeeds silently.
 #
 # It must stay bash 3.2 portable: macOS /bin/bash runs it in the suite.
+
+# macOS `stat` and GNU `stat` spell "octal permission bits" differently.
+file_mode() {
+  if [[ "$(uname -s)" = Darwin ]]; then
+    command stat -f '%Lp' "$1"
+  else
+    command stat -c '%a' "$1"
+  fi
+}
 
 {
   printf '%s\0' "$#"
   printf '%s\0' "${KODA_VERSION-}"
+  printf '%s\0' "$(umask)"
+  if [[ -d "$KODA_DEPLOY_HARNESS_DIR/backups" ]]; then
+    printf '%s\0' "$(file_mode "$KODA_DEPLOY_HARNESS_DIR/backups")"
+  else
+    printf '%s\0' -
+  fi
   for argument in "$@"; do
     printf '%s\0' "$argument"
   done
 } >> "$KODA_DEPLOY_HARNESS_RECORD"
 
+# `tar -czf - …`: the archive goes to stdout, not to a file the container writes itself.
+archive_stdout=0
+previous=""
 for argument in "$@"; do
-  case "$argument" in
-    "tar -czf /backup/"*)
-      archive="${argument#tar -czf /backup/}"
-      archive="${archive%% *}"
-      mkdir -p "$KODA_DEPLOY_HARNESS_DIR/backups"
-      printf 'partial data volume archive\n' > "$KODA_DEPLOY_HARNESS_DIR/backups/$archive"
-      ;;
-  esac
+  if [[ "$previous" = "-czf" && "$argument" = "-" ]]; then
+    archive_stdout=1
+  fi
+  previous="$argument"
 done
 
 joined=""
@@ -49,25 +73,58 @@ done
 # Drop the temp dir first, so a random directory suffix never matches a failOn entry by accident.
 joined="${joined//"$KODA_DEPLOY_HARNESS_DIR"/}"
 
+will_fail=0
 while IFS= read -r pattern; do
   if [[ -z "$pattern" ]]; then
     continue
   fi
   case "$joined" in
     *"$pattern"*)
-      exit 1
+      will_fail=1
+      break
       ;;
   esac
 done <<< "${KODA_DEPLOY_HARNESS_FAIL_ON-}"
 
+if [[ "$archive_stdout" = 1 ]]; then
+  mkdir -p "$KODA_DEPLOY_HARNESS_DIR/backups"
+  : > "$KODA_DEPLOY_HARNESS_DIR/.harness/archive-moment"
+  for partial in "$KODA_DEPLOY_HARNESS_DIR"/backups/.koda_data-*.tar.gz.partial; do
+    [[ -e "$partial" ]] || continue
+    printf '%s %s\n' "${partial##*/}" "$(file_mode "$partial")" >> "$KODA_DEPLOY_HARNESS_DIR/.harness/archive-moment"
+  done
+  if [[ "$will_fail" = 1 ]]; then
+    # The bytes a container wrote before it died on the way out.
+    printf 'SYNTHETIC-VOLUME-ARCHIVE-'
+    exit 1
+  fi
+  printf 'SYNTHETIC-VOLUME-ARCHIVE-BYTES\n'
+  exit 0
+fi
+
 case "$joined" in
   *pg_dump*)
+    mkdir -p "$KODA_DEPLOY_HARNESS_DIR/backups"
+    : > "$KODA_DEPLOY_HARNESS_DIR/.harness/dump-moment"
+    printf 'backups %s\n' "$(file_mode "$KODA_DEPLOY_HARNESS_DIR/backups")" \
+      >> "$KODA_DEPLOY_HARNESS_DIR/.harness/dump-moment"
+    for dump in "$KODA_DEPLOY_HARNESS_DIR"/backups/koda-db-*.sql.gz; do
+      [[ -e "$dump" ]] || continue
+      printf '%s %s\n' "${dump##*/}" "$(file_mode "$dump")" >> "$KODA_DEPLOY_HARNESS_DIR/.harness/dump-moment"
+    done
+    if [[ "$will_fail" = 1 ]]; then
+      exit 1
+    fi
     if [[ -n "${KODA_DEPLOY_HARNESS_PG_DUMP-}" ]]; then
       cat "$KODA_DEPLOY_HARNESS_PG_DUMP"
     fi
     exit "${KODA_DEPLOY_HARNESS_PG_DUMP_EXIT:-0}"
     ;;
 esac
+
+if [[ "$will_fail" = 1 ]]; then
+  exit 1
+fi
 
 # Model Compose's rendered config for the fixtures (not a general dotenv parser).
 case "$1" in
