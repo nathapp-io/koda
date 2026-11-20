@@ -1,0 +1,443 @@
+{
+  "project": "koda",
+  "feature": "review-1120-api-cli-web",
+  "branchName": "feat/review-1120-api-cli-web",
+  "createdAt": "2026-11-20T08:04:00.317Z",
+  "updatedAt": "2026-11-20T08:04:00.317Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Validate CI webhook payloads and link failure source files",
+      "description": "**Goal** — Reject invalid webhook parent objects with a 400 and include each available failure source URL in the ticket description.\n\n**Motivation** — class-validator skips nested validation of an absent value, so a payload with neither object passes `parseInboundPayload`, and `CiWebhookService.createTicket` then reads `payload.pipeline.id` and throws a `TypeError` (500).\n\n**Approach** — **K14.** Both parent fields gain `@IsDefined()` and `@IsObject()` (class-validator), ahead of the existing `@ValidateNested()`. Validation is event-independent: a `pipeline_success` payload without `pipeline` is now a 400 too, as the DTO already documents both fields as required. The OpenAPI schema does not change (`@ApiProperty` already marks both required), so `openapi.json` and the CLI client are not regenerated.\n\n**K15.** `CiProjectDomain` gains `gitRemoteUrl: string | null`; `findProjectBySlug` selects it; `buildDescription` takes the project and passes `project.gitRemoteUrl` to `buildGitUrl`. `buildGitUrl` is unchanged.\n\nKeep `parseInboundPayload` read-only: it throws `ValidationAppException({ param })` on the first validation error. Signed missing, null, string or array parent objects fail validation before replay recording and processing. Keep the existing per-failure loop and omit the URL for failures without a file or when the project has no remote. Extend the signed-payload table in `ci-webhook.controller.spec.ts`, description cases in `ci-webhook.service.spec.ts` and the real route in `endpoint.e2e.spec.ts`; add the repository integration spec with the existing database gate. The controller ACs use a raw signed body and `handleCiWebhook('koda', request, signature, deliveryId)`, based on a `pipeline_failed` fixture with `pipeline: { id: '12345' }`, `commit: { sha: 'abc123' }` and one failure. The endpoint AC is correctly v1-signed.\n\n**Scope** — In: CI DTO, project domain and repository projection, service description and their tests. Out: PR ruling lookup (US-002), CLI webhook signing (US-003), `buildGitUrl` support for SSH remotes or self-hosted GitLab hosts, and regeneration of `openapi.json` or the CLI client.\n\n**Interface** — `CiWebhookPayloadDto.pipeline` and `.commit`: `@ApiProperty(...) @IsDefined() @IsObject() @ValidateNested() @Type(...)`. `CiProjectDomain` adds `gitRemoteUrl: string | null`. `private buildDescription(project: { gitRemoteUrl: string | null }, payload: CiWebhookPayloadDto): string`; `createTicket` receives the full `CiProjectDomain`. Read-only: `buildGitUrl(gitRemoteUrl: string | null | undefined, ref: string, filePath: string, line?: number): string | null`.",
+      "acceptanceCriteria": [
+        "When `handleCiWebhook` receives a correctly signed, otherwise-valid `pipeline_failed` body with no `pipeline` key, then it rejects with a `ValidationAppException` whose status is 400.",
+        "When `handleCiWebhook` receives a correctly signed, otherwise-valid `pipeline_failed` body with no `commit` key, then it rejects with a `ValidationAppException` whose status is 400.",
+        "When `handleCiWebhook` receives a correctly signed body with `pipeline: null`, then it rejects with a `ValidationAppException` whose status is 400.",
+        "When `handleCiWebhook` receives a correctly signed body with `pipeline: '12345'` (a string), then it rejects with a `ValidationAppException` whose status is 400.",
+        "When `handleCiWebhook` receives a correctly signed body with `commit: []` (an array), then it rejects with a `ValidationAppException` whose status is 400.",
+        "When `handleCiWebhook` receives a correctly signed, otherwise-valid `pipeline_failed` body with no `pipeline` key, then `CiWebhookService.processCiWebhook` is never called.",
+        "When `handleCiWebhook` receives a correctly signed, otherwise-valid `pipeline_failed` body with no `pipeline` key, then the replay guard's `assertFresh` is never called.",
+        "Given a project created with `gitRemoteUrl: 'https://github.com/acme/app'`, when `PrismaCiWebhookRepository.findProjectBySlug` reads it, then the result has `gitRemoteUrl: 'https://github.com/acme/app'`.",
+        "Given the repository returns a project with `gitRemoteUrl: 'https://github.com/acme/app'`, when `CiWebhookService.processCiWebhook('koda', payload)` processes `pipeline_failed` with commit `abc123` and one failure `{ test: 'T', file: 'src/a.ts', line: 7 }`, then the description passed to `repo.createTicket` contains the line `  - URL: https://github.com/acme/app/blob/abc123/src/a.ts#L7`.",
+        "Given the same file-bearing failure and a project with `gitRemoteUrl: null`, when `CiWebhookService.processCiWebhook('koda', payload)` processes it, then the description passed to `repo.createTicket` has no line starting with `  - URL:`.",
+        "Given a project with `gitRemoteUrl: 'https://github.com/acme/app'` and the failure `{ test: 'T' }` (no `file`), when `CiWebhookService.processCiWebhook('koda', payload)` processes it, then the description passed to `repo.createTicket` has no line starting with `  - URL:`.",
+        "When the real `POST /api/projects/:slug/ci-webhook` route in `endpoint.e2e.spec.ts` receives a correctly v1-signed body without `pipeline`, then it responds with status 400."
+      ],
+      "tags": [
+        "api",
+        "webhook",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard DTO and projection changes, but the signed inbound boundary and replay ordering require security-isolated tests."
+      },
+      "contextFiles": [
+        "apps/api/src/ci-webhook/ci-webhook.dto.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts",
+        "apps/api/src/ci-webhook/ci-webhook.controller.spec.ts",
+        "apps/api/test/integration/audit/audit-ci-webhook.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/ci-webhook/ci-webhook-repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a CI failure ticket lists failures in two different files and the project has a GitHub remote, then the description includes the distinct source URL for each file."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.dto.ts",
+          "reason": "`pipeline` and `commit` gain `@IsDefined()` and `@IsObject()` before `@ValidateNested()`; nothing else in the DTO changes."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/domain/ci-webhook.domain.ts",
+          "reason": "`CiProjectDomain` gains `gitRemoteUrl: string | null`."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts",
+          "reason": "`findProjectBySlug` also selects `gitRemoteUrl`."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.service.ts",
+          "reason": "`createTicket` takes the full project and `buildDescription passes project.gitRemoteUrl to buildGitUrl` instead of the inline `{ gitRemoteUrl: undefined }`."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.controller.spec.ts",
+          "reason": "gains the missing, null, string and array parent-object cases in the existing signed-payload 400 table."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.service.spec.ts",
+          "reason": "gains the source-URL description cases."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the `ci-webhook` block gains a v1-signed payload without `pipeline` answering 400 (rule `api-testing`: at least one error case per endpoint)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Find the latest PR run across URL variants",
+      "description": "**Goal** — Make `latestRunForPr` select the newest matching RUN when its stored PR URL has a trailing slash, query string or fragment.\n\n**Motivation** — When the newest RUN's URL is such a variant, `ruleTarget` answers `fleet.rulings.notLatest`, a FIX snapshot misses pending rulings, and an older run with a canonical URL is picked.\n\n**Approach** — `latestRunForPr` replaces the single `endsWith` with an `OR` that covers the supported variants of the canonical PR/MR suffix; `prNumberFor` still decides whether a candidate names that PR. With `s` the existing `prUrlSuffix(provider, prNumber)`, the job filter is `OR: [{ resultPrUrl: { endsWith: s } }, { resultPrUrl: { endsWith: s + '/' } }, { resultPrUrl: { contains: s + '?' } }, { resultPrUrl: { contains: s + '/?' } }, { resultPrUrl: { contains: s + '#' } }, { resultPrUrl: { contains: s + '/#' } }]`. The `OR` covers the canonical URL and every trailing-slash, query and fragment variant of it; `prNumberFor` still confirms every candidate, so `/pull/420?x` and `/pull/42x` never match. A zero-padded number (`/pull/042`), which `prNumberFor` also parses as 42, matches neither the old filter nor the new one. `runsForPr` already scans every RUN with a URL and is unchanged.\n\nThe paging loop and the `prNumberFor` confirmation are unchanged. Keep repo and RUN filtering and newest-first ordering. Extend `fleet-pr-ruling.repository.integration.spec.ts` using the existing GitHub `acme/app` (`repoId` in the fixture, `githubRepoId` in the ACs) and GitLab `acme/gitlab-app` (`gitlabRepoId`) repos, a separate PR number per new scenario, and a URL-parametrised variant of the `newJob` helper for the real `create(newerJobId)` ruling case.\n\n**Scope** — In: latest RUN lookup and DB integration cases. Out: webhook validation/source URLs (US-001), zero-padded PR numbers, storing a normalized PR number or URL on `FleetJob` (no migration), and changes to `PrismaFleetPrRulingRepository.runsForPr`.\n\n**Interface** — `latestRunForPr(repoId: string, prNumber: number): Promise<string | null>`. Read-only: `prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'name' | 'host'>, url: string): number | null`. `FleetPrRulingsService` and `fleet.rulings.notLatest` are unchanged.",
+      "acceptanceCriteria": [
+        "Given a RUN with `resultPrUrl` `https://github.com/acme/app/pull/51/`, when `latestRunForPr(githubRepoId, 51)` is called, then it returns that job's id.",
+        "Given a RUN with `resultPrUrl` `https://github.com/acme/app/pull/52?w=1`, when `latestRunForPr(githubRepoId, 52)` is called, then it returns that job's id.",
+        "Given a RUN with `resultPrUrl` `https://github.com/acme/app/pull/53#discussion_r1`, when `latestRunForPr(githubRepoId, 53)` is called, then it returns that job's id.",
+        "Given a RUN with `resultPrUrl` `https://gitlab.com/acme/gitlab-app/-/merge_requests/54/?tab=notes`, when `latestRunForPr(gitlabRepoId, 54)` is called, then it returns that job's id.",
+        "Given an older RUN at `https://github.com/acme/app/pull/55` and one created 1 s later at `https://github.com/acme/app/pull/55/`, when `latestRunForPr(githubRepoId, 55)` is called, then it returns the newer job's id.",
+        "Given only a RUN at `https://github.com/acme/app/pull/560?w=1`, when `latestRunForPr(githubRepoId, 56)` is called, then it returns `null`.",
+        "Given an older RUN at `https://github.com/acme/app/pull/57` and a draft RUN created 1 s later at `https://github.com/acme/app/pull/57/` with open item `D-1`, both built by a new URL-parametrised variant of the spec's `newJob` helper (which hardcodes `pull/42`), when the existing `create(newerJobId)` helper calls `FleetPrRulingsService.create(principal, 'rulings', newerJobId, { itemId: 'D-1', text: 'confirm: test green' })`, then it resolves with a ruling instead of rejecting with `fleet.rulings.notLatest`."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "pr-rulings"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized Prisma predicate change with integration coverage for ordering and the existing ruling caller."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+        "apps/api/src/fleet/sync/pr-attribution.service.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
+        "apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given a RUN at `https://github.com/acme/app/pull/58/` and a newer RUN for a different PR whose query mentions `/pull/58?`, when `latestRunForPr(githubRepoId, 58)` is called, then it returns the older RUN's id."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+          "reason": "`latestRunForPr`'s `resultPrUrl: { endsWith }` filter becomes the six-way `OR` from Design; the paging loop and the `prNumberFor` confirmation are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts",
+          "reason": "gains the URL-variant cases, each on its own PR number so they do not collide with the existing pull 42 fixture jobs."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Sign CLI CI webhook deliveries with v2",
+      "description": "**Goal** — Let `koda ci-webhook trigger` send a v2 signature over the exact body delivered when `KODA_CI_WEBHOOK_SECRET` is configured.\n\n**Motivation** — With `ciRequireV2` true, `CiWebhookController.handleCiWebhook` refuses every request without `x-ci-signature-v2`.\n\n**Approach** — The secret comes only from the environment variable `KODA_CI_WEBHOOK_SECRET`, never a flag, so it stays out of argv and shell history. When it is set and non-empty, the command serializes the body once with `JSON.stringify`, sets `x-ci-timestamp` to `String(Math.floor(Date.now() / 1000))`, computes `x-ci-signature-v2 = 'sha256=' + hex(HMAC-SHA256(secret, timestamp + '.' + delivery + '.' + serialized))` with `node:crypto` `createHmac`, and passes `bodySerializer: () => serialized` to `ciWebhookControllerHandleCiWebhook`, so the bytes sent are the bytes signed (the generated client calls `opts.bodySerializer(opts.body)`, `apps/cli/src/generated/client/client.gen.ts`). `--signature` stays through the deprecation window: when given it is still sent as `x-ci-signature`, alongside v2 when the secret is set. An empty `KODA_CI_WEBHOOK_SECRET` counts as unset, as the API treats an empty token as no token. The `trigger` description names the variable.\n\nKeep the existing Date header and generate the delivery id once per invocation. In `ci-webhook.spec.ts`, mock `ciWebhookControllerHandleCiWebhook`, fix `Date.now() = 1763600000000`, and run `koda ci-webhook trigger --event pipeline_failed --pipeline-id pipe-1 --commit-sha abc123`; inspect the mocked call's options. The serialized body is the string the call's `bodySerializer` returns for the call's `body`. Restore clock and environment mocks after use.\n\n**Scope** — In: CLI trigger action, help and Jest tests. Out: API webhook DTO and ticket description (US-001), repo resolution (US-004), a `--secret` flag, removal of `--signature` or the v1 header, and generation or edits of `openapi.json` or the CLI client.\n\n**Interface** — `ciWebhookCommand(program: Command): void` remains unchanged. Trigger request options add `x-ci-timestamp`, `x-ci-signature-v2` and `bodySerializer: () => serialized` only when signing with a non-empty `KODA_CI_WEBHOOK_SECRET`.",
+      "acceptanceCriteria": [
+        "When the fixed-clock trigger runs with `KODA_CI_WEBHOOK_SECRET=s3cret`, then the mocked call's headers carry `x-ci-timestamp: '1763600000'`.",
+        "When the fixed-clock trigger runs with `KODA_CI_WEBHOOK_SECRET=s3cret`, then the call's `x-ci-signature-v2` equals `'sha256='` followed by the hex HMAC-SHA256, keyed `s3cret`, of `1763600000.<the call's x-ci-delivery header>.<the serialized body>`.",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET=s3cret`, then the serialized body parsed as JSON equals the call's `body` under non-strict deep equality (`JSON.stringify` drops the absent `pipeline.url` and `commit.message`).",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET=s3cret` and no `--signature`, then the call's headers have no `x-ci-signature` value (regression guard: passes before the change).",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET=s3cret` and `--signature sha256=abc`, then the call's headers carry `x-ci-signature: 'sha256=abc'` (regression guard: passes before the change).",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET=s3cret` and `--signature sha256=abc`, then the call's headers carry an `x-ci-signature-v2` value.",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET` unset and `--signature sha256=abc`, then the call's headers carry `x-ci-signature: 'sha256=abc'` (regression guard: passes before the change).",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET` unset, then the call's headers have no `x-ci-signature-v2` value (regression guard: passes before the change).",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET` unset, then the call's headers have no `x-ci-timestamp` value (regression guard: passes before the change).",
+        "When the trigger runs with `KODA_CI_WEBHOOK_SECRET` set to the empty string, then the call's headers have no `x-ci-signature-v2` value (regression guard: passes before the change).",
+        "When the trigger runs twice with `KODA_CI_WEBHOOK_SECRET=s3cret`, then the calls carry two different `x-ci-delivery` values (regression guard: passes before the change).",
+        "When Commander with `exitOverride` parses `koda ci-webhook trigger --event pipeline_failed --pipeline-id pipe-1 --commit-sha abc123 --secret s3cret`, then it rejects with a Commander error whose `code` is `commander.unknownOption` (regression guard: passes before the change).",
+        "When reading the `trigger` subcommand's `description()`, then the returned text names `KODA_CI_WEBHOOK_SECRET`."
+      ],
+      "tags": [
+        "cli",
+        "webhook",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One command and an existing serializer seam; HMAC, secret handling and exact byte agreement require strict TDD."
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/ci-webhook.ts",
+        "apps/cli/src/commands/ci-webhook.spec.ts",
+        "apps/cli/src/generated/client/client.gen.ts",
+        "apps/api/src/webhook-security/webhook-signature.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/ci-webhook.ts",
+          "reason": "the `trigger` action gains the `KODA_CI_WEBHOOK_SECRET` v2 path (one serialization, `x-ci-timestamp`, `x-ci-signature-v2`, `bodySerializer`) and its description names the variable; the v1 `--signature` path is unchanged."
+        },
+        {
+          "path": "apps/cli/src/commands/ci-webhook.spec.ts",
+          "reason": "gains the v2 cases with a fixed clock and the variable set, unset and empty."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "suggestedCriteria": [
+        "(regression guard: passes before the change) When the trigger runs with `KODA_CI_WEBHOOK_SECRET` set to the empty string, then the call's headers have no `x-ci-timestamp` value, as when the variable is unset."
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Reject ambiguous CLI repo shorthand",
+      "description": "**Goal** — Resolve exact repo ids first and refuse a shorthand that matches more than one repo instead of using API list order to choose.\n\n**Motivation** — `FleetRepo.host` is part of repo identity (`apps/api/prisma/schema.prisma`, `FleetRepo.host`), so two GitLab hosts can share an `owner/name`, and `koda fleet dispatch`, `fleet job list`, `fleet schedule create` and `fleet budget` act on whichever repo the API listed first.\n\n**Approach** — `resolveRepo` matches an exact id first. Otherwise it collects every repo whose `owner/name` matches case-insensitively; one match is returned, none returns `null` (callers keep their existing refusal), and two or more call `handleFleetValidation` (exit 3) with the message `Repo \"<ref>\" matches <n> repos in project <slug>: <host> (id <id>), <host> (id <id>). Pass the repo id instead.`, hosts and ids in the API's list order, and then returns `null`, so with a stubbed `process.exit` (the CLI specs' harness) each caller still stops at its existing null-repo check and sends no target request. Keep each caller's existing fallback message for a repo that cannot be resolved (`fleet budget set` says `No fleet repo`). The four callers (`fleet dispatch`, `fleet job list`, `fleet schedule create`, `fleet budget set`) need no change: each already refuses a `null` repo before any API write; the ACs drive the first two.\n\nExtend `fleet-shared.spec.ts`, `fleet-dispatch.spec.ts` and `fleet-job.spec.ts`. For command cases mock `projectFleetReposControllerList` for project `web` with `fr1` (`acme/app`, `https://gitlab.com`) then `fr2` (`acme/app`, `https://gitlab.example.com`). Include `--max-cost 1` on all dispatch invocations so Commander reaches the action.\n\n**Scope** — In: shared CLI resolver and its caller regression tests. Out: CLI signature handling (US-003), web labels (US-005), host-qualified shorthand (`host/owner/name`), and display-only labels from `repoNamesOrEmpty`.\n\n**Interface** — `resolveRepo(slug: string, ref: string): Promise<FleetRepoDto | null>`; existing `handleApiError(err, { validationError: true })` prints and exits 3 through `handleFleetValidation`.",
+      "acceptanceCriteria": [
+        "Given the two-host fixture, when `koda fleet dispatch --project web --repo acme/app --feature f1 --max-cost 1` runs, then it exits with code 3.",
+        "Given the two-host fixture, when `koda fleet dispatch --project web --repo acme/app --feature f1 --max-cost 1` runs, then it never calls `fleetJobsControllerDispatch`.",
+        "Given the two-host fixture, when that ambiguous dispatch runs, then its error output names both `https://gitlab.com` and `https://gitlab.example.com`.",
+        "Given the two-host fixture, when that ambiguous dispatch runs, then its error output names both `fr1` and `fr2`.",
+        "Given the two-host fixture, when `koda fleet dispatch --project web --repo fr2 --feature f1 --max-cost 1` runs, then `fleetJobsControllerDispatch` is called with a body whose `repoId` is `fr2` (regression guard: passes before the change).",
+        "Given the two-host fixture, when `koda fleet job list --project web --repo acme/app` runs, then it exits with code 3.",
+        "Given the two-host fixture, when `koda fleet job list --project web --repo acme/app` runs, then it never calls `fleetJobsControllerList`.",
+        "Given repos `fr1` (`acme/app`) and `fr3` (`acme/other`) on one host, when `resolveRepo('web', 'ACME/App')` is called, then it returns `fr1` (regression guard: passes before the change)."
+      ],
+      "tags": [
+        "cli",
+        "fleet",
+        "repo-selection"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One shared runtime edit changes resolution for four commands, with focused resolver and command tests."
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet-shared.ts",
+        "apps/cli/src/commands/fleet-shared.spec.ts",
+        "apps/cli/src/commands/fleet-dispatch.spec.ts",
+        "apps/cli/src/commands/fleet-job.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an earlier repo's owner/name equals the requested ref but a later repo has that exact id, then `resolveRepo` returns the exact-id repo."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/fleet-shared.ts",
+          "reason": "`resolveRepo` matches an exact id first and exits 3 through `handleFleetValidation` when the owner and name match two or more repos."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet-shared.spec.ts",
+          "reason": "gains the two-host fixtures."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet-dispatch.spec.ts",
+          "reason": "gains the ambiguous-shorthand and id cases."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet-job.spec.ts",
+          "reason": "gains the ambiguous-shorthand `job list` case."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Disambiguate shared names in seven web repo choosers",
+      "description": "**Goal** — Show which host a repo belongs to in all seven web choosers when names collide, without changing repo ids or unique labels.\n\n**Motivation** — The web repo choosers in `dispatch.vue`, `threads/new.vue`, `schedules/index.vue`, `schedules/[id].vue`, `budgets.vue`, the jobs list filter in `fleet/index.vue` and the REPO scope select in `SettingsProviderKeysCard.vue` all label both options `owner/name`.\n\n**Approach** — New pure helper `repoChoices` in `apps/web/lib/fleet-repo-choices.ts` builds the `{ value, label }` options from a repo list. The label is `owner/name`; when two or more repos in the list share `owner/name` case-insensitively, each of those gets ` (<host label>)`, where the host label is `URL.host` plus the pathname without a trailing `/` when `host` parses as a URL, else the raw `host`. The five form pages replace their inline `repoOptions` computed with `computed(() => repoChoices(options.repos.value))`; the jobs list repo filter (`pages/[project]/fleet/index.vue`) and the REPO scope select of `components/SettingsProviderKeysCard.vue` render their `SelectItem`s from `repoChoices(...)` (value and label) instead of `{{ repo.owner }}/{{ repo.name }}`. Page specs stub `useFleetDispatchOptions` with repos that have no `host`, so `host` is optional in the helper's input type; a colliding repo without a `host` gets ` (<id>)`.\n\nThe jobs list uses `repoChoices(options.repos.value)`; the provider-keys REPO chooser uses `repoChoices(repos)` and keeps `repoName` for existing key labels.\n\nMount the five form pages and the two select-item surfaces with `r1` (`acme/app`, `https://gitlab.com`) and `r2` (`acme/app`, `https://gitlab.example.com`). The schedule list needs `canEdit`, schedule detail `canChange`, and budgets `canCreate` or `canEdit`. Read the schedule and budget dialog stubs' `repo-options` attribute; they declare no `repoOptions` prop. Add a repos parameter to `mountScheduleDetail` in `fleet-schedule-approval-gates.spec.ts`. Repeat the existing mount stubs in `fleet-dispatch-placement-runtime.spec.ts` and read `props.options` of the recorded `FleetNativeSelect` with `id=\"dispatch-repo\"`, not the other selects. Use `threads-new-page.spec.ts`, `fleet-schedules-list-page.spec.ts`, `fleet-budgets-project-page.spec.ts`, `fleet-jobs-list.spec.ts` and `SettingsProviderKeysCard.spec.ts` for the other mounts. For jobs list and provider keys, inspect the `SelectItem`s for `r1` and `r2` only. Add `apps/web/tests/lib/fleet-repo-choices.spec.ts` for the helper cases.\n\n**Scope** — In: dispatch, new thread, schedule list, schedule detail, budgets, jobs filter and provider-keys REPO scope chooser; label-only, with existing permissions and repo ids preserved. Out: CLI shorthand (US-004), notification and download flows (US-006), and display-only names (`useFleetDispatchOptions().repoName`, admin repos, existing provider-key labels from `repoName`, `RepoConfigList` and the repo list in `SettingsKnowledgeCard`).\n\n**Interface**\n```ts\n// apps/web/lib/fleet-repo-choices.ts\nexport interface RepoChoiceInput { id: string; owner: string; name: string; host?: string }\nexport function repoChoices(repos: readonly RepoChoiceInput[]): Array<{ value: string; label: string }>\n```",
+      "acceptanceCriteria": [
+        "When `repoChoices([{ id: 'r1', owner: 'acme', name: 'app', host: 'https://github.com' }])` is called, then it returns `[{ value: 'r1', label: 'acme/app' }]`.",
+        "When `repoChoices` receives the two-host fixture, then it returns labels `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)` in input order.",
+        "When `repoChoices` receives `r1` with owner `Acme`, name `App` and `r2` unchanged from the two-host fixture, then the labels are `Acme/App (gitlab.com)` and `acme/app (gitlab.example.com)` in input order.",
+        "When `repoChoices` receives the two-host fixture plus `r3` (`acme/other`, host `https://gitlab.com`), then it labels `r3` `acme/other`.",
+        "When `repoChoices` receives the two-host fixture with `r2`'s host `gitlab.internal` (not a URL), then it labels `r2` `acme/app (gitlab.internal)`.",
+        "When `repoChoices` receives the two-host fixture with `r2`'s host `https://gitlab.example.com/gl/`, then it labels `r2` `acme/app (gitlab.example.com/gl)`.",
+        "When `repoChoices` receives `r1` and `r2` both without `host`, then it labels them `acme/app (r1)` and `acme/app (r2)`.",
+        "When `pages/[project]/fleet/dispatch.vue` mounts through `fleet-dispatch-placement-runtime.spec.ts` with `useFleetDispatchOptions` returning the two-host repos, then its repo chooser offers the labels `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)`.",
+        "When `pages/[project]/threads/new.vue` mounts with `useFleetDispatchOptions` returning the two-host repos, then its repo chooser offers the labels `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)`.",
+        "When `pages/[project]/fleet/schedules/index.vue` mounts with `useFleetDispatchOptions` returning the two-host repos, then it passes its schedule form the labels `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)`.",
+        "When `pages/[project]/fleet/schedules/[id].vue` mounts through `fleet-schedule-approval-gates.spec.ts`'s detail harness with `useFleetDispatchOptions` returning the two-host repos, then it passes its schedule form the labels `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)`.",
+        "When `pages/[project]/fleet/budgets.vue` mounts with `useFleetDispatchOptions` returning the two-host repos, then it passes its budget form the labels `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)`.",
+        "When `pages/[project]/fleet/index.vue` mounts through `fleet-jobs-list.spec.ts` with `useFleetDispatchOptions` returning the two-host repos, then the repo filter's `SelectItem`s with values `r1` and `r2` render `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)` respectively.",
+        "When `SettingsProviderKeysCard` mounts with the `/fleet/repos` read returning the two-host repos and REPO scope is chosen, then the repo select's `SelectItem`s with values `r1` and `r2` render `acme/app (gitlab.com)` and `acme/app (gitlab.example.com)` respectively."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "repo-selection"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "A new shared helper must be wired into seven independently mounted chooser modules; no access or credential semantics change."
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/tests/pages/fleet-dispatch-placement-runtime.spec.ts",
+        "apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts",
+        "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+        "apps/web/tests/components/SettingsProviderKeysCard.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-repo-choices.ts",
+        "apps/web/tests/lib/fleet-repo-choices.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/dispatch.vue",
+          "reason": "the inline `repoOptions` computed becomes repoChoices(options.repos.value)."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/new.vue",
+          "reason": "the inline `repoOptions` computed becomes repoChoices(options.repos.value)."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/schedules/index.vue",
+          "reason": "the inline `repoOptions` computed becomes repoChoices(options.repos.value)."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/schedules/[id].vue",
+          "reason": "the inline `repoOptions` computed becomes repoChoices(options.repos.value)."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/budgets.vue",
+          "reason": "the inline `repoOptions` computed becomes repoChoices(options.repos.value)."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/index.vue",
+          "reason": "the repo filter's `SelectItem`s come from repoChoices(options.repos.value)."
+        },
+        {
+          "path": "apps/web/components/SettingsProviderKeysCard.vue",
+          "reason": "the REPO scope select's `SelectItem`s come from `repoChoices(repos)`; the `repoName` display helper is unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-dispatch-placement-runtime.spec.ts",
+          "reason": "gains a new test that repeats the existing test's mount stubs with the two-host repos and reads the dispatch-repo select's options (the dispatch page's only mounting spec; fleet-dispatch-page.spec.ts reads source text only)."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-new-page.spec.ts",
+          "reason": "gains the two-host repo case."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-schedules-list-page.spec.ts",
+          "reason": "gains the two-host repo case."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts",
+          "reason": "mountScheduleDetail gains a repos parameter (it hardcodes an empty list) and its schedule detail ([id].vue) mount gains the two-host repo case (fleet-schedule-detail.spec.ts reads source text only)."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+          "reason": "its fleet/index.vue mount gains the two-host repo case."
+        },
+        {
+          "path": "apps/web/tests/components/SettingsProviderKeysCard.spec.ts",
+          "reason": "gains the two-host repo case for the REPO scope select."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-budgets-project-page.spec.ts",
+          "reason": "gains the two-host repo case."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Keep inbox refreshes ordered and renew the log download session",
+      "description": "**Goal** — Prevent a stale bell refresh from undoing Mark all read on screen and make the log Download control renew the access session before opening the file.\n\n**Motivation** — A bell refresh that started earlier and finishes after the inbox's post-`markAllRead` refresh puts the badge back to unread until the next 60 s poll.\n\n**Approach** — **K16.** `useNotifications` keeps a refresh generation in `useState` keyed `notifications-refresh-gen:<owner>` (the same `owner` key as the other two states). `refresh` increments it before its requests and writes `unreadCount` and `latest` only if the generation is still its own when both responses arrive.\n\n**K17.** The anchor keeps its `href` and `download` attributes (copy-link and middle-click still work) and gains a click handler that prevents the default navigation and calls the new helper `startLogDownload(href, { probe, open })` (`apps/web/lib/fleet-log-download.ts`). `startLogDownload` awaits `probe()` and then calls `open(href)`; a rejected probe rejects `startLogDownload` and `open` is not called. The page passes `probe: () => logsApi.list()` (a `$api` GET, which refreshes the session and retries once on a 401, `useApi` M22) and an `open` that creates an anchor with that `href` and the `download` attribute and clicks it. On a rejection the page shows `extractApiError(err)` in an element with `data-testid=\"fleet-log-download-error\"`.\n\nIn `useNotifications.spec.ts`, exercise overlap with two `useNotifications()` instances (bell and inbox) sharing the stubbed `useState` map and with explicitly controlled GET resolutions. A failed newest refresh still supersedes the older one. In `fleet-job-logs-page.spec.ts`, hoist the `useFleetJobLogs` list stub into one `jest.fn` that can reject once; the node test environment needs a `globalThis.document` stub whose `createElement('a')` records `href`, the `download` attribute and `click`. The existing page load calls `list`; after it settles, invoke the recorded anchor click handler with an event stub that supplies `preventDefault`. Hold the click's probe pending to assert the download starts only after it resolves. Add helper tests in `apps/web/tests/lib/fleet-log-download.spec.ts`. `useApi` and `useFleetJobLogs` are read-only integration points.\n\n**Scope** — In: notification refresh state, logs-page download click/error and helper tests. Out: repo labels (US-005), refreshing the session inside the Nuxt `/api` proxy or `shouldRefreshSession` for stream requests, and the job bundle download, which already uses `$api.download` and refreshes/retries on a 401.\n\n**Interface** — `refresh(): Promise<void>` is unchanged.\n```ts\n// apps/web/lib/fleet-log-download.ts\nexport function startLogDownload(\n  href: string,\n  deps: { probe: () => Promise<unknown>; open: (href: string) => void },\n): Promise<void>\n```",
+      "acceptanceCriteria": [
+        "Given two instances for the same owner, when the bell refresh with `count: 5` is pending, the inbox refresh resolves with `count: 0`, and the bell responses then resolve, then `unreadCount` remains `0`.",
+        "Given two notification instances for the same owner, when the bell's refresh with `count: 5` and its own records starts first, the inbox refresh with `count: 0` and different records resolves first, and the bell's responses then resolve, then `latest` holds the inbox refresh's records.",
+        "Given the bell refresh with `count: 5` is pending, when the other instance's `markAllRead()` completes with its own refresh answering `count: 0` and the bell responses then resolve, then `unreadCount` remains `0`.",
+        "When a single `refresh()` resolves with `count: 3`, then `unreadCount` is `3` (regression guard: passes before the change).",
+        "Given `unreadCount` is `2` and the bell refresh with `count: 5` is pending, when the other instance's refresh rejects and the bell responses then resolve, then `unreadCount` remains `2`.",
+        "When `startLogDownload(href, { probe, open })` runs, then it calls `probe` before `open`.",
+        "When `probe` resolves, then `startLogDownload` calls `open` once with `href`.",
+        "When `probe` rejects, then `startLogDownload` rejects with the same error and never calls `open`.",
+        "Given the logs page has finished loading, when its `fleet-log-download` control is clicked once, then the `list` stub's call count increases by exactly one from the page-load count.",
+        "Given the logs page's Download click has a pending `list` probe, when the probe resolves, then the recorded download-anchor click occurs only after that resolution, with the page's download `href` and the `download` attribute.",
+        "When the click's `list` call rejects, then the logs page renders the `extractApiError` message of the rejection in `fleet-log-download-error`.",
+        "When the click's `list` call rejects, then the click handler clicks no download anchor."
+      ],
+      "tags": [
+        "web",
+        "notifications",
+        "logs",
+        "session",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shared async state and a separate page/helper integration that gates protected downloads on successful session renewal."
+      },
+      "contextFiles": [
+        "apps/web/composables/useNotifications.ts",
+        "apps/web/tests/composables/useNotifications.spec.ts",
+        "apps/web/composables/useFleetJobLogs.ts",
+        "apps/web/pages/[project]/fleet/jobs/[id]/logs.vue",
+        "apps/web/tests/pages/fleet-job-logs-page.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-log-download.ts",
+        "apps/web/tests/lib/fleet-log-download.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useNotifications.ts",
+          "reason": "`refresh` increments and checks a per-owner generation in `useState`; nothing else changes."
+        },
+        {
+          "path": "apps/web/tests/composables/useNotifications.spec.ts",
+          "reason": "gains the two-instance overlapping-refresh cases."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/logs.vue",
+          "reason": "the Download anchor gains a click handler that calls `startLogDownload` and an error element `fleet-log-download-error`; the anchor's `href` and `download` attributes stay."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-logs-page.spec.ts",
+          "reason": "the `useFleetJobLogs` stub's `list` is hoisted into one jest.fn that can reject once, a globalThis.document anchor recorder is installed, and the click, probe-order and probe-failure cases are added."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Scope and rollout: The review inventory is docs/20261120-review-whole-repo-consolidated.md:27 and the rollout warning is at :47. This bundle resolves K2, K9, K12, K14, K15, K16 and K17; #487 already handled deploy/CI/release, and runner work is separate. This is a TypeScript maintenance release in a Bun/Turborepo monorepo: NestJS on Fastify with Prisma/PostgreSQL and Vitest, Commander with a generated client and Jest, and Nuxt/Vue SSR with Jest (not Next.js). The six implementation slices are independent. The operational sequence is to ship the updated CLI and provision its project webhook secret before enabling CI_WEBHOOK_REQUIRE_V2; keep existing v1 callers during deprecation. No schema migration, data backfill, new dependency or generated artifact update. The MCP graph tool was unavailable, so source references were verified with direct reads and text search.\n\nUS-001: apps/api/src/ci-webhook/ci-webhook.dto.ts:50 declares pipeline and commit required in Swagger already, but only validates them as nested values. apps/api/src/webhook-security/inbound-webhook-request.ts:25 transforms and validates, throwing a ValidationAppException for the first error. apps/api/src/ci-webhook/ci-webhook.controller.ts:76 authenticates first, :87 parses, :94 asserts replay freshness, and :98 invokes processing; preserve this order so signed bad input becomes a 400 without reserving the delivery and unsigned input still gets 401. The tighter validation applies to success events too; senders missing either object must supply it, with no OpenAPI change. apps/api/prisma/schema.prisma:146 already stores nullable Project.gitRemoteUrl; apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts:15 currently omits it. apps/api/src/ci-webhook/domain/ci-webhook.domain.ts:24 defines the projection. The repository lookup serves both target resolution and processing (apps/api/src/ci-webhook/ci-webhook.service.ts:27 and :45); only ticket description rendering needs the new field. createTicket at :82 gets the real project today but its type narrows it, and buildDescription at :117 synthesizes an undefined remote while iterating all failures. Pass the real remote per failure and keep the primary failure for ticket metadata/title. apps/api/src/common/utils/git-url.util.ts:12 already formats URLs and returns null for no remote. Do not change audit, retry, transaction or replay behavior. Extend the controller's signed 400 table (apps/api/src/ci-webhook/ci-webhook.controller.spec.ts:221), service description coverage (apps/api/src/ci-webhook/ci-webhook.service.spec.ts:187), and real route block (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:3064); add the real Prisma projection test, mirroring the database gate in apps/api/test/integration/audit/audit-ci-webhook.integration.spec.ts:24.\n\nUS-002: apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:80 restricts to the repo and RUN command, then selects candidates by provider-specific suffix, pages 100 at a time, sorts createdAt then id descending, and confirms each with prNumberFor. apps/api/src/fleet/sync/pr-attribution.service.ts:27 uses URL.pathname, accepts trailing slash, checks the repo path and handles GitLab path prefixes; it must stay the arbiter when a contains condition finds an unrelated candidate, such as a query or fragment that mentions the sought path. Keep sort, paging, repo/command constraints and parser; the wider predicate can admit more candidates without changing the result for nonmatching URLs. apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:43 uses the lookup for pending FIX snapshots (called from apps/api/src/fleet/jobs/fleet-jobs.service.ts:120) and :118 uses it to reject stale ruling targets. The separate repository scan at apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:151 already parses every RUN with a URL; leave it unchanged. The DB spec at apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts:37 has a hardcoded pull/42 fixture and :56 already exercises GitLab ordering/prefix separation; isolate each new PR number and verify a ruling on the newer variant. Run API DB/e2e specs through the host scoped test command so sandbox skips do not count as verification.\n\nUS-003: apps/cli/src/commands/ci-webhook.ts:16 owns trigger help and :39 sends generated delivery, Date, optional legacy signature and a JSON body containing both required objects. apps/cli/src/generated/sdk.gen.ts:1274 spreads per-call options; apps/cli/src/generated/client/client.gen.ts:58 calls bodySerializer before constructing the fetch Request at :79. Override the serializer per call, never edit generated code or hand-wire transport, so the exact wire body is signed. apps/api/src/webhook-security/webhook-signature.ts:27 verifies timestamp/delivery/raw body HMAC; apps/api/src/ci-webhook/ci-webhook.controller.ts:76 enforces v2 when configured. Keep Date and unique delivery, support coexistence of v1 and v2, never print the secret or expose it as a flag, and treat empty env as absent. The Jest harness in apps/cli/src/commands/ci-webhook.spec.ts:40 mocks the SDK and process.exit and uses objectContaining for request assertions; isolate clock/env state per case. The route already exercises v2-only at apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:2972; the story adds CLI-side byte agreement, not a new API behavior.\n\nUS-004: apps/api/prisma/schema.prisma:853 and :885 make host part of repo identity. apps/cli/src/commands/fleet-shared.ts:60 gathers paged repos in API order, but :72 uses one find for both id and shorthand, so the earliest display-name match can win. Resolve exact id before any shorthand and reject ambiguous shorthand via the existing validation path (apps/cli/src/commands/fleet-shared.ts:104; apps/cli/src/utils/error.ts:125). The repo-list reads are necessary to decide ambiguity; do not call the target operation. Callers already handle null: apps/cli/src/commands/fleet-dispatch.ts:56, apps/cli/src/commands/fleet-job.ts:33, apps/cli/src/commands/fleet-schedule.ts:136 and apps/cli/src/commands/fleet-budget.ts:170. Stubbed process.exit can return during specs, so the null fallback still matters. Extend apps/cli/src/commands/fleet-shared.spec.ts:48 and the dispatch/job command specs. Unique case-insensitive and nested-owner shorthand still resolve; scripts using ambiguous names should switch to repo id. Display-only repoNamesOrEmpty remains unchanged (apps/cli/src/commands/fleet-shared.ts:96).\n\nUS-005: apps/web/composables/useFleetDispatchOptions.ts:11 supplies FleetRepo choices, apps/web/lib/fleet-types.ts:171 exposes host, and useFleetDispatchOptions.ts:39 supplies separate display-only names. Replace only chooser labels at apps/web/pages/[project]/fleet/dispatch.vue:79, apps/web/pages/[project]/threads/new.vue:49, apps/web/pages/[project]/fleet/schedules/index.vue:115, apps/web/pages/[project]/fleet/schedules/[id].vue:141, apps/web/pages/[project]/fleet/budgets.vue:38 and apps/web/pages/[project]/fleet/index.vue:134. The jobs page's RepoConfigList (:127) is not a chooser. apps/web/components/SettingsProviderKeysCard.vue:14 uses a local Repo type with no host declared, although the paged fleet repo read (:59) keeps whole records; share or align the input shape and leave the row heading at :132 and permission checks unchanged. Convert its REPO SelectItem loop at :141 only. Repo ids remain option values and labels stay unchanged for noncollisions; use input order, case-insensitive grouping and optional host to accommodate existing mocks. Add helper tests and mount each surface; the dispatch and schedule detail source-only specs do not verify runtime wiring. Use the dispatch runtime spec, new-thread, schedule-list, schedule approval-gates (mountScheduleDetail at apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts:319), jobs-list, budgets project and provider-key card specs. Existing Playwright selection by unique owner/name at apps/web/tests/e2e/fleet-dispatch.e2e.spec.ts:35 must remain compatible.\n\nUS-006: apps/web/composables/useNotifications.ts:18 keys shared state by owner; :22 writes both responses unconditionally, and :36 refreshes after mark-all. Independent composable instances in apps/web/components/NotificationBell.vue:88 and apps/web/pages/notifications.vue:18 share this state. Increment generation before issuing requests and gate both writes together; later rejection must not let the older result back in. Keep API methods, polling and owner isolation; exercise two instances with deferred responses in apps/web/tests/composables/useNotifications.spec.ts:70. In apps/web/pages/[project]/fleet/jobs/[id]/logs.vue:51 the raw URL is tied to current stream/lease epoch and :157 renders a native anchor. apps/web/server/utils/session-refresh.ts:29 excludes /api and requires HTML. apps/web/composables/useFleetJobLogs.ts:10 probes via $api.get, which retries after one client-side session refresh on 401 (apps/web/composables/useApi.ts:237 and :272); :287 already handles bundle downloads separately. Capture the selected href at click time, preserve the original link/download affordances, and open the streaming link only after the probe; no server refresh changes, no buffering the raw stream and no DOM access during SSR. The failure message uses existing extractApiError at apps/web/composables/useApi.ts:72. apps/web/tests/pages/fleet-job-logs-page.spec.ts:51 has a list stub and :79 pins the original href; extend with deferred/rejectable list and a document recorder for the actual click seam, restore stubbed globals, and cover the helper separately. apps/web/tests/e2e/fleet-logs.e2e.spec.ts:132 also pins the raw path and epoch. Session renewal is inherited from useApi, not newly implemented by the page.",
+  "outOfScope": [
+    "A zero-padded PR number in a stored URL (`/pull/042`): no forge emits one, and the lookup filter does not match it.",
+    "Storing a normalized PR number or URL on `FleetJob`: the owner ruled a wider lookup filter with no migration (2026-11-20).",
+    "`PrismaFleetPrRulingRepository.runsForPr`: it already scans every RUN job with a URL and confirms through `prNumberFor`.",
+    "A `--secret` flag on `koda ci-webhook trigger`: the secret comes only from `KODA_CI_WEBHOOK_SECRET` so it never appears in argv or shell history.",
+    "Removing `--signature` or the v1 header from the CLI: it stays through the v1 deprecation window.",
+    "A `host/owner/name` repo shorthand in the CLI: an ambiguous shorthand is refused and the user passes the repo id.",
+    "Display-only repo names (CLI tables from `repoNamesOrEmpty`, `useFleetDispatchOptions().repoName`, the admin repos page, the `repoName` helper in `SettingsProviderKeysCard` that labels existing keys, `RepoConfigList`, the repo list in `SettingsKnowledgeCard`): they keep `owner/name`; only the seven choosers change.",
+    "`buildGitUrl` support for SSH remotes or self-hosted GitLab hosts: unchanged; it already returns its existing URL shapes.",
+    "Refreshing the session inside the Nuxt `/api` proxy or `shouldRefreshSession` for stream requests: the click handler renews the session instead.",
+    "The job bundle download: it goes through `$api.download`, which already refreshes and retries on a 401.",
+    "Regenerating `openapi.json` or the CLI client: no API contract changes.",
+    "The runner findings K10, K11, K13 and K18: a separate feature."
+  ],
+  "routingProfile": "native-codex-ds"
+}
