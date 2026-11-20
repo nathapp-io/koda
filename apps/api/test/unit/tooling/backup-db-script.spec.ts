@@ -171,6 +171,16 @@ describe('backup-db.sh', () => {
     expect(dumpFiles(run)).toEqual([]);
   });
 
+  it('AC-4: rejects a completion marker that is not its own line', () => {
+    // The verifier matches the exact line, so a dump whose marker was truncated into another line does not
+    // count as complete.
+    const pgDump = DEFAULT_PG_DUMP.replace(DUMP_COMPLETE_LINE, `${DUMP_COMPLETE_LINE} was truncated`);
+    const run = runDeployScript('backup-db.sh', [], { umask: OPERATOR_UMASK, docker: { pgDump } });
+
+    expect(run.status).not.toBe(0);
+    expect(dumpFiles(run)).toEqual([]);
+  });
+
   it('AC-5: returns nonzero and keeps no accepted dump when the compressed input is invalid', () => {
     const run = runDeployScript('backup-db.sh', [], {
       umask: OPERATOR_UMASK,
