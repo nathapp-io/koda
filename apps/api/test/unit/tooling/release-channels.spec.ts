@@ -159,6 +159,28 @@ const cases = [
       'latest=false',
     ],
   },
+  {
+    name: 'B8: a zero-padded remote version stays in the minor it belongs to',
+    tag: 'v0.4.1',
+    remote: ['v0.04.2'],
+    expected: [
+      'tags_api=nathapp/koda-api:v0.4.1',
+      'tags_web=nathapp/koda-web:v0.4.1',
+      'npm_tag=backport-0.4.1',
+      'latest=false',
+    ],
+  },
+  {
+    name: 'B8: a remote component beyond the 64-bit range is still newer, not wrapped',
+    tag: 'v0.4.1',
+    remote: ['v9223372036854775808.0.0'],
+    expected: [
+      'tags_api=nathapp/koda-api:v0.4.1,nathapp/koda-api:0.4',
+      'tags_web=nathapp/koda-web:v0.4.1,nathapp/koda-web:0.4',
+      'npm_tag=release-0.4',
+      'latest=false',
+    ],
+  },
 ];
 
 describe('release workflow channels', () => {
@@ -208,5 +230,19 @@ describe('release workflow channels', () => {
     const nextStep = releaseJob.indexOf('\n      - ', withStart);
     const withBlock = releaseJob.slice(withStart, nextStep < 0 ? undefined : nextStep);
     expect(withBlock).toContain('make_latest: ${{ needs.info.outputs.latest }}');
+  });
+
+  it('B4: serializes every release run in one publisher group', () => {
+    // A run computes its channels in `info` and publishes much later (approval, builds). Only a single
+    // repository-wide group, queued rather than cancelled, keeps a second run from publishing in between, so
+    // the eligibility is computed inside the serialized stage (review B4).
+    const concurrencyStart = workflow.indexOf('\nconcurrency:');
+    expect(concurrencyStart).toBeGreaterThanOrEqual(0);
+    const concurrencyBlock = workflow.slice(concurrencyStart + 1).split('\n\n')[0];
+    expect(concurrencyBlock).toContain('group: release-publish');
+    expect(concurrencyBlock).toContain('cancel-in-progress: false');
+    // A ref-scoped group would not serialize a tag push against a manual re-publish of another tag.
+    expect(concurrencyBlock).not.toContain('${{');
+    expect(workflow.slice(0, concurrencyStart)).not.toContain('concurrency:');
   });
 });

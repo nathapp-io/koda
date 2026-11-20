@@ -16,6 +16,16 @@ on:
 # full commit SHAs (the comment names the version); Dependabot bumps them (.github/dependabot.yml).
 permissions: {}
 
+# One release publishes at a time (review B4). The channel eligibility computed in `info` is only valid while no
+# other run can publish between that computation and the pushes: with two runs in flight, an older tag could
+# compute "I am the newest" before a newer tag is pushed, wait for approval or a build, and then move `:latest`,
+# the npm dist-tags and the GitHub latest flag back to itself. Queueing (not cancelling) keeps a release that a
+# tag push arrived next to, instead of dropping it; it also keeps immutable tag builds from running beside a
+# publishing run.
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
 # ─── Shared info ──────────────────────────────────────────────────────────────
 
 jobs:
@@ -80,6 +90,8 @@ jobs:
           VERSION: ${{ steps.info.outputs.version }}
         run: |
           set -euo pipefail
+          # Every comparison below is on decimal digits, so it must not depend on the runner's locale.
+          export LC_ALL=C
           remote_tags=$(git ls-remote --tags --refs origin 'v*')
 
           if [[ "$TAG" == *"-canary."* ]]; then
@@ -90,15 +102,78 @@ jobs:
             exit 0
           fi
 
+          # A version component is a canonical decimal string: leading zeros stripped, so `04` and `4` are the
+          # same minor. Components are never put through bash arithmetic: `10#08` family tricks are avoidable,
+          # and a component past the 64-bit range wraps to a negative number, which compares as older than
+          # every release and makes an old tag claim `:latest` (review B8).
+          normalize_component() {
+            local value="$1"
+            while [[ "${#value}" -gt 1 && "$value" == 0* ]]; do
+              value="${value#0}"
+            done
+            printf '%s' "$value"
+          }
+
+          # -1, 0 or 1 for two canonical decimal strings: longer is bigger, equal lengths compare bytewise
+          # (both are pure digits, and LC_ALL=C keeps the comparison independent of the locale).
+          compare_components() {
+            local left="$1" right="$2"
+            if [[ "${#left}" -lt "${#right}" ]]; then
+              printf '%s' -1
+              return 0
+            fi
+            if [[ "${#left}" -gt "${#right}" ]]; then
+              printf '%s' 1
+              return 0
+            fi
+            if [[ "$left" == "$right" ]]; then
+              printf '%s' 0
+              return 0
+            fi
+            if [[ "$left" < "$right" ]]; then
+              printf '%s' -1
+              return 0
+            fi
+            printf '%s' 1
+          }
+
           is_older() {
+            local left_major left_minor left_patch right_major right_minor right_patch comparison
+            IFS=. read -r left_major left_minor left_patch <<< "${1#v}"
+            IFS=. read -r right_major right_minor right_patch <<< "${2#v}"
+            left_major="$(normalize_component "$left_major")"
+            left_minor="$(normalize_component "$left_minor")"
+            left_patch="$(normalize_component "$left_patch")"
+            right_major="$(normalize_component "$right_major")"
+            right_minor="$(normalize_component "$right_minor")"
+            right_patch="$(normalize_component "$right_patch")"
+
+            comparison="$(compare_components "$left_major" "$right_major")"
+            if [[ "$comparison" != 0 ]]; then
+              if [[ "$comparison" == -1 ]]; then return 0; else return 1; fi
+            fi
+            comparison="$(compare_components "$left_minor" "$right_minor")"
+            if [[ "$comparison" != 0 ]]; then
+              if [[ "$comparison" == -1 ]]; then return 0; else return 1; fi
+            fi
+            comparison="$(compare_components "$left_patch" "$right_patch")"
+            if [[ "$comparison" == -1 ]]; then return 0; fi
+            return 1
+          }
+
+          # Minor identity comes from the same canonical components, not from a textual prefix of the version:
+          # `v0.04.2` and `v0.4.1` are both minor 0.4 (review B8).
+          same_minor() {
             local left_major left_minor left_patch right_major right_minor right_patch
             IFS=. read -r left_major left_minor left_patch <<< "${1#v}"
             IFS=. read -r right_major right_minor right_patch <<< "${2#v}"
-            if ((10#$left_major < 10#$right_major)); then return 0; fi
-            if ((10#$left_major > 10#$right_major)); then return 1; fi
-            if ((10#$left_minor < 10#$right_minor)); then return 0; fi
-            if ((10#$left_minor > 10#$right_minor)); then return 1; fi
-            ((10#$left_patch < 10#$right_patch))
+            if [[ "$(normalize_component "$left_major")" != "$(normalize_component "$right_major")" ]]; then
+              return 1
+            fi
+            if [[ "$(normalize_component "$left_minor")" != "$(normalize_component "$right_minor")" ]]; then
+              return 1
+            fi
+            return 0
           }
 
           latest=true
@@ -106,16 +181,20 @@ jobs:
           while IFS=$'\t' read -r _ remote_ref; do
             remote_tag="${remote_ref#refs/tags/}"
             [[ "$remote_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-            remote_minor="$(printf '%s' "${remote_tag#v}" | cut -d. -f1-2)"
             if is_older "$TAG" "$remote_tag"; then
               latest=false
-              if [[ "$VERSION" == "$remote_minor".* ]]; then
+              if same_minor "$TAG" "$remote_tag"; then
                 minor_latest=false
               fi
             fi
           done <<< "$remote_tags"
 
-          major_minor="$(printf '%s' "$VERSION" | cut -d. -f1-2)"
+          IFS=. read -r major minor patch <<< "$VERSION"
+          major="$(normalize_component "$major")"
+          minor="$(normalize_component "$minor")"
+          patch="$(normalize_component "$patch")"
+          major_minor="${major}.${minor}"
+          canonical_version="${major}.${minor}.${patch}"
           tags_api="nathapp/koda-api:${TAG}"
           tags_web="nathapp/koda-web:${TAG}"
           if [[ "$minor_latest" == true ]]; then
@@ -129,7 +208,7 @@ jobs:
           elif [[ "$minor_latest" == true ]]; then
             npm_tag="release-${major_minor}"
           else
-            npm_tag="backport-${VERSION}"
+            npm_tag="backport-${canonical_version}"
           fi
           echo "tags_api=${tags_api}" >> "$GITHUB_OUTPUT"
           echo "tags_web=${tags_web}" >> "$GITHUB_OUTPUT"

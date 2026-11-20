@@ -2,11 +2,16 @@
 # Recording `docker` stub for apps/api/test/unit/tooling/helpers/deploy-script-harness.ts.
 #
 # Every call appends one record to $KODA_DEPLOY_HARNESS_RECORD: the argument count, then KODA_VERSION as
-# the child saw it, then the arguments, each field NUL-terminated; the harness parses that file. The call
-# then fails (exit 1) when its argv, joined with spaces and with every occurrence of the per-test temp dir
-# removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. A call that runs pg_dump writes the
-# contents of $KODA_DEPLOY_HARNESS_PG_DUMP and exits with $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT; anything else
-# succeeds silently.
+# the child saw it, then the arguments, each field NUL-terminated; the harness parses that file.
+#
+# Before deciding the exit code, the stub writes the files a real container would leave on the host: a
+# `tar -czf /backup/<name>` call writes <name> under $KODA_DEPLOY_HARNESS_DIR/backups, and a pg_dump call
+# writes $KODA_DEPLOY_HARNESS_PG_DUMP. Both happen even for a call that fails, so a script that writes an
+# archive straight to its restore-ready name leaves a partial file a test can catch (review B9).
+#
+# The call then fails (exit 1) when its argv, joined with spaces and with every occurrence of the per-test
+# temp dir removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. A pg_dump call exits with
+# $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT; anything else succeeds silently.
 #
 # It must stay bash 3.2 portable: macOS /bin/bash runs it in the suite.
 
@@ -17,6 +22,17 @@
     printf '%s\0' "$argument"
   done
 } >> "$KODA_DEPLOY_HARNESS_RECORD"
+
+for argument in "$@"; do
+  case "$argument" in
+    "tar -czf /backup/"*)
+      archive="${argument#tar -czf /backup/}"
+      archive="${archive%% *}"
+      mkdir -p "$KODA_DEPLOY_HARNESS_DIR/backups"
+      printf 'partial data volume archive\n' > "$KODA_DEPLOY_HARNESS_DIR/backups/$archive"
+      ;;
+  esac
+done
 
 joined=""
 for argument in "$@"; do

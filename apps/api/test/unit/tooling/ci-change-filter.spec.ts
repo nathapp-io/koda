@@ -35,7 +35,28 @@ function runFilter(event: string, paths: string[]) {
   const calls = join(tempRoot, 'git-calls');
   const pathFile = join(tempRoot, 'paths');
   writeFileSync(pathFile, paths.join('\n') + (paths.length ? '\n' : ''));
-  writeFileSync(join(bin, 'git'), `#!/bin/bash\necho called >> '${calls}'\ncat '${pathFile}'\n`, { mode: 0o755 });
+  // `git diff --name-only` C-quotes a path that is not printable ASCII (`"deployments/caf\303\251.sh"`);
+  // with `-z` it emits the raw path, NUL-terminated. The stub does both, like git (review B7).
+  writeFileSync(
+    join(bin, 'git'),
+    [
+      '#!/bin/bash',
+      `echo called >> '${calls}'`,
+      'case " $* " in',
+      `  *" -z "*) tr '\\n' '\\0' < '${pathFile}' ;;`,
+      '  *)',
+      `    while IFS= read -r path; do`,
+      `      case "$path" in`,
+      `        *[!\\ -~]*) printf '"%s"\\n' "$path" ;;`,
+      `        *) printf '%s\\n' "$path" ;;`,
+      '      esac',
+      `    done < '${pathFile}'`,
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
   const script = join(tempRoot, 'filter.sh');
   writeFileSync(script, body);
   const output = join(tempRoot, 'github-output');
@@ -70,6 +91,12 @@ describe('CI change filter workflow step', () => {
 
   it('recognizes the root Compose file as code', () => {
     expect(runFilter('pull_request', ['docker-compose.yml']).output).toBe('code=true');
+  });
+
+  it('recognizes a deployment file whose path Git would quote', () => {
+    // `git diff --name-only` prints `"deployments/caf\303\251.sh"`, which matches no path pattern, so the
+    // filter must read the raw NUL-separated listing (review B7).
+    expect(runFilter('pull_request', ['deployments/café.sh']).output).toBe('code=true');
   });
 
   it('pushes write code=true without invoking git', () => {

@@ -113,7 +113,9 @@ cd deployments/example
 ./rollback.sh v0.3.0 --restore-db ./backups/koda_data-YYYYMMDD-HHMMSS.tar.gz
 ```
 
-Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz`, then pulls the target images. If either preflight check fails, the running services are left untouched.
+Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz` (the gzip stream is checked explicitly, so a plain tar with a `.tar.gz` name is refused), then pulls the target images. If either preflight check fails, the running services are left untouched. A stop that cannot be confirmed also aborts before any data is replaced.
+
+The archive is copied to a staging directory next to the scripts and mounted from there, so a backup that is a symlink to a file outside its own directory still restores. The restore itself extracts the archive inside the target `api` container before it changes `/data`, and the current volume content is moved aside until the restored content is in place.
 
 ## Notes
 

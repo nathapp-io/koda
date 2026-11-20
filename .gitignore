@@ -18,6 +18,10 @@ coverage/
 .env.local
 .env.*.local
 
+# Example deployment artifacts (backups and the rollback restore staging directory)
+deployments/example/backups/
+deployments/example/.rollback-stage-*/
+
 # Generated (OpenAPI clients — regenerate with `bun run generate`)
 apps/cli/src/generated/
 apps/web/generated/

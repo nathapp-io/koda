@@ -27,6 +27,11 @@ function dbDumpFiles(dir: string): string[] {
   return readdirSync(join(dir, 'backups')).filter((name) => /^koda-db-.+\.sql\.gz$/.test(name));
 }
 
+/** Every file the data volume archive produced, under its temporary or restore-ready name. */
+function dataArchiveFiles(dir: string): string[] {
+  return readdirSync(join(dir, 'backups')).filter((name) => name.includes('koda_data-'));
+}
+
 describe('backup-db.sh', () => {
   it('AC-1: starts the postgres service before it dumps', () => {
     const run = runDeployScript('backup-db.sh', []);
@@ -96,7 +101,7 @@ describe('backup-db.sh', () => {
     expect(archiveCall).toBeDefined();
 
     const tarCommand = (archiveCall?.argv ?? []).find((argument) => argument.startsWith('tar -czf'));
-    const stamp = /^tar -czf \/backup\/koda_data-(\d{8}-\d{6}-\d+)\.tar\.gz -C \/data \.$/.exec(
+    const stamp = /^tar -czf \/backup\/\.koda_data-(\d{8}-\d{6}-\d+)\.tar\.gz\.partial -C \/data \.$/.exec(
       tarCommand ?? '',
     )?.[1];
     if (stamp === undefined) throw new Error(`unexpected archive command: ${tarCommand}`);
@@ -116,8 +121,17 @@ describe('backup-db.sh', () => {
       `${run.dir}/backups:/backup`,
       'api',
       '-c',
-      `tar -czf /backup/koda_data-${stamp}.tar.gz -C /data .`,
+      `tar -czf /backup/.koda_data-${stamp}.tar.gz.partial -C /data .`,
     ]);
+  });
+
+  it('AC-16: renames the archive to its restore-ready name once tar succeeded', () => {
+    const run = runDeployScript('backup-db.sh', []);
+
+    expect(run.status).toBe(0);
+    const archives = dataArchiveFiles(run.dir);
+    expect(archives).toHaveLength(1);
+    expect(archives[0]).toMatch(/^koda_data-\d{8}-\d{6}-\d+\.tar\.gz$/);
   });
 
   it('AC-5: runs every docker call through the compose plugin', () => {
@@ -190,8 +204,17 @@ describe('backup-db.sh', () => {
     expect(run.status).not.toBe(0);
   });
 
+  it('AC-17: leaves no partial or restore-ready archive when the archive fails', () => {
+    // The stub writes the file the tar command names, like a real container that dies mid-write (review B9).
+    const run = runDeployScript('backup-db.sh', [], { docker: { failOn: ['tar -czf'] } });
+
+    expect(run.status).not.toBe(0);
+    expect(dataArchiveFiles(run.dir)).toEqual([]);
+  });
+
   it('AC-15: reports the incomplete dump as a failed dump', () => {
     const run = runDeployScript('backup-db.sh', [], { docker: { pgDump: INCOMPLETE_PG_DUMP } });
     expect(run.output).toContain('❌ Postgres dump failed');
   });
 });
+

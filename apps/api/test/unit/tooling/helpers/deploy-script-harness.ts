@@ -8,7 +8,6 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -21,9 +20,11 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
  * Runs the example deployment scripts (`deployments/example/*.sh`) against recording stubs, so the
  * deploy behaviour can be asserted without Docker.
  *
- * A run copies `deployments/example/` into a fresh temp dir (the run's `dir`), puts a recording `docker`
- * stub, a `curl` stub, a pin-able `date` shim (`KODA_DEPLOY_HARNESS_DATE`, set through `opts.env`) and a
- * `bash` shim first on `PATH`, and runs `/bin/bash <dir>/<script> ...args` with an environment built from
+ * A run copies the deployment files the scripts read (`docker-compose.yml` and the three scripts, never the
+ * example's `README.md`, `backups/` or a developer's local `.env`) into a fresh temp dir (the run's `dir`),
+ * puts a recording `docker` stub, a `curl` stub, a pin-able `date` shim (`KODA_DEPLOY_HARNESS_DATE`, set
+ * through `opts.env`) and a `bash` shim first on `PATH`, and runs `/bin/bash <dir>/<script> ...args` with an
+ * environment built from
  * `PATH` and `HOME` only, plus `opts.env`: an operator's exported
  * `POSTGRES_PASSWORD`, `KODA_VERSION`, `DATABASE_URL` or `COMPOSE_PROJECT_NAME` never reaches the
  * script. The `bash` shim execs `/bin/bash`, so a script that `deploy.sh` runs through its
@@ -63,6 +64,11 @@ export const DEFAULT_PG_DUMP = [
 ].join('\n');
 
 const EXAMPLE_DIR = resolve(__dirname, '../../../../../../deployments/example');
+/**
+ * The deployment files the scripts under test read. Listed one by one, so a developer's local `.env`,
+ * `backups/` or any later file in the example directory cannot change what a test starts from (review B10).
+ */
+const EXAMPLE_FILES = ['docker-compose.yml', 'deploy.sh', 'backup-db.sh', 'rollback.sh'] as const;
 const STUB_DIR = join(__dirname, 'deploy-script-stubs');
 const CURL_STUB = '#!/bin/bash\nexit 0\n';
 const BASH_SHIM = '#!/bin/sh\nexec /bin/bash "$@"\n';
@@ -76,12 +82,10 @@ function writeExecutable(path: string, content: string): void {
   chmodSync(path, 0o755);
 }
 
-/** Copies the example deployment, keeping each script executable (`deploy.sh` checks `-x backup-db.sh`). */
+/** Copies the deployment files a script reads, keeping each script executable (`deploy.sh` checks `-x backup-db.sh`). */
 function copyExample(dir: string): void {
-  for (const entry of readdirSync(EXAMPLE_DIR)) {
-    // A developer's local dumps must not leak into the copy: the tests assert on `backups/`.
-    if (entry === 'backups') continue;
-    cpSync(join(EXAMPLE_DIR, entry), join(dir, entry), { recursive: true });
+  for (const entry of EXAMPLE_FILES) {
+    cpSync(join(EXAMPLE_DIR, entry), join(dir, entry));
     if (entry.endsWith('.sh')) chmodSync(join(dir, entry), 0o755);
   }
 }

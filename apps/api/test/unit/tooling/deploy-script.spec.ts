@@ -1,7 +1,40 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript } from './helpers/deploy-script-harness';
 
-afterEach(() => cleanupDeployScriptRuns());
+const decoyRoots: string[] = [];
+
+/** A second environment file an operator could point `COMPOSE_ENV_FILES` at. */
+function decoyEnvFile(contents: string): string {
+  const root = mkdtempSync(join(tmpdir(), 'koda-deploy-decoy-env-'));
+  decoyRoots.push(root);
+  const file = join(root, 'other.env');
+  writeFileSync(file, contents);
+  return file;
+}
+
+/**
+ * The arguments that decide which Compose project a call acts on: the environment file and the Compose
+ * file, up to the subcommand.
+ */
+function composeSelection(argv: string[]): string[] {
+  const selection = ['compose'];
+  for (let index = 1; index < argv.length; index += 1) {
+    if (argv[index] !== '--env-file' && argv[index] !== '-f') break;
+    selection.push(argv[index], argv[index + 1] ?? '');
+    index += 1;
+  }
+  return selection;
+}
+
+afterEach(() => {
+  cleanupDeployScriptRuns();
+  for (const root of decoyRoots.splice(0, decoyRoots.length)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 describe('deploy.sh', () => {
   const lines = (extra: string) => `POSTGRES_PASSWORD=pw\n${extra}`;
@@ -50,5 +83,27 @@ describe('deploy.sh', () => {
   it('AC-10: does not migrate after the pre-deploy pg_dump fails', () => {
     const run = runDeployScript('deploy.sh', [], { envFile: 'POSTGRES_PASSWORD=pw', docker: { pgDumpExit: 1 } });
     expect(run.dockerCalls.some(({ argv }) => argv.includes('migrate'))).toBe(false);
+  });
+
+  it('B1: backs up and migrates the same Compose project when COMPOSE_ENV_FILES points elsewhere', () => {
+    const decoy = decoyEnvFile('COMPOSE_PROJECT_NAME=other\n');
+    const run = runDeployScript('deploy.sh', [], {
+      envFile: 'POSTGRES_PASSWORD=pw\nCOMPOSE_PROJECT_NAME=target\n',
+      env: { COMPOSE_ENV_FILES: decoy },
+    });
+
+    expect(run.status).toBe(0);
+    const backupStart = run.dockerCalls.find(({ argv }) => argv.includes('--wait') && argv.includes('postgres'));
+    const migration = run.dockerCalls.find(({ argv }) => argv.includes('migrate') && argv.includes('deploy'));
+    expect(backupStart).toBeDefined();
+    expect(migration).toBeDefined();
+
+    // `deploy.sh` pins `.env` for its own calls and runs `backup-db.sh` as a separate process: both must
+    // resolve the same project, or a successful backup of one stack lets deploy migrate another (review B1).
+    const expected = ['compose', '--env-file', `${run.dir}/.env`, '-f', `${run.dir}/docker-compose.yml`];
+    expect(composeSelection(backupStart?.argv ?? [])).toEqual(expected);
+    expect(composeSelection(migration?.argv ?? [])).toEqual(expected);
+    const distinctSelections = new Set(run.dockerCalls.map(({ argv }) => composeSelection(argv).join(' ')));
+    expect(distinctSelections).toEqual(new Set([expected.join(' ')]));
   });
 });

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
@@ -24,6 +25,41 @@ function plainTextFixture(): { path: string; cleanup: () => void } {
   const path = join(dir, 'not-an-archive.tar.gz');
   writeFileSync(path, 'plain text, not a gzip tar archive\n');
   return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+/** A tar archive without gzip compression: bsdtar lists it, the container's `tar -xzf` cannot read it. */
+function uncompressedTarFixture(): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'koda-rollback-plain-tar-'));
+  writeFileSync(join(dir, 'data'), 'payload\n');
+  const path = join(dir, 'uncompressed.tar.gz');
+  const tar = spawnSync('tar', ['-cf', path, '-C', dir, 'data'], { encoding: 'utf8' });
+  if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+const fixtureRoots: string[] = [];
+afterAll(() => {
+  for (const root of fixtureRoots.splice(0, fixtureRoots.length)) rmSync(root, { recursive: true, force: true });
+});
+
+/** A real gzip tar `--restore-db` accepts, kept outside the harness dir like an operator's backup. */
+function validArchiveFixture(): string {
+  const root = mkdtempSync(join(tmpdir(), 'koda-rollback-valid-'));
+  fixtureRoots.push(root);
+  const archive = join(root, 'backup.tar.gz');
+  writeFileSync(join(root, 'data'), 'payload\n');
+  const tar = spawnSync('tar', ['-czf', archive, '-C', root, 'data'], { encoding: 'utf8' });
+  if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+  return archive;
+}
+
+/** A second environment file a shell `COMPOSE_ENV_FILES` could point the script at. */
+function decoyEnvFile(): string {
+  const root = mkdtempSync(join(tmpdir(), 'koda-rollback-decoy-'));
+  fixtureRoots.push(root);
+  const file = join(root, 'other.env');
+  writeFileSync(file, 'COMPOSE_PROJECT_NAME=other\n');
+  return file;
 }
 
 describe('rollback.sh preflight', () => {
@@ -100,5 +136,38 @@ describe('rollback.sh preflight', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1']);
     const pullCall = run.dockerCalls.find((call) => call.argv.includes('pull'));
     expect(pullCall?.kodaVersion).toBe('v0.4.1');
+  });
+
+  it('AC-11: rejects an uncompressed tar archive before stopping any service', () => {
+    const fixture = uncompressedTarFixture();
+    try {
+      const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', fixture.path]);
+
+      // `tar -tzf` alone accepts a plain tar on bsdtar (macOS), which the container then cannot extract
+      // after the services are already down (review B5).
+      expect(run.status).toBe(1);
+      expect(run.output).toContain('is not a valid .tar.gz');
+      expect(run.dockerCalls).toEqual([]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('B1: selects the same Compose project as deploy for every call when .env exists', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchiveFixture()], {
+      envFile: 'POSTGRES_PASSWORD=pw\n',
+      env: { COMPOSE_ENV_FILES: decoyEnvFile() },
+    });
+
+    expect(run.status).toBe(0);
+    for (const call of run.dockerCalls) {
+      expect(call.argv.slice(0, 5)).toEqual([
+        'compose',
+        '--env-file',
+        `${run.dir}/.env`,
+        '-f',
+        `${run.dir}/docker-compose.yml`,
+      ]);
+    }
   });
 });

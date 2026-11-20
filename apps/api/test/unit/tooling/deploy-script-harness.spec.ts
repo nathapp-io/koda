@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript } from './helpers/deploy-script-harness';
@@ -40,7 +40,7 @@ describe('deploy script harness', () => {
     const copied = join(run.dir, basename(archive));
     expect(readFileSync(copied)).toEqual(readFileSync(archive));
     expect(run.output).not.toContain('Backup file not found');
-    expect(run.dockerCalls.some((call) => call.argv.includes(`${run.dir}:/backup:ro`))).toBe(true);
+    expect(run.dockerCalls.some((call) => call.argv.some((argument) => argument.endsWith(':/backup:ro')))).toBe(true);
   });
 
   it('resolves a missing fixture under dir without creating it', () => {
@@ -50,6 +50,21 @@ describe('deploy script harness', () => {
     const resolved = join(run.dir, basename(missing));
     expect(run.output).toContain(`❌ Backup file not found: ${resolved}`);
     expect(existsSync(resolved)).toBe(false);
+  });
+
+  it('copies only the deployment files a script reads', () => {
+    // A developer's local `deployments/example/.env` (or `backups/` dumps) must never become a test's
+    // starting state: `.env` comes from the fixture alone (review B10).
+    const run = runDeployScript('backup-db.sh', []);
+
+    expect(readdirSync(run.dir).sort()).toEqual([
+      '.harness',
+      'backup-db.sh',
+      'backups',
+      'deploy.sh',
+      'docker-compose.yml',
+      'rollback.sh',
+    ]);
   });
 
   it('writes .env with the requested mode before the script starts', () => {
