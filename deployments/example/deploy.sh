@@ -89,6 +89,15 @@ if ! is_url_safe_postgres_password "$effective_postgres_password"; then
   exit 1
 fi
 
+if [[ -f "$ENV_FILE" ]]; then
+  while IFS= read -r env_line || [[ -n "$env_line" ]]; do
+    if [[ "$env_line" =~ ^[[:space:]]*(export[[:space:]]+)?DATABASE_URL[[:space:]]*= ]]; then
+      echo "❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service"
+      exit 1
+    fi
+  done < "$ENV_FILE"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "❌ docker is required"
   exit 1
