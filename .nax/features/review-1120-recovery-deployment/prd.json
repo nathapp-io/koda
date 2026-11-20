@@ -3,7 +3,7 @@
   "feature": "review-1120-recovery-deployment",
   "branchName": "feat/review-1120-recovery-deployment",
   "createdAt": "2026-11-20T14:49:09.751Z",
-  "updatedAt": "2026-11-20T15:36:25.573Z",
+  "updatedAt": "2026-11-20T16:24:28.071Z",
   "userStories": [
     {
       "id": "US-001",
@@ -270,14 +270,17 @@
         "docker"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Host/container ownership, private creation modes, binary stdout pipelines and shared shell harness behavior cross multiple seams; confidential backup access control requires strict security TDD."
+        "reasoning": "Host/container ownership, private creation modes, binary stdout pipelines and shared shell harness behavior cross multiple seams; confidential backup access control requires strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "deployments/example/backup-db.sh",
@@ -311,7 +314,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "49731dc097fbbf4a137950d26c6f5a4abf0f92e8"
     },
     {
       "id": "US-006",
