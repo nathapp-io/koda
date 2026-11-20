@@ -3,7 +3,7 @@
   "feature": "review-1120-runner",
   "branchName": "feat/review-1120-runner",
   "createdAt": "2026-11-20T11:48:47.927Z",
-  "updatedAt": "2026-11-20T12:15:26.179Z",
+  "updatedAt": "2026-11-20T12:31:02.234Z",
   "userStories": [
     {
       "id": "US-001",
@@ -108,14 +108,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Concurrent epoch retirement crosses command handling, Supervisor tracking, JobRun cancellation and FIFO mutex sequencing. Credential/approval release and THREAD session retirement require strict security-isolated TDD."
+        "reasoning": "Concurrent epoch retirement crosses command handling, Supervisor tracking, JobRun cancellation and FIFO mutex sequencing. Credential/approval release and THREAD session retirement require strict security-isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/command-handler.ts",
@@ -146,7 +149,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "da59437ec5ba000ea2c26e986a0856f901cbca56"
     },
     {
       "id": "US-003",
