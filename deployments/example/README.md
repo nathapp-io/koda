@@ -111,12 +111,18 @@ fallback and as the target of a reversal.
 
 ### The procedure
 
-The procedure is one Bash script. The fenced blocks below are marked `restore-step-*`, they are in the order
-to run them, and the first one begins with `set -euo pipefail`, so the first failing step ends the script and
-nothing after it runs. Copy them into `restore.sh` in this order and run `bash restore.sh`.
+The procedure is one Bash script, made of steps 1 to 5. The fenced blocks below are marked `restore-step-*`,
+they are in the order to run them, and the first one begins with `set -euo pipefail`, so the first failing step
+ends the script and nothing after it runs. Copy steps **1 to 5** into `restore.sh` and run `bash restore.sh`.
 `apps/api/test/integration/db/documented-restore.integration.spec.ts` runs exactly these blocks, in this
 order, against a disposable PostgreSQL 16 project, so this guide and the exercised procedure cannot drift
 apart.
+
+The procedure ends at the cutover, on the restored database: that is a completed recovery. Going back to the
+original database is a **separate** operation with its own script
+([reversal](#6-reversal-a-separate-operation)), run only when you decide to. Concatenating it into `restore.sh`
+would switch the deployment back to the original database at the end of every successful restore, and every
+write the deployment accepted in between would stay behind in the database it no longer serves.
 
 Inputs (export them in the shell that runs the script):
 
@@ -170,9 +176,33 @@ baseline_table="${KODA_RESTORE_BASELINE_TABLE:?set KODA_RESTORE_BASELINE_TABLE t
 baseline_rows="${KODA_RESTORE_BASELINE_ROWS:?set KODA_RESTORE_BASELINE_ROWS to the row count of that table in this backup}"
 baseline_migrations="${KODA_RESTORE_BASELINE_MIGRATIONS:?set KODA_RESTORE_BASELINE_MIGRATIONS to the applied migration count of this backup}"
 
-# Every Compose call is pinned to the file, the environment file and the project. Without the project,
-# COMPOSE_PROJECT_NAME in the operator's shell decides which deployment a step addresses.
-compose=( docker compose --env-file "$env_file" -f "$compose_file" -p "$compose_project" )
+# Every Compose call is pinned to the file, the environment file and the project, and the variables that could
+# redirect those pins are removed from Compose's environment: only what this script names decides which
+# deployment a step addresses.
+#
+# Compose also gives the shell precedence over --env-file for interpolation: an exported POSTGRES_DB would
+# override the value `set_persistent_db` writes below, so the deployment would keep reading its old database
+# while every message here says it switched. The selection variables are removed rather than trusted, and the
+# result is read back with `assert_selected_db`.
+compose=( env -u POSTGRES_DB -u COMPOSE_PROJECT_NAME -u COMPOSE_FILE -u COMPOSE_ENV_FILES \
+  docker compose --env-file "$env_file" -f "$compose_file" -p "$compose_project" )
+
+# The database Compose resolves for the deployment, asked of Compose instead of read from the file this script
+# rewrites: the api derives its DATABASE_URL from POSTGRES_DB, so what Compose resolves is the database the
+# services open once they are recreated. Anything else (an inherited POSTGRES_DB, another environment file in
+# front of this one) shows up here as a mismatch, and the procedure stops before a writer starts.
+assert_selected_db() {
+  local db="$1" resolved
+  if ! resolved="$("${compose[@]}" config --environment 2>/dev/null)"; then
+    echo "❌ Compose cannot render ${compose_file} with ${env_file}: refusing to continue" >&2
+    exit 1
+  fi
+  # `grep` without -q reads the whole list, so nothing here dies of SIGPIPE under `pipefail`.
+  if ! printf '%s\n' "${resolved}" | grep -x "POSTGRES_DB=${db}" >/dev/null; then
+    echo "❌ Compose does not resolve POSTGRES_DB=${db} for ${compose_project}: refusing to continue" >&2
+    exit 1
+  fi
+}
 
 # psql as the configured role, inside this deployment's own postgres service. -X ignores the container's
 # psqlrc, and ON_ERROR_STOP turns the first SQL error into a nonzero exit instead of a report the script
@@ -226,6 +256,9 @@ if ! grep -qx "POSTGRES_DB=${original_db}" "${env_file}"; then
   echo "❌ ${env_file} does not set POSTGRES_DB=${original_db}: refusing to guess which database is live" >&2
   exit 1
 fi
+# The file is not the last word on that: Compose turns it into the services' DATABASE_URL, so what Compose
+# resolves has to be the same database before a service is stopped or a database is created.
+assert_selected_db "${original_db}"
 
 # The archive has to be a complete gzip before a database exists for it: a decompression failure discovered
 # halfway through a replay leaves a half-restored staging database behind, and the operator has to work out
@@ -320,6 +353,10 @@ the live database later describes the live database and would make the gate comp
 ```bash restore-step-5-cutover
 echo "==> Cutover: ${compose_project} now selects ${target_db}"
 set_persistent_db "${target_db}"
+# The written setting only reaches the services if Compose resolves it, so it is checked before the recreate:
+# a POSTGRES_DB inherited by Compose's own environment would win over the file and leave the deployment on the
+# database it was serving.
+assert_selected_db "${target_db}"
 # A restart does not reread the environment: the containers have to be recreated, in the same project and on the
 # same named volumes. postgres is recreated too, so its healthcheck checks the database the deployment now
 # serves; its volume keeps the data.
@@ -337,20 +374,34 @@ healthy, so a database the api cannot use fails here instead of serving errors.
 If the recreate or the healthchecks fail, the environment file already selects `${target_db}`: run the reversal
 below to put the deployment back on `${original_db}` before investigating.
 
-#### 6. Reversal
+#### 6. Reversal (a separate operation)
 
-```bash restore-step-6-reversal
+Reversal is **not** part of the procedure above and it is not a step of `restore.sh`: a successful restore ends
+at the cutover, reading the restored database. Reversal is what you run when you decide to go back to the
+original one — after a failed cutover, or because the restored copy turned out to be missing something the
+original database still has. (On a cutover that failed healthchecks, run it before investigating: the
+environment file already names `${target_db}` and the services may be half-way onto it.)
+
+It is the cutover in the other direction, and the same two operations: put the original name back in the
+environment file, recreate the services. Build `reversal.sh` from the block in
+[step 1](#1-inputs-and-helpers) — the inputs and the helpers, the same `KODA_RESTORE_*` variables — followed by
+this block, and run `bash reversal.sh`:
+
+```bash restore-reversal
 echo "==> Reversal: ${compose_project} selects ${original_db} again"
 set_persistent_db "${original_db}"
+# Same gate as the cutover: the recreate only goes ahead once Compose really resolves the original database.
+assert_selected_db "${original_db}"
 "${compose[@]}" up -d --force-recreate --wait postgres api web
 echo "✅ The deployment reads ${original_db} again. ${target_db} stays for inspection."
 ```
 
-Reversal is the cutover of step 5 in the other direction, and it is the same two operations: put the original
-name back in the environment file and recreate the services. The original database was never written by any
-step above, so the deployment resumes exactly where it was. The restored `${target_db}` is left in place,
-offline: nobody reads it while `POSTGRES_DB` names another database, so it can be inspected or dropped after a
-fresh backup of it.
+The original database was never written by any step above, so the deployment resumes exactly where it was
+before recovery began. Any write the deployment accepted while it ran on `${target_db}` stays in
+`${target_db}`: a reversal is a return to the pre-recovery state, not a merge, so take a backup of
+`${target_db}` first if its rows matter. The restored `${target_db}` is otherwise left in place, offline:
+nobody reads it while `POSTGRES_DB` names another database, so it can be inspected or dropped after a fresh
+backup of it.
 
 Run the whole script again with a different `${target_db}` to retry a restore. Delete a failed staging database
 with `DROP DATABASE` only after the deployment is serving from the database it should.

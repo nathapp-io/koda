@@ -92,6 +92,33 @@ function verifyMoment(run: ScriptRun): VerifyMoment | undefined {
   };
 }
 
+/**
+ * What the deployment directory held while the verifier decompressed the dump: the `gzip` shim lists `run.dir`
+ * itself (`.`) and every entry beside it, with `backups/` and the harness's own `.harness/` pruned. `undefined`
+ * when the run never decompressed the dump.
+ *
+ * The listing is taken while the shim is still the pipeline's decompressor, so a plaintext copy a downstream
+ * command writes outside `backups/` is on record even when a later command deletes it before the script exits.
+ */
+function verifyTree(run: ScriptRun): string[] | undefined {
+  const file = join(run.dir, '.harness', 'verify-tree');
+  if (!existsSync(file)) return undefined;
+  const lines = readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    // The probe lists the directory with `find .`, so everything below it is printed as `./name`.
+    .map((line) => (line.startsWith('./') ? line.slice('./'.length) : line));
+  return lines.length === 0 ? undefined : lines;
+}
+
+/** The entries the harness itself puts beside the scripts: the deployment a run starts from, and nothing else. */
+const DEPLOYMENT_ENTRIES = ['.', 'backup-db.sh', 'deploy.sh', 'docker-compose.yml', 'rollback.sh'];
+
+/** Entries in the deployment directory that no run put there: a file the script created beside its backups. */
+function entriesCreatedBesideBackups(run: ScriptRun): string[] {
+  return (verifyTree(run) ?? []).filter((entry) => !DEPLOYMENT_ENTRIES.includes(entry));
+}
+
 function callIndex(calls: DockerCall[], predicate: (argv: string[]) => boolean): number {
   return calls.findIndex((call) => predicate(call.argv));
 }
@@ -170,6 +197,40 @@ describe('backup-db.sh', () => {
     }
     expect(dumpFiles(run)).toHaveLength(1);
     expect(publishedArchives(run)).toHaveLength(1);
+  });
+
+  it('AC-2: writes nothing beside its backups directory while it verifies the dump', () => {
+    // The case above inspects what the verifier streamed and what `backups/` held at that instant; this one
+    // reads the deployment directory itself while the dump is being verified, so a verifier that stores the
+    // plaintext copy somewhere else — under any name — has nowhere to hide.
+    const run = runDeployScript('backup-db.sh', [], { umask: OPERATOR_UMASK });
+
+    expect(run.status).toBe(0);
+    // The probe ran and saw the deployment it starts from, so the comparison below is a reading and not an
+    // empty file.
+    expect(verifyTree(run)).toEqual(DEPLOYMENT_ENTRIES);
+    expect(entriesCreatedBesideBackups(run)).toEqual([]);
+  });
+
+  it('AC-2: the verify probe catches a plaintext copy written beside the script and deleted again', () => {
+    // The guarantee above, validated against the mutation it exists to catch: `tee` puts the decompressed dump
+    // beside the script and the very next command deletes it. The run still succeeds and nothing plaintext is
+    // left on disk, so neither the gzip shim's stdout kind nor a listing of backups/ taken afterwards sees it —
+    // the deployment directory listed while the pipeline runs does.
+    const run = runDeployScript('backup-db.sh', [], {
+      umask: OPERATOR_UMASK,
+      editScript: (source) =>
+        source.replace(
+          'gzip -dc "$DB_BACKUP_FILE" | grep -F -x -- "$DUMP_COMPLETE_LINE" >/dev/null || report_failed_dump',
+          'gzip -dc "$DB_BACKUP_FILE" | tee "$SCRIPT_DIR/verifier-plaintext.sql" | grep -F -x -- "$DUMP_COMPLETE_LINE" >/dev/null || report_failed_dump\nrm -f "$SCRIPT_DIR/verifier-plaintext.sql"',
+        ),
+    });
+
+    expect(run.status).toBe(0);
+    // The copy is gone from disk by the time the script exits, which is why the earlier cases could not see it.
+    expect(existsSync(join(run.dir, 'verifier-plaintext.sql'))).toBe(false);
+    expect(only(dumpFiles(run))).toMatch(/^koda-db-.+\.sql\.gz$/);
+    expect(entriesCreatedBesideBackups(run)).toEqual(['verifier-plaintext.sql']);
   });
 
   it('AC-3: fails before any pg_dump when a regular file sits where the backups directory belongs', () => {

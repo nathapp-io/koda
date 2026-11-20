@@ -79,7 +79,6 @@ describeDb('password reset request (PG)', () => {
   let providerSend: ReturnType<typeof vi.spyOn>;
   let sendOne: ReturnType<typeof vi.spyOn>;
   let warn: ReturnType<typeof vi.spyOn>;
-  let delayedProviderCompleted: boolean;
   let userId: string;
   let userEmail: string;
   const previous = {
@@ -105,6 +104,22 @@ describeDb('password reset request (PG)', () => {
   const unusedRows = (id: string) => db.passwordResetToken.findMany({ where: { userId: id, usedAt: null } });
   const scheduleRows = (address: string) =>
     db.emailSchedule.findMany({ where: { toEmail: address, kind: 'PASSWORD_RESET' } });
+  /**
+   * The teardown step between cases: waits until every reset this case requested has a terminal schedule row,
+   * so a send that is still in flight cannot outlive the case that started it (and land in the next one). It is
+   * the `afterEach` and it is also callable inside a case, so the drain can be exercised without depending on
+   * another case having run first.
+   */
+  const drainDetachedSends = async (): Promise<void> => {
+    const terminal = new Set(['SENT', 'FAILED', 'SKIPPED']);
+    for (const [address, expectedCount] of requestedDeliveryCounts) {
+      await waitFor(async () => {
+        const rows = await scheduleRows(address);
+        return rows.length >= expectedCount && rows.every((row) => terminal.has(row.status)) ? true : null;
+      }, `all ${expectedCount} detached reset send(s) for ${address} to finish`);
+    }
+    requestedDeliveryCounts.clear();
+  };
   const createUser = async (address: string, disabled = false): Promise<string> => {
     const user = await db.user.create({
       data: { email: address, name: 'Reset User', passwordHash: await bcrypt.hash(TEST_PASSWORD, 4), disabled },
@@ -146,14 +161,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   afterEach(async () => {
-    const terminal = new Set(['SENT', 'FAILED', 'SKIPPED']);
-    for (const [address, expectedCount] of requestedDeliveryCounts) {
-      await waitFor(async () => {
-        const rows = await scheduleRows(address);
-        return rows.length >= expectedCount && rows.every((row) => terminal.has(row.status)) ? true : null;
-      }, `all ${expectedCount} detached reset send(s) for ${address} to finish`);
-    }
-    requestedDeliveryCounts.clear();
+    await drainDetachedSends();
   });
 
   beforeEach(async () => {
@@ -168,20 +176,27 @@ describeDb('password reset request (PG)', () => {
     warn.mockClear();
   });
 
-  it('leaves a delayed detached provider call for teardown to drain', async () => {
-    delayedProviderCompleted = false;
+  it('waits for a delayed detached provider call before the case ends', async () => {
+    // The case that used to be split in two: a delayed provider call is still in flight when the response is
+    // written, and the teardown drain is what makes the case wait for it instead of leaving it to the next one.
+    // Both halves run here, so this case passes on its own and in any order.
+    let completed = false;
     providerSend.mockImplementation(async () => {
       await sleep(500);
-      delayedProviderCompleted = true;
+      completed = true;
       return { providerMessageId: 'delayed-reset' };
     });
 
     await requestReset(userEmail);
     await waitFor(async () => providerSend.mock.calls.length > 0, 'the delayed detached provider call');
-  });
+    // The call has started and has not finished: this is the window the drain exists for.
+    expect(completed).toBe(false);
 
-  it('does not begin the next test until the prior detached provider call completes', () => {
-    expect(delayedProviderCompleted).toBe(true);
+    await drainDetachedSends();
+
+    expect(completed).toBe(true);
+    // ... and the row it settled is terminal, so nothing is left for the next case.
+    expect((await scheduleRows(userEmail)).map((row) => row.status)).toEqual(['SENT']);
   });
 
   it('AC-1: answers 200 {} and writes one unused token expiring in 30 minutes', async () => {

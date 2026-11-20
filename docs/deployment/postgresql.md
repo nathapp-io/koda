@@ -133,12 +133,14 @@ It takes the Compose file, the project, the environment file, the configured rol
 database and a **new** database name, creates the new database from `template0`, replays into it, verifies row
 counts and `_prisma_migrations` records against the baseline captured for that backup, and only then flips
 `POSTGRES_DB` (create and recreate the affected services with the same Compose project and the same volumes) —
-with a reversal that puts the original back. Two details are worth repeating here:
+and, as a separate operation, a reversal that puts the original back. Two details are worth repeating here:
 
 - The project matters. Every `docker compose` call in the procedure is pinned with `-p <project>` and
   `--env-file <file>`, because the deployment's `POSTGRES_DB` lives in that environment file and Compose
   otherwise takes the project from `COMPOSE_PROJECT_NAME` in your shell. Get the project from
-  `docker compose ls`.
+  `docker compose ls`. Because the same precedence lets an exported `POSTGRES_DB` override that file, the
+  procedure drops it from Compose's environment and reads the resolved database back with
+  `docker compose config --environment` before a service is recreated.
 - The role matters. Use the deployment's `POSTGRES_USER` (`koda` in the example, `koda_user` above): it is the
   owner of the tables in the dump and the account the deployment connects as.
 

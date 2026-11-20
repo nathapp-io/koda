@@ -14,7 +14,10 @@ const README = resolve(__dirname, '../../../../../deployments/example/README.md'
 const POSTGRES_GUIDE = resolve(__dirname, '../../../../../docs/deployment/postgresql.md');
 
 const RESTORE_SECTION = '## Restore PostgreSQL into a fresh database';
-const EXPECTED_STEP_IDS = ['1-inputs', '2-preflight', '3-replay', '4-verify', '5-cutover', '6-reversal'];
+/** The procedure itself. The reversal is marked apart, because it is not part of a successful restore. */
+const EXPECTED_STEP_IDS = ['1-inputs', '2-preflight', '3-replay', '4-verify', '5-cutover'];
+/** The fence marker of the reversal block: one operation, invoked separately, never appended to the procedure. */
+const REVERSAL_MARKER = 'restore-reversal';
 
 interface MarkedStep {
   id: string;
@@ -36,6 +39,14 @@ function markedSteps(text: string): MarkedStep[] {
     id: `${match[1] ?? ''}-${match[2] ?? ''}`,
     body: match[3] ?? '',
   }));
+}
+
+/** The reversal's block: the separate script an operator builds when they decide to go back. */
+function reversalBlock(text: string): string {
+  const pattern = /^```bash restore-reversal[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/m;
+  const body = pattern.exec(text)?.[1];
+  if (body === undefined) throw new Error(`the guide has no ${REVERSAL_MARKER} block`);
+  return body;
 }
 
 function step(steps: readonly MarkedStep[], id: string): MarkedStep {
@@ -67,6 +78,36 @@ describe('the documented PostgreSQL recovery procedure', () => {
     expect(step(steps, '4-verify').body).toContain('exit 1');
   });
 
+  it('ends a successful restore on the restored database, with the reversal run separately', () => {
+    const steps = markedSteps(readme());
+    // The script an operator builds from the procedure is these blocks and nothing else: a reversal appended to
+    // them would switch the deployment back to the original database at the end of every successful restore.
+    expect(steps.map((candidate) => candidate.body).join('\n')).not.toContain('set_persistent_db "${original_db}"');
+    // The reversal is still documented, under its own marker, as the cutover in the other direction.
+    const reversal = reversalBlock(readme());
+    expect(reversal).toContain('set_persistent_db "${original_db}"');
+    expect(reversal).toContain('up -d --force-recreate --wait postgres api web');
+    // ... and the prose tells the operator which blocks make `restore.sh`.
+    expect(readme()).toContain('Copy steps **1 to 5** into `restore.sh`');
+    expect(readme()).toContain('Reversal is **not** part of the procedure above');
+  });
+
+  it('does not let an inherited POSTGRES_DB decide the database the deployment selects', () => {
+    const steps = markedSteps(readme());
+    const inputs = step(steps, '1-inputs').body;
+
+    // Compose gives the operator's shell precedence over --env-file, so the file the procedure rewrites is not
+    // enough on its own: the selection variables have to be out of Compose's environment...
+    expect(inputs).toContain('env -u POSTGRES_DB');
+    expect(inputs).toContain('docker compose --env-file "$env_file" -f "$compose_file" -p "$compose_project"');
+    // ... and what Compose resolves is read back before anything is recreated on it.
+    expect(inputs).toContain('config --environment');
+    expect(inputs).toContain('assert_selected_db()');
+    expect(step(steps, '2-preflight').body).toContain('assert_selected_db "${original_db}"');
+    expect(step(steps, '5-cutover').body).toContain('assert_selected_db "${target_db}"');
+    expect(reversalBlock(readme())).toContain('assert_selected_db "${original_db}"');
+  });
+
   it('never replays the snapshot into the database the deployment serves', () => {
     const steps = markedSteps(readme());
     const replay = step(steps, '3-replay').body;
@@ -92,7 +133,7 @@ describe('the documented PostgreSQL recovery procedure', () => {
   it('recreates the affected services for cutover and reversal, and keeps the LanceDB archive separate', () => {
     const steps = markedSteps(readme());
     const cutover = step(steps, '5-cutover').body;
-    const reversal = step(steps, '6-reversal').body;
+    const reversal = reversalBlock(readme());
 
     // POSTGRES_DB is the setting the api derives DATABASE_URL from, so both directions flip that one line...
     expect(cutover).toContain('set_persistent_db "${target_db}"');

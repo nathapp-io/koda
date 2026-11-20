@@ -4,7 +4,10 @@
  *
  * Nothing here reimplements the runbook: the fixture extracts the README's marked `restore-step-*` blocks, in
  * the order the guide prints them, concatenates them into one Bash script and runs that script. A step that is
- * missing, renamed or reordered from the guide therefore changes what this file executes.
+ * missing, renamed or reordered from the guide therefore changes what this file executes. The guide keeps the
+ * reversal out of that script (a successful restore ends on the restored database); it is marked
+ * `restore-reversal` and the fixture runs it as the separate script the guide documents — the inputs block
+ * followed by the reversal block — so cutover and reversal are exercised as the two operations they are.
  *
  * The fixture is a synthetic deployment of its own: a unique Compose project, its own environment file, its own
  * named volume and a synthetic API database client (`api`) that derives `DATABASE_URL` from `POSTGRES_DB` the
@@ -35,6 +38,7 @@ const BASELINE_TABLE = 'restore_probe';
 const BASELINE_ROWS = '1';
 const BASELINE_MIGRATIONS = '1';
 const RESTORED_DB = 'koda_restore_full';
+const CONFLICT_DB = 'koda_restore_conflict';
 const REFUSED_DB = 'koda_restore_refused';
 const BAD_SQL_DB = 'koda_restore_bad_sql';
 const INVALID_GZIP_DB = 'koda_restore_invalid_gzip';
@@ -43,8 +47,8 @@ const WRONG_BASELINE_DB = 'koda_restore_baseline';
 const SENTINEL_TABLE = 'operator_sentinel';
 const REFUSED_SENTINEL = '1,do-not-touch';
 const BAD_SQL_SENTINEL = 'sentinel-after-sql-error';
-/** The ids the guide's procedure is made of, in the order it documents them. */
-const EXPECTED_STEP_IDS = ['1-inputs', '2-preflight', '3-replay', '4-verify', '5-cutover', '6-reversal'];
+/** The ids the guide's procedure is made of, in the order it documents them. The reversal is not one of them. */
+const EXPECTED_STEP_IDS = ['1-inputs', '2-preflight', '3-replay', '4-verify', '5-cutover'];
 
 // The real Docker/PostgreSQL suites only run on an opted-in host.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -65,6 +69,20 @@ function markedSteps(): MarkedStep[] {
     id: `${match[1] ?? ''}-${match[2] ?? ''}`,
     body: match[3] ?? '',
   }));
+}
+
+/**
+ * The reversal's block. It is deliberately not a `restore-step-*` block: the guide builds `restore.sh` from the
+ * steps alone, because a reversal appended to them would switch the deployment back to the original database at
+ * the end of every successful restore. The guide documents `reversal.sh` as the inputs block followed by this
+ * block, which is what the fixture assembles below.
+ */
+function markedReversal(): string {
+  const text = readFileSync(README, 'utf8');
+  const match = /^```bash restore-reversal[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/m.exec(text);
+  const body = match?.[1];
+  if (body === undefined) throw new Error('the guide no longer marks its reversal block as restore-reversal');
+  return body;
 }
 
 /** Only what a Compose CLI or a procedure step needs: inherited database URLs and project names stay out. */
@@ -251,12 +269,16 @@ function procedureInputs(
  * Runs the guide's marked blocks as one Bash script, exactly as an operator would, and records what the
  * deployment looked like before and after it: which database the environment file selects, what the original
  * database holds, and whether any application writer started.
+ *
+ * `extraEnv` is spread into the script's environment after the inputs, so a case can reproduce an operator
+ * shell that exports a variable Compose would otherwise interpolate (an inherited `POSTGRES_DB`).
  */
 function runProcedure(
   work: string,
   project: string,
   label: string,
   inputs: Record<string, string>,
+  extraEnv: Record<string, string> = {},
 ): ProcedureRun {
   const steps = markedSteps();
   const script = join(work, `procedure-${label}.sh`);
@@ -266,7 +288,7 @@ function runProcedure(
   const before = deploymentState(work, project);
   const result = spawnSync('/bin/bash', [script], {
     cwd: work,
-    env: controlledEnv(inputs),
+    env: controlledEnv({ ...inputs, ...extraEnv }),
     encoding: 'utf8',
     timeout: 900_000,
     maxBuffer: 32 * 1024 * 1024,
@@ -276,6 +298,49 @@ function runProcedure(
   return {
     label,
     stepIds: steps.map((step) => step.id),
+    status: result.status ?? 1,
+    output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
+    persistedDbBefore: before.persistedDb,
+    persistedDbAfter: after.persistedDb,
+    writerStartsAdded: after.writerStarts - before.writerStarts,
+    writerLinesAdded: after.writerLines.slice(before.writerLines.length),
+    originalRowsBefore: before.originalRows,
+    originalRowsAfter: after.originalRows,
+  };
+}
+
+/**
+ * Runs the reversal the way the guide documents it: a script of its own, made of the inputs/helpers block and
+ * the `restore-reversal` block. It is never appended to the procedure's script, so a successful restore is not
+ * silently undone, and a test that wants a reversal has to ask for one.
+ */
+function runReversal(
+  work: string,
+  project: string,
+  label: string,
+  inputs: Record<string, string>,
+  extraEnv: Record<string, string> = {},
+): ProcedureRun {
+  const steps = markedSteps();
+  const inputsBlock = steps.find((step) => step.id === '1-inputs');
+  if (inputsBlock === undefined) throw new Error('the guide no longer marks its inputs block as restore-step-1-inputs');
+  const script = join(work, `reversal-${label}.sh`);
+  writeFileSync(script, `${inputsBlock.body}\n${markedReversal()}`);
+  chmodSync(script, 0o755);
+
+  const before = deploymentState(work, project);
+  const result = spawnSync('/bin/bash', [script], {
+    cwd: work,
+    env: controlledEnv({ ...inputs, ...extraEnv }),
+    encoding: 'utf8',
+    timeout: 900_000,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const after = deploymentState(work, project);
+
+  return {
+    label,
+    stepIds: ['1-inputs', 'reversal'],
     status: result.status ?? 1,
     output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
     persistedDbBefore: before.persistedDb,
@@ -359,6 +424,9 @@ describeIntegration('documented PostgreSQL restore procedure against a disposabl
   let project: string;
   let archive: string;
   let successRun: ProcedureRun;
+  let reversalRun: ProcedureRun;
+  let conflictRun: ProcedureRun;
+  let conflictReversalRun: ProcedureRun;
   let refusedRun: ProcedureRun;
   let badSqlRun: ProcedureRun;
   let invalidGzipRun: ProcedureRun;
@@ -385,8 +453,29 @@ describeIntegration('documented PostgreSQL restore procedure against a disposabl
       takeBackup(work, project, archive);
       writeNewerRows(work, project);
 
-      // AC-1, AC-8: the documented procedure over a snapshot that is behind the live database.
+      // AC-1, AC-8: the documented procedure over a snapshot that is behind the live database. It ends on the
+      // restored database; the reversal is a separate script and is run as one, below.
       successRun = runProcedure(work, project, 'success', procedureInputs(work, project, archive, RESTORED_DB));
+      reversalRun = runReversal(work, project, 'reversal', procedureInputs(work, project, archive, RESTORED_DB));
+
+      // AC-12: the same procedure from a shell that exports its own POSTGRES_DB. Compose gives the process
+      // environment precedence over --env-file, so without the procedure's guard this cutover would leave the
+      // synthetic client reading the original database while the environment file names the restored one.
+      conflictRun = runProcedure(
+        work,
+        project,
+        'inherited-postgres-db',
+        procedureInputs(work, project, archive, CONFLICT_DB),
+        { POSTGRES_DB: ORIGINAL_DB },
+      );
+      // Back to the original database through the documented reversal, so the cases below start where the
+      // fixture started: this deployment serving ORIGINAL_DB.
+      conflictReversalRun = runReversal(
+        work,
+        project,
+        'inherited-postgres-db',
+        procedureInputs(work, project, archive, CONFLICT_DB),
+      );
 
       // AC-2, AC-3: a target that already exists, holding a row of its own.
       psqlIn(work, project, 'postgres', `create database ${REFUSED_DB};`);
@@ -527,15 +616,40 @@ describeIntegration('documented PostgreSQL restore procedure against a disposabl
     ).toBe('1,after\n2,new');
   });
 
-  it('AC-8: cutover makes the synthetic client read the restored database, and reversal the original one', () => {
+  it('AC-8: a successful restore ends on the restored database, and only the separate reversal leaves it', () => {
     expect(successRun.status).toBe(0);
-    // Exactly two starts: the containers recreated for the cutover, then the containers recreated for the
-    // reversal. Nothing else started the writer.
-    expect(successRun.writerLinesAdded).toEqual([
-      `start db=${RESTORED_DB} rows=before`,
-      `start db=${ORIGINAL_DB} rows=after,new`,
-    ]);
-    expect(successRun.writerStartsAdded).toBe(2);
+    // The procedure's script is steps 1-5: the reversal is not part of it, so nothing undoes the cutover.
+    expect(successRun.stepIds).toEqual(EXPECTED_STEP_IDS);
+    expect(successRun.persistedDbBefore).toBe(ORIGINAL_DB);
+    expect(successRun.persistedDbAfter).toBe(RESTORED_DB);
+    // Exactly one start: the containers the cutover recreated, reading the backup's own row.
+    expect(successRun.writerLinesAdded).toEqual([`start db=${RESTORED_DB} rows=before`]);
+    expect(successRun.writerStartsAdded).toBe(1);
+  });
+
+  it('AC-8: the separately invoked reversal returns the deployment to the retained original database', () => {
+    expect(reversalRun.status).toBe(0);
+    expect(reversalRun.persistedDbBefore).toBe(RESTORED_DB);
+    expect(reversalRun.persistedDbAfter).toBe(ORIGINAL_DB);
+    // The recreated client reads the newer rows: the original database kept everything the restore did not
+    // touch, which is what makes it a fallback.
+    expect(reversalRun.writerLinesAdded).toEqual([`start db=${ORIGINAL_DB} rows=after,new`]);
+    expect(reversalRun.writerStartsAdded).toBe(1);
+  });
+
+  it('AC-12: a POSTGRES_DB exported by the operator shell does not decide the database the deployment selects', () => {
+    // The procedure ran with POSTGRES_DB=ORIGINAL_DB exported and the environment file naming CONFLICT_DB, which
+    // is the case Compose resolves in favour of the shell unless the procedure removes it.
+    expect(conflictRun.stepIds).toEqual(EXPECTED_STEP_IDS);
+    expect(conflictRun.status).toBe(0);
+    expect(conflictRun.persistedDbAfter).toBe(CONFLICT_DB);
+    // The recreated client read the restored row: Compose resolved the environment file's database, not the
+    // exported one, which would have read 'after,new' from the retained original database.
+    expect(conflictRun.writerLinesAdded).toEqual([`start db=${CONFLICT_DB} rows=before`]);
+
+    // The fixture is on the original database again for the cases below, through the documented reversal.
+    expect(conflictReversalRun.status).toBe(0);
+    expect(conflictReversalRun.persistedDbAfter).toBe(ORIGINAL_DB);
   });
 
   it('AC-9: an incorrect expected row baseline exits nonzero and keeps the original database selected', () => {
