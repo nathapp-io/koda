@@ -60,8 +60,31 @@ describe('backup-db.sh', () => {
     expect(DEFAULT_PG_DUMP.split('\n')).toContain(DUMP_COMPLETE_LINE);
     const files = dbDumpFiles(run.dir);
     expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^koda-db-\d{8}-\d{6}-\d+\.sql\.gz$/);
     const decompressed = gunzipSync(readFileSync(join(run.dir, 'backups', String(files[0]))));
     expect(decompressed.toString('utf8')).toBe(DEFAULT_PG_DUMP);
+  });
+
+  it('AC-1: two backups taken in the same second use different artefact names', () => {
+    // Both runs see the same clock, so only a per-run component keeps their files apart (F1).
+    const clock = '20260101-000000';
+    const first = runDeployScript('backup-db.sh', [], { env: { KODA_DEPLOY_HARNESS_DATE: clock } });
+    const second = runDeployScript('backup-db.sh', [], { env: { KODA_DEPLOY_HARNESS_DATE: clock } });
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(dbDumpFiles(first.dir)).toHaveLength(1);
+    expect(dbDumpFiles(second.dir)).toHaveLength(1);
+    expect(dbDumpFiles(first.dir)[0]).not.toBe(dbDumpFiles(second.dir)[0]);
+
+    const archiveCommands = [first, second].map(
+      (run) =>
+        run.dockerCalls
+          .flatMap((call) => call.argv)
+          .find((argument) => argument.startsWith('tar -czf')) ?? '',
+    );
+    expect(archiveCommands[0]).toContain(`koda_data-${clock}-`);
+    expect(archiveCommands[0]).not.toBe(archiveCommands[1]);
   });
 
   it('AC-4: archives the data volume through the project api service with the exact argv', () => {
@@ -73,7 +96,7 @@ describe('backup-db.sh', () => {
     expect(archiveCall).toBeDefined();
 
     const tarCommand = (archiveCall?.argv ?? []).find((argument) => argument.startsWith('tar -czf'));
-    const stamp = /^tar -czf \/backup\/koda_data-(\d{8}-\d{6})\.tar\.gz -C \/data \.$/.exec(
+    const stamp = /^tar -czf \/backup\/koda_data-(\d{8}-\d{6}-\d+)\.tar\.gz -C \/data \.$/.exec(
       tarCommand ?? '',
     )?.[1];
     if (stamp === undefined) throw new Error(`unexpected archive command: ${tarCommand}`);

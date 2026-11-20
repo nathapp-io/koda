@@ -4,7 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 BACKUP_DIR="$SCRIPT_DIR/backups"
-TS="$(date +%Y%m%d-%H%M%S)"
+# The stamp keeps the date-time ordering, and the pid makes each run's files its own: two backups started
+# in the same second must not write the same dump, and one run's failure cleanup must not delete the
+# other's file (F1).
+TS="$(date +%Y%m%d-%H%M%S)-$$"
 DB_BACKUP_FILE="$BACKUP_DIR/koda-db-$TS.sql.gz"
 DB_CHECK_FILE="$BACKUP_DIR/.koda-db-$TS.check"
 DATA_BACKUP_NAME="koda_data-$TS.tar.gz"

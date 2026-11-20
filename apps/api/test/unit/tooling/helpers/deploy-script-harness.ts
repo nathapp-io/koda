@@ -21,9 +21,10 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
  * Runs the example deployment scripts (`deployments/example/*.sh`) against recording stubs, so the
  * deploy behaviour can be asserted without Docker.
  *
- * A run copies `deployments/example/` into a fresh temp dir (Android `dir`), puts a recording `docker`
- * stub, a `curl` stub and a `bash` shim first on `PATH`, and runs `/bin/bash <dir>/<script> ...args`
- * with an environment built from `PATH` and `HOME` only, plus `opts.env`: an operator's exported
+ * A run copies `deployments/example/` into a fresh temp dir (the run's `dir`), puts a recording `docker`
+ * stub, a `curl` stub, a pin-able `date` shim (`KODA_DEPLOY_HARNESS_DATE`, set through `opts.env`) and a
+ * `bash` shim first on `PATH`, and runs `/bin/bash <dir>/<script> ...args` with an environment built from
+ * `PATH` and `HOME` only, plus `opts.env`: an operator's exported
  * `POSTGRES_PASSWORD`, `KODA_VERSION`, `DATABASE_URL` or `COMPOSE_PROJECT_NAME` never reaches the
  * script. The `bash` shim execs `/bin/bash`, so a script that `deploy.sh` runs through its
  * `#!/usr/bin/env bash` line also runs under the host bash (3.2 on macOS), like the script under test.
@@ -148,6 +149,7 @@ export function runDeployScript(
   writeFileSync(pgDumpFile, opts.docker?.pgDump ?? DEFAULT_PG_DUMP);
 
   writeExecutable(join(binDir, 'docker'), readFileSync(join(STUB_DIR, 'docker'), 'utf8'));
+  writeExecutable(join(binDir, 'date'), readFileSync(join(STUB_DIR, 'date'), 'utf8'));
   writeExecutable(join(binDir, 'curl'), CURL_STUB);
   writeExecutable(join(binDir, 'bash'), BASH_SHIM);
 
