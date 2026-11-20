@@ -3,7 +3,7 @@
   "feature": "review-1120-api-cli-web",
   "branchName": "feat/review-1120-api-cli-web",
   "createdAt": "2026-11-20T08:04:00.317Z",
-  "updatedAt": "2026-11-20T08:47:36.987Z",
+  "updatedAt": "2026-11-20T09:02:37.300Z",
   "userStories": [
     {
       "id": "US-001",
@@ -303,14 +303,17 @@
         "repo-selection"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "A new shared helper must be wired into seven independently mounted chooser modules; no access or credential semantics change."
+        "reasoning": "A new shared helper must be wired into seven independently mounted chooser modules; no access or credential semantics change.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/fleet-types.ts",
@@ -385,7 +388,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7e13448ea30444e8cf30d113a42e67d91639f9c9"
     },
     {
       "id": "US-006",
