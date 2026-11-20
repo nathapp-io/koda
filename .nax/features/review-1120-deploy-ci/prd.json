@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T02:33:55.236Z",
+  "updatedAt": "2026-11-20T02:45:38.995Z",
   "userStories": [
     {
       "id": "US-001",
@@ -25,14 +25,17 @@
         "bugfix"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized filter and path wiring with shell-execution and configuration regression tests."
+        "reasoning": "Localized filter and path wiring with shell-execution and configuration regression tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         ".github/workflows/ci.yml",
@@ -48,7 +51,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "22680185767a2c27b7f3550602eb80e0a58d1855"
     },
     {
       "id": "US-002",
@@ -97,7 +104,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -150,7 +160,10 @@
         }
       ],
       "workdir": ".",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -206,7 +219,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -256,7 +272,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -310,7 +329,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -360,7 +382,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -417,7 +442,10 @@
         }
       ],
       "workdir": ".",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This is a brownfield operations hardening feature for Koda's Bun/Turborepo monorepo, not a change to application APIs, generated SDK code, or the database schema. The review anchors are docs/20261120-review-whole-repo-consolidated.md:53 (K1), :61 (K3), :69 (K4), :77 (K5), :85 (K6), :93 (K20), :111 (K7), :119 (K8), and :127 (K19); N1 is the separately grounded BSD sed failure. Codebase findings were checked by direct reads and text search (no codebase-memory tool was available).\n\nCI: .github/workflows/ci.yml:5-22 limits main pushes but intentionally triggers all main-targeted PRs so required checks report. The changes job output (ci.yml:43-44) gates quality (:77-79), tests (:145-148), integration shards (:191-194), smoke (:521-524), and other jobs. The filter (ci.yml:51-68) passes base/head/event through env, uses the early push return, logs paths, and incorrectly treats a successful early grep as a false condition if printf gets SIGPIPE under pipefail. A here-string preserves early matching without a pipe writer; keep the anchored exact-file alternatives and push patterns in sync without changing required-check names, the integration job, or docs-only behavior. openapi-ts.config.ts:3-18 determines CLI SDK output and request behavior, and package.json:21 wires it into generate:cli, run by both CI (ci.yml:179-183) and release (.github/workflows/release.yml:138-140).\n\nCache and test discovery: CI runs turbo test (.github/workflows/ci.yml:182-183); root package.json:13 and :34 identify the workspace test command and Turbo 2.11.4. Root turbo.json:3-10 and :20-24 don't track the required root file set for the API test and define inherited dependsOn, env, and outputs. No apps/api/turbo.json exists yet. A package-local inputs override keeps defaults and affects only the API test task, avoiding a cache bypass or global invalidation. US-001 ensures the job runs; US-003 ensures a tooling-only change doesn't replay a stale green. apps/api/package.json:12 excludes integration/e2e from the default Vitest run; apps/api/vitest.config.ts:28 and :65 include unit tooling specs. apps/api/test/unit/tooling/ci-integration-shards.spec.ts:4-14 is the existing workflow text-slice precedent and does not read either modified step. There is no existing deploy-shell test harness. Extract workflow bodies and run them under /bin/bash -e with recording stubs; slice workflow text only for wiring assertions. Test scripts with real host bash/gzip/tar and fake Docker/curl; no actual DB, Docker, GitHub, or registry required. Ensure large fixtures travel via file/stdout rather than a process argument or environment variable. Verify 3.2 behavior explicitly, especially inherited shell shims, strict mode, and read-to-EOF pipelines.\n\nRelease: .github/workflows/release.yml:3-12 supports pushes and dispatch of existing tags; :34-75 validates the tag, then checks out the historical tag and checks package.json. :77-91 currently promotes every stable build, while :49-57 chooses npm's channel without checking newer versions. The consumers are npm publish (:145-152), API and web build/push (:186 and :228), and the GitHub Release action (:242-254). Keep tag/version validation, pinned actions, prerequisites, prerelease and notification behavior, tag checkout, and the already-published npm skip (:116-128) intact. Inline rules run from the current workflow even on a historical checkout; remote origin refs, not the shallow checkout's local tags or version text sorting, determine channel eligibility. Exact stable re-publishes remain supported; canary behavior is unchanged; stable backports still get version tags and a usable dist-tag without moving newer aliases. A remote listing failure must fail info before publishing. This rule compares a snapshot of remote tags; publication-time coordination across simultaneous release runs and repair of existing pointers are not part of the specified change. No registry or GitHub data migration is needed.\n\nCompose: docker-compose.yml:20-37 and deployments/example/docker-compose.yml:11-24 explicitly map API environment variables and mount koda_data at /data; both keep the bundled database URL. apps/api/src/config/webhook-signature.config.ts:24-28 defines the defaults, tested by apps/api/src/config/webhook-signature.config.spec.ts:25-46; consumers are the outbound handler (apps/api/src/webhook/webhook-delivery.handler.ts:41-50) and inbound CI controller (apps/api/src/ci-webhook/ci-webhook.controller.ts:76-79). Add only the two environment mappings, not signature implementation changes. Defaults preserve compatibility; operators who already set non-default values will see their settings take effect when API containers are recreated. The compatibility/rollout warning in docs/deployment/webhooks.md:29-36 remains relevant, especially checking sender readiness before requiring v2. Review YAML and the test input override without rendering Compose in the sandbox.\n\nDeployment: deployments/example/docker-compose.yml:1, :5, :24, and :36-49 show the default project name, version interpolation, project-local /data mount and health-checked Postgres with its own persistent volume. apps/api/Dockerfile:4, :108-118, and :138 show the Alpine runtime lineage, shipped runtime files and non-root user; the example deploy already uses a root API one-off for volume ownership (deployments/example/deploy.sh:106-110). Compose one-offs replace literal volume names so normal Compose project selection, including COMPOSE_PROJECT_NAME, consistently scopes the data; keep the API entrypoint overridden and no-deps for archive work. A usable target API image is needed for the data archive/restore; backup intentionally needs Compose wait support and leaves Postgres running, including on first install. The old backup skip branch and hardcoded archive volume are in deployments/example/backup-db.sh:18-40. Preserve backup names and formats, verify the output stream completely and remove a failed dump so migration never mistakes it for a recovery point. The caller uses set -e and invokes the executable backup before its image pull/migration (deployments/example/deploy.sh:1-8, :90-115), so failed-backup gating is a regression test, not a backup call-site rewrite. Keep the explicit --no-backup escape hatch.\n\nRollback baseline (deployments/example/rollback.sh:45-86) stops before validation, uses a hardcoded volume and GNU sed syntax, then pulls and starts. Preflight moves archive and target-pull failures before service disruption; archive listing checks readability/format but is not a transactional restore or a guarantee against later I/O errors. Keep target image selection explicit for pull and restore, treat the archive basename as a literal shell argument/value when composing the in-container command, and keep .env replacement on the same filesystem with its existing mode so publishing the new version is portable and doesn't expose an existing private env file. Stub tests verify command order/arguments and local file effects; they do not run the image's BusyBox tools. Use operator-created backup archives; SQL restore remains manual. No volume renames or automated schema downgrade are required; operators using a custom project should back up and restore under that same project.\n\nAdoption and docs: deployments/example/deploy.sh:38-84 is the read-without-sourcing password guard precedent. deployments/example/docker-compose.yml:11-16 sets DATABASE_URL directly, so the old advice in deployments/example/README.md:116-123 and docs/deployment/postgresql.md:75-76 never configured this script-managed stack. Remove stale DATABASE_URL assignments from the example .env before deploying; an exported development-shell URL alone remains allowed. Keep README secret examples at :28-30 because apps/api/src/config/env.validation.spec.ts:120-127 reads them; preserve the manual SQL recovery instructions at deployments/example/README.md:94-98. scripts/seed.sh:20 assumes a container name Compose doesn't create and a source seed file absent from the runtime image. Repo search found only the script itself and the historical review reference (docs/20261120-review-whole-repo-consolidated.md:93-95), not operator instructions or a caller. The bootstrap admin path remains (apps/api/src/config/auth.config.ts:13-18); apps/api/package.json:29 and its Prisma seed source remain for development/e2e.\n\nOrder: US-001, US-002, US-003, and US-004 may start independently; US-004 provides the shared isolated helper and verified backup for US-005 and US-007; US-006 builds on US-005 and consumes the helper transitively; US-008 follows all four deployment stories to document shipped behavior. Coordinate merges for the shared rollback file. US-003 and US-008 are review-only per spec. Feature completion means the eight story behaviors are evidenced by executable regressions or explicit config/docs review, not by altering separate whole-repo review features.",
