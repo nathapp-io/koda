@@ -3,7 +3,7 @@
   "feature": "review-1120-api-cli-web",
   "branchName": "feat/review-1120-api-cli-web",
   "createdAt": "2026-11-20T08:04:00.317Z",
-  "updatedAt": "2026-11-20T08:34:09.729Z",
+  "updatedAt": "2026-11-20T08:39:39.670Z",
   "userStories": [
     {
       "id": "US-001",
@@ -110,14 +110,17 @@
         "pr-rulings"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized Prisma predicate change with integration coverage for ordering and the existing ruling caller."
+        "reasoning": "Localized Prisma predicate change with integration coverage for ordering and the existing ruling caller.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
@@ -142,7 +145,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6008a402f2f60f9e06da496e84fd582498fda5a5"
     },
     {
       "id": "US-003",
