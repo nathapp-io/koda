@@ -170,4 +170,34 @@ describe('rollback.sh preflight', () => {
       ]);
     }
   });
+
+  it('B1: refuses a Compose project name that follows KODA_VERSION before any docker call', () => {
+    // `stop` runs under the version `.env` holds and the restore under the target, so a project name built
+    // from KODA_VERSION would stop one project and restore into another (review B1).
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchiveFixture()], {
+      envFile: 'POSTGRES_PASSWORD=pw\nKODA_VERSION=v0.4.2\nCOMPOSE_PROJECT_NAME=koda-${KODA_VERSION}\n',
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.output).toContain('depends on KODA_VERSION');
+    expect(run.dockerCalls).toEqual([]);
+  });
+
+  it('B1: refuses a version-dependent project name inherited from the shell', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], {
+      env: { COMPOSE_PROJECT_NAME: 'koda-$KODA_VERSION' },
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.dockerCalls).toEqual([]);
+  });
+
+  it('B1: still rolls back a version-independent Compose project name', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], {
+      envFile: 'POSTGRES_PASSWORD=pw\nCOMPOSE_PROJECT_NAME=koda-staging\n',
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.dockerCalls.some((call) => call.argv.includes('pull'))).toBe(true);
+  });
 });

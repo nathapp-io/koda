@@ -31,19 +31,22 @@ afterEach(() => { rmSync(tempRoot, { recursive: true, force: true }); });
 
 function runFilter(event: string, paths: string[]) {
   const bin = join(tempRoot, 'bin');
-  mkdirSync(bin);
+  mkdirSync(bin, { recursive: true });
   const calls = join(tempRoot, 'git-calls');
   const pathFile = join(tempRoot, 'paths');
+  const pathFileZ = join(tempRoot, 'paths-z');
   writeFileSync(pathFile, paths.join('\n') + (paths.length ? '\n' : ''));
-  // `git diff --name-only` C-quotes a path that is not printable ASCII (`"deployments/caf\303\251.sh"`);
-  // with `-z` it emits the raw path, NUL-terminated. The stub does both, like git (review B7).
+  // `git diff --name-only -z` emits each raw path NUL-terminated, so a path may hold any byte, a newline and
+  // non-ASCII included. `git diff --name-only` C-quotes such a path (`"deployments/caf\303\251.sh"`, and a
+  // newline becomes `\n`); the stub does both, like git (review B7).
+  writeFileSync(pathFileZ, paths.map((path) => `${path}\0`).join(''));
   writeFileSync(
     join(bin, 'git'),
     [
       '#!/bin/bash',
       `echo called >> '${calls}'`,
       'case " $* " in',
-      `  *" -z "*) tr '\\n' '\\0' < '${pathFile}' ;;`,
+      `  *" -z "*) cat '${pathFileZ}' ;;`,
       '  *)',
       `    while IFS= read -r path; do`,
       `      case "$path" in`,
@@ -60,6 +63,7 @@ function runFilter(event: string, paths: string[]) {
   const script = join(tempRoot, 'filter.sh');
   writeFileSync(script, body);
   const output = join(tempRoot, 'github-output');
+  writeFileSync(output, '');
   execFileSync('/bin/bash', ['-e', script], {
     env: { PATH: `${bin}:${process.env.PATH}`, GITHUB_OUTPUT: output, EVENT_NAME: event, BASE_SHA: 'base', HEAD_SHA: 'head' },
   });
@@ -97,6 +101,15 @@ describe('CI change filter workflow step', () => {
     // `git diff --name-only` prints `"deployments/caf\303\251.sh"`, which matches no path pattern, so the
     // filter must read the raw NUL-separated listing (review B7).
     expect(runFilter('pull_request', ['deployments/café.sh']).output).toBe('code=true');
+  });
+
+  it('matches each NUL-delimited path whole when a name contains a newline', () => {
+    // Git reported ONE path. Turning the NUL list into a newline list would split it into `docs/note` and
+    // `apps/a.ts`, and the second fragment would count the PR as a code change (review B7).
+    expect(runFilter('pull_request', ['docs/note\napps/a.ts']).output).toBe('code=false');
+    expect(runFilter('pull_request', ['docs/note\napps/a.ts\napps/b.ts']).output).toBe('code=false');
+    // A real code path that merely contains a newline still counts.
+    expect(runFilter('pull_request', ['apps/a.ts\nREADME.md']).output).toBe('code=true');
   });
 
   it('pushes write code=true without invoking git', () => {

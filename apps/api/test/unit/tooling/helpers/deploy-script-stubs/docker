@@ -11,7 +11,14 @@
 #
 # The call then fails (exit 1) when its argv, joined with spaces and with every occurrence of the per-test
 # temp dir removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. A pg_dump call exits with
-# $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT; anything else succeeds silently.
+# $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT.
+#
+# A `compose run … -c <script> <arg>…` call that passes positional arguments is a restore pipeline, and the
+# stub really runs it on the host: `/data` is bound to the fake volume $KODA_DEPLOY_HARNESS_VOLUME and
+# `/backup` to the host directory the call mounts, with the trailing arguments as the command's `$@`, exactly
+# like `docker compose run … api -c '<script>' koda-restore <archive>`. A test can then assert the files a
+# restore leaves in the volume, not only the arguments it passed (review B12, B13). The call exits with the
+# command's own status. Every other call succeeds silently (the pg_dump and archive cases below decide first).
 #
 # It must stay bash 3.2 portable: macOS /bin/bash runs it in the suite.
 
@@ -61,5 +68,40 @@ case "$joined" in
     exit "${KODA_DEPLOY_HARNESS_PG_DUMP_EXIT:-0}"
     ;;
 esac
+
+# Restore pipeline: `run … -c <script> <positional args…>`.
+args=( "$@" )
+command_index=-1
+mount_spec=""
+index=0
+while [[ "$index" -lt "${#args[@]}" ]]; do
+  case "${args[$index]}" in
+    -v)
+      index=$((index + 1))
+      mount_spec="${args[$index]-}"
+      ;;
+    -c)
+      index=$((index + 1))
+      command_index=$index
+      ;;
+  esac
+  index=$((index + 1))
+done
+
+if [[ "$command_index" -ge 0 && "$command_index" -lt "$(( ${#args[@]} - 1 ))" ]]; then
+  command="${args[$command_index]}"
+  volume="${KODA_DEPLOY_HARNESS_VOLUME:?the harness must set KODA_DEPLOY_HARNESS_VOLUME}"
+  positional=( "${args[@]:$((command_index + 1))}" )
+  # Bind the container paths to the host directories, and run the command with the trailing arguments as
+  # its `$@`, so `$1` is what the archive argument was.
+  if [[ -n "$mount_spec" ]]; then
+    mount_source="${mount_spec%%:*}"
+    translated="$(printf '%s' "$command" | sed -e "s#/backup#$mount_source#g" -e "s#/data#$volume#g")"
+  else
+    translated="$(printf '%s' "$command" | sed -e "s#/data#$volume#g")"
+  fi
+  ( cd "${KODA_DEPLOY_HARNESS_DIR:?}" && /bin/sh -c "$translated" "${positional[@]}" )
+  exit "$?"
+fi
 
 exit 0

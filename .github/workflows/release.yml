@@ -22,6 +22,15 @@ permissions: {}
 # the npm dist-tags and the GitHub latest flag back to itself. Queueing (not cancelling) keeps a release that a
 # tag push arrived next to, instead of dropping it; it also keeps immutable tag builds from running beside a
 # publishing run.
+#
+# A concurrency group holds one running run and ONE pending run — Actions replaces the pending one — so a third
+# release request that arrives while both slots are taken is cancelled before it publishes (review B11). GitHub
+# has no deeper, non-replacing queue to ask for, so that run is recovered by requesting the release again, which
+# is the documented re-publish path: Actions -> Release -> "Run workflow" with its tag, or
+# `gh workflow run release.yml -f tag=v0.4.3`. A cancelled run published nothing, and a repeated request
+# converges, because publishing a tag that is already out is idempotent (npm skips a version that exists,
+# Docker pushes the same tag again). To avoid the third-slot case, let the previous release finish, approvals
+# included, before requesting the next one.
 concurrency:
   group: release-publish
   cancel-in-progress: false

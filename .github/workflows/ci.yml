@@ -65,19 +65,24 @@ jobs:
           # `-z` keeps the paths Git's raw bytes: without it Git C-quotes a non-ASCII path
           # ("deployments/caf\303\251.sh"), which no path pattern matches, so a deployment-only PR would
           # count as no change (review B7). The listing goes to a file first so a Git failure is the step's
-          # failure and the NUL bytes survive; the newline copy below feeds `grep` from a regular file, so
-          # no early-exiting reader can kill a writer with SIGPIPE (review K7).
+          # failure and the NUL bytes survive, and every record is matched on its own with a NUL delimiter:
+          # a path may legally contain a newline, and converting NULs to newlines would split one real path
+          # into fragments that match by accident (review B7). Reading a file (never a pipe into a
+          # early-exiting reader) also keeps the K7 SIGPIPE hazard closed, and `[[ =~ ]]` matches per
+          # string, not per line, so a fragment can never be mistaken for a changed path.
           changed_list=$(mktemp)
-          changed_names=$(mktemp)
-          trap 'rm -f "$changed_list" "$changed_names"' EXIT
+          trap 'rm -f "$changed_list"' EXIT
           git diff --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_list"
-          tr '\0' '\n' < "$changed_list" > "$changed_names"
           printf 'Changed files:\n'
-          cat "$changed_names"
-          if grep -qE "$CODE_PATHS" "$changed_names"; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
+          code=false
+          while IFS= read -r -d '' changed_path; do
+            printf '%s\n' "$changed_path"
+            if [[ "$changed_path" =~ $CODE_PATHS ]]; then
+              code=true
+            fi
+          done < "$changed_list"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = false ]; then
             echo "No code changes: the other CI jobs are skipped."
           fi
 

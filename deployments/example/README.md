@@ -115,7 +115,11 @@ cd deployments/example
 
 Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz` (the gzip stream is checked explicitly, so a plain tar with a `.tar.gz` name is refused), then pulls the target images. If either preflight check fails, the running services are left untouched. A stop that cannot be confirmed also aborts before any data is replaced.
 
-The archive is copied to a staging directory next to the scripts and mounted from there, so a backup that is a symlink to a file outside its own directory still restores. The restore itself extracts the archive inside the target `api` container before it changes `/data`, and the current volume content is moved aside until the restored content is in place.
+The archive is copied to a staging directory next to the scripts and mounted from there, so a backup that is a symlink to a file outside its own directory still restores. The restore extracts the archive **once**, into a staging directory on the data volume itself: a backup that fits on the volume therefore does not also need room in Docker's storage, and the swap into `/data` only starts after that extraction has succeeded. Every top-level entry of the volume — dotfiles, names with two leading dots and symlinks whose target is gone included — is moved aside until the restored content is in place.
+
+If a restore is interrupted after it moved the old content aside, `/data/.koda-restore-previous` holds the only copy. The next run refuses to continue rather than delete it and prints how to put that content back, so the rollback fails loudly instead of starting a restore over data that was never replaced.
+
+The Compose project name must not depend on `KODA_VERSION`: a rollback stops the services under the version `.env` holds and restores under the target one, so a project name such as `COMPOSE_PROJECT_NAME=koda-${KODA_VERSION}` would stop one project and restore into another. `rollback.sh` refuses such a name before it touches Docker. Pin a version-independent name (for example `COMPOSE_PROJECT_NAME=koda-staging`).
 
 ## Notes
 

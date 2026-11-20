@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript, type DockerCall } from './helpers/deploy-script-harness';
@@ -16,6 +26,26 @@ function validArchive(name = 'backup.tar.gz'): string {
   writeFileSync(join(root, 'data'), 'payload');
   const tar = spawnSync('tar', ['-czf', archive, '-C', root, 'data'], { encoding: 'utf8' });
   if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+  return archive;
+}
+/**
+ * A gzip tar that lists fine — `gzip -t` and `tar -tzf` both accept it — but whose extraction fails: it holds
+ * `a/b` as a file under a directory `a`, then `a` itself as a file, so creating the second entry cannot work.
+ * That is the "the archive does not extract" case the swap must survive (review B13).
+ */
+function unextractableArchive(name = 'conflicting.tar.gz'): string {
+  const first = fixtureRoot();
+  const second = fixtureRoot();
+  mkdirSync(join(first, 'a'));
+  writeFileSync(join(first, 'a', 'b'), 'nested');
+  writeFileSync(join(second, 'a'), 'flat');
+  const tarPath = join(fixtureRoot(), 'conflicting.tar');
+  const tar = spawnSync('tar', ['-cf', tarPath, '-C', first, 'a/b', '-C', second, 'a'], { encoding: 'utf8' });
+  if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+  const listed = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' });
+  if (listed.status !== 0) throw new Error(`the fixture must list: ${listed.stderr}`);
+  const archive = join(fixtureRoot(), name);
+  writeFileSync(archive, spawnSync('gzip', ['-c', tarPath]).stdout);
   return archive;
 }
 afterEach(() => cleanupDeployScriptRuns());
@@ -36,9 +66,13 @@ function mountSource(call: DockerCall): string {
 function envLines(run: { dir: string }): string[] {
   return readFileSync(join(run.dir, '.env'), 'utf8').split(/\r?\n/).filter(Boolean);
 }
+/** The fake data volume a restore really runs against (the `docker` stub executes the container command). */
+function volumeEntries(run: { dataDir: string }): string[] {
+  return readdirSync(run.dataDir).sort();
+}
 
 describe('rollback.sh restore and portable .env update', () => {
-  it('AC-1: verifies and restores between stop and restart after pull', () => {
+  it('AC-1: restores between stop and restart after pull', () => {
     const archive = validArchive();
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
     const indexes = [
@@ -49,11 +83,12 @@ describe('rollback.sh restore and portable .env update', () => {
     ];
     expect(indexes.every((index) => index >= 0)).toBe(true);
     expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
-    expect(restoreRuns(run.dockerCalls)).toHaveLength(2);
+    // One container run: the archive is extracted once, into staging on the target volume (review B13).
+    expect(restoreRuns(run.dockerCalls)).toHaveLength(1);
   });
   it('AC-2: installs the staged archive through the project api with the exact argv', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()]);
-    const install = restoreRuns(run.dockerCalls)[1];
+    const install = restoreRuns(run.dockerCalls)[0];
     const stage = mountSource(install);
     expect(install.argv.slice(0, 12)).toEqual([
       'compose', '-f', `${run.dir}/docker-compose.yml`, 'run', '--rm', '--no-deps', '--user', 'root',
@@ -62,18 +97,73 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(install.argv.slice(12, 14)).toEqual(['api', '-c']);
     expect(install.argv.slice(15)).toEqual(['koda-restore', 'koda-restore.tar.gz']);
   });
-  it('B2: extracts the staged archive inside the container before the install touches /data', () => {
+  it('B13: extracts once into staging on the volume before it moves anything', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()]);
-    const [check, install] = restoreRuns(run.dockerCalls);
+    const [install] = restoreRuns(run.dockerCalls);
+    const command = commandOf(install);
 
-    expect(mountSource(check)).toBe(mountSource(install));
-    expect(commandOf(check)).toContain('tar -xzf "/backup/$1"');
-    expect(commandOf(check)).not.toContain('/data');
     // The old data survives until the staged restore is in place: the extract goes to a staging directory
-    // in the volume and the current entries are moved aside, not deleted (review B2).
-    expect(commandOf(install)).toContain('/data/.koda-restore-staging');
-    expect(commandOf(install)).toContain('/data/.koda-restore-previous');
-    expect(commandOf(install)).not.toContain('find /data -mindepth 1 -delete');
+    // in the volume, never to the container's writable layer, and the current entries are moved aside
+    // rather than deleted (review B2, B13).
+    expect(command).toContain('stage=/data/.koda-restore-staging');
+    expect(command).toContain('tar -xzf "/backup/$1" -C "$stage"');
+    expect(command.indexOf('tar -xzf')).toBeLessThan(command.indexOf('mv "$entry" "$previous/"'));
+    expect(command).toContain('/data/.koda-restore-previous');
+    expect(command).not.toContain('/tmp');
+    expect(command).not.toContain('find /data -mindepth 1 -delete');
+  });
+  it('B13: leaves the current data in place when the extraction fails', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', unextractableArchive()], {
+      seedVolume: (dataDir) => writeFileSync(join(dataDir, 'keep.txt'), 'current data\n'),
+    });
+
+    expect(run.status).not.toBe(0);
+    // Nothing was moved aside, so the interrupted-restore directory does not exist either.
+    expect(volumeEntries(run)).toEqual(['keep.txt']);
+    expect(readFileSync(join(run.dataDir, 'keep.txt'), 'utf8')).toBe('current data\n');
+  });
+  it('B2: refuses to delete the data an interrupted restore moved aside', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      seedVolume: (dataDir) => {
+        mkdirSync(join(dataDir, '.koda-restore-previous'));
+        writeFileSync(join(dataDir, '.koda-restore-previous', 'keep.txt'), 'the only copy\n');
+        writeFileSync(join(dataDir, 'current.txt'), 'new data\n');
+      },
+    });
+
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('An earlier restore was interrupted');
+    // The recovery directory is the only remaining copy: it must survive, and the new archive must not be
+    // installed over it (review B2).
+    expect(readFileSync(join(run.dataDir, '.koda-restore-previous', 'keep.txt'), 'utf8')).toBe('the only copy\n');
+    expect(existsSync(join(run.dataDir, 'data'))).toBe(false);
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
+  });
+  it('B12: moves entries whose name begins with two dots and counts dangling symlinks as entries', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      seedVolume: (dataDir) => {
+        writeFileSync(join(dataDir, '..archive-notes'), 'two leading dots\n');
+        writeFileSync(join(dataDir, '.hidden'), 'dotfile\n');
+        symlinkSync(join(dataDir, 'already-gone'), join(dataDir, 'dangling'));
+      },
+    });
+
+    expect(run.status).toBe(0);
+    // The archive's own entry is installed, and every entry that was there before — including `..name` and a
+    // symlink whose target does not exist — went with the swap (review B12).
+    expect(volumeEntries(run)).toEqual(['data']);
+  });
+  it('B12: keeps a dangling symlink in the restored archive', () => {
+    const root = fixtureRoot();
+    symlinkSync(join(root, 'missing'), join(root, 'dangling'));
+    const archive = join(fixtureRoot(), 'with-symlink.tar.gz');
+    const tar = spawnSync('tar', ['-czf', archive, '-C', root, 'dangling'], { encoding: 'utf8' });
+    if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
+
+    expect(run.status).toBe(0);
+    expect(volumeEntries(run)).toEqual(['dangling']);
   });
   it('B2: stages a symlinked archive as a regular file instead of mounting only its directory', () => {
     const root = fixtureRoot();
@@ -89,13 +179,12 @@ describe('rollback.sh restore and portable .env update', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', link]);
 
     expect(run.status).toBe(0);
-    const [check, install] = restoreRuns(run.dockerCalls);
+    const [install] = restoreRuns(run.dockerCalls);
     // The container only sees the mounted directory, so mounting the directory that holds the symlink
     // would hide its target. The script copies the archive into a staging directory and mounts that.
-    const stage = mountSource(check);
+    const stage = mountSource(install);
     expect(stage).not.toBe(run.dir);
     expect(stage.startsWith(run.dir)).toBe(true);
-    expect(mountSource(install)).toBe(stage);
     expect(existsSync(stage)).toBe(false);
   });
   it('B3: never restores or restarts when the app services cannot be stopped', () => {
@@ -111,7 +200,7 @@ describe('rollback.sh restore and portable .env update', () => {
     const archive = validArchive('backup.tar.gz;id');
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
 
-    const install = restoreRuns(run.dockerCalls)[1];
+    const install = restoreRuns(run.dockerCalls)[0];
     expect(install.argv.slice(15)).toEqual(['koda-restore', 'koda-restore.tar.gz']);
     expect(commandOf(install)).not.toContain('backup.tar.gz;id');
     expect(run.dockerCalls.flatMap((call) => call.argv).some((argument) => argument.includes('backup.tar.gz;id'))).toBe(false);
@@ -162,6 +251,17 @@ describe('rollback.sh restore and portable .env update', () => {
       envFile: 'POSTGRES_PASSWORD=pw\nexport KODA_VERSION = v0.9.0\n',
     });
 
+    expect(envLines(run)).toEqual(['POSTGRES_PASSWORD=pw', 'KODA_VERSION=v0.4.1']);
+    expect(run.dockerCalls.find((call) => call.argv.includes('up'))?.kodaVersion).toBe('v0.4.1');
+  });
+  it('B6: rewrites a later colon-style version assignment with no shell override', () => {
+    // Compose accepts `KEY: value` in an environment file. A later assignment wins, so one left behind would
+    // undo the persisted target on the next deploy or rollback (review B6).
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], {
+      envFile: 'POSTGRES_PASSWORD=pw\nKODA_VERSION: v0.9.0\n',
+    });
+
+    expect(run.status).toBe(0);
     expect(envLines(run)).toEqual(['POSTGRES_PASSWORD=pw', 'KODA_VERSION=v0.4.1']);
     expect(run.dockerCalls.find((call) => call.argv.includes('up'))?.kodaVersion).toBe('v0.4.1');
   });

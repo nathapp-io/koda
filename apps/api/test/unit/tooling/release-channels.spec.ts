@@ -245,4 +245,15 @@ describe('release workflow channels', () => {
     expect(concurrencyBlock).not.toContain('${{');
     expect(workflow.slice(0, concurrencyStart)).not.toContain('concurrency:');
   });
+
+  it('B11: documents the one-pending-slot queue and how a cancelled release is recovered', () => {
+    // GitHub keeps one running run and ONE pending run per group, so a third request is cancelled before it
+    // publishes. That run cannot be replaced from the workflow (it never starts), so the comment must say so
+    // and name the recovery path (review B11).
+    const concurrencyStart = workflow.indexOf('\nconcurrency:');
+    const comment = workflow.slice(0, concurrencyStart);
+    expect(comment).toContain('ONE pending run');
+    expect(comment).toContain('workflow_dispatch');
+    expect(comment).toContain('gh workflow run release.yml');
+  });
 });

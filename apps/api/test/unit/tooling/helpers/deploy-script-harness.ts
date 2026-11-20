@@ -29,6 +29,12 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
  * `POSTGRES_PASSWORD`, `KODA_VERSION`, `DATABASE_URL` or `COMPOSE_PROJECT_NAME` never reaches the
  * script. The `bash` shim execs `/bin/bash`, so a script that `deploy.sh` runs through its
  * `#!/usr/bin/env bash` line also runs under the host bash (3.2 on macOS), like the script under test.
+ *
+ * The stub does not only record: a `compose run … -c <script> <args…>` call (how a restore pipeline reaches
+ * the volume) really executes that command on the host with `/data` bound to a fake volume under the run
+ * directory and `/backup` bound to the host directory the call mounts. `opts.seedVolume` populates that
+ * volume before the script starts and `run.dataDir` exposes it afterwards, so a test can assert the files a
+ * restore leaves behind instead of only the arguments it passed.
  */
 
 export interface DockerCall {
@@ -51,6 +57,12 @@ export interface ScriptRun {
   dockerCalls: DockerCall[];
   /** The temp copy of `deployments/example`, real path, as the script's own `SCRIPT_DIR`. */
   dir: string;
+  /**
+   * The fake `koda_data` volume. A `compose run … -c <script> <args…>` call (a restore pipeline) really
+   * executes its command on the host with `/data` bound here and `/backup` bound to the directory the call
+   * mounts, so a test can assert the files a restore leaves behind (review B12, B13).
+   */
+  dataDir: string;
 }
 
 /** A complete `pg_dump` output: the last comment line is what `backup-db.sh` verifies. */
@@ -135,7 +147,14 @@ function placeFixtureArguments(dir: string, args: string[]): string[] {
 export function runDeployScript(
   script: 'backup-db.sh' | 'rollback.sh' | 'deploy.sh',
   args: string[],
-  opts: { envFile?: string; envFileMode?: number; env?: Record<string, string>; docker?: StubBehaviour } = {},
+  opts: {
+    envFile?: string;
+    envFileMode?: number;
+    env?: Record<string, string>;
+    docker?: StubBehaviour;
+    /** Populates the fake `koda_data` volume before the script starts, i.e. the data a rollback replaces. */
+    seedVolume?: (dataDir: string) => void;
+  } = {},
 ): ScriptRun {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'koda-deploy-script-')));
   createdDirs.push(dir);
@@ -143,7 +162,10 @@ export function runDeployScript(
 
   const harnessDir = join(dir, '.harness');
   const binDir = join(harnessDir, 'bin');
+  const dataDir = join(harnessDir, 'volume');
   mkdirSync(binDir, { recursive: true });
+  mkdirSync(dataDir, { recursive: true });
+  opts.seedVolume?.(dataDir);
 
   const recordFile = join(harnessDir, 'docker-calls');
   const outputFile = join(harnessDir, 'output');
@@ -169,6 +191,7 @@ export function runDeployScript(
     HOME: process.env.HOME ?? dir,
     KODA_DEPLOY_HARNESS_RECORD: recordFile,
     KODA_DEPLOY_HARNESS_DIR: dir,
+    KODA_DEPLOY_HARNESS_VOLUME: dataDir,
     KODA_DEPLOY_HARNESS_PG_DUMP: pgDumpFile,
     KODA_DEPLOY_HARNESS_PG_DUMP_EXIT: String(opts.docker?.pgDumpExit ?? 0),
     KODA_DEPLOY_HARNESS_FAIL_ON: (opts.docker?.failOn ?? []).join('\n'),
@@ -194,6 +217,7 @@ export function runDeployScript(
     output: readFileSync(outputFile, 'utf8'),
     dockerCalls: readDockerCalls(recordFile),
     dir,
+    dataDir,
   };
 }
 
