@@ -28,7 +28,15 @@ const DEVELOPER: Keys = ['fleet.schedule.create', 'fleet.schedule.update.own']
 const VIEWER: Keys = []
 const ADMIN: Keys = ['fleet.schedule.update', 'fleet.schedule.delete']
 
-function mountList(rows: ScheduleDto[], role: Keys, get?: jest.Mock) {
+/** The repos the page's dispatch options report unless a test supplies its own. */
+const REPOS = [{ id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com' }]
+/** US-005: one owner/name on two forges. */
+const TWO_HOST_REPOS = [
+  { id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com' },
+  { id: 'r2', owner: 'acme', name: 'app', host: 'https://gitlab.example.com' },
+]
+
+function mountList(rows: ScheduleDto[], role: Keys, get?: jest.Mock, repos: Array<Record<string, unknown>> = REPOS) {
   const api = {
     get: get ?? jest.fn(async () => rows),
     post: jest.fn(async (p: string) => schedule('a', { enabled: !p.endsWith('/disable') })),
@@ -56,7 +64,7 @@ function mountList(rows: ScheduleDto[], role: Keys, get?: jest.Mock) {
       useAuth: () => ({ user: ref({ id: 'owner' }) }),
       useProjectPermissions: () => projectPermissionsStub(role),
       useFleetDispatchOptions: () => ({
-        repos: ref([{ id: 'r1', owner: 'acme', name: 'app' }]), runners: ref([]),
+        repos: ref(repos), runners: ref([]),
         repoName: (id: string) => (id === 'r1' ? 'acme/app' : id), runnerName: (id: string | null) => id,
         profileOptions: ref([]), labelOptions: ref([]), load: async () => undefined,
       }),
@@ -179,5 +187,25 @@ describe('Schedules list page (behaviour)', () => {
     expect(source).toContain('onFleetJob: () => liveReload.trigger()')
     expect(source).toContain('onResync: () => liveReload.trigger()')
     expect(source).toContain(':key="editing?.id ?? \'new\'"')
+  })
+})
+
+/**
+ * US-005 AC-10 (K9): the schedule form is handed the repo choices, so two repos sharing `owner/name`
+ * reach it as distinct labels. The dialog stub declares no `repoOptions` prop, so the page's binding
+ * arrives as the stub's `repo-options` attribute — exactly what the real dialog receives.
+ */
+describe('US-005 AC-10: the schedule form repo choices', () => {
+  test('AC-10: a shared owner/name is labelled with its host', async () => {
+    const m = mountList(ROWS, DEVELOPER, undefined, TWO_HOST_REPOS)
+    await m.settle()
+
+    const dialog = m.app.one('[data-stub="fleet-schedule-edit-dialog"]')
+    expect(dialog).toBeDefined()
+    expect(dialog?.props['repo-options']).toEqual([
+      { value: 'r1', label: 'acme/app (gitlab.com)' },
+      { value: 'r2', label: 'acme/app (gitlab.example.com)' },
+    ])
+    m.app.unmount()
   })
 })

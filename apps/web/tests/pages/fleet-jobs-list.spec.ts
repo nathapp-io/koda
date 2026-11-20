@@ -217,3 +217,44 @@ describe('the approval journeys drive the engine inbox (P3b US-007)', () => {
     for (const retired of RETIRED) expect(source).not.toContain(retired)
   })
 })
+
+/**
+ * US-005 AC-13 (K9): the jobs list repo filter tells two repos apart that share `owner/name`. Its
+ * `SelectItem`s come from `repoChoices`, so the options a person picks from carry the host.
+ */
+describe('US-005 AC-13: the jobs list repo filter', () => {
+  test('AC-13: the r1 and r2 options are labelled with their host', async () => {
+    const noop = async (): Promise<void> => undefined
+    const mounted = mountSfc(webFile('pages', '[project]', 'fleet', 'index.vue'), {
+      globals: {
+        useRoute: () => ({ params: { project: 'demo' } }),
+        useI18n: () => enI18n(), useAppToast: () => ({ error: jest.fn(), success: jest.fn() }),
+        useFleetJobs: () => ({ jobs: ref([]), total: ref(0), hasNext: ref(false), load: async () => true }),
+        useFleetDispatchOptions: () => ({
+          repos: ref([
+            { id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com', defaultBranch: 'main' },
+            { id: 'r2', owner: 'acme', name: 'app', host: 'https://gitlab.example.com', defaultBranch: 'main' },
+          ]),
+          runners: ref([]), repoName: () => 'repo', runnerName: () => null, load: noop,
+          moreRepos: ref(false), profileOptions: ref([]), labelOptions: ref([]),
+        }),
+        useProjectMemberNames: () => ({ members: ref([]), nameOf: () => 'Member', load: noop }),
+        useProjectPermissions: () => ({ permissions: ref({ has: () => true }) }),
+        useProjectEvents: noop,
+      },
+      components: { ...uiStubs, RepoConfigList: { template: '<div />' } },
+    })
+    try {
+      await new Promise((resolve) => { setImmediate(resolve) })
+      const items = mounted.find('SelectItem').filter((node) => node.props.value === 'r1' || node.props.value === 'r2')
+      expect(items.map((node) => String(node.props.value))).toEqual(['r1', 'r2'])
+      expect(items.map((node) => mounted.textOf(node))).toEqual([
+        'acme/app (gitlab.com)',
+        'acme/app (gitlab.example.com)',
+      ])
+    }
+    finally {
+      mounted.unmount()
+    }
+  })
+})

@@ -7,6 +7,7 @@ import type { ProjectSkillDto } from '~/composables/useProjectSkills'
 import { buildThreadCreateSchema, eligibleAgents, isAgentChoiceKey, threadModeChoices, toCreateThreadBody } from '~/lib/thread-create'
 import type { ThreadCreateFormValues } from '~/lib/thread-create'
 import type { ChatThreadKind } from '~/lib/thread-types'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
@@ -46,7 +47,8 @@ const canSubmit = computed(() => chosenAgent.value?.available === true)
 /** US-011: the REPO mode select offers only the modes the caller's project keys allow. */
 const modeOptions = computed(() => threadModeChoices(key => permissions.value.has(key))
   .map(mode => ({ value: mode, label: t(`fleet.threads.new.mode.${mode}`) })))
-const repoOptions = computed(() => options.repos.value.map(repo => ({ value: repo.id, label: `${repo.owner}/${repo.name}` })))
+/** US-005: a repo name two repos share is labelled with its host. */
+const repoOptions = computed(() => repoChoices(options.repos.value))
 const selectedRepo = computed(() => options.repos.value.find(repo => repo.id === values.repoId) ?? null)
 /** The scope picker (S5b 1a-R5): Repo is the default, so today's behaviour survives. */
 const scopeOptions = computed(() => [

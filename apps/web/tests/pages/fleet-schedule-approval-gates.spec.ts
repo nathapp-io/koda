@@ -316,7 +316,7 @@ describe('US-009 AC-5: an empty project key set is a read-only schedules index',
 // AC-4 — pages/[project]/fleet/schedules/[id].vue
 // ─────────────────────────────────────────────────────────────────────────────
 
-function mountScheduleDetail(project: readonly string[], row: ScheduleDto): Mounted {
+function mountScheduleDetail(project: readonly string[], row: ScheduleDto, repos: Array<Record<string, unknown>> = []): Mounted {
   const get = permissionsApi({ project, routes: { [`/projects/koda/fleet/schedules/${row.id}`]: row } })
   installPermissionsRuntime(get)
   const polling = pollingDouble()
@@ -339,7 +339,7 @@ function mountScheduleDetail(project: readonly string[], row: ScheduleDto): Moun
       useVisiblePolling: (pageTask: () => Promise<void>) => { (polling.capture as (t: () => Promise<void>) => void)(pageTask); return polling },
       useFleetJobs: () => ({ jobs: ref([]), hasNext: ref(false), load: jest.fn(async () => true) }),
       useFleetDispatchOptions: () => ({
-        repos: ref([]), runners: ref([]), profileOptions: ref([]), labelOptions: ref([]),
+        repos: ref(repos), runners: ref([]), profileOptions: ref([]), labelOptions: ref([]),
         repoName: (id: string) => id, runnerName: (id: string | null) => id, load: jest.fn(async () => undefined),
       }),
       useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
@@ -384,6 +384,35 @@ describe('US-009 AC-4: the schedule detail page gates change and delete separate
     for (const id of ['fleet-schedule-edit', 'fleet-schedule-disable', 'fleet-schedule-delete']) {
       expect(byTestId(app, id)).toBeUndefined()
     }
+    app.unmount()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-005 AC-11 (K9) — the detail page's schedule form repo choices
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One owner/name on two forges: the fixture the repo-chooser case mounts. */
+const TWO_HOST_REPOS = [
+  { id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com' },
+  { id: 'r2', owner: 'acme', name: 'app', host: 'https://gitlab.example.com' },
+]
+
+/**
+ * The dialog stub declares no `repoOptions` prop, so the page's `:repo-options` binding arrives as the
+ * stub's `repo-options` attribute — what the real dialog receives as its `repoOptions` prop.
+ */
+describe('US-005 AC-11: the schedule detail form repo choices', () => {
+  test('AC-11: a shared owner/name is labelled with its host', async () => {
+    const app = mountScheduleDetail(['fleet.schedule.update.own'], scheduleFixture('a', { createdById: 'u1' }), TWO_HOST_REPOS)
+    await settle()
+
+    const dialog = byTestId(app, 'fleet-schedule-edit-dialog') ?? app.one('[data-stub="fleet-schedule-edit-dialog"]')
+    expect(dialog).toBeDefined()
+    expect(dialog?.props['repo-options']).toEqual([
+      { value: 'r1', label: 'acme/app (gitlab.com)' },
+      { value: 'r2', label: 'acme/app (gitlab.example.com)' },
+    ])
     app.unmount()
   })
 })

@@ -287,3 +287,31 @@ describe('US-013 SettingsProviderKeysCard', () => {
     }
   })
 })
+
+/**
+ * US-005 AC-14 (K9): the REPO scope chooser tells two repos apart that share `owner/name`. The card's
+ * `repoName` helper (which labels an EXISTING key) keeps `owner/name`; only the chooser gains the host.
+ */
+describe('US-005 AC-14: the REPO scope repo chooser', () => {
+  test('AC-14: the r1 and r2 options are labelled with their host', async () => {
+    const twoHosts = [
+      { id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com' },
+      { id: 'r2', owner: 'acme', name: 'app', host: 'https://gitlab.example.com' },
+    ]
+    get.mockImplementation(async (path: string): Promise<unknown> => path.endsWith('/fleet/repos')
+      ? { records: twoHosts }
+      : { records: [row(), row({ id: 'c2', scope: 'REPO', repoId: 'r1', name: 'Repo key' })] })
+
+    const app = await mountCard()
+    await (node(app, 'provider-key-scope-repo')?.props.onClick as () => void)()
+    await flush()
+
+    const items = app.find('SelectItem').filter((item) => item.props.value === 'r1' || item.props.value === 'r2')
+    expect(items.map((item) => String(item.props.value))).toEqual(['r1', 'r2'])
+    expect(items.map((item) => app.textOf(item))).toEqual([
+      'acme/app (gitlab.com)',
+      'acme/app (gitlab.example.com)',
+    ])
+    app.unmount()
+  })
+})

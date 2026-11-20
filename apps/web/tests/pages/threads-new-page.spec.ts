@@ -87,6 +87,8 @@ type PageOver = {
   permissions?: string[]
   /** Mount with the real English copy instead of the key-echo stub (label assertions). */
   englishCopy?: boolean
+  /** The repos `useFleetDispatchOptions` reports; the default is the single plain `acme/app`. */
+  repos?: Record<string, unknown>[]
   skills?: Record<string, unknown>[]
   post?: jest.Mock
 }
@@ -118,7 +120,7 @@ function mountPage(over: PageOver = {}) {
       // REPO mode select follows the two `thread.mode.*` keys (thread-agents-modes US-011).
       useProjectPermissions: () => projectPermissionsStub(over.permissions ?? ['thread.create']),
       useFleetDispatchOptions: () => ({
-        repos: ref([repo()]),
+        repos: ref(over.repos ?? [repo()]),
         runners: ref(runners),
         moreRepos: ref(false),
         moreRunners: ref(false),
@@ -502,6 +504,30 @@ describe('US-011 AC-9, AC-10: the submitted body carries the chosen agent and mo
 
     expect(must(selectsWith(m.app, 'gpt-5-codex')[0], 'codex model select').props.value).toBe('gpt-5-codex')
     expect(must(selectsWith(m.app, 'high')[0], 'codex effort select').props.value).toBe('')
+    m.app.unmount()
+  })
+})
+
+// ── US-005 (K9): the repo chooser tells two repos with one owner/name apart ────────────────────
+
+/** The fixture: `acme/app` on gitlab.com and on a self-hosted GitLab. */
+const TWO_HOST_REPOS = [
+  { ...repo(), id: 'r1', host: 'https://gitlab.com' },
+  { ...repo(), id: 'r2', host: 'https://gitlab.example.com' },
+]
+
+describe('US-005 AC-9: pages/[project]/threads/new.vue repo chooser', () => {
+  test('AC-9: a shared owner/name is labelled with its host', async () => {
+    const m = mountPage({ models: ['m1'], repos: TWO_HOST_REPOS })
+    await m.settle()
+
+    const select = must(selectIn(m.app, 'repoId'), 'repo select')
+    const choices = m.app.find('option', select).filter((option) => String(option.props.value) !== '')
+    expect(choices.map((option) => String(option.props.value))).toEqual(['r1', 'r2'])
+    expect(choices.map((option) => m.app.textOf(option))).toEqual([
+      'acme/app (gitlab.com)',
+      'acme/app (gitlab.example.com)',
+    ])
     m.app.unmount()
   })
 })
