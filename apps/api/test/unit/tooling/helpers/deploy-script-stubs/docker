@@ -98,17 +98,35 @@ case "$1" in
     ;;
 esac
 if [[ "$joined" == *' config' ]]; then
-  env_file="$KODA_DEPLOY_HARNESS_DIR/.env"
-  if [[ "$2" = --env-file ]]; then env_file="$3"; fi
+  # Compose reads the --env-file options in order and the later file wins, so the version this script writes
+  # must stay visible even when the deployment's own file comes first. With no option Compose reads `.env`.
+  env_files=()
+  expect_env_file=0
+  for argument in "$@"; do
+    if [[ "$expect_env_file" = 1 ]]; then
+      env_files+=( "$argument" )
+      expect_env_file=0
+      continue
+    fi
+    if [[ "$argument" = --env-file ]]; then expect_env_file=1; fi
+  done
+  if [[ ${#env_files[@]} -eq 0 ]]; then
+    env_files=( "$KODA_DEPLOY_HARNESS_DIR/.env" )
+  fi
   project="${COMPOSE_PROJECT_NAME:-}"
-  if [[ -z "$project" && -f "$env_file" ]]; then
-    project="$(grep '^COMPOSE_PROJECT_NAME=' "$env_file" | cut -d= -f2-)"
-  fi
-  project="${project:-koda-local}"
   version="${KODA_VERSION:-}"
-  if [[ -z "$version" && -f "$env_file" ]]; then
-    version="$(grep '^KODA_VERSION=' "$env_file" | cut -d= -f2- | tail -n 1)"
-  fi
+  file_project=""
+  file_version=""
+  for env_file in "${env_files[@]}"; do
+    [[ -f "$env_file" ]] || continue
+    value="$(grep '^COMPOSE_PROJECT_NAME=' "$env_file" | cut -d= -f2- | tail -n 1)"
+    if [[ -n "$value" ]]; then file_project="$value"; fi
+    value="$(grep '^KODA_VERSION=' "$env_file" | cut -d= -f2- | tail -n 1)"
+    if [[ -n "$value" ]]; then file_version="$value"; fi
+  done
+  if [[ -z "$project" ]]; then project="$file_project"; fi
+  if [[ -z "$version" ]]; then version="$file_version"; fi
+  project="${project:-koda-local}"
   project="${project//'${PROJECT_SUFFIX}'/${version:-default}}"
   project="${project//'${KODA_VERSION}'/${version:-latest}}"
   if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then exit 1; fi
@@ -179,8 +197,14 @@ if [[ "$command_index" -ge 0 && "$command_index" -lt "$(( ${#args[@]} - 1 ))" ]]
   }
   tar() {
     command tar "$@" || return
-    # This fixture archives the actual host uid/gid. After extraction stat can read them from disk.
-    rm -f "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner"
+    # A fixture that declares the root ownership its archive records (`.harness/archive-owner`) is what
+    # `tar -p --numeric-owner` applies on extraction, as seen through the `stat` shim; without one the fixture
+    # archived the host uid/gid, which stat reads from disk anyway.
+    if [ -f "$KODA_DEPLOY_HARNESS_DIR/.harness/archive-owner" ]; then
+      cp "$KODA_DEPLOY_HARNESS_DIR/.harness/archive-owner" "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner"
+    else
+      rm -f "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner"
+    fi
   }
   mv() {
     case "$2" in

@@ -145,9 +145,29 @@ fi
 # `.env` with `--env-file` and then migrates that project, so this script pins exactly the same pair:
 # otherwise `COMPOSE_ENV_FILES` can make a rollback touch another project than the one deploy manages
 # (review B1).
+#
+# With a local `.env`, `deploy.sh` pins it and Compose ignores the `COMPOSE_ENV_FILES` list, so this script
+# does the same. With no local `.env`, `deploy.sh` passes no `--env-file` at all and Compose reads that list —
+# and a single `--env-file` would replace it, leaving the staged validation and the restart with only the
+# version this script writes (review rollback.sh:275). So the list is carried for that case, and the version
+# file goes last: Compose reads them in order and the later file wins.
+COMPOSE_ENV_FILE_ARGS=()
+COMPOSE_ENV_FILE_LIST=()
+if [[ ! -f "$ENV_FILE" && -n "${COMPOSE_ENV_FILES:-}" ]]; then
+  IFS=',' read -r -a COMPOSE_ENV_FILE_LIST <<< "$COMPOSE_ENV_FILES"
+  if [[ ${#COMPOSE_ENV_FILE_LIST[@]} -gt 0 ]]; then
+    for compose_env_file in "${COMPOSE_ENV_FILE_LIST[@]}"; do
+      if [[ -n "$compose_env_file" ]]; then
+        COMPOSE_ENV_FILE_ARGS+=( --env-file "$compose_env_file" )
+      fi
+    done
+  fi
+fi
 COMPOSE_ARGS=( -f "$COMPOSE_FILE" )
 if [[ -f "$ENV_FILE" ]]; then
-  COMPOSE_ARGS=( --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" )
+  COMPOSE_ARGS=( --env-file "$ENV_FILE" -f "$COMPOSE_FILE" )
+else
+  COMPOSE_ARGS=( ${COMPOSE_ENV_FILE_ARGS[@]+"${COMPOSE_ENV_FILE_ARGS[@]}"} -f "$COMPOSE_FILE" )
 fi
 
 # Read the canonical config, not the source expressions. This also resolves an explicit
@@ -241,6 +261,10 @@ if [[ -f "$ENV_FILE" ]]; then
     }
     BEGIN { version = "KODA_VERSION=" ENVIRON["KODA_ROLLBACK_VERSION"] }
     {
+      # A UTF-8 BOM in front of the first key hides it from the anchored match: the old assignment would stay
+      # and the target would be appended after it, leaving every setting in between interpolating the old
+      # version. Compose ignores the BOM, so drop it and treat the line as the assignment it is.
+      if (NR == 1 && substr($0, 1, 3) == "\357\273\277") $0 = substr($0, 4)
       if (quote != "") {
         if (!replacing) emit($0)
         if (quote_end($0, 1)) quote = ""
@@ -272,7 +296,7 @@ else
 fi
 
 # Validate what Compose will read on a future run without the shell version override.
-if ! staged_identity="$(unset KODA_VERSION; compose_identity --env-file "$ENV_FILE_TMP" -f "$COMPOSE_FILE")" ||
+if ! staged_identity="$(unset KODA_VERSION; compose_identity ${COMPOSE_ENV_FILE_ARGS[@]+"${COMPOSE_ENV_FILE_ARGS[@]}"} --env-file "$ENV_FILE_TMP" -f "$COMPOSE_FILE")" ||
    [[ "$staged_identity" != "$target_identity" ]]; then
   echo "❌ Could not validate the staged .env against the target Compose project, volume and API image." >&2
   exit 1
@@ -324,7 +348,7 @@ fi
 
 mv "$ENV_FILE_TMP" "$ENV_FILE"
 ENV_FILE_TMP=""
-COMPOSE_ARGS=( --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --project-name "$project" )
+COMPOSE_ARGS=( ${COMPOSE_ENV_FILE_ARGS[@]+"${COMPOSE_ENV_FILE_ARGS[@]}"} --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --project-name "$project" )
 
 echo "==> Starting app services on KODA_VERSION=$TARGET_VERSION"
 # Pin the version for the restart too: an exported KODA_VERSION (or an assignment this script did not read)

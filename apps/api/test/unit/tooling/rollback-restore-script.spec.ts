@@ -71,6 +71,15 @@ function mountSource(call: DockerCall): string {
   if (mount === undefined) throw new Error(`no read-only /backup mount in: ${call.argv.join(' ')}`);
   return mount.slice(0, -BACKUP_MOUNT_SUFFIX.length);
 }
+/** The files a Compose call passes with `--env-file`, in the order Compose reads them (the last one wins). */
+function envFileArgsOf(call: DockerCall): string[] {
+  const files: string[] = [];
+  call.argv.forEach((argument, index) => {
+    const next = call.argv[index + 1];
+    if (argument === '--env-file' && next !== undefined) files.push(next);
+  });
+  return files;
+}
 function envLines(run: { dir: string }): string[] {
   return readFileSync(join(run.dir, '.env'), 'utf8').split(/\r?\n/).filter(Boolean);
 }
@@ -259,19 +268,23 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(volumeEntries(run)).toEqual(['a', 'z']);
     expect(readFileSync(join(run.dataDir, 'z'), 'utf8')).toBe('restored z');
   });
-  it('B16: restores the root metadata from a backup-shaped archive', () => {
+  it('B16: applies the archived root owner and mode, not the live root metadata', () => {
     const { archive, root } = backupShapedArchive();
-    const archived = statSync(root);
-    // Seed different live numeric IDs in the Docker stub, even on hosts without permission to chown.
+    const live = statSync(root);
+    // The fixture declares the ownership its archive records — what `tar -p --numeric-owner` applies on
+    // extraction — and starts the live volume on a different owner and mode. A restore that skips the `chown`
+    // keeps the live owner, and one that skips the `chmod` keeps the live mode, so either mutant fails.
+    const archivedOwner = `${live.uid + 1000}:${live.gid + 1000}`;
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive], {
       seedVolume: (dir) => {
         chmodSync(dir, 0o700);
-        writeFileSync(join(dir, '..', 'live-owner'), `${archived.uid + 1}:${archived.gid + 1}\n`);
+        writeFileSync(join(dir, '..', 'live-owner'), `${live.uid}:${live.gid}\n`);
+        writeFileSync(join(dir, '..', 'archive-owner'), `${archivedOwner}\n`);
       },
     });
     expect(run.status).toBe(0);
     expect(statSync(run.dataDir).mode & 0o7777).toBe(0o750);
-    expect(readFileSync(join(run.dir, '.harness', 'live-owner'), 'utf8').trim()).toBe(`${archived.uid}:${archived.gid}`);
+    expect(readFileSync(join(run.dir, '.harness', 'live-owner'), 'utf8').trim()).toBe(archivedOwner);
   });
   it('B16: preserves the volume root metadata when there is no root archive entry', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
@@ -449,5 +462,47 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(run.status).toBe(0);
     expect(envLines(run)).toEqual(['POSTGRES_PASSWORD=pw', 'KODA_VERSION=v0.4.1']);
     expect(run.dockerCalls.find((call) => call.argv.includes('up'))?.kodaVersion).toBe('v0.4.1');
+  });
+  it('B17: replaces a BOM-prefixed first-line version assignment instead of appending after it', () => {
+    // A BOM hides the first assignment from the anchored match, so the old version would stay on line 1 and the
+    // target would be appended at the end: every setting in between would still interpolate the old one.
+    const bom = '\uFEFF';
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], {
+      envFile: `${bom}KODA_VERSION=v0.9.0\nOLLAMA_BASE_URL=http://ollama:\${KODA_VERSION}\n`,
+    });
+
+    expect(run.status).toBe(0);
+    // One assignment, in place, without the BOM, and the unrelated line byte for byte.
+    expect(readFileSync(join(run.dir, '.env'), 'utf8'))
+      .toBe('KODA_VERSION=v0.4.1\nOLLAMA_BASE_URL=http://ollama:${KODA_VERSION}\n');
+    expect(run.dockerCalls.find((call) => call.argv.includes('up'))?.kodaVersion).toBe('v0.4.1');
+  });
+  it('B1: keeps the COMPOSE_ENV_FILES configuration when the deployment has no local .env', () => {
+    // One `--env-file` replaces the COMPOSE_ENV_FILES list, so a deployment that keeps its settings in a file
+    // named there would reach the staged validation and the restart without them.
+    const configFile = join(fixtureRoot(), 'compose-env');
+    writeFileSync(configFile, 'POSTGRES_PASSWORD=pw\nJWT_SECRET=s\n');
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      env: { COMPOSE_ENV_FILES: configFile },
+    });
+
+    expect(run.status).toBe(0);
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe('KODA_VERSION=v0.4.1\n');
+    // Every Compose call keeps the deployment's file, and the version file comes last so it wins.
+    const composeCalls = run.dockerCalls.filter((call) => call.argv[0] === 'compose');
+    expect(composeCalls.length).toBeGreaterThan(0);
+    for (const call of composeCalls) {
+      const files = envFileArgsOf(call);
+      // The deployment's own file is always there, and anything after it is the version file this script
+      // writes, so the target version wins while the rest of the configuration survives.
+      expect(files[0]).toBe(configFile);
+      for (const versionFile of files.slice(1)) {
+        expect(versionFile.startsWith(join(run.dir, '.env'))).toBe(true);
+      }
+    }
+    const restart = run.dockerCalls.find((call) => call.argv.includes('up'));
+    if (restart === undefined) throw new Error('the run never restarted the services');
+    expect(envFileArgsOf(restart)).toEqual([configFile, join(run.dir, '.env')]);
+    expect(restoreRuns(run.dockerCalls)).toHaveLength(1);
   });
 });
