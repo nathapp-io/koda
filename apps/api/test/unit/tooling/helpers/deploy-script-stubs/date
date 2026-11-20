@@ -1,0 +1,15 @@
+#!/bin/bash
+# Pinnable `date` shim for apps/api/test/unit/tooling/helpers/deploy-script-harness.ts.
+#
+# The backup script stamps its artefact names with `date`, and a test that compares two runs started in
+# the same second needs both to see the same clock. When $KODA_DEPLOY_HARNESS_DATE is set the shim prints
+# it (already formatted) and ignores the arguments; otherwise it runs the real `date`.
+#
+# It must stay bash 3.2 portable: macOS /bin/bash runs it in the suite.
+
+if [[ -n "${KODA_DEPLOY_HARNESS_DATE-}" ]]; then
+  printf '%s\n' "$KODA_DEPLOY_HARNESS_DATE"
+  exit 0
+fi
+
+exec /bin/date "$@"

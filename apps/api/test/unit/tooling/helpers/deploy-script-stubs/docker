@@ -1,0 +1,274 @@
+#!/bin/bash
+# Recording `docker` stub for apps/api/test/unit/tooling/helpers/deploy-script-harness.ts.
+#
+# Every call appends one record to $KODA_DEPLOY_HARNESS_RECORD: the argument count, then KODA_VERSION as
+# the child saw it, then the arguments, each field NUL-terminated; the harness parses that file.
+#
+# Before deciding the exit code, the stub writes the files a real container would leave on the host: a
+# `tar -czf /backup/<name>` call writes <name> under $KODA_DEPLOY_HARNESS_DIR/backups, and a pg_dump call
+# writes $KODA_DEPLOY_HARNESS_PG_DUMP. Both happen even for a call that fails, so a script that writes an
+# archive straight to its restore-ready name leaves a partial file a test can catch (review B9).
+#
+# The call then fails (exit 1) when its argv, joined with spaces and with every occurrence of the per-test
+# temp dir removed, contains one of the $KODA_DEPLOY_HARNESS_FAIL_ON lines. A pg_dump call exits with
+# $KODA_DEPLOY_HARNESS_PG_DUMP_EXIT.
+#
+# A `compose run … -c <script> <arg>…` call that passes positional arguments is a restore pipeline, and the
+# stub really runs it on the host: `/data` is bound to the fake volume $KODA_DEPLOY_HARNESS_VOLUME and
+# `/backup` to the host directory the call mounts, with the trailing arguments as the command's `$@`, exactly
+# like `docker compose run … api -c '<script>' koda-restore <archive>`. A test can then assert the files a
+# restore leaves in the volume, not only the arguments it passed (review B12, B13). The call exits with the
+# command's own status. Every other call succeeds silently (the pg_dump and archive cases below decide first).
+#
+# It must stay bash 3.2 portable: macOS /bin/bash runs it in the suite.
+
+{
+  printf '%s\0' "$#"
+  printf '%s\0' "${KODA_VERSION-}"
+  for argument in "$@"; do
+    printf '%s\0' "$argument"
+  done
+} >> "$KODA_DEPLOY_HARNESS_RECORD"
+
+for argument in "$@"; do
+  case "$argument" in
+    "tar -czf /backup/"*)
+      archive="${argument#tar -czf /backup/}"
+      archive="${archive%% *}"
+      mkdir -p "$KODA_DEPLOY_HARNESS_DIR/backups"
+      printf 'partial data volume archive\n' > "$KODA_DEPLOY_HARNESS_DIR/backups/$archive"
+      ;;
+  esac
+done
+
+joined=""
+for argument in "$@"; do
+  joined="$joined $argument"
+done
+
+# Drop the temp dir first, so a random directory suffix never matches a failOn entry by accident.
+joined="${joined//"$KODA_DEPLOY_HARNESS_DIR"/}"
+
+while IFS= read -r pattern; do
+  if [[ -z "$pattern" ]]; then
+    continue
+  fi
+  case "$joined" in
+    *"$pattern"*)
+      exit 1
+      ;;
+  esac
+done <<< "${KODA_DEPLOY_HARNESS_FAIL_ON-}"
+
+case "$joined" in
+  *pg_dump*)
+    if [[ -n "${KODA_DEPLOY_HARNESS_PG_DUMP-}" ]]; then
+      cat "$KODA_DEPLOY_HARNESS_PG_DUMP"
+    fi
+    exit "${KODA_DEPLOY_HARNESS_PG_DUMP_EXIT:-0}"
+    ;;
+esac
+
+# Model Compose's rendered config for the fixtures (not a general dotenv parser).
+case "$1" in
+  create)
+    mkdir "$KODA_DEPLOY_HARNESS_DIR/.harness/$3" || exit 1
+    printf '%s\n' "$3"
+    exit 0
+    ;;
+  rm)
+    rmdir "$KODA_DEPLOY_HARNESS_DIR/.harness/$2"
+    exit "$?"
+    ;;
+  ps)
+    if [[ -n "${KODA_DEPLOY_HARNESS_MOUNT_MODE-}" && "$*" == *"volume=${KODA_DEPLOY_HARNESS_VOLUME_NAME:-koda-local_koda_data}" ]]; then
+      echo fixture-container-id
+    fi
+    exit 0
+    ;;
+  container)
+    if [[ "$2" = inspect && "${@: -1}" = fixture-container-id ]]; then
+      if [[ "$4" == *".Name \"${KODA_DEPLOY_HARNESS_VOLUME_NAME:-koda-local_koda_data}\""* ]] &&
+         [[ "${KODA_DEPLOY_HARNESS_MOUNT_MODE-}" = rw || "$4" != *'.RW'* ]]; then
+        echo /other-project-api-1
+      fi
+      exit 0
+    fi
+    exit 1
+    ;;
+esac
+if [[ "$joined" == *' port '* ]]; then
+  # `docker compose … port <service> <container port>`: the post-deploy health checks read the published port
+  # here instead of sourcing `.env`.
+  previous=""
+  service=""
+  for argument in "$@"; do
+    if [[ "$previous" = port ]]; then
+      service="$argument"
+      break
+    fi
+    previous="$argument"
+  done
+  case "$service" in
+    api) echo "0.0.0.0:${API_PORT:-3100}" ;;
+    web) echo "0.0.0.0:${WEB_PORT:-3101}" ;;
+    *) exit 1 ;;
+  esac
+  exit 0
+fi
+if [[ "$joined" == *' config' ]]; then
+  # Compose reads the --env-file options in order and the later file wins; with none it reads `.env`.
+  env_files=()
+  expect_env_file=0
+  for argument in "$@"; do
+    if [[ "$expect_env_file" = 1 ]]; then
+      env_files+=( "$argument" )
+      expect_env_file=0
+      continue
+    fi
+    if [[ "$argument" = --env-file ]]; then expect_env_file=1; fi
+  done
+  if [[ ${#env_files[@]} -eq 0 ]]; then
+    env_files=( "$KODA_DEPLOY_HARNESS_DIR/.env" )
+  fi
+  project="${COMPOSE_PROJECT_NAME:-}"
+  version="${KODA_VERSION:-}"
+  file_project=""
+  file_version=""
+  for env_file in "${env_files[@]}"; do
+    [[ -f "$env_file" ]] || continue
+    value="$(grep '^COMPOSE_PROJECT_NAME=' "$env_file" | cut -d= -f2- | tail -n 1)"
+    if [[ -n "$value" ]]; then file_project="$value"; fi
+    value="$(grep '^KODA_VERSION=' "$env_file" | cut -d= -f2- | tail -n 1)"
+    if [[ -n "$value" ]]; then file_version="$value"; fi
+  done
+  if [[ -z "$project" ]]; then project="$file_project"; fi
+  if [[ -z "$version" ]]; then version="$file_version"; fi
+  project="${project:-koda-local}"
+  project="${project//'${PROJECT_SUFFIX}'/${version:-default}}"
+  project="${project//'${KODA_VERSION}'/${version:-latest}}"
+  if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then exit 1; fi
+  volume_name="${KODA_DEPLOY_HARNESS_VOLUME_NAME:-${project}_koda_data}"
+  volume_name="${volume_name//'${KODA_VERSION}'/${version:-latest}}"
+  # Model Compose's interpolation of one nominated setting, so a test can assert a dependent value the way
+  # Compose renders it: the process environment wins, then the env files in order, so a line placed before the
+  # version assignment sees the fallback while the restart (with the override exported) sees the target.
+  check_block=""
+  if [[ -n "${KODA_DEPLOY_HARNESS_INTERPOLATE:-}" ]]; then
+    resolved_version="${KODA_VERSION:-}"
+    check_value=""
+    for env_file in "${env_files[@]}"; do
+      [[ -f "$env_file" ]] || continue
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+          KODA_VERSION=*)
+            if [[ -z "${KODA_VERSION:-}" ]]; then resolved_version="${line#KODA_VERSION=}"; fi
+            ;;
+          "${KODA_DEPLOY_HARNESS_INTERPOLATE}="*)
+            value="${line#*=}"
+            value="$(printf '%s' "$value" | sed -e "s|\${KODA_VERSION:-latest}|${resolved_version:-latest}|g" -e "s|\${KODA_VERSION}|${resolved_version}|g")"
+            check_value="$value"
+            ;;
+        esac
+      done < "$env_file"
+    done
+    check_block="    x-check: ${check_value:-unset}"$'\n'
+  fi
+  printf 'name: %s\nservices:\n  api:\n    image: nathapp/koda-api:%s\n%s    volumes:\n      - type: volume\n        source: koda_data\n        target: /data\nvolumes:\n  koda_data:\n    name: %s\n' \
+    "$project" "${version:-latest}" "$check_block" "$volume_name"
+  exit 0
+fi
+
+# Restore pipeline: `run … -c <script> <positional args…>`.
+args=( "$@" )
+command_index=-1
+mount_spec=""
+index=0
+while [[ "$index" -lt "${#args[@]}" ]]; do
+  case "${args[$index]}" in
+    -v)
+      index=$((index + 1))
+      mount_spec="${args[$index]-}"
+      ;;
+    -c)
+      index=$((index + 1))
+      command_index=$index
+      ;;
+  esac
+  index=$((index + 1))
+done
+
+if [[ "$command_index" -ge 0 && "$command_index" -lt "$(( ${#args[@]} - 1 ))" ]]; then
+  command="${args[$command_index]}"
+  volume="${KODA_DEPLOY_HARNESS_VOLUME:?the harness must set KODA_DEPLOY_HARNESS_VOLUME}"
+  positional=( "${args[@]:$((command_index + 1))}" )
+  # Bind the container paths to the host directories, and run the command with the trailing arguments as
+  # its `$@`, so `$1` is what the archive argument was.
+  if [[ -n "$mount_spec" ]]; then
+    mount_source="${mount_spec%%:*}"
+    translated="$(printf '%s' "$command" | sed -e "s#/backup#$mount_source#g" -e "s#/data#$volume#g")"
+  else
+    translated="$(printf '%s' "$command" | sed -e "s#/data#$volume#g")"
+  fi
+  helpers='# Simulate ownership only when a fixture supplies a different live owner; modes and extraction remain real.
+  owner_file() {
+    case "$1" in
+      "$KODA_DEPLOY_HARNESS_VOLUME") echo "$KODA_DEPLOY_HARNESS_DIR/.harness/live-owner" ;;
+      "$KODA_DEPLOY_HARNESS_VOLUME/.koda-restore-staging/tree") echo "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner" ;;
+      *) return 1 ;;
+    esac
+  }
+  stat() {
+    if [ "$1" != "-c" ] || [ "$2" != "%u:%g %a" ]; then command stat "$@"; return; fi
+    if [ "$(uname -s)" = Darwin ]; then
+      metadata=$(command stat -f "%u:%g %Lp" "$3") || return
+    else
+      metadata=$(command stat "$@") || return
+    fi
+    if owner=$(owner_file "$3") && [ -f "$owner" ]; then
+      metadata="$(cat "$owner") ${metadata#* }"
+    fi
+    printf "%s\n" "$metadata"
+  }
+  chown() {
+    if [ -f "$KODA_DEPLOY_HARNESS_DIR/.harness/live-owner" ] && owner=$(owner_file "$2"); then
+      printf "%s\n" "$1" > "$owner"
+    else
+      command chown "$@"
+    fi
+  }
+  tar() {
+    command tar "$@" || return
+    # A fixture that declares the root ownership its archive records (`.harness/archive-owner`) is what
+    # `tar -p --numeric-owner` applies on extraction, as seen through the `stat` shim; without one the fixture
+    # archived the host uid/gid, which stat reads from disk anyway.
+    if [ -f "$KODA_DEPLOY_HARNESS_DIR/.harness/archive-owner" ]; then
+      cp "$KODA_DEPLOY_HARNESS_DIR/.harness/archive-owner" "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner"
+    else
+      rm -f "$KODA_DEPLOY_HARNESS_DIR/.harness/staged-owner"
+    fi
+  }
+  mv() {
+    case "$2" in
+      */.koda-restore-previous/entries/|*/.koda-restore-previous/) phase=save ;;
+      "$KODA_DEPLOY_HARNESS_VOLUME"/) phase=install ;;
+      *) command mv "$@"; return ;;
+    esac
+    if [ "${KODA_DEPLOY_HARNESS_FAIL_MOVE-}" = "$phase" ] && [ "${1##*/}" = z ]; then return 1; fi
+    command mv "$@" || return
+    if [ "$phase" = install ] && [ -n "${KODA_DEPLOY_HARNESS_COMPETE-}" ]; then
+      # Re-enter while the winner owns staging and has already installed its first entry.
+      set +e
+      KODA_DEPLOY_HARNESS_COMPETE= COMPOSE_PROJECT_NAME=koda-other /bin/bash "$KODA_DEPLOY_HARNESS_DIR/rollback.sh" v0.4.1 --restore-db "$KODA_DEPLOY_HARNESS_COMPETE"
+      contender_status=$?
+      set -e
+      printf "Contender exit: %s\n" "$contender_status"
+      unset KODA_DEPLOY_HARNESS_COMPETE
+    fi
+  }'
+  ( cd "${KODA_DEPLOY_HARNESS_DIR:?}" && /bin/sh -c "$helpers
+$translated" "${positional[@]}" )
+  exit "$?"
+fi
+
+exit 0

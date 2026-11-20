@@ -72,8 +72,10 @@ production compose, run them once after the stack is up:
 docker compose exec api bunx prisma migrate deploy
 ```
 
-To point the API at an external Postgres instead of the bundled container, set `DATABASE_URL`
-for the `api` service (e.g. via an override file or environment) — no other changes required.
+The scripts in `deployments/example` support only their bundled `postgres` service; they do not
+support pointing that deployment at an external Postgres. Other deployments can point the API at an
+external Postgres by setting `DATABASE_URL` for the `api` service (e.g. via an override file or
+environment).
 
 ---
 

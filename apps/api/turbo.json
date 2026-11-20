@@ -1,0 +1,16 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.github/workflows/**",
+        "$TURBO_ROOT$/deployments/**",
+        "$TURBO_ROOT$/scripts/**",
+        "$TURBO_ROOT$/docker-compose.yml",
+        "$TURBO_ROOT$/openapi-ts.config.ts"
+      ]
+    }
+  }
+}

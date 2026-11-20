@@ -28,6 +28,8 @@ If `X-CI-Signature-V2` is present, it alone decides whether the request is accep
 
 ## Deprecation window
 
+Both Compose files pass `WEBHOOK_SIGNATURE_V1_ENABLED` (default `true`) and `CI_WEBHOOK_REQUIRE_V2` (default `false`) to the API.
+
 Both switches are deployment-wide environment variables:
 
 - `WEBHOOK_SIGNATURE_V1_ENABLED` defaults to `true`. Set it to `false` to stop including the legacy body-only `X-Koda-Signature` on outbound webhooks. Outbound v2 signing remains enabled.

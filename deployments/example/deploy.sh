@@ -89,6 +89,50 @@ if ! is_url_safe_postgres_password "$effective_postgres_password"; then
   exit 1
 fi
 
+if [[ -f "$ENV_FILE" ]]; then
+  # A quoted value may span lines and legitimately contain a line that looks like an assignment, so only
+  # top-level assignments count (review deploy.sh:94).
+  if database_url_line="$(
+    awk '
+      BEGIN { dq = sprintf("%c", 34); sq = sprintf("%c", 39); quote = "" }
+      {
+        line = $0
+        if (quote != "") {
+          for (i = 1; i <= length(line); i++) {
+            c = substr(line, i, 1)
+            if (c == "\\") { i++; continue }
+            if (c == quote) { quote = ""; break }
+          }
+          next
+        }
+        if (line ~ /^[[:space:]]*(export[[:space:]]+)?DATABASE_URL[[:space:]]*=/) { print NR; exit }
+        eq = index(line, "=")
+        if (eq == 0) next
+        value = substr(line, eq + 1)
+        sub(/^[[:space:]]+/, "", value)
+        first = substr(value, 1, 1)
+        if (first != dq && first != sq) next
+        closed = 0
+        for (i = 2; i <= length(value); i++) {
+          c = substr(value, i, 1)
+          if (c == "\\") { i++; continue }
+          if (c == first) { closed = 1; break }
+        }
+        if (!closed) quote = first
+      }
+      END { if (quote != "") print 0 }
+    ' "$ENV_FILE"
+  )" && [[ -n "$database_url_line" ]]; then
+    echo "❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service"
+    if [[ "$database_url_line" = 0 ]]; then
+      echo "   (a quoted value in $ENV_FILE is never closed)"
+    else
+      echo "   (line $database_url_line of $ENV_FILE)"
+    fi
+    exit 1
+  fi
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "❌ docker is required"
   exit 1
@@ -126,11 +170,23 @@ echo "==> Start services"
 docker compose "${COMPOSE_ARGS[@]}" up -d --wait api web
 
 echo "==> Post-deploy health checks"
-set -a
-[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
-set +a
-curl -fsS "http://localhost:${API_PORT:-3100}/api/health" >/dev/null
-curl -fsS "http://localhost:${WEB_PORT:-3101}" >/dev/null
+# Ask Compose for the published ports instead of sourcing `.env`: an environment file Compose accepts may use
+# syntax bash would run as commands (`KEY: value`, or a quoted multiline value), which fails here — after the
+# services have already been replaced (review rollback.sh:289).
+published_port() {
+  local published
+  published="$(docker compose "${COMPOSE_ARGS[@]}" port "$1" "$2" 2>/dev/null | head -n 1)" || return 1
+  if [[ -z "$published" ]]; then
+    return 1
+  fi
+  printf '%s\n' "${published##*:}"
+}
+if ! api_port="$(published_port api 3100)" || ! web_port="$(published_port web 3101)"; then
+  echo "❌ Could not resolve the published ports of api and web from Compose" >&2
+  exit 1
+fi
+curl -fsS "http://localhost:${api_port}/api/health" >/dev/null
+curl -fsS "http://localhost:${web_port}" >/dev/null
 
 echo "==> Status"
 docker compose "${COMPOSE_ARGS[@]}" ps

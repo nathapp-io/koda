@@ -16,6 +16,29 @@ on:
 # full commit SHAs (the comment names the version); Dependabot bumps them (.github/dependabot.yml).
 permissions: {}
 
+# One release publishes at a time (review B4). The channel eligibility computed in `info` is only valid while no
+# other run can publish between that computation and the pushes: with two runs in flight, an older tag could
+# compute "I am the newest" before a newer tag is pushed, wait for approval or a build, and then move `:latest`,
+# the npm dist-tags and the GitHub latest flag back to itself. Queueing (not cancelling) keeps a release that a
+# tag push arrived next to, instead of dropping it; it also keeps immutable tag builds from running beside a
+# publishing run.
+#
+# By default a concurrency group holds one running run and a single pending one, and a new request replaces that
+# pending run, so a third release request would be cancelled before it publishes. `queue: max` asks for the
+# deeper, non-replacing queue instead: up to 100 runs stay pending and start in the order they arrived (review
+# B11). `cancel-in-progress` must stay false there — Actions rejects `queue: max` together with `true`, and
+# cancelling a running release is the very thing this group exists to prevent.
+#
+# Past that capacity a request is still dropped before it publishes, so the recovery path stays documented:
+# request the release again — Actions -> Release -> "Run workflow" with its tag, or
+# `gh workflow run release.yml -f tag=v0.4.3`. A run that never started published nothing, and a repeated
+# request converges, because publishing a tag that is already out is idempotent (npm skips a version that
+# exists, Docker pushes the same tag again).
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+  queue: max
+
 # ─── Shared info ──────────────────────────────────────────────────────────────
 
 jobs:
@@ -26,11 +49,12 @@ jobs:
     outputs:
       tag: ${{ steps.info.outputs.tag }}
       version: ${{ steps.info.outputs.version }}
-      npm_tag: ${{ steps.info.outputs.npm_tag }}
+      npm_tag: ${{ steps.channels.outputs.npm_tag }}
       prerelease: ${{ steps.info.outputs.prerelease }}
       notify: ${{ steps.info.outputs.notify }}
-      docker_tags_api: ${{ steps.docker.outputs.tags_api }}
-      docker_tags_web: ${{ steps.docker.outputs.tags_web }}
+      docker_tags_api: ${{ steps.channels.outputs.tags_api }}
+      docker_tags_web: ${{ steps.channels.outputs.tags_web }}
+      latest: ${{ steps.channels.outputs.latest }}
     steps:
       # Review E/SEC-9: workflow inputs reach scripts through env, never through ${{ }} inside run:.
       - name: Set release info
@@ -48,11 +72,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           if [[ "$TAG" == *"-canary."* ]]; then
-            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "notify=false" >> "$GITHUB_OUTPUT"
           else
-            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "notify=true" >> "$GITHUB_OUTPUT"
           fi
@@ -74,20 +96,137 @@ jobs:
           fi
           echo "✅ Version match: $TAG"
 
-      - name: Compute Docker tags
-        id: docker
+      - name: Compute release channels
+        id: channels
         env:
           TAG: ${{ steps.info.outputs.tag }}
           VERSION: ${{ steps.info.outputs.version }}
         run: |
+          set -euo pipefail
+          # Every comparison below is on decimal digits, so it must not depend on the runner's locale.
+          export LC_ALL=C
+          remote_tags=$(git ls-remote --tags --refs origin 'v*')
+
           if [[ "$TAG" == *"-canary."* ]]; then
             echo "tags_api=nathapp/koda-api:canary" >> "$GITHUB_OUTPUT"
             echo "tags_web=nathapp/koda-web:canary" >> "$GITHUB_OUTPUT"
-          else
-            MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
-            echo "tags_api=nathapp/koda-api:${TAG},nathapp/koda-api:${MAJOR_MINOR},nathapp/koda-api:latest" >> "$GITHUB_OUTPUT"
-            echo "tags_web=nathapp/koda-web:${TAG},nathapp/koda-web:${MAJOR_MINOR},nathapp/koda-web:latest" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          # A version component is a canonical decimal string: leading zeros stripped, so `04` and `4` are the
+          # same minor. Components are never put through bash arithmetic: `10#08` family tricks are avoidable,
+          # and a component past the 64-bit range wraps to a negative number, which compares as older than
+          # every release and makes an old tag claim `:latest` (review B8).
+          normalize_component() {
+            local value="$1"
+            while [[ "${#value}" -gt 1 && "$value" == 0* ]]; do
+              value="${value#0}"
+            done
+            printf '%s' "$value"
+          }
+
+          # -1, 0 or 1 for two canonical decimal strings: longer is bigger, equal lengths compare bytewise
+          # (both are pure digits, and LC_ALL=C keeps the comparison independent of the locale).
+          compare_components() {
+            local left="$1" right="$2"
+            if [[ "${#left}" -lt "${#right}" ]]; then
+              printf '%s' -1
+              return 0
+            fi
+            if [[ "${#left}" -gt "${#right}" ]]; then
+              printf '%s' 1
+              return 0
+            fi
+            if [[ "$left" == "$right" ]]; then
+              printf '%s' 0
+              return 0
+            fi
+            if [[ "$left" < "$right" ]]; then
+              printf '%s' -1
+              return 0
+            fi
+            printf '%s' 1
+          }
+
+          is_older() {
+            local left_major left_minor left_patch right_major right_minor right_patch comparison
+            IFS=. read -r left_major left_minor left_patch <<< "${1#v}"
+            IFS=. read -r right_major right_minor right_patch <<< "${2#v}"
+            left_major="$(normalize_component "$left_major")"
+            left_minor="$(normalize_component "$left_minor")"
+            left_patch="$(normalize_component "$left_patch")"
+            right_major="$(normalize_component "$right_major")"
+            right_minor="$(normalize_component "$right_minor")"
+            right_patch="$(normalize_component "$right_patch")"
+
+            comparison="$(compare_components "$left_major" "$right_major")"
+            if [[ "$comparison" != 0 ]]; then
+              if [[ "$comparison" == -1 ]]; then return 0; else return 1; fi
+            fi
+            comparison="$(compare_components "$left_minor" "$right_minor")"
+            if [[ "$comparison" != 0 ]]; then
+              if [[ "$comparison" == -1 ]]; then return 0; else return 1; fi
+            fi
+            comparison="$(compare_components "$left_patch" "$right_patch")"
+            if [[ "$comparison" == -1 ]]; then return 0; fi
+            return 1
+          }
+
+          # Minor identity comes from the same canonical components, not from a textual prefix of the version:
+          # `v0.04.2` and `v0.4.1` are both minor 0.4 (review B8).
+          same_minor() {
+            local left_major left_minor left_patch right_major right_minor right_patch
+            IFS=. read -r left_major left_minor left_patch <<< "${1#v}"
+            IFS=. read -r right_major right_minor right_patch <<< "${2#v}"
+            if [[ "$(normalize_component "$left_major")" != "$(normalize_component "$right_major")" ]]; then
+              return 1
+            fi
+            if [[ "$(normalize_component "$left_minor")" != "$(normalize_component "$right_minor")" ]]; then
+              return 1
+            fi
+            return 0
+          }
+
+          latest=true
+          minor_latest=true
+          while IFS=$'\t' read -r _ remote_ref; do
+            remote_tag="${remote_ref#refs/tags/}"
+            [[ "$remote_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            if is_older "$TAG" "$remote_tag"; then
+              latest=false
+              if same_minor "$TAG" "$remote_tag"; then
+                minor_latest=false
+              fi
+            fi
+          done <<< "$remote_tags"
+
+          IFS=. read -r major minor patch <<< "$VERSION"
+          major="$(normalize_component "$major")"
+          minor="$(normalize_component "$minor")"
+          patch="$(normalize_component "$patch")"
+          major_minor="${major}.${minor}"
+          canonical_version="${major}.${minor}.${patch}"
+          tags_api="nathapp/koda-api:${TAG}"
+          tags_web="nathapp/koda-web:${TAG}"
+          if [[ "$minor_latest" == true ]]; then
+            tags_api+=",nathapp/koda-api:${major_minor}"
+            tags_web+=",nathapp/koda-web:${major_minor}"
+          fi
+          if [[ "$latest" == true ]]; then
+            tags_api+=",nathapp/koda-api:latest"
+            tags_web+=",nathapp/koda-web:latest"
+            npm_tag=latest
+          elif [[ "$minor_latest" == true ]]; then
+            npm_tag="release-${major_minor}"
+          else
+            npm_tag="backport-${canonical_version}"
+          fi
+          echo "tags_api=${tags_api}" >> "$GITHUB_OUTPUT"
+          echo "tags_web=${tags_web}" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=${npm_tag}" >> "$GITHUB_OUTPUT"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
 
   # ─── CLI: npm publish ─────────────────────────────────────────────────────────
 
@@ -252,6 +391,7 @@ jobs:
           name: ${{ needs.info.outputs.tag }}
           prerelease: ${{ needs.info.outputs.prerelease }}
           generate_release_notes: true
+          make_latest: ${{ needs.info.outputs.latest }}
 
   # ─── Notify ───────────────────────────────────────────────────────────────────
 
