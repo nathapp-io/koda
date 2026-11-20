@@ -90,12 +90,47 @@ if ! is_url_safe_postgres_password "$effective_postgres_password"; then
 fi
 
 if [[ -f "$ENV_FILE" ]]; then
-  while IFS= read -r env_line || [[ -n "$env_line" ]]; do
-    if [[ "$env_line" =~ ^[[:space:]]*(export[[:space:]]+)?DATABASE_URL[[:space:]]*= ]]; then
-      echo "❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service"
-      exit 1
+  # A quoted value may span lines and legitimately contain a line that looks like an assignment, so only
+  # top-level assignments count (review deploy.sh:94).
+  if database_url_line="$(
+    awk '
+      BEGIN { dq = sprintf("%c", 34); sq = sprintf("%c", 39); quote = "" }
+      {
+        line = $0
+        if (quote != "") {
+          for (i = 1; i <= length(line); i++) {
+            c = substr(line, i, 1)
+            if (c == "\\") { i++; continue }
+            if (c == quote) { quote = ""; break }
+          }
+          next
+        }
+        if (line ~ /^[[:space:]]*(export[[:space:]]+)?DATABASE_URL[[:space:]]*=/) { print NR; exit }
+        eq = index(line, "=")
+        if (eq == 0) next
+        value = substr(line, eq + 1)
+        sub(/^[[:space:]]+/, "", value)
+        first = substr(value, 1, 1)
+        if (first != dq && first != sq) next
+        closed = 0
+        for (i = 2; i <= length(value); i++) {
+          c = substr(value, i, 1)
+          if (c == "\\") { i++; continue }
+          if (c == first) { closed = 1; break }
+        }
+        if (!closed) quote = first
+      }
+      END { if (quote != "") print 0 }
+    ' "$ENV_FILE"
+  )" && [[ -n "$database_url_line" ]]; then
+    echo "❌ DATABASE_URL is not supported by this example deployment: it always uses the bundled postgres service"
+    if [[ "$database_url_line" = 0 ]]; then
+      echo "   (a quoted value in $ENV_FILE is never closed)"
+    else
+      echo "   (line $database_url_line of $ENV_FILE)"
     fi
-  done < "$ENV_FILE"
+    exit 1
+  fi
 fi
 
 if ! command -v docker >/dev/null 2>&1; then

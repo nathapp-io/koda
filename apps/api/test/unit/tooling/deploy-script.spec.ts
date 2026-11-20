@@ -122,4 +122,14 @@ describe('deploy.sh', () => {
       .map(({ argv }) => argv.slice(argv.indexOf('port') + 1).join(' '));
     expect(ports).toEqual(['api 3100', 'web 3101']);
   });
+  it('B17: does not treat an assignment-shaped line inside a quoted value as DATABASE_URL', () => {
+    // Compose accepts a quoted value spanning lines; a configuration example inside it is text, not an override
+    // (review deploy.sh:94).
+    const run = runDeployScript('deploy.sh', [], {
+      envFile: 'POSTGRES_PASSWORD=pw\nNOTE="example:\nDATABASE_URL=literal-example\nend"\n',
+    });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.dockerCalls.some(({ argv }) => argv.includes('migrate') && argv.includes('deploy'))).toBe(true);
+  });
 });

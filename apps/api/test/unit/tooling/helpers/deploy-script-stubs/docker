@@ -150,8 +150,32 @@ if [[ "$joined" == *' config' ]]; then
   if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then exit 1; fi
   volume_name="${KODA_DEPLOY_HARNESS_VOLUME_NAME:-${project}_koda_data}"
   volume_name="${volume_name//'${KODA_VERSION}'/${version:-latest}}"
-  printf 'name: %s\nservices:\n  api:\n    image: nathapp/koda-api:%s\n    volumes:\n      - type: volume\n        source: koda_data\n        target: /data\nvolumes:\n  koda_data:\n    name: %s\n' \
-    "$project" "${version:-latest}" "$volume_name"
+  # Model Compose's interpolation of one nominated setting, so a test can assert a dependent value the way
+  # Compose renders it: the process environment wins, then the env files in order, so a line placed before the
+  # version assignment sees the fallback while the restart (with the override exported) sees the target.
+  check_block=""
+  if [[ -n "${KODA_DEPLOY_HARNESS_INTERPOLATE:-}" ]]; then
+    resolved_version="${KODA_VERSION:-}"
+    check_value=""
+    for env_file in "${env_files[@]}"; do
+      [[ -f "$env_file" ]] || continue
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+          KODA_VERSION=*)
+            if [[ -z "${KODA_VERSION:-}" ]]; then resolved_version="${line#KODA_VERSION=}"; fi
+            ;;
+          "${KODA_DEPLOY_HARNESS_INTERPOLATE}="*)
+            value="${line#*=}"
+            value="$(printf '%s' "$value" | sed -e "s|\${KODA_VERSION:-latest}|${resolved_version:-latest}|g" -e "s|\${KODA_VERSION}|${resolved_version}|g")"
+            check_value="$value"
+            ;;
+        esac
+      done < "$env_file"
+    done
+    check_block="    x-check: ${check_value:-unset}"$'\n'
+  fi
+  printf 'name: %s\nservices:\n  api:\n    image: nathapp/koda-api:%s\n%s    volumes:\n      - type: volume\n        source: koda_data\n        target: /data\nvolumes:\n  koda_data:\n    name: %s\n' \
+    "$project" "${version:-latest}" "$check_block" "$volume_name"
   exit 0
 fi
 

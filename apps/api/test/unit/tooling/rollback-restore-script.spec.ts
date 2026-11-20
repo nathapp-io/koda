@@ -486,4 +486,28 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(run.dockerCalls).toEqual([]);
     expect(existsSync(join(run.dir, '.env'))).toBe(false);
   });
+  it('B17: refuses a .env whose setting interpolates the version before the assignment', () => {
+    // The identity check cannot see it: `${KODA_VERSION:-latest}` on a line before the appended assignment renders
+    // the target for the restart, where the shell override is exported, and the fallback once only the file is
+    // read — with the same project, volume and API image (review rollback.sh:293).
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], {
+      envFile: 'JWT_EXPIRES_IN=${KODA_VERSION:-latest}\n',
+      env: { KODA_DEPLOY_HARNESS_INTERPOLATE: 'JWT_EXPIRES_IN' },
+    });
+
+    expect(run.status, run.output).toBe(1);
+    expect(run.output).toContain('on its own it would not resolve the same configuration');
+    // Refused before the lock and the stop, and the deployment's own file is untouched.
+    expect(run.dockerCalls.filter(({ argv }) => argv[0] === 'create' || argv.includes('stop'))).toEqual([]);
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe('JWT_EXPIRES_IN=${KODA_VERSION:-latest}\n');
+  });
+  it('B17: keeps a deployment whose settings do not interpolate the version', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], {
+      envFile: 'JWT_EXPIRES_IN=15m\n',
+      env: { KODA_DEPLOY_HARNESS_INTERPOLATE: 'JWT_EXPIRES_IN' },
+    });
+
+    expect(run.status, run.output).toBe(0);
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe('JWT_EXPIRES_IN=15m\nKODA_VERSION=v0.4.1\n');
+  });
 });

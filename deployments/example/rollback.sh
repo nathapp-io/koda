@@ -217,17 +217,8 @@ if [[ -n "$RESTORE_DB_FILE" ]]; then
   fi
 fi
 
-# Docker reserves container names atomically on the daemon. The lock is never started;
-# acquiring it before stop also serializes version-only rollbacks on this volume.
-LOCK_NAME="koda-rollback-lock-$volume"
-if ! LOCK_ID="$(docker create --name "$LOCK_NAME" --entrypoint /bin/true "$target_image")"; then
-  LOCK_ID=""
-  echo "❌ Could not acquire rollback lock: $LOCK_NAME" >&2
-  echo "   Check for another rollback or follow the interrupted-restore steps in README.md." >&2
-  exit 1
-fi
-
-# Prepare the replacement under the lock, but do not publish it until the restore succeeds.
+# Prepare the replacement before taking the lock: a rollback that cannot proceed then leaves the lock, the
+# services and the volume untouched (review rollback.sh:293). The lock only has to cover the destructive part.
 if [[ -e "$ENV_FILE" && ! -f "$ENV_FILE" ]]; then
   echo "❌ .env is not a regular file." >&2
   exit 1
@@ -294,6 +285,42 @@ if ! staged_identity="$(unset KODA_VERSION; compose_identity --env-file "$ENV_FI
    [[ "$staged_identity" != "$target_identity" ]]; then
   echo "❌ Could not validate the staged .env against the target Compose project, volume and API image." >&2
   printf '   staged: %s\n   target: %s\n' "${staged_identity:-<unresolved>}" "$target_identity" >&2
+  exit 1
+fi
+
+# The identity check cannot see a setting that interpolates a variable this script sets: a `.env` holding
+# `JWT_EXPIRES_IN=${KODA_VERSION:-latest}` renders the target for the restart, where the version comes from the
+# shell, but the fallback once only the file is read — same project, volume and image. Compare the whole
+# rendered configuration, by digest only: the render carries the deployment's secrets (review rollback.sh:293).
+config_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  else
+    shasum -a 256 | cut -d' ' -f1
+  fi
+}
+target_config_digest="$(
+  KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" config 2>/dev/null | config_digest
+)" || target_config_digest=''
+staged_config_digest="$(
+  (unset KODA_VERSION; docker compose --env-file "$ENV_FILE_TMP" -f "$COMPOSE_FILE" config 2>/dev/null) | config_digest
+)" || staged_config_digest=''
+if [[ -z "$target_config_digest" || "$target_config_digest" != "$staged_config_digest" ]]; then
+  echo "❌ Could not validate the staged .env: on its own it would not resolve the same configuration." >&2
+  echo "   A setting that interpolates KODA_VERSION before the version assignment (for example" >&2
+  echo "   \${KODA_VERSION:-latest}) keeps the old value once only the file is read. Put KODA_VERSION on the" >&2
+  echo "   first line of .env, then retry." >&2
+  exit 1
+fi
+
+# Docker reserves container names atomically on the daemon. The lock is never started; taking it here, once the
+# replacement is validated, serializes version-only and data rollbacks on this volume, and covers the stop,
+# the restore and the swap.
+LOCK_NAME="koda-rollback-lock-$volume"
+if ! LOCK_ID="$(docker create --name "$LOCK_NAME" --entrypoint /bin/true "$target_image")"; then
+  LOCK_ID=""
+  echo "❌ Could not acquire rollback lock: $LOCK_NAME" >&2
+  echo "   Check for another rollback or follow the interrupted-restore steps in README.md." >&2
   exit 1
 fi
 

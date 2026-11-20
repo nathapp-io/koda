@@ -161,10 +161,15 @@ describe('rollback.sh preflight', () => {
 
     expect(run.status).toBe(0);
     const composeCalls = run.dockerCalls.filter(({ argv }) => argv[0] === 'compose');
-    const [staged] = composeCalls.filter(({ argv }) => argv[2]?.startsWith(`${run.dir}/.env.tmp.`));
-    expect(staged?.argv.slice(3)).toEqual(['-f', `${run.dir}/docker-compose.yml`, 'config']);
-    expect(staged?.kodaVersion).toBe('');
-    for (const call of composeCalls.filter((call) => call !== staged)) {
+    // The staged replacement is only rendered: once for its identity and once for the whole-configuration
+    // comparison against the target render.
+    const staged = composeCalls.filter(({ argv }) => argv[2]?.startsWith(`${run.dir}/.env.tmp.`));
+    expect(staged.length).toBeGreaterThan(0);
+    for (const call of staged) {
+      expect(call.argv.slice(3)).toEqual(['-f', `${run.dir}/docker-compose.yml`, 'config']);
+      expect(call.kodaVersion).toBe('');
+    }
+    for (const call of composeCalls.filter((call) => !staged.includes(call))) {
       expect(call.argv.slice(0, 5)).toEqual([
         'compose',
         '--env-file',
