@@ -26,6 +26,8 @@ services:
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
       MCP_ENABLED: ${MCP_ENABLED:-false}
       API_KEY_SECRET: ${API_KEY_SECRET:?set API_KEY_SECRET}
+      WEBHOOK_SIGNATURE_V1_ENABLED: ${WEBHOOK_SIGNATURE_V1_ENABLED:-true}
+      CI_WEBHOOK_REQUIRE_V2: ${CI_WEBHOOK_REQUIRE_V2:-false}
       API_PORT: 3100
       API_PREFIX: api
       # With --profile rag, set OLLAMA_BASE_URL=http://ollama:11434 to use the bundled container;
