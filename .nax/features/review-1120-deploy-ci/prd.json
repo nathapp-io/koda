@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T02:57:57.952Z",
+  "updatedAt": "2026-11-20T03:24:26.934Z",
   "userStories": [
     {
       "id": "US-001",
@@ -201,14 +201,17 @@
         "tooling"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Combines fail-closed dump verification, Compose project scoping and a new reusable shell/stub filesystem harness."
+        "reasoning": "Combines fail-closed dump verification, Compose project scoping and a new reusable shell/stub filesystem harness.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "deployments/example/backup-db.sh",
@@ -230,7 +233,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0dfa85e732290445422c21a049031e58c632d27f"
     },
     {
       "id": "US-005",
