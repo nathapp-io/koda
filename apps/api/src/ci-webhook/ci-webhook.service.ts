@@ -9,6 +9,16 @@ import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { runAsSystemWriter } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 
+/**
+ * Review B3: a failure's `file` is a repository path, not URL text. Encoding each segment keeps a
+ * valid Git filename with a reserved character (`src/part#2.ts`, `docs/why?.md`, `src/a b.ts`) one
+ * path segment instead of ending the pathname there and turning the rest into a fragment or query.
+ * The line stays `buildGitUrl`'s separate `#L<n>` fragment.
+ */
+function encodeGitPath(filePath: string): string {
+  return filePath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+}
+
 @Injectable()
 @SystemWriter('system.ci.ticket-create')
 export class CiWebhookService {
@@ -121,7 +131,7 @@ export class CiWebhookService {
       if (f.file) parts.push(`  - File: \`${f.file}\``);
       if (f.line) parts.push(`  - Line: ${f.line}`);
       if (f.file && payload.commit.sha) {
-        const url = buildGitUrl(project.gitRemoteUrl, payload.commit.sha, f.file, f.line);
+        const url = buildGitUrl(project.gitRemoteUrl, payload.commit.sha, encodeGitPath(f.file), f.line);
         if (url) parts.push(`  - URL: ${url}`);
       }
       return parts;

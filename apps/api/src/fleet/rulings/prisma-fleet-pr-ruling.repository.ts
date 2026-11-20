@@ -24,6 +24,26 @@ const prNumberRepo = (repo: { provider: string; owner: string; name: string; hos
 const prUrlSuffix = (provider: string, prNumber: number): string =>
   provider === 'gitlab' ? `/merge_requests/${prNumber}` : `/pull/${prNumber}`;
 
+/**
+ * Review B1: the origin a repo's PR URLs must carry — its forge scheme, host and port, without the
+ * path prefix a self-hosted instance is served below. `null` when the row's `host` is not a URL.
+ */
+const repoOrigin = (host: string): string | null => {
+  try { return new URL(host).origin; } catch { return null; }
+};
+
+/**
+ * Review B1: `prNumberFor` reads the URL path only, so a same-path URL on another forge host
+ * (`https://gitlab.example.com/acme/app/pull/42`) would otherwise confirm as this repo's PR and a
+ * newer foreign-host RUN could displace the correct one. A stored URL is only a candidate when its
+ * origin is the row's own origin; a `host` that is not a URL vouches for no URL at all.
+ */
+const sameRepoOrigin = (repo: PrNumberRepo, url: string): boolean => {
+  const expected = repoOrigin(repo.host);
+  if (expected === null) return false;
+  try { return new URL(url).origin === expected; } catch { return false; }
+};
+
 @Injectable()
 export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<FleetPrRuling, RulingRow, string> implements IFleetPrRulingRepository {
   constructor(@Inject(TRANSACTION_MANAGER) tx: ITransactionManager, private readonly prisma: PrismaService<PrismaClient>) { super(tx); }
@@ -83,6 +103,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
     const ref = prNumberRepo(repo);
     // US-005: the pre-filter narrows to this forge's URL shape; `prNumberFor` confirms every match.
     // Include supported URL suffix variants because URL parsing strips query strings and fragments.
+    // Review B1: the candidate's origin must also be this repo's, so another host's same-path URL
+    // can neither be returned nor hide the correct run behind it.
     const suffix = prUrlSuffix(repo.provider, prNumber);
     const urlVariants = [
       { resultPrUrl: { endsWith: suffix } },
@@ -99,7 +121,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: pageSize, skip: page * pageSize,
         select: { id: true, resultPrUrl: true },
       });
-      const match = jobs.find((job) => job.resultPrUrl && prNumberFor(ref, job.resultPrUrl) === prNumber);
+      const match = jobs.find((job) => job.resultPrUrl && prNumberFor(ref, job.resultPrUrl) === prNumber
+        && sameRepoOrigin(ref, job.resultPrUrl));
       if (match) return match.id;
       if (jobs.length < pageSize) return null;
     }

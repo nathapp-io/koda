@@ -86,6 +86,31 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
     await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 56)).resolves.toBeNull();
   });
 
+  /**
+   * Review B1: a stored PR URL is only a candidate when its origin is the repo's own forge host.
+   * `prNumberFor` reads the path alone, so a same-path URL from another host would otherwise pass
+   * the confirmation and a newer foreign-host RUN would displace the correct one.
+   */
+  it('B1: latestRunForPr keeps the correct-host RUN when a newer same-path URL names another host', async () => {
+    const older = await newUrlJob('variant-foreign-host-older', 'https://github.com/acme/app/pull/58');
+    const newer = await newUrlJob('variant-foreign-host-newer', 'https://gitlab.example.com/acme/app/pull/58/');
+    await db.fleetJob.update({ where: { id: newer.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 58)).resolves.toBe(older.id);
+  });
+
+  it('B1: latestRunForPr does not match a GitHub PR URL from another host', async () => {
+    await newUrlJob('variant-foreign-host-only', 'https://gitlab.example.com/acme/app/pull/59/');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 59)).resolves.toBeNull();
+  });
+
+  it('B1: latestRunForPr does not match a merge-request URL from another GitLab host', async () => {
+    await db.fleetJob.create({ data: {
+      projectId, repoId: gitlabRepoId, command: 'RUN', feature: 'variant-foreign-gitlab', ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
+      resultPrUrl: 'https://gitlab.example.com/acme/gitlab-app/-/merge_requests/60/', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+    } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(gitlabRepoId, 60)).resolves.toBeNull();
+  });
+
   it('AC-7: create accepts the latest draft RUN when its PR URL has a trailing slash', async () => {
     const older = await newUrlJob('ruling-variant-older', 'https://github.com/acme/app/pull/57');
     const newer = await newUrlJob('ruling-variant-newer', 'https://github.com/acme/app/pull/57/');

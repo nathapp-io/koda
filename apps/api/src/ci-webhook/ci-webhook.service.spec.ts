@@ -291,6 +291,27 @@ describe('CiWebhookService', () => {
     });
 
     /**
+     * Review B3: a file name is a repository path, not URL text. A reserved character in it (`#`,
+     * `?`, a space) would otherwise end the pathname at that character and turn the rest into a
+     * fragment or query, so the link would name the wrong file even on a supported GitHub remote.
+     */
+    it.each([
+      ['src/part#2.ts', 'src/part%232.ts'],
+      ['docs/why?.md', 'docs/why%3F.md'],
+      ['src/a b.ts', 'src/a%20b.ts'],
+    ])('B3: encodes %s in the source URL, keeping the line fragment separate', async (file, encoded) => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = { ...validPayload, commit: { sha: 'abc123' }, failures: [{ test: 'T', file, line: 7 }] };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(mockRepo.createTicket.mock.calls[0][1].description).toContain(
+        `  - URL: https://github.com/acme/app/blob/abc123/${encoded}#L7`,
+      );
+    });
+
+    /**
      * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous` (US-002).
      * Creating the ticket is the system's own write, so `processCiWebhook` overrides it with `SYSTEM/ci`.
      */
