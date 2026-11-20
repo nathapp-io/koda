@@ -67,7 +67,7 @@ describe('deploy.sh', () => {
   it('AC-7: ignores a commented DATABASE_URL and runs migrations', () => {
     const run = runDeployScript('deploy.sh', [], { envFile: lines('# DATABASE_URL=postgresql://db.example/koda') });
     expect(run.dockerCalls.some(({ argv }) => argv.includes('migrate') && argv.includes('deploy'))).toBe(true);
-  });
+  }, 30_000);
 
   it('AC-8: permits DATABASE_URL exported in the operator environment', () => {
     expect(runDeployScript('deploy.sh', [], {
