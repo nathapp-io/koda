@@ -110,16 +110,26 @@ Rollback app + restore DB backup:
 
 ```bash
 cd deployments/example
-./rollback.sh v0.3.0 --restore-db ./backups/koda_data-YYYYMMDD-HHMMSS.tar.gz
+./rollback.sh v0.3.0 --restore-db ./backups/koda_data-YYYYMMDD-HHMMSS-PID.tar.gz
 ```
 
 Before stopping any service, `rollback.sh` checks that the restore archive exists and is a valid `.tar.gz` (the gzip stream is checked explicitly, so a plain tar with a `.tar.gz` name is refused), then pulls the target images. If either preflight check fails, the running services are left untouched. A stop that cannot be confirmed also aborts before any data is replaced.
 
 The archive is copied to a staging directory next to the scripts and mounted from there, so a backup that is a symlink to a file outside its own directory still restores. The restore extracts the archive **once**, into a staging directory on the data volume itself: a backup that fits on the volume therefore does not also need room in Docker's storage, and the swap into `/data` only starts after that extraction has succeeded. Every top-level entry of the volume — dotfiles, names with two leading dots and symlinks whose target is gone included — is moved aside until the restored content is in place.
 
-If a restore is interrupted after it moved the old content aside, `/data/.koda-restore-previous` holds the only copy. The next run refuses to continue rather than delete it and prints how to put that content back, so the rollback fails loudly instead of starting a restore over data that was never replaced.
+Before pulling or stopping services, `rollback.sh` compares Compose's resolved project and named `/data` volume under the current and target versions. It refuses any change, including one through an intermediate variable. Use version-independent names (for example `COMPOSE_PROJECT_NAME=koda-staging`). Before stopping services it takes a Docker container-name lock for the resolved volume, shared by version-only and data rollbacks. Do not prune or remove the lock container during a rollback. Do not run deploy, backup, or manual Compose operations against the volume while a rollback is in progress.
 
-The Compose project name must not depend on `KODA_VERSION`: a rollback stops the services under the version `.env` holds and restores under the target one, so a project name such as `COMPOSE_PROJECT_NAME=koda-${KODA_VERSION}` would stop one project and restore into another. `rollback.sh` refuses such a name before it touches Docker. Pin a version-independent name (for example `COMPOSE_PROJECT_NAME=koda-staging`).
+The restore refuses archives with either reserved top-level name (`.koda-restore-previous` or `.koda-restore-staging`). It applies and verifies the archived root owner and mode before discarding the saved data, or preserves the live root owner and mode if the archive lacks a root entry.
+
+### Recover an interrupted restore
+
+1. Keep the app stopped. On the same Docker daemon, check that no rollback is running and that the `koda-rollback-worker-<volume>` container is gone or stopped. Leave the `koda-rollback-lock-<volume>` container in place during recovery. On deployments with a shared volume, stop other services writing to it too.
+2. Inspect the exact volume in a root maintenance shell with the same Compose project and environment, for example `docker compose --env-file .env -p <project> run --rm --no-deps --user root --entrypoint sh api`. Do not start the API. Preserve a separate copy or snapshot of the volume, including its hidden directories, before making changes.
+3. If `/data/.koda-restore-previous/entries` exists, check for the `installing` marker alongside it:
+   - **No marker:** the restore was still moving original entries aside. Leave the original entries still in `/data` in place. Check that none of the saved names already exists at the destination (count dangling symlinks as existing); investigate any conflict rather than overwriting it.
+   - **`installing` exists:** all originals were moved aside. Move every remaining live top-level entry, including dotfiles and dangling symlinks, into a separate empty quarantine directory (for example inside `.koda-restore-previous`, beside `entries`). Leave the two reserved directories in place. This removes partial output, including files that were never in the original tree.
+4. Copy the saved `entries` back preserving metadata and symlinks, without overwriting live entries, and restore the original numeric owner/group and mode of `/data` from `root-metadata`. Verify both the saved and the never-moved entries, the absence of restore-only entries, and the root metadata before moving the recovery and staging directories out of `/data`. Keep the saved copy and quarantined files until verification is complete. If only staging exists, do not copy it over the live tree: a `committed` subdirectory means the new tree was installed and verified by the script, otherwise extraction may have stopped before any moves. If the layout does not match these cases (including older rollback scripts), keep the copies and inspect them against a known-good backup rather than guessing.
+5. If a restore failed before touching live data (for example, archive extraction failed), verify the original data is intact. After verifying the volume and confirming the worker is no longer active, remove the retained lock (`docker rm koda-rollback-lock-<volume>`) and retry or restart the verified stack.
 
 ## Notes
 

@@ -11,59 +11,80 @@ RESTORE_STAGE_DIR=""
 # file with a plain name whatever the operator called the backup (review B2).
 STAGED_ARCHIVE_NAME="koda-restore.tar.gz"
 
-# Install the restore: extract once, into a staging directory on the target volume, and swap it into place
-# only after that extraction succeeded. Extracting here rather than in the container's writable layer means a
-# backup that fits on the data volume does not also need room in Docker's storage, and a corrupt or
-# unreadable archive fails before anything under /data is moved (review B13).
-#
-# Every top-level entry is enumerated except `.`, `..` and the two staging directories: the three globs cover
-# plain names, single-dot names and names that begin with two dots, and a symlink counts as an entry even
-# when its target is gone (an empty or already-moved target made the old `[ -e ]` test skip it, so a restore
-# could report success while keeping stale entries and dropping archived ones — review B12).
-RESTORE_INSTALL_SCRIPT='set -e
+# Use the same volume for extraction and the renames. Recovery data is published before
+# moving any live entry, and the installing marker precedes the first install rename.
+RESTORE_INSTALL_SCRIPT='set -eu
+umask 077
 stage=/data/.koda-restore-staging
 previous=/data/.koda-restore-previous
-trap "rm -rf $stage" EXIT
-if [ -e "$previous" ] || [ -L "$previous" ]; then
-  echo "❌ An earlier restore was interrupted: $previous still holds the data it moved aside." >&2
-  echo "   Put it back before rolling back again, inside the api container:" >&2
-  echo "     cp -a $previous/. /data/ && rm -rf $previous" >&2
+exists() { [ -e "$1" ] || [ -L "$1" ]; }
+root_metadata() { stat -c "%u:%g %a" "$1"; }
+apply_root_metadata() {
+  chown "${2%% *}" "$1" || return 1
+  chmod "${2#* }" "$1" || return 1
+  actual=$(root_metadata "$1") || return 1
+  [ "$actual" = "$2" ]
+}
+if exists "$previous" || exists "$stage"; then
+  echo "❌ An earlier restore was interrupted or a reserved staging path already exists." >&2
+  echo "   Keep the services stopped; inspect $previous and $stage before retrying." >&2
   exit 1
 fi
-rm -rf "$stage"
-mkdir -p "$stage"
-tar -xzf "/backup/$1" -C "$stage"
-mkdir -p "$previous"
+mkdir "$stage"
+trap '\''rm -rf "$stage"'\'' EXIT
+trap "exit 1" HUP INT TERM
+mkdir "$stage/tree"
+original=$(root_metadata /data)
+# If the archive has no root entry, the extracted tree retains the original root metadata.
+apply_root_metadata "$stage/tree" "$original"
+tar --numeric-owner -xzpf "/backup/$1" -C "$stage/tree"
+for reserved in .koda-restore-staging .koda-restore-previous; do
+  if exists "$stage/tree/$reserved"; then
+    echo "❌ Restore archive contains reserved name: $reserved" >&2
+    exit 1
+  fi
+done
+restored=$(root_metadata "$stage/tree")
+mkdir -p "$stage/original/entries"
+printf "%s\n" "$original" > "$stage/original/root-metadata"
+mv "$stage/original" "$previous"
 cd /data
 for entry in ./* ./.[!.]* ./..?*; do
   case "$entry" in
     ./.koda-restore-staging|./.koda-restore-previous) continue ;;
   esac
-  if [ -e "$entry" ] || [ -L "$entry" ]; then
-    mv "$entry" "$previous/"
-  fi
+  if exists "$entry"; then mv "$entry" "$previous/entries/"; fi
 done
-cd "$stage"
-if [ -e ./.koda-restore-staging ] || [ -e ./.koda-restore-previous ]; then
-  echo "⚠️  The archive holds an entry this script reserves for its own staging; it was not installed." >&2
-fi
+: > "$previous/installing"
+cd "$stage/tree"
 for entry in ./* ./.[!.]* ./..?*; do
-  case "$entry" in
-    ./.koda-restore-staging|./.koda-restore-previous) continue ;;
-  esac
-  if [ -e "$entry" ] || [ -L "$entry" ]; then
-    mv "$entry" /data/
-  fi
+  if exists "$entry"; then mv "$entry" /data/; fi
 done
-rm -rf "$stage" "$previous"'
+cd /data
+if ! apply_root_metadata /data "$restored"; then
+  echo "❌ Could not apply or verify the archived data root metadata." >&2
+  exit 1
+fi
+# Commit by atomically removing the recovery marker from /data; the EXIT cleanup
+# can now delete the saved entries without leaving a misleading partial recovery tree.
+mv "$previous" "$stage/committed"'
 
-cleanup_stage_dir() {
+LOCK_ID=""
+KEEP_LOCK=0
+ENV_FILE_TMP=""
+cleanup() {
   if [[ -n "$RESTORE_STAGE_DIR" ]]; then
     rm -rf "$RESTORE_STAGE_DIR"
-    RESTORE_STAGE_DIR=""
+  fi
+  if [[ -n "$ENV_FILE_TMP" ]]; then
+    rm -f "$ENV_FILE_TMP"
+  fi
+  if [[ -n "$LOCK_ID" && "$KEEP_LOCK" == 0 ]]; then
+    docker rm "$LOCK_ID" >/dev/null || echo "⚠️  Could not release rollback lock: $LOCK_NAME" >&2
   fi
 }
-trap cleanup_stage_dir EXIT
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 usage() {
   cat <<'EOF'
@@ -72,7 +93,7 @@ Usage:
 
 Examples:
   ./rollback.sh v0.3.0
-  ./rollback.sh v0.3.0 --restore-db ./backups/koda_data-20260409-180000.tar.gz
+  ./rollback.sh v0.3.0 --restore-db ./backups/koda_data-20260409-180000-12345.tar.gz
 EOF
 }
 
@@ -129,60 +150,50 @@ if [[ -f "$ENV_FILE" ]]; then
   COMPOSE_ARGS=( --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" )
 fi
 
-# The Compose project name Compose would derive from the environment, in its own precedence order: the
-# shell's `COMPOSE_PROJECT_NAME`, then the value in `.env`, then the Compose file's top-level `name:`.
-# Compose interpolates all three, so any of them may reference KODA_VERSION.
-compose_project_source() {
-  local env_line env_value="" compose_line
-  if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
-    printf '%s' "$COMPOSE_PROJECT_NAME"
-    return 0
-  fi
-  if [[ -f "$ENV_FILE" ]]; then
-    while IFS= read -r env_line || [[ -n "$env_line" ]]; do
-      if [[ "$env_line" =~ ^[[:space:]]*(export[[:space:]]+)?COMPOSE_PROJECT_NAME[[:space:]]*[=:][[:space:]]*(.*)$ ]]; then
-        env_value="${BASH_REMATCH[2]}"
-      fi
-    done < "$ENV_FILE"
-    if [[ -n "$env_value" ]]; then
-      printf '%s' "$env_value"
-      return 0
-    fi
-  fi
-  if [[ -f "$COMPOSE_FILE" ]]; then
-    while IFS= read -r compose_line || [[ -n "$compose_line" ]]; do
-      if [[ "$compose_line" =~ ^name:[[:space:]]*(.*)$ ]]; then
-        printf '%s' "${BASH_REMATCH[1]}"
-        return 0
-      fi
-    done < "$COMPOSE_FILE"
-  fi
+# Read the canonical config, not the source expressions. This also resolves an explicit
+# Docker volume name (two Compose projects can point at the same volume).
+compose_identity() {
+  docker compose "${COMPOSE_ARGS[@]}" config | awk '
+    /^[^[:space:]]/ { section = $1; key = ""; mount_type = "" }
+    function scalar(value) { if (value ~ /^"[a-zA-Z0-9_.-]+"$/) return substr(value, 2, length(value)-2); return value }
+    /^name: / { project = scalar($2) }
+    /^  [^[:space:]]/ { key = $1; mount_type = "" }
+    section == "services:" && key == "api:" {
+      if ($0 ~ /^    image: /) image = $2
+      if ($0 ~ /^      - type: /) { mount_type = $3; source = "" }
+      if ($0 ~ /^        source: /) source = scalar($2)
+      if ($0 ~ /^        target: \/data$/ && mount_type == "volume") data_key = source
+    }
+    section == "volumes:" && /^    name: / { names[scalar(substr(key, 1, length(key)-1))] = scalar($2) }
+    END {
+      volume = names[data_key]
+      if (project !~ /^[a-z0-9][a-z0-9_-]*$/ || volume !~ /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/ || !image) exit 1
+      print project, volume, image
+    }
+  '
 }
-
-# This rollback stops the services under whatever version `.env` (or the shell) has now and restores under
-# the target one. When the Compose project name follows KODA_VERSION, those two are different projects, so
-# the stop would hit one project and the restore the other — and the data would land in a project the
-# running stack never used (review B1). Refuse instead of guessing which project owns the data.
-project_source="$(compose_project_source)"
-case "$project_source" in
-  *KODA_VERSION*)
-    echo "❌ The Compose project name depends on KODA_VERSION (\"$project_source\")."
-    echo "   A rollback stops one project and restores another when the project name follows the version."
-    echo "   Pin COMPOSE_PROJECT_NAME (in .env, the shell, or the Compose file's name:) to a name that does not, then retry."
-    exit 1
-    ;;
-esac
+if ! current_identity="$(compose_identity)" || ! target_identity="$(KODA_VERSION="$TARGET_VERSION" compose_identity)"; then
+  echo "❌ Could not resolve the Compose project, API image and named /data volume." >&2
+  exit 1
+fi
+read -r project volume _ <<< "$current_identity"
+read -r target_project target_volume target_image <<< "$target_identity"
+if [[ "$project" != "$target_project" || "$volume" != "$target_volume" ]]; then
+  echo "❌ KODA_VERSION changes the resolved Compose project or data volume." >&2
+  echo "   Use a version-independent project name and /data volume, then retry." >&2
+  exit 1
+fi
+COMPOSE_ARGS+=( --project-name "$project" )
 
 echo "==> Pull target images"
 KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" pull api web
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   # Stage next to the deployment (the directory `deploy.sh` writes `.env` in and `backup-db.sh` writes
-  # `backups/` in), so the mount stays on a directory the operator's Docker shares, and the pid keeps two
-  # concurrent rollbacks apart. Staging happens before the services stop, so an unstageable archive never
+  # `backups/` in), so the mount stays on a directory the operator's Docker shares. The unique directory
+  # keeps concurrent rollbacks apart. Staging happens before the services stop, so an unstageable archive never
   # takes them down.
-  RESTORE_STAGE_DIR="$SCRIPT_DIR/.rollback-stage-$$"
-  mkdir -p "$RESTORE_STAGE_DIR"
+  RESTORE_STAGE_DIR="$(mktemp -d "$SCRIPT_DIR/.rollback-stage-XXXXXXXX")"
   # A symlink to a valid archive outside its own directory passes the host checks, but the container only
   # sees the mounted directory and cannot follow it. `cp -L` stages the archive as a regular file, so the
   # container reads the content, not a dangling link (review B2).
@@ -190,6 +201,16 @@ if [[ -n "$RESTORE_DB_FILE" ]]; then
     echo "❌ Could not stage the backup file: $RESTORE_DB_FILE"
     exit 1
   fi
+fi
+
+# Docker reserves container names atomically on the daemon. The lock is never started;
+# acquiring it before stop also serializes version-only rollbacks on this volume.
+LOCK_NAME="koda-rollback-lock-$volume"
+if ! LOCK_ID="$(docker create --name "$LOCK_NAME" --entrypoint /bin/true "$target_image")"; then
+  LOCK_ID=""
+  echo "❌ Could not acquire rollback lock: $LOCK_NAME" >&2
+  echo "   Check for another rollback or follow the interrupted-restore steps in README.md." >&2
+  exit 1
 fi
 
 echo "==> Stopping app services"
@@ -202,28 +223,66 @@ fi
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   echo "==> Restoring DB volume from: $RESTORE_DB_FILE"
-  KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps --user root --entrypoint sh \
-    -v "$RESTORE_STAGE_DIR:/backup:ro" \
-    api -c "$RESTORE_INSTALL_SCRIPT" koda-restore "$STAGED_ARCHIVE_NAME"
+  # A failed/disconnected Docker client does not prove the worker stopped. Retain the
+  # lock on any restore failure so no rollback starts the API on partially replaced data.
+  KEEP_LOCK=1
+  if ! KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps --user root --entrypoint sh \
+    --name "koda-rollback-worker-$volume" -v "$RESTORE_STAGE_DIR:/backup:ro" \
+    api -c "$RESTORE_INSTALL_SCRIPT" koda-restore "$STAGED_ARCHIVE_NAME"; then
+    echo "❌ Restore failed. Keep the services stopped; rollback lock $LOCK_NAME was retained." >&2
+    echo "   Follow the interrupted-restore steps in README.md before releasing the lock." >&2
+    exit 1
+  fi
+  KEEP_LOCK=0
 fi
 
-ENV_FILE_TMP="${ENV_FILE}.tmp.$$"
+ENV_FILE_TMP="$(mktemp "$ENV_FILE.tmp.XXXXXXXX")"
 if [[ -f "$ENV_FILE" ]]; then
   cp -p "$ENV_FILE" "$ENV_FILE_TMP"
-  # Replace every assignment Compose would read — `KODA_VERSION=v0.9.0`, `KODA_VERSION: v0.9.0`,
-  # `export KODA_VERSION = v0.9.0` and their whitespace variants: Compose accepts `=` and `:`, a later
-  # assignment in the same file wins, and one left behind would restart the services on a version other
-  # than the one that was pulled and restored (review B6).
-  awk -v version="KODA_VERSION=$TARGET_VERSION" '
-    /^[[:space:]]*(export[[:space:]]+)?KODA_VERSION[[:space:]]*[=:]/ { print version; found = 1; next }
-    { print }
-    END { if (!found) print version }
+  # Compose accepts export, colon and multiline quoted values. Track the closing quote
+  # before treating a physical line as a new assignment. Keep unrelated bytes as-is.
+  KODA_ROLLBACK_VERSION="$TARGET_VERSION" LC_ALL=C awk -v final_nl="$(tail -c 1 "$ENV_FILE" | wc -l)" '
+    function quote_end(text, start,    i) {
+      for (i = start; i <= length(text); i++) {
+        if (substr(text, i, 1) == quote && (i == 1 || substr(text, i-1, 1) != "\\")) return i
+      }
+      return 0
+    }
+    function emit(line) {
+      if (pending) print last
+      pending = 1
+      last = line
+    }
+    BEGIN { version = "KODA_VERSION=" ENVIRON["KODA_ROLLBACK_VERSION"] }
+    {
+      if (quote != "") {
+        if (!replacing) emit($0)
+        if (quote_end($0, 1)) quote = ""
+        next
+      }
+      replacing = 0
+      if (match($0, /^[[:space:]]*(export[[:space:]]+)?[[:alnum:]_.-]+[[:space:]]*[=:][[:space:]]*/)) {
+        replacing = ($0 ~ /^[[:space:]]*(export[[:space:]]+)?KODA_VERSION[[:space:]]*[=:]/)
+        value = substr($0, RLENGTH + 1)
+        quote = substr(value, 1, 1)
+        if ((quote != "\047" && quote != "\042") || quote_end(value, 2)) quote = ""
+      }
+      if (replacing) {
+        found = 1
+        emit(version ($0 ~ /\r$/ ? "\r" : ""))
+      } else emit($0)
+    }
+    END {
+      if (quote != "") exit 1
+      if (!found) emit(version)
+      if (pending) printf "%s%s", last, (final_nl || !found ? "\n" : "")
+    }
   ' "$ENV_FILE" > "$ENV_FILE_TMP"
 else
-  : > "$ENV_FILE_TMP"
   printf '%s\n' "KODA_VERSION=$TARGET_VERSION" > "$ENV_FILE_TMP"
 fi
 mv "$ENV_FILE_TMP" "$ENV_FILE"
+ENV_FILE_TMP=""
 
 echo "==> Starting app services on KODA_VERSION=$TARGET_VERSION"
 # Pin the version for the restart too: an exported KODA_VERSION (or an assignment this script did not read)
@@ -231,6 +290,6 @@ echo "==> Starting app services on KODA_VERSION=$TARGET_VERSION"
 KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" up -d api web
 
 echo "==> Status"
-docker compose "${COMPOSE_ARGS[@]}" ps
+KODA_VERSION="$TARGET_VERSION" docker compose "${COMPOSE_ARGS[@]}" ps
 
 echo "✅ Rollback complete"

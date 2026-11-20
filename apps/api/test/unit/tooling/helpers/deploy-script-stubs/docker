@@ -69,6 +69,36 @@ case "$joined" in
     ;;
 esac
 
+# Model Compose's rendered config for the fixtures (not a general dotenv parser).
+case "$1" in
+  create)
+    mkdir "$KODA_DEPLOY_HARNESS_DIR/.harness/$3" || exit 1
+    printf '%s\n' "$3"
+    exit 0
+    ;;
+  rm)
+    rmdir "$KODA_DEPLOY_HARNESS_DIR/.harness/$2"
+    exit "$?"
+    ;;
+esac
+if [[ "$joined" == *' config' ]]; then
+  project="${COMPOSE_PROJECT_NAME:-}"
+  if [[ -z "$project" && -f "$KODA_DEPLOY_HARNESS_DIR/.env" ]]; then
+    project="$(grep '^COMPOSE_PROJECT_NAME=' "$KODA_DEPLOY_HARNESS_DIR/.env" | cut -d= -f2-)"
+  fi
+  project="${project:-koda-local}"
+  version="${KODA_VERSION:-}"
+  if [[ -z "$version" && -f "$KODA_DEPLOY_HARNESS_DIR/.env" ]]; then
+    version="$(grep '^KODA_VERSION=' "$KODA_DEPLOY_HARNESS_DIR/.env" | cut -d= -f2- | tail -n 1)"
+  fi
+  project="${project//'${PROJECT_SUFFIX}'/${version:-default}}"
+  project="${project//'${KODA_VERSION}'/${version:-latest}}"
+  if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then exit 1; fi
+  printf 'name: %s\nservices:\n  api:\n    image: nathapp/koda-api:%s\n    volumes:\n      - type: volume\n        source: koda_data\n        target: /data\nvolumes:\n  koda_data:\n    name: %s\n' \
+    "$project" "${version:-latest}" "${KODA_DEPLOY_HARNESS_VOLUME_NAME:-${project}_koda_data}"
+  exit 0
+fi
+
 # Restore pipeline: `run … -c <script> <positional args…>`.
 args=( "$@" )
 command_index=-1
@@ -100,7 +130,33 @@ if [[ "$command_index" -ge 0 && "$command_index" -lt "$(( ${#args[@]} - 1 ))" ]]
   else
     translated="$(printf '%s' "$command" | sed -e "s#/data#$volume#g")"
   fi
-  ( cd "${KODA_DEPLOY_HARNESS_DIR:?}" && /bin/sh -c "$translated" "${positional[@]}" )
+  helpers='stat() {
+    if [ "$(uname -s)" = Darwin ] && [ "$1" = "-c" ] && [ "$2" = "%u:%g %a" ]; then
+      command stat -f "%u:%g %Lp" "$3"
+    else
+      command stat "$@"
+    fi
+  }
+  mv() {
+    case "$2" in
+      */.koda-restore-previous/entries/|*/.koda-restore-previous/) phase=save ;;
+      "$KODA_DEPLOY_HARNESS_VOLUME"/) phase=install ;;
+      *) command mv "$@"; return ;;
+    esac
+    if [ "${KODA_DEPLOY_HARNESS_FAIL_MOVE-}" = "$phase" ] && [ "${1##*/}" = z ]; then return 1; fi
+    command mv "$@" || return
+    if [ "$phase" = install ] && [ -n "${KODA_DEPLOY_HARNESS_COMPETE-}" ]; then
+      # Re-enter while the winner owns staging and has already installed its first entry.
+      set +e
+      KODA_DEPLOY_HARNESS_COMPETE= COMPOSE_PROJECT_NAME=koda-other /bin/bash "$KODA_DEPLOY_HARNESS_DIR/rollback.sh" v0.4.1 --restore-db "$KODA_DEPLOY_HARNESS_COMPETE"
+      contender_status=$?
+      set -e
+      printf "Contender exit: %s\n" "$contender_status"
+      unset KODA_DEPLOY_HARNESS_COMPETE
+    fi
+  }'
+  ( cd "${KODA_DEPLOY_HARNESS_DIR:?}" && /bin/sh -c "$helpers
+$translated" "${positional[@]}" )
   exit "$?"
 fi
 

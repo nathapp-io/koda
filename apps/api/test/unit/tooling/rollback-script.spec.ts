@@ -127,7 +127,7 @@ describe('rollback.sh preflight', () => {
     const pullIndex = matchingCallIndex(run.dockerCalls, 'pull');
     const stopIndex = matchingCallIndex(run.dockerCalls, 'stop');
     expect(run.dockerCalls[pullIndex]?.argv).toEqual([
-      'compose', '-f', `${run.dir}/docker-compose.yml`, 'pull', 'api', 'web',
+      'compose', '-f', `${run.dir}/docker-compose.yml`, '--project-name', 'koda-local', 'pull', 'api', 'web',
     ]);
     expect(stopIndex).toBeGreaterThan(pullIndex);
   });
@@ -160,7 +160,7 @@ describe('rollback.sh preflight', () => {
     });
 
     expect(run.status).toBe(0);
-    for (const call of run.dockerCalls) {
+    for (const call of run.dockerCalls.filter(({ argv }) => argv[0] === 'compose')) {
       expect(call.argv.slice(0, 5)).toEqual([
         'compose',
         '--env-file',
@@ -171,25 +171,34 @@ describe('rollback.sh preflight', () => {
     }
   });
 
-  it('B1: refuses a Compose project name that follows KODA_VERSION before any docker call', () => {
+  it('B1: refuses a Compose project name that follows KODA_VERSION before service operations', () => {
     // `stop` runs under the version `.env` holds and the restore under the target, so a project name built
     // from KODA_VERSION would stop one project and restore into another (review B1).
-    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchiveFixture()], {
-      envFile: 'POSTGRES_PASSWORD=pw\nKODA_VERSION=v0.4.2\nCOMPOSE_PROJECT_NAME=koda-${KODA_VERSION}\n',
+    const run = runDeployScript('rollback.sh', ['pinned', '--restore-db', validArchiveFixture()], {
+      envFile: 'POSTGRES_PASSWORD=pw\nKODA_VERSION=current\nCOMPOSE_PROJECT_NAME=koda-${KODA_VERSION}\n',
     });
 
     expect(run.status).toBe(1);
-    expect(run.output).toContain('depends on KODA_VERSION');
-    expect(run.dockerCalls).toEqual([]);
+    expect(run.output).toContain('changes the resolved Compose project or data volume');
+    expect(run.dockerCalls.map((call) => call.argv.at(-1))).toEqual(['config', 'config']);
   });
 
-  it('B1: refuses a version-dependent project name inherited from the shell', () => {
+  it('B1: rejects an indirect Compose project-name change before stopping or pulling', () => {
+    const run = runDeployScript('rollback.sh', ['pinned', '--restore-db', validArchiveFixture()], {
+      envFile: 'PROJECT_SUFFIX=${KODA_VERSION:-default}\nCOMPOSE_PROJECT_NAME=koda-${PROJECT_SUFFIX}\n',
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.dockerCalls.map((call) => call.argv.at(-1))).toEqual(['config', 'config']);
+  });
+
+  it('B1: fails safely when Compose cannot resolve an invalid shell project name', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1'], {
       env: { COMPOSE_PROJECT_NAME: 'koda-$KODA_VERSION' },
     });
 
     expect(run.status).toBe(1);
-    expect(run.dockerCalls).toEqual([]);
+    expect(run.dockerCalls.map((call) => call.argv.at(-1))).toEqual(['config']);
   });
 
   it('B1: still rolls back a version-independent Compose project name', () => {
@@ -198,6 +207,11 @@ describe('rollback.sh preflight', () => {
     });
 
     expect(run.status).toBe(0);
-    expect(run.dockerCalls.some((call) => call.argv.includes('pull'))).toBe(true);
+    const serviceCalls = run.dockerCalls.filter(({ argv }) => argv[0] === 'compose' && !argv.includes('config'));
+    expect(serviceCalls.length).toBeGreaterThan(0);
+    for (const { argv } of serviceCalls) {
+      expect(argv.slice(argv.indexOf('--project-name'), argv.indexOf('--project-name') + 2))
+        .toEqual(['--project-name', 'koda-staging']);
+    }
   });
 });

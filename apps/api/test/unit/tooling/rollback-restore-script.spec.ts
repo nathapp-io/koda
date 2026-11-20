@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -97,12 +98,12 @@ describe('rollback.sh restore and portable .env update', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()]);
     const install = restoreRuns(run.dockerCalls)[0];
     const stage = mountSource(install);
-    expect(install.argv.slice(0, 12)).toEqual([
-      'compose', '-f', `${run.dir}/docker-compose.yml`, 'run', '--rm', '--no-deps', '--user', 'root',
-      '--entrypoint', 'sh', '-v', `${stage}${BACKUP_MOUNT_SUFFIX}`,
+    expect(install.argv.slice(0, install.argv.indexOf('-c') + 1)).toEqual([
+      'compose', '-f', `${run.dir}/docker-compose.yml`, '--project-name', 'koda-local',
+      'run', '--rm', '--no-deps', '--user', 'root', '--entrypoint', 'sh',
+      '--name', 'koda-rollback-worker-koda-local_koda_data', '-v', `${stage}${BACKUP_MOUNT_SUFFIX}`, 'api', '-c',
     ]);
-    expect(install.argv.slice(12, 14)).toEqual(['api', '-c']);
-    expect(install.argv.slice(15)).toEqual(['koda-restore', 'koda-restore.tar.gz']);
+    expect(install.argv.slice(-2)).toEqual(['koda-restore', 'koda-restore.tar.gz']);
   });
   it('B13: extracts once into staging on the volume before it moves anything', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()]);
@@ -113,8 +114,9 @@ describe('rollback.sh restore and portable .env update', () => {
     // in the volume, never to the container's writable layer, and the current entries are moved aside
     // rather than deleted (review B2, B13).
     expect(command).toContain('stage=/data/.koda-restore-staging');
-    expect(command).toContain('tar -xzf "/backup/$1" -C "$stage"');
-    expect(command.indexOf('tar -xzf')).toBeLessThan(command.indexOf('mv "$entry" "$previous/"'));
+    const extract = 'tar --numeric-owner -xzpf "/backup/$1" -C "$stage/tree"';
+    expect(command.split(extract)).toHaveLength(2);
+    expect(command.indexOf(extract)).toBeLessThan(command.indexOf('mv "$entry" "$previous/entries/"'));
     expect(command).toContain('/data/.koda-restore-previous');
     expect(command).not.toContain('/tmp');
     expect(command).not.toContain('find /data -mindepth 1 -delete');
@@ -125,6 +127,8 @@ describe('rollback.sh restore and portable .env update', () => {
     });
 
     expect(run.status).not.toBe(0);
+    expect(restoreRuns(run.dockerCalls)).toHaveLength(1);
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
     // Nothing was moved aside, so the interrupted-restore directory does not exist either.
     expect(volumeEntries(run)).toEqual(['keep.txt']);
     expect(readFileSync(join(run.dataDir, 'keep.txt'), 'utf8')).toBe('current data\n');
@@ -172,24 +176,98 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(run.status).toBe(0);
     expect(volumeEntries(run)).toEqual(['dangling']);
   });
-  it('B12: reports an archive entry that collides with the script staging names instead of dropping it', () => {
+  it.each(['.koda-restore-staging', '.koda-restore-previous'].flatMap((name) =>
+    [false, true].map((dangling) => ({ name, dangling })),
+  ))('B12: rejects reserved archive name $name (dangling: $dangling)', ({ name, dangling }) => {
     const root = fixtureRoot();
-    mkdirSync(join(root, '.koda-restore-previous'));
-    writeFileSync(join(root, '.koda-restore-previous', 'archived.txt'), 'archived\n');
-    writeFileSync(join(root, 'payload'), 'restored\n');
+    if (dangling) symlinkSync('missing', join(root, name));
+    else writeFileSync(join(root, name), 'archived');
+    writeFileSync(join(root, 'payload'), 'restored');
     const archive = join(fixtureRoot(), 'reserved-name.tar.gz');
-    const tar = spawnSync('tar', ['-czf', archive, '-C', root, '.koda-restore-previous', 'payload'], {
-      encoding: 'utf8',
-    });
+    const tar = spawnSync('tar', ['-czf', archive, '-C', root, name, 'payload'], { encoding: 'utf8' });
     if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
 
-    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive], {
+      seedVolume: (dir) => writeFileSync(join(dir, 'original'), 'keep'),
+    });
+
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('reserved name');
+    expect(volumeEntries(run)).toEqual(['original']);
+    expect(readFileSync(join(run.dataDir, 'original'), 'utf8')).toBe('keep');
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
+  });
+  function backupShapedArchive(): { archive: string; root: string } {
+    const root = fixtureRoot();
+    chmodSync(root, 0o750);
+    writeFileSync(join(root, 'a'), 'restored a');
+    writeFileSync(join(root, 'z'), 'restored z');
+    const archive = join(fixtureRoot(), 'full.tar.gz');
+    const tar = spawnSync('tar', ['-czf', archive, '-C', root, '.'], { encoding: 'utf8' });
+    if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+    return { archive, root };
+  }
+  it.each(['save', 'install'])('B2: preserves the original data and identifies the phase when %s fails', (phase) => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', backupShapedArchive().archive], {
+      env: { KODA_DEPLOY_HARNESS_FAIL_MOVE: phase },
+      seedVolume: (dir) => {
+        chmodSync(dir, 0o700);
+        writeFileSync(join(dir, 'a'), 'original a');
+        writeFileSync(join(dir, 'z'), 'original z');
+      },
+    });
+
+    expect(run.status).not.toBe(0);
+    expect(run.dockerCalls.some((call) => call.argv.includes('up'))).toBe(false);
+    const previous = join(run.dataDir, '.koda-restore-previous');
+    expect(readFileSync(join(previous, 'entries/a'), 'utf8')).toBe('original a');
+    expect(readFileSync(join(previous, 'root-metadata'), 'utf8').trim().split(' ').at(-1)).toBe('700');
+    expect(existsSync(join(previous, 'installing'))).toBe(phase === 'install');
+    if (phase === 'save') {
+      expect(readFileSync(join(run.dataDir, 'z'), 'utf8')).toBe('original z');
+      expect(existsSync(join(run.dataDir, 'a'))).toBe(false);
+    } else {
+      expect(readFileSync(join(previous, 'entries/z'), 'utf8')).toBe('original z');
+      expect(readFileSync(join(run.dataDir, 'a'), 'utf8')).toBe('restored a');
+      expect(existsSync(join(run.dataDir, 'z'))).toBe(false);
+    }
+    expect(run.output).toContain('Keep the services stopped');
+  });
+  it('B14: protects the winning restore from a different project sharing its resolved volume', () => {
+    const { archive } = backupShapedArchive();
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive], {
+      env: { KODA_DEPLOY_HARNESS_COMPETE: archive, KODA_DEPLOY_HARNESS_VOLUME_NAME: 'shared-data' },
+    });
 
     expect(run.status).toBe(0);
-    // The reserved name cannot be installed over the script's own recovery directory, so it is reported
-    // rather than silently deleted with that directory.
-    expect(run.output).toContain('reserves for its own staging');
-    expect(volumeEntries(run)).toEqual(['payload']);
+    expect(run.output).toContain('Contender exit: 1');
+    expect(run.output).toContain('Could not acquire rollback lock');
+    expect(run.dockerCalls.filter((call) => call.argv[0] === 'create').map((call) => call.argv[2]))
+      .toEqual(['koda-rollback-lock-shared-data', 'koda-rollback-lock-shared-data']);
+    expect(run.dockerCalls.filter((call) => call.argv.includes('stop'))).toHaveLength(1);
+    expect(restoreRuns(run.dockerCalls)).toHaveLength(1);
+    const restart = run.dockerCalls.findIndex((call) => call.argv.includes('up'));
+    expect(restart).toBeGreaterThanOrEqual(0);
+    expect(run.dockerCalls.findIndex((call) => call.argv[0] === 'rm')).toBeGreaterThan(restart);
+    expect(volumeEntries(run)).toEqual(['a', 'z']);
+    expect(readFileSync(join(run.dataDir, 'z'), 'utf8')).toBe('restored z');
+  });
+  it('B16: restores the root metadata from a backup-shaped archive', () => {
+    const { archive, root } = backupShapedArchive();
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive], {
+      seedVolume: (dir) => chmodSync(dir, 0o700),
+    });
+    expect(run.status).toBe(0);
+    const restored = statSync(run.dataDir);
+    const archived = statSync(root);
+    expect([restored.uid, restored.gid, restored.mode & 0o7777]).toEqual([archived.uid, archived.gid, 0o750]);
+  });
+  it('B16: preserves the volume root metadata when there is no root archive entry', () => {
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', validArchive()], {
+      seedVolume: (dir) => chmodSync(dir, 0o711),
+    });
+    expect(run.status).toBe(0);
+    expect(statSync(run.dataDir).mode & 0o777).toBe(0o711);
   });
   it('B2: stages a symlinked archive as a regular file instead of mounting only its directory', () => {
     const root = fixtureRoot();
@@ -227,7 +305,7 @@ describe('rollback.sh restore and portable .env update', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
 
     const install = restoreRuns(run.dockerCalls)[0];
-    expect(install.argv.slice(15)).toEqual(['koda-restore', 'koda-restore.tar.gz']);
+    expect(install.argv.slice(-2)).toEqual(['koda-restore', 'koda-restore.tar.gz']);
     expect(commandOf(install)).not.toContain('backup.tar.gz;id');
     expect(run.dockerCalls.flatMap((call) => call.argv).some((argument) => argument.includes('backup.tar.gz;id'))).toBe(false);
   });
@@ -261,6 +339,15 @@ describe('rollback.sh restore and portable .env update', () => {
   });
   it('AC-10: preserves restrictive .env permissions', () => {
     const run = runDeployScript('rollback.sh', ['v0.4.1'], { envFile: 'KODA_VERSION=v0.4.2\n', envFileMode: 0o600 });
+    expect(statSync(join(run.dir, '.env')).mode & 0o777).toBe(0o600);
+  });
+  it.each([false, true])('B17: preserves multiline values byte for byte (version assignment: %s)', (present) => {
+    const multiline = "UNRELATED: 'hello\r\nKODA_VERSION: example\r\nexport KODA_VERSION = example\r\nworld'\r\n";
+    const doubleQuoted = 'OTHER="start\\"escaped\nKODA_VERSION=example\nend"\n';
+    const original = multiline + doubleQuoted + (present ? 'export KODA_VERSION : old\n' : '');
+    const run = runDeployScript('rollback.sh', ['v0.4.1'], { envFile: original, envFileMode: 0o600 });
+    expect(run.status).toBe(0);
+    expect(readFileSync(join(run.dir, '.env'), 'utf8')).toBe(multiline + doubleQuoted + 'KODA_VERSION=v0.4.1\n');
     expect(statSync(join(run.dir, '.env')).mode & 0o777).toBe(0o600);
   });
   it('B6: restarts the services on the requested version, not an inherited one', () => {
