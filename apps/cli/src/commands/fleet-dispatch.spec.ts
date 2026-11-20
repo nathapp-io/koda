@@ -63,6 +63,34 @@ describe('koda fleet dispatch', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('refuses an ambiguous repo shorthand and reports both hosts and ids', async () => {
+    const repoFr1 = { ...repo, host: 'https://gitlab.com' };
+    const repoFr2 = { ...repo, id: 'fr2', provider: 'gitlab', host: 'https://gitlab.example.com' };
+    (projectFleetReposControllerList as jest.Mock).mockResolvedValue(page([repoFr1, repoFr2]));
+
+    await run('--repo', 'acme/app', '--feature', 'f1', '--max-cost', '1');
+
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(fleetJobsControllerDispatch).not.toHaveBeenCalled();
+    const output = errorSpy.mock.calls.flat().join('\n');
+    for (const value of ['https://gitlab.com', 'https://gitlab.example.com', 'fr1', 'fr2']) {
+      expect(output).toContain(value);
+    }
+  });
+
+  it('dispatches to the exact repo id even when its shorthand is ambiguous', async () => {
+    const repoFr1 = { ...repo, host: 'https://gitlab.com' };
+    const repoFr2 = { ...repo, id: 'fr2', provider: 'gitlab', host: 'https://gitlab.example.com' };
+    (projectFleetReposControllerList as jest.Mock).mockResolvedValue(page([repoFr1, repoFr2]));
+    (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job({ repoId: 'fr2' }), placement: { assigned: true, runnerId: 'r1', misfits: [] } } });
+
+    await run('--repo', 'fr2', '--feature', 'f1', '--max-cost', '1');
+
+    expect(fleetJobsControllerDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ repoId: 'fr2' }),
+    }));
+  });
+
   it('dispatches a PLAN when --plan is given, pinned by runner name, with a ref', async () => {
     (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job({ state: 'QUEUED' }), placement: { assigned: false, runnerId: null, misfits: [{ runnerId: 'r1', name: 'box-1', reason: 'offline' }] } } });
     await run('--repo', 'fr1', '--feature', 'login', '--max-cost', '1', '--plan', 'docs/spec.md', '--pin', 'box-1', '--ref', 'dev');

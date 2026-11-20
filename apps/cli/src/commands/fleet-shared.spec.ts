@@ -52,6 +52,13 @@ describe('fleet-shared', () => {
     expect(projectFleetReposControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: { size: 100 } });
   });
 
+  it('resolves a unique owner/name case-insensitively when another repo has a different name', async () => {
+    const repoFr1 = { ...repoA, host: 'https://gitlab.com' };
+    const repoFr3 = { ...repoB, id: 'fr3', owner: 'acme', name: 'other', host: 'https://gitlab.com' };
+    (projectFleetReposControllerList as jest.Mock).mockResolvedValue(page([repoFr1, repoFr3]));
+    expect(await resolveRepo('web', 'ACME/App')).toEqual(repoFr1);
+  });
+
   it.each(['fr2', 'GROUP/SUB/SVC'])('resolves a repo by id or path on a later page (%s)', async (ref) => {
     (projectFleetReposControllerList as jest.Mock)
       .mockResolvedValueOnce(page([repoA], 1, true))
