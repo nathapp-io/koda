@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T02:45:38.995Z",
+  "updatedAt": "2026-11-20T02:53:12.842Z",
   "userStories": [
     {
       "id": "US-001",
@@ -81,14 +81,17 @@
         "npm"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A numeric comparison and a stubbed Git lookup fit in one existing workflow step and one unit suite; the existing publishing jobs consume the revised outputs without new integrations."
+        "reasoning": "A numeric comparison and a stubbed Git lookup fit in one existing workflow step and one unit suite; the existing publishing jobs consume the revised outputs without new integrations.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         ".github/workflows/release.yml",
@@ -107,7 +110,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0b940ffdc0b2d225aebfbc6ad1663349cb2a8bf6"
     },
     {
       "id": "US-003",
