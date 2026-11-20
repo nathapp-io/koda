@@ -165,6 +165,25 @@ describe('rollback.sh restore and portable .env update', () => {
     expect(run.status).toBe(0);
     expect(volumeEntries(run)).toEqual(['dangling']);
   });
+  it('B12: reports an archive entry that collides with the script staging names instead of dropping it', () => {
+    const root = fixtureRoot();
+    mkdirSync(join(root, '.koda-restore-previous'));
+    writeFileSync(join(root, '.koda-restore-previous', 'archived.txt'), 'archived\n');
+    writeFileSync(join(root, 'payload'), 'restored\n');
+    const archive = join(fixtureRoot(), 'reserved-name.tar.gz');
+    const tar = spawnSync('tar', ['-czf', archive, '-C', root, '.koda-restore-previous', 'payload'], {
+      encoding: 'utf8',
+    });
+    if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+
+    const run = runDeployScript('rollback.sh', ['v0.4.1', '--restore-db', archive]);
+
+    expect(run.status).toBe(0);
+    // The reserved name cannot be installed over the script's own recovery directory, so it is reported
+    // rather than silently deleted with that directory.
+    expect(run.output).toContain('reserves for its own staging');
+    expect(volumeEntries(run)).toEqual(['payload']);
+  });
   it('B2: stages a symlinked archive as a regular file instead of mounting only its directory', () => {
     const root = fixtureRoot();
     mkdirSync(join(root, 'real'));

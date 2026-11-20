@@ -44,7 +44,13 @@ for entry in ./* ./.[!.]* ./..?*; do
   fi
 done
 cd "$stage"
+if [ -e ./.koda-restore-staging ] || [ -e ./.koda-restore-previous ]; then
+  echo "⚠️  The archive holds an entry this script reserves for its own staging; it was not installed." >&2
+fi
 for entry in ./* ./.[!.]* ./..?*; do
+  case "$entry" in
+    ./.koda-restore-staging|./.koda-restore-previous) continue ;;
+  esac
   if [ -e "$entry" ] || [ -L "$entry" ]; then
     mv "$entry" /data/
   fi
