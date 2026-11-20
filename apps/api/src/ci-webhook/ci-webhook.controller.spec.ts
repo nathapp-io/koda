@@ -209,6 +209,11 @@ describe('CiWebhookController', () => {
       ['a zero line', { ...validPayload, failures: [{ test: 'T', line: 0 }] }],
       ['a fractional line', { ...validPayload, failures: [{ test: 'T', line: 1.5 }] }],
       ['a non-numeric line', { ...validPayload, failures: [{ test: 'T', line: 'abc' }] }],
+      ['AC-1 missing pipeline', (({ pipeline: _pipeline, ...body }) => body)(validPayload)],
+      ['AC-2 missing commit', (({ commit: _commit, ...body }) => body)(validPayload)],
+      ['AC-3 null pipeline', { ...validPayload, pipeline: null }],
+      ['AC-4 string pipeline', { ...validPayload, pipeline: '12345' }],
+      ['AC-5 array commit', { ...validPayload, commit: [] }],
       ['an array body', [validPayload]],
       ['a null body', null],
     ])('a signed payload with %s is a 400 that neither processes nor records the delivery', async (_label, body) => {

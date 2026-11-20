@@ -22,7 +22,40 @@ const logEvent = (over: Partial<LiveFleetLogEvent> = {}): LiveFleetLogEvent => (
   id: `e${Math.random()}`, type: 'fleet_log', projectId: 'p1', jobId: 'j1', leaseEpoch: 1, stream: 'run', size: 80, complete: false, at: 'x', ...over,
 })
 
-function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: FleetJobLogListDto[]; entries?: Array<FleetJobLogEntriesDto | Error>; query?: Record<string, string> } = {}) {
+/** A promise the test settles by hand, so the session probe's timing is the test's to control. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
+}
+
+interface RecordedAnchor { href: string; attributes: Record<string, string>; clicks: number }
+
+const g = globalThis as Record<string, unknown>
+
+/**
+ * The node test environment has no DOM, but the Download handler creates an anchor and clicks it (spec K17). This
+ * stub records what the browser would have been handed. Returns the list it appends to.
+ */
+function installDocument(): RecordedAnchor[] {
+  const anchors: RecordedAnchor[] = []
+  g.document = {
+    createElement: (tag: string) => {
+      const record: RecordedAnchor = { href: '', attributes: {}, clicks: 0 }
+      anchors.push(record)
+      return {
+        tag,
+        get href() { return record.href },
+        set href(value: string) { record.href = value },
+        setAttribute: (name: string, value: string) => { record.attributes[name] = value },
+        click: () => { record.clicks += 1 },
+      }
+    },
+  }
+  return anchors
+}
+
+function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Array<FleetJobLogListDto | Promise<FleetJobLogListDto>>; entries?: Array<FleetJobLogEntriesDto | Error>; query?: Record<string, string> } = {}) {
   const route = reactive({ params: { project: 'koda', id: 'j1' }, query: { ...(opts.query ?? {}) } as Record<string, string>, fullPath: '/koda/fleet/jobs/j1/logs' })
   const replace = jest.fn(async ({ query }: { query: Record<string, string> }) => {
     route.query = query
@@ -34,7 +67,20 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Fl
     if (next instanceof Error) throw next
     return next
   })
+  // One list stub for the whole page: the load calls it, and so does the Download control's session probe (K17), so a
+  // test can count the calls and hand one of them a promise it settles itself.
   const lists = [...(opts.lists ?? [])]
+  let rejectNextList: Error | null = null
+  const logsList = jest.fn(async (): Promise<FleetJobLogListDto> => {
+    if (rejectNextList) {
+      const err = rejectNextList
+      rejectNextList = null
+      throw err
+    }
+    const next = lists.length > 1 ? lists.shift() : lists[0]
+    if (next !== undefined) return await next
+    return opts.list ?? list()
+  })
   let handlers: ProjectEventHandlers | null = null
   const job = { id: 'j1', feature: 'login', command: 'RUN', state: opts.state ?? 'RUNNING', leaseEpoch: 1, stories: [{ id: 'US-001' }, { id: 'US-002' }] }
   const app = mountSfc(pageFile, {
@@ -48,7 +94,7 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Fl
       useI18n: () => enI18n(),
       useFleetJobs: () => ({ get: jest.fn(async () => job) }),
       useFleetJobLogs: () => ({
-        list: jest.fn(async () => (lists.length > 1 ? lists.shift() : lists[0]) ?? opts.list ?? list()),
+        list: logsList,
         entries,
         downloadHref: (stream: string, epoch: number) => `/api/dl/${stream}/${epoch}`,
       }),
@@ -63,11 +109,18 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Fl
   }
   const byId = (id: string): FakeNode[] => app.find(`[data-testid="${id}"]`)
   const click = (id: string): void => (byId(id)[0].props.onClick as () => void)()
+  const clickControl = (id: string): { preventDefault: jest.Mock } => {
+    const event = { preventDefault: jest.fn() }
+    ;(byId(id)[0].props.onClick as (e: unknown) => void)(event)
+    return event
+  }
   const fire = (event: LiveFleetLogEvent): void => handlers?.onFleetLog?.(event)
-  return { app, route, replace, entries, settle, byId, click, fire }
+  /** Makes the next list call (the Download click's session probe) reject. */
+  const armListReject = (err: Error): void => { rejectNextList = err }
+  return { app, route, replace, entries, logsList, settle, byId, click, clickControl, fire, armListReject }
 }
 
-afterEach(() => { jest.useRealTimers() })
+afterEach(() => { jest.useRealTimers(); delete g.document })
 
 describe('Job logs page (spec §4.1)', () => {
   test('opens the latest attempt backward from the end and follows a running job', async () => {
@@ -182,6 +235,62 @@ describe('Job logs page (spec §4.1)', () => {
     await p.settle()
     expect(p.replace).toHaveBeenLastCalledWith({ query: { stream: 'stdout', epoch: '1' } })
     expect(p.entries).toHaveBeenLastCalledWith('stdout', { direction: 'backward', limit: '200', leaseEpoch: '1' })
+    p.app.unmount()
+  })
+
+  // K17: a plain anchor download never refreshes the access cookie, so the click renews the session through one GET
+  // (which retries once on a 401) and only then hands the href to the browser.
+  test('the Download control renews the session with one list call before the file is fetched', async () => {
+    installDocument()
+    const p = mountPage()
+    await p.settle()
+    const pageLoadCalls = p.logsList.mock.calls.length
+    expect(pageLoadCalls).toBe(1)
+    const event = p.clickControl('fleet-log-download')
+    await p.settle()
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(p.logsList.mock.calls.length).toBe(pageLoadCalls + 1)
+    p.app.unmount()
+  })
+
+  test('the download opens only after the session probe resolves, with the page href and the download attribute', async () => {
+    const anchors = installDocument()
+    const probe = deferred<FleetJobLogListDto>()
+    const p = mountPage({ lists: [list(), probe.promise] })
+    await p.settle()
+    p.clickControl('fleet-log-download')
+    await p.settle()
+    expect(anchors).toHaveLength(0)
+    probe.resolve(list())
+    await p.settle()
+    expect(anchors).toHaveLength(1)
+    expect(anchors[0].href).toBe('/api/dl/run/1')
+    expect(anchors[0].attributes.download).toBe('')
+    expect(anchors[0].clicks).toBe(1)
+    p.app.unmount()
+  })
+
+  test('a refused session probe shows the API error in fleet-log-download-error', async () => {
+    installDocument()
+    const p = mountPage()
+    await p.settle()
+    p.armListReject(new ApiError(401, 'Your session expired. Sign in again.'))
+    p.clickControl('fleet-log-download')
+    await p.settle()
+    expect(p.byId('fleet-log-download-error')).toHaveLength(1)
+    expect(p.app.textOf(p.byId('fleet-log-download-error')[0])).toBe('Your session expired. Sign in again.')
+    expect(p.byId('fleet-log-download')).toHaveLength(1)
+    p.app.unmount()
+  })
+
+  test('a refused session probe clicks no download anchor', async () => {
+    const anchors = installDocument()
+    const p = mountPage()
+    await p.settle()
+    p.armListReject(new ApiError(401, 'Your session expired. Sign in again.'))
+    p.clickControl('fleet-log-download')
+    await p.settle()
+    expect(anchors).toEqual([])
     p.app.unmount()
   })
 })

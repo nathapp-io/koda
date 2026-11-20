@@ -3,6 +3,7 @@ import { computed, defineComponent, h, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { useProviderCredentials, type ProviderCredentialRow } from '~/composables/useProviderCredentials'
 import { providerCredentialFormSchema, providerKeySchema } from '~/lib/provider-credentials'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import { apiPath } from '~/lib/api-path'
 
 const props = defineProps<{ slug: string }>()
@@ -11,8 +12,10 @@ const toast = useAppToast()
 const { $api } = useApi()
 const { permissions } = useProjectPermissions(props.slug)
 const vault = useProviderCredentials({ kind: 'project', slug: props.slug })
-interface Repo { id: string; owner: string; name: string }
+interface Repo { id: string; owner: string; name: string; host?: string }
 const repos = ref<Repo[]>([])
+/** US-005: the REPO scope chooser labels a name two repos share with its host; `repoName` stays plain. */
+const repoScopeOptions = computed(() => repoChoices(repos.value))
 const can = (key: string) => permissions.value.has(key)
 const canRead = computed(() => can('project.credential.read'))
 const form = ref({ scope: 'PROJECT' as 'PROJECT' | 'REPO', repoId: '', providerId: '', name: '', key: '' })
@@ -138,7 +141,7 @@ async function remove(row: ProviderCredentialRow) {
       <div v-if="can('project.credential.create')" class="space-y-3 border-t border-border pt-4">
         <h3 class="font-medium">{{ t('fleet.providerKeys.addTitle') }}</h3>
         <div class="flex flex-wrap gap-2"><Button type="button" data-testid="provider-key-scope-project" :variant="form.scope === 'PROJECT' ? 'default' : 'outline'" @click="form.scope = 'PROJECT'">{{ t('fleet.providerKeys.projectScope') }}</Button><Button type="button" data-testid="provider-key-scope-repo" :variant="form.scope === 'REPO' ? 'default' : 'outline'" @click="form.scope = 'REPO'">{{ t('fleet.providerKeys.repoScope') }}</Button></div>
-        <Select v-if="form.scope === 'REPO'" v-model="form.repoId"><SelectTrigger><SelectValue :placeholder="t('fleet.providerKeys.repoPlaceholder')" /></SelectTrigger><SelectContent><SelectItem v-for="repo in repos" :key="repo.id" :value="repo.id">{{ repo.owner }}/{{ repo.name }}</SelectItem></SelectContent></Select>
+        <Select v-if="form.scope === 'REPO'" v-model="form.repoId"><SelectTrigger><SelectValue :placeholder="t('fleet.providerKeys.repoPlaceholder')" /></SelectTrigger><SelectContent><SelectItem v-for="repo in repoScopeOptions" :key="repo.value" :value="repo.value">{{ repo.label }}</SelectItem></SelectContent></Select>
         <Input v-model="form.providerId" data-testid="provider-key-provider" :placeholder="t('fleet.providerKeys.providerId')" /><Input v-model="form.name" data-testid="provider-key-name" :placeholder="t('fleet.providerKeys.name')" /><Input v-model="form.key" data-testid="provider-key-secret" type="password" :placeholder="t('fleet.providerKeys.key')" autocomplete="new-password" />
         <Button type="button" data-testid="provider-key-add" :disabled="adding" @click="create">{{ t('fleet.providerKeys.add') }}</Button>
       </div>

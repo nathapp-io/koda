@@ -38,6 +38,10 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
     projectId, repoId, command: 'RUN', feature, ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
     resultPrUrl: 'https://github.com/acme/app/pull/42', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
   } });
+  const newUrlJob = (feature: string, resultPrUrl: string) => db.fleetJob.create({ data: {
+    projectId, repoId, command: 'RUN', feature, ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
+    resultPrUrl, workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+  } });
   const create = (jobId: string, text = 'confirm: test green') => withTestActor({ type: 'AGENT', id: principal.id }, () =>
     app.get(FleetPrRulingsService).create(principal, 'rulings', jobId, { itemId: 'D-1', text }));
 
@@ -46,6 +50,73 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
     projectId, repoId: gitlabRepoId, command: 'RUN', feature, ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
     resultPrUrl: `https://gitlab.com/acme/gitlab-app/-/merge_requests/${mr}`, workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
   } });
+
+  it('AC-1: latestRunForPr finds a GitHub PR URL with a trailing slash', async () => {
+    const job = await newUrlJob('variant-trailing-slash', 'https://github.com/acme/app/pull/51/');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 51)).resolves.toBe(job.id);
+  });
+
+  it('AC-2: latestRunForPr finds a GitHub PR URL with a query string', async () => {
+    const job = await newUrlJob('variant-query', 'https://github.com/acme/app/pull/52?w=1');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 52)).resolves.toBe(job.id);
+  });
+
+  it('AC-3: latestRunForPr finds a GitHub PR URL with a fragment', async () => {
+    const job = await newUrlJob('variant-fragment', 'https://github.com/acme/app/pull/53#discussion_r1');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 53)).resolves.toBe(job.id);
+  });
+
+  it('AC-4: latestRunForPr finds a GitLab MR URL with slash and query string', async () => {
+    const job = await db.fleetJob.create({ data: {
+      projectId, repoId: gitlabRepoId, command: 'RUN', feature: 'variant-gitlab', ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
+      resultPrUrl: 'https://gitlab.com/acme/gitlab-app/-/merge_requests/54/?tab=notes', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+    } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(gitlabRepoId, 54)).resolves.toBe(job.id);
+  });
+
+  it('AC-5: latestRunForPr chooses a newer trailing-slash URL over a canonical URL', async () => {
+    const older = await newUrlJob('variant-newer-older', 'https://github.com/acme/app/pull/55');
+    const newer = await newUrlJob('variant-newer-latest', 'https://github.com/acme/app/pull/55/');
+    await db.fleetJob.update({ where: { id: newer.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 55)).resolves.toBe(newer.id);
+  });
+
+  it('AC-6: latestRunForPr does not match a longer PR number with a query string', async () => {
+    await newUrlJob('variant-longer-number', 'https://github.com/acme/app/pull/560?w=1');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 56)).resolves.toBeNull();
+  });
+
+  /**
+   * Review B1: a stored PR URL is only a candidate when its origin is the repo's own forge host.
+   * `prNumberFor` reads the path alone, so a same-path URL from another host would otherwise pass
+   * the confirmation and a newer foreign-host RUN would displace the correct one.
+   */
+  it('B1: latestRunForPr keeps the correct-host RUN when a newer same-path URL names another host', async () => {
+    const older = await newUrlJob('variant-foreign-host-older', 'https://github.com/acme/app/pull/58');
+    const newer = await newUrlJob('variant-foreign-host-newer', 'https://gitlab.example.com/acme/app/pull/58/');
+    await db.fleetJob.update({ where: { id: newer.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 58)).resolves.toBe(older.id);
+  });
+
+  it('B1: latestRunForPr does not match a GitHub PR URL from another host', async () => {
+    await newUrlJob('variant-foreign-host-only', 'https://gitlab.example.com/acme/app/pull/59/');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 59)).resolves.toBeNull();
+  });
+
+  it('B1: latestRunForPr does not match a merge-request URL from another GitLab host', async () => {
+    await db.fleetJob.create({ data: {
+      projectId, repoId: gitlabRepoId, command: 'RUN', feature: 'variant-foreign-gitlab', ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
+      resultPrUrl: 'https://gitlab.example.com/acme/gitlab-app/-/merge_requests/60/', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+    } });
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(gitlabRepoId, 60)).resolves.toBeNull();
+  });
+
+  it('AC-7: create accepts the latest draft RUN when its PR URL has a trailing slash', async () => {
+    const older = await newUrlJob('ruling-variant-older', 'https://github.com/acme/app/pull/57');
+    const newer = await newUrlJob('ruling-variant-newer', 'https://github.com/acme/app/pull/57/');
+    await db.fleetJob.update({ where: { id: newer.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    await expect(create(newer.id)).resolves.toMatchObject({ jobId: newer.id, prNumber: 57 });
+  });
 
   it('AC-1: findTarget reads the merge-request number and the repo id and host of a GitLab job', async () => {
     const job = await gitlabJob('gitlab-target', 12);

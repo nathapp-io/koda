@@ -3061,6 +3061,24 @@ describeIntegration('API Integration Tests', () => {
         .expect(401);
     });
 
+    it('AC-12 POST /api/projects/:slug/ci-webhook — a v1-signed payload without pipeline returns 400', async () => {
+      const payload = {
+        event: 'pipeline_failed',
+        commit: { sha: 'abc123def459' },
+        failures: [{ test: 'MissingPipeline' }],
+      };
+      const rawBody = JSON.stringify(payload);
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(rawBody).digest('hex')}`;
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('Content-Type', 'application/json')
+        .set('x-ci-signature', signature)
+        .set('x-ci-delivery', 'e2e-ci-missing-pipeline')
+        .send(rawBody)
+        .expect(400);
+    });
+
     it('POST /api/projects/:slug/ci-webhook — a signed invalid payload returns 400 and creates no ticket', async () => {
       const prisma = fixtureDb(app);
       const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });

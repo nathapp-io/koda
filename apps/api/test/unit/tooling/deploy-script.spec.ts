@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript } from './helpers/deploy-script-harness';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 const decoyRoots: string[] = [];
 

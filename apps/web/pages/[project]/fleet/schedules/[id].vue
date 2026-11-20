@@ -6,6 +6,7 @@ import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
 import { formatUsd } from '~/lib/fleet-jobs'
 import { bashSummary } from '~/lib/fleet-bash-mode'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import { canChangeSchedule, canDeleteSchedule, formatInZone, historyRows, placementOf, scheduleStatusKey } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
@@ -138,7 +139,8 @@ useProjectEvents(slug, {
   onResync: () => liveReload.trigger(),
 })
 
-const repoOptions = computed(() => options.repos.value.map((r) => ({ value: r.id, label: `${r.owner}/${r.name}` })))
+/** US-005: a repo name two repos share is labelled with its host. */
+const repoOptions = computed(() => repoChoices(options.repos.value))
 const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: r.id, label: r.name })))
 </script>
 

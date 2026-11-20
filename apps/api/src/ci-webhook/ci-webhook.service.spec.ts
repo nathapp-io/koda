@@ -247,6 +247,165 @@ describe('CiWebhookService', () => {
       expect(description).toContain('AuthService.validateToken');
     });
 
+    it('AC-9: includes the source URL for each file failure when project remote is known', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'T', file: 'src/a.ts', line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(mockRepo.createTicket.mock.calls[0][1].description).toContain(
+        '  - URL: https://github.com/acme/app/blob/abc123/src/a.ts#L7',
+      );
+    });
+
+    it('AC-10: omits the source URL when the project has no remote', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: null });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        failures: [{ test: 'T', file: 'src/a.ts', line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(
+        mockRepo.createTicket.mock.calls[0][1].description.split('\n').some((line) => line.startsWith('  - URL:')),
+      ).toBe(false);
+    });
+
+    it('AC-11: omits the source URL for a failure without a file', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = { ...validPayload, failures: [{ test: 'T' }] };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(
+        mockRepo.createTicket.mock.calls[0][1].description.split('\n').some((line) => line.startsWith('  - URL:')),
+      ).toBe(false);
+    });
+
+    /**
+     * Review B3: a file name is a repository path, not URL text. A reserved character in it (`#`,
+     * `?`, a space) would otherwise end the pathname at that character and turn the rest into a
+     * fragment or query, so the link would name the wrong file even on a supported GitHub remote.
+     */
+    it.each([
+      ['src/part#2.ts', 'src/part%232.ts'],
+      ['docs/why?.md', 'docs/why%3F.md'],
+      ['src/a b.ts', 'src/a%20b.ts'],
+      ['src/a(b.ts', 'src/a%28b.ts'],
+      ['src/a)b.ts', 'src/a%29b.ts'],
+      ["src/it's!.ts", 'src/it%27s%21.ts'],
+      ['src/a*b.ts', 'src/a%2Ab.ts'],
+    ])('B3: encodes %s in the source URL, keeping the line fragment separate', async (file, encoded) => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = { ...validPayload, commit: { sha: 'abc123' }, failures: [{ test: 'T', file, line: 7 }] };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(mockRepo.createTicket.mock.calls[0][1].description).toContain(
+        `  - URL: https://github.com/acme/app/blob/abc123/${encoded}#L7`,
+      );
+    });
+
+    /**
+     * Review B3 (follow-up): the ticket's Markdown renderer ends a bare link at a parenthesis it
+     * balances against nothing, so an unmatched `(` in a file name truncates the rendered href even
+     * though `encodeURIComponent` leaves it alone. The whole URL line is asserted, not a substring,
+     * because a truncated link still contains the start of the correct one.
+     */
+    it('B3: renders the whole href for a file name with an unmatched parenthesis', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'T', file: 'src/a(b.ts', line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      const urlLine = mockRepo.createTicket.mock.calls[0][1].description
+        .split('\n')
+        .find((line) => line.startsWith('  - URL:'));
+      expect(urlLine).toBe('  - URL: https://github.com/acme/app/blob/abc123/src/a%28b.ts#L7');
+    });
+
+    /**
+     * Review D-2: `encodeURIComponent` throws on an unpaired UTF-16 surrogate, and a failure's `file`
+     * is only validated as a string, so a signed delivery can carry one. Encoding must not cost the
+     * ticket: the encodable failures keep their URL line and the poisoned one loses only its own.
+     */
+    it('D-2: an unencodable file name omits only that failure URL and still creates the ticket', async () => {
+      const poisoned = `src/a${String.fromCharCode(0xd800)}b.ts`;
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [
+          { test: 'good', file: 'src/a.ts', line: 7 },
+          { test: 'poisoned', file: poisoned, line: 9 },
+        ],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      const urlLines = mockRepo.createTicket.mock.calls[0][1].description
+        .split('\n')
+        .filter((line) => line.startsWith('  - URL:'));
+      expect(urlLines).toEqual(['  - URL: https://github.com/acme/app/blob/abc123/src/a.ts#L7']);
+    });
+
+    it('D-2: an unencodable file name on a project without a remote still creates the ticket', async () => {
+      const poisoned = `src/a${String.fromCharCode(0xd800)}b.ts`;
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: null });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'T', file: poisoned, line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(mockRepo.createTicket).toHaveBeenCalledTimes(1);
+      expect(
+        mockRepo.createTicket.mock.calls[0][1].description.split('\n').some((line) => line.startsWith('  - URL:')),
+      ).toBe(false);
+    });
+
+    /**
+     * Review f-613a: `gitRefFile` is stored, not the encoded URL, and `TicketsService.computeGitRefUrl`
+     * rebuilds the link from it. An unencodable path survives storage only as a U+FFFD-substituted
+     * copy, so it must not become the ticket's git ref — otherwise the later source link names a file
+     * that does not exist. The description still reports the failure.
+     */
+    it('f-613a: an unencodable file name is not stored as the ticket git ref', async () => {
+      const poisoned = `src/a${String.fromCharCode(0xd800)}b.ts`;
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'poisoned', file: poisoned, line: 9 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      const stored = mockRepo.createTicket.mock.calls[0][1];
+      expect(stored.gitRefFile).toBeNull();
+      expect(stored.gitRefVersion).toBe('abc123');
+      expect(stored.description).toContain('- **poisoned**');
+    });
+
     /**
      * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous` (US-002).
      * Creating the ticket is the system's own write, so `processCiWebhook` overrides it with `SYSTEM/ci`.

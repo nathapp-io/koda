@@ -5,6 +5,7 @@ import { isForbidden } from '~/composables/useFleetBudgetPage'
 import { useFleetScheduleActions } from '~/composables/useFleetScheduleActions'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
 
@@ -112,7 +113,8 @@ function openEdit(schedule: ScheduleDto): void {
   editOpen.value = true
 }
 
-const repoOptions = computed(() => options.repos.value.map((r) => ({ value: r.id, label: `${r.owner}/${r.name}` })))
+/** US-005: a repo name two repos share is labelled with its host. */
+const repoOptions = computed(() => repoChoices(options.repos.value))
 const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: r.id, label: r.name })))
 </script>
 

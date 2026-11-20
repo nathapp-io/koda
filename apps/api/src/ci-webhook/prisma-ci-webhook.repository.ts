@@ -20,6 +20,7 @@ export class PrismaCiWebhookRepository {
         key: true,
         deletedAt: true,
         ciWebhookToken: true,
+        gitRemoteUrl: true,
       },
     });
   }

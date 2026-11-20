@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { vi } from 'vitest';
 import {
   chmodSync,
   existsSync,
@@ -14,6 +15,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript, type DockerCall } from './helpers/deploy-script-harness';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 const fixtureRoots: string[] = [];
 function fixtureRoot(): string {

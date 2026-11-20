@@ -4,9 +4,46 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { TicketType, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { CiWebhookPayloadDto, CiFailureDto } from './ci-webhook.dto';
+import type { CiProjectDomain } from './domain/ci-webhook.domain';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { runAsSystemWriter } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+
+/**
+ * Review B3: a failure's `file` is a repository path, not URL text. Encoding each segment keeps a
+ * valid Git filename with a reserved character (`src/part#2.ts`, `docs/why?.md`, `src/a b.ts`) one
+ * path segment instead of ending the pathname there and turning the rest into a fragment or query.
+ * The line stays `buildGitUrl`'s separate `#L<n>` fragment.
+ *
+ * The description is Markdown and the URL is bare, so the renderer also ends the link at punctuation
+ * it treats as prose: `encodeURIComponent` leaves `!`, `'`, `(`, `)` and `*` alone, and an unmatched
+ * `(` in a file name (`src/a(b.ts`) truncates the rendered href at that character while the stored
+ * URL looks right. Those five reserved characters are percent-encoded too, so the rendered link
+ * covers the whole path.
+ */
+const MARKDOWN_UNSAFE_PUNCTUATION = /[!'()*]/g;
+
+function encodeGitSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(
+    MARKDOWN_UNSAFE_PUNCTUATION,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
+ * `encodeURIComponent` throws a `URIError` for an unpaired UTF-16 surrogate, and a failure's `file`
+ * is only validated as a string, so a correctly signed delivery can carry one. Encoding is best
+ * effort: a path that cannot be encoded answers `null` and only that failure's URL line is omitted,
+ * rather than the whole ticket intake failing before `createTicket` runs.
+ */
+function encodeGitPath(filePath: string): string | null {
+  try {
+    return filePath.split('/').map((segment) => encodeGitSegment(segment)).join('/');
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
+  }
+}
 
 @Injectable()
 @SystemWriter('system.ci.ticket-create')
@@ -80,7 +117,7 @@ export class CiWebhookService {
    * `project` carries the key for the summary: `created <KEY>-<number>`, never the payload.
    */
   private async createTicket(
-    project: { id: string; key: string },
+    project: CiProjectDomain,
     failure: CiFailureDto,
     payload: CiWebhookPayloadDto,
   ) {
@@ -88,7 +125,12 @@ export class CiWebhookService {
     const title = `CI failure: ${failure.test} (pipeline #${payload.pipeline.id})`;
 
     // Build description with details
-    const description = this.buildDescription(failure, payload);
+    const description = this.buildDescription(project, payload);
+
+    // Review f-613a: a path that cannot be encoded reaches the database only as a U+FFFD-substituted
+    // copy, so `TicketsService.computeGitRefUrl` would later render it as a link naming a different
+    // file. The ref is dropped for such a path; the description still names the reported file.
+    const gitRefFile = failure.file && encodeGitPath(failure.file) !== null ? failure.file : null;
 
     return this.repo.createTicket(
       project.id,
@@ -99,7 +141,7 @@ export class CiWebhookService {
         status: 'CREATED',
         priority: Priority.HIGH,
         gitRefVersion: payload.commit.sha,
-        gitRefFile: failure.file || null,
+        gitRefFile,
         gitRefLine: failure.line || null,
       },
       async (ticket) => {
@@ -114,14 +156,16 @@ export class CiWebhookService {
     );
   }
 
-  private buildDescription(_failure: CiFailureDto, payload: CiWebhookPayloadDto): string {
+  private buildDescription(project: CiProjectDomain, payload: CiWebhookPayloadDto): string {
     const failureLines = payload.failures.flatMap((f) => {
       const parts: string[] = [`- **${f.test}**`];
       if (f.file) parts.push(`  - File: \`${f.file}\``);
       if (f.line) parts.push(`  - Line: ${f.line}`);
-      if (f.file && payload.commit.sha) {
-        const project = { gitRemoteUrl: undefined } as { gitRemoteUrl?: string | null };
-        const url = buildGitUrl(project.gitRemoteUrl, payload.commit.sha, f.file, f.line);
+      if (f.file && payload.commit.sha && project.gitRemoteUrl) {
+        // Encode only when `buildGitUrl` will use the path: no remote means no link, and a path that
+        // cannot be encoded drops its own URL line instead of the whole ticket.
+        const encodedPath = encodeGitPath(f.file);
+        const url = encodedPath === null ? null : buildGitUrl(project.gitRemoteUrl, payload.commit.sha, encodedPath, f.line);
         if (url) parts.push(`  - URL: ${url}`);
       }
       return parts;

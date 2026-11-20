@@ -6,6 +6,7 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchFeatureOf, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
 import type { DispatchFormValues } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import type { FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
 import type { DispatchResponse } from '~/composables/useFleetJobs'
 import { inboxHref } from '~/lib/approval-requests'
@@ -75,8 +76,8 @@ function setPlacementMode(mode: string): void {
 
 const selectedRepo = computed(() => options.repos.value.find(r => r.id === values.repoId) ?? null)
 
-// Native select options (4b D137).
-const repoOptions = computed(() => options.repos.value.map(r => ({ value: r.id, label: `${r.owner}/${r.name}` })))
+// Native select options (4b D137). US-005: a repo name two repos share is labelled with its host.
+const repoOptions = computed(() => repoChoices(options.repos.value))
 const commandOptions = computed(() => [
   { value: 'RUN', label: t('fleet.dispatch.commandRun') },
   { value: 'PLAN', label: t('fleet.dispatch.commandPlan') },

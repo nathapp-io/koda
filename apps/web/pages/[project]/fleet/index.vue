@@ -7,6 +7,7 @@ import { formatUsd, isConfigJob, reviewPrNumber } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import { runningFirstJobs } from '~/lib/fleet-jobs'
 import { useLocalDates } from '~/lib/local-dates'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import type { FleetJobDto } from '~/lib/fleet-types'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'
@@ -95,6 +96,9 @@ const stateChips = [{ value: ALL, label: t('fleet.jobs.filters.allStates') }, ..
 
 const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
 
+/** US-005: the repo filter's choices, so a name two repos share carries its host. */
+const repoFilterOptions = computed(() => repoChoices(options.repos.value))
+
 function featureLabel(job: FleetJobDto): string {
   if (isConfigJob(job)) return t('fleet.jobs.configFeature')
   if (job.command !== 'REVIEW' && job.command !== 'FIX') return job.feature
@@ -131,7 +135,7 @@ function featureLabel(job: FleetJobDto): string {
         <SelectTrigger data-testid="fleet-filter-repo" :aria-label="t('fleet.jobs.filters.repo')"><SelectValue :placeholder="t('fleet.jobs.filters.repo')" /></SelectTrigger>
         <SelectContent>
           <SelectItem :value="ALL">{{ t('fleet.jobs.filters.allRepos') }}</SelectItem>
-          <SelectItem v-for="repo in options.repos.value" :key="repo.id" :value="repo.id">{{ repo.owner }}/{{ repo.name }}</SelectItem>
+          <SelectItem v-for="repo in repoFilterOptions" :key="repo.value" :value="repo.value">{{ repo.label }}</SelectItem>
         </SelectContent>
       </Select>
       <Select v-model="filters.runnerId">

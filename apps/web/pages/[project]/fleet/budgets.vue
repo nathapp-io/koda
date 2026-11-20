@@ -4,6 +4,7 @@ import { useFleetBudgetPage } from '~/composables/useFleetBudgetPage'
 import type { BudgetBase } from '~/composables/useFleetBudgets'
 import { createDebouncer } from '~/lib/debounce'
 import { isManagedOn, scopeName, scopeText } from '~/lib/fleet-budgets'
+import { repoChoices } from '~/lib/fleet-repo-choices'
 import type { BudgetPolicyDto } from '~/lib/fleet-types'
 
 definePageMeta({ layout: 'default' })
@@ -35,7 +36,8 @@ const canChangePolicy = computed(() => canCreate.value || canResume.value || can
 // D175: the project's own policies (editable) and the fleet-wide ones (read-only).
 const own = computed(() => policies.value.filter((p) => isManagedOn('project', p)))
 const fleetWide = computed(() => policies.value.filter((p) => p.scopeType === 'global'))
-const repoOptions = computed(() => options.repos.value.map((r) => ({ value: r.id, label: `${r.owner}/${r.name}` })))
+/** US-005: a repo name two repos share is labelled with its host. */
+const repoOptions = computed(() => repoChoices(options.repos.value))
 const nameOf = (p: BudgetPolicyDto): string | null =>
   scopeName(p, { project: slug, repo: options.repoName, runner: (id) => id })
 const confirmText = (p: BudgetPolicyDto): string => t('fleet.budgets.deleteConfirm', { scope: scopeText(t, p, nameOf(p)) })

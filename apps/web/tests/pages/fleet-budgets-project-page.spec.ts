@@ -34,7 +34,7 @@ const ADMIN_KEYS: readonly string[] = [
   'fleet.budget.create', 'fleet.budget.resume', 'fleet.budget.update', 'fleet.budget.delete',
 ]
 
-function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMBER, over: { get?: jest.Mock } = {}) {
+function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMBER, over: { get?: jest.Mock; repos?: Array<Record<string, unknown>> } = {}) {
   // `/me/permissions` is the scope's key list; every other GET keeps the double the test supplied.
   const listGet = over.get ?? jest.fn(async () => rows)
   const get = jest.fn(async (requestPath: string, options?: { query?: Record<string, string> }) =>
@@ -64,7 +64,7 @@ function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMB
       useProjectPermissions,
       useRoute: () => ({ params: { project: 'koda' } }),
       useFleetDispatchOptions: () => ({
-        repos: ref([{ id: 'r1', owner: 'acme', name: 'app' }]),
+        repos: ref(over.repos ?? [{ id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com' }]),
         repoName: (id: string) => (id === 'r1' ? 'acme/app' : id),
         load: async () => undefined,
       }),
@@ -211,5 +211,30 @@ describe('Project budgets page (wiring)', () => {
     expect(source).toContain('onFleetJob: () => liveReload.trigger()')
     expect(source).toContain('onResync: () => liveReload.trigger()')
     expect(source).toContain('liveReload.cancel()')
+  })
+})
+
+/**
+ * US-005 AC-12 (K9): the budget form is handed the repo choices, so two repos sharing `owner/name`
+ * reach it as distinct labels. The dialog stub declares no `repoOptions` prop, so the page's binding
+ * arrives as the stub's `repo-options` attribute — what the real dialog receives.
+ */
+describe('US-005 AC-12: the budget form repo choices', () => {
+  test('AC-12: a shared owner/name is labelled with its host', async () => {
+    const m = mountProject(ROWS, ADMIN_KEYS, {
+      repos: [
+        { id: 'r1', owner: 'acme', name: 'app', host: 'https://gitlab.com' },
+        { id: 'r2', owner: 'acme', name: 'app', host: 'https://gitlab.example.com' },
+      ],
+    })
+    await m.settle()
+
+    const dialog = m.app.one('[data-stub="fleet-budget-edit-dialog"]')
+    expect(dialog).toBeDefined()
+    expect(dialog?.props['repo-options']).toEqual([
+      { value: 'r1', label: 'acme/app (gitlab.com)' },
+      { value: 'r2', label: 'acme/app (gitlab.example.com)' },
+    ])
+    m.app.unmount()
   })
 })

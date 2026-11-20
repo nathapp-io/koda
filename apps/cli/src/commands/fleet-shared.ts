@@ -68,10 +68,20 @@ async function projectRunners(slug: string): Promise<RunnerSummaryDto[]> {
     projectFleetRunnersControllerList({ path: { slug }, query: { size: 100, ...(current > 1 ? { current } : {}) } }));
 }
 
-/** A project repo by id, or by `owner/name` (case-insensitive, D133). */
+/** A project repo by id, or by an unambiguous `owner/name` (case-insensitive, D133). */
 export async function resolveRepo(slug: string, ref: string): Promise<FleetRepoDto | null> {
+  const repos = await projectRepos(slug);
+  const exactId = repos.find((repo) => repo.id === ref);
+  if (exactId) return exactId;
+
   const wanted = ref.toLowerCase();
-  return (await projectRepos(slug)).find((r) => r.id === ref || `${r.owner}/${r.name}`.toLowerCase() === wanted) ?? null;
+  const matches = repos.filter((repo) => `${repo.owner}/${repo.name}`.toLowerCase() === wanted);
+  if (matches.length > 1) {
+    const details = matches.map((repo) => `${repo.host} (id ${repo.id})`).join(', ');
+    handleFleetValidation(`Repo "${ref}" matches ${matches.length} repos in project ${slug}: ${details}. Pass the repo id instead.`);
+    return null;
+  }
+  return matches[0] ?? null;
 }
 
 /** A runner by id or by name (D133). */

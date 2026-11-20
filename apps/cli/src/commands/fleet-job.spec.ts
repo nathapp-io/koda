@@ -75,6 +75,17 @@ describe('koda fleet job', () => {
     expect(out).toContain('Next: --page 2');
   });
 
+  it('list refuses an ambiguous repo shorthand before requesting jobs (exit 3)', async () => {
+    const repoFr1 = { ...repo, host: 'https://gitlab.com' };
+    const repoFr2 = { ...repo, id: 'fr2', provider: 'gitlab', host: 'https://gitlab.example.com' };
+    (projectFleetReposControllerList as jest.Mock).mockResolvedValue(page([repoFr1, repoFr2]));
+
+    await run('list', '--repo', 'acme/app');
+
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(fleetJobsControllerList).not.toHaveBeenCalled();
+  });
+
   it('list rejects an unknown --state before any request (exit 3)', async () => {
     await run('list', '--state', 'DONE');
     expect(exitSpy).toHaveBeenLastCalledWith(3);

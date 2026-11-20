@@ -11,6 +11,11 @@ export const LIST_SIZE = 20
 /**
  * Fleet S4a §5: the signed-in user's inbox. `unreadCount` and `latest` live in tab state so the bell and the
  * inbox page show the same numbers; the API is the authority (every call is scoped to the caller).
+ *
+ * K16: both screens share that state, so two refreshes can be in flight at once (the bell's 60 s poll and the inbox's
+ * post-`markAllRead` one). A per-owner generation makes the newest refresh the only writer: it is bumped before the
+ * requests leave, and a refresh that is no longer the newest when its answers arrive writes nothing — otherwise a
+ * slower, older answer would put the badge back to unread until the next poll.
  */
 export function useNotifications() {
   const { $api } = useApi()
@@ -18,12 +23,17 @@ export function useNotifications() {
   const owner = useAuth().user.value?.id ?? 'anonymous'
   const unreadCount = useState<number>(`notifications-unread:${owner}`, () => 0) as Ref<number>
   const latest = useState<NotificationDto[]>(`notifications-latest:${owner}`, () => []) as Ref<NotificationDto[]>
+  const refreshGeneration = useState<number>(`notifications-refresh-gen:${owner}`, () => 0) as Ref<number>
 
   async function refresh(): Promise<void> {
+    const generation = refreshGeneration.value + 1
+    refreshGeneration.value = generation
     const [count, page] = await Promise.all([
       $api.get<{ count: number }>(UNREAD_COUNT_PATH),
       $api.get<NotificationPage>(NOTIFICATIONS_PATH, { query: { current: '1', size: String(LATEST_SIZE) } }),
     ])
+    // A newer refresh started while these were in flight (and may already have written); this answer is stale.
+    if (refreshGeneration.value !== generation) return
     unreadCount.value = count.count
     latest.value = page.records ?? []
   }
