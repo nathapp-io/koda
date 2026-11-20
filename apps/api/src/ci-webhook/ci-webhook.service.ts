@@ -4,6 +4,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { TicketType, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { CiWebhookPayloadDto, CiFailureDto } from './ci-webhook.dto';
+import type { CiProjectDomain } from './domain/ci-webhook.domain';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { runAsSystemWriter } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -80,7 +81,7 @@ export class CiWebhookService {
    * `project` carries the key for the summary: `created <KEY>-<number>`, never the payload.
    */
   private async createTicket(
-    project: { id: string; key: string },
+    project: CiProjectDomain,
     failure: CiFailureDto,
     payload: CiWebhookPayloadDto,
   ) {
@@ -88,7 +89,7 @@ export class CiWebhookService {
     const title = `CI failure: ${failure.test} (pipeline #${payload.pipeline.id})`;
 
     // Build description with details
-    const description = this.buildDescription(failure, payload);
+    const description = this.buildDescription(project, payload);
 
     return this.repo.createTicket(
       project.id,
@@ -114,13 +115,12 @@ export class CiWebhookService {
     );
   }
 
-  private buildDescription(_failure: CiFailureDto, payload: CiWebhookPayloadDto): string {
+  private buildDescription(project: CiProjectDomain, payload: CiWebhookPayloadDto): string {
     const failureLines = payload.failures.flatMap((f) => {
       const parts: string[] = [`- **${f.test}**`];
       if (f.file) parts.push(`  - File: \`${f.file}\``);
       if (f.line) parts.push(`  - Line: ${f.line}`);
       if (f.file && payload.commit.sha) {
-        const project = { gitRemoteUrl: undefined } as { gitRemoteUrl?: string | null };
         const url = buildGitUrl(project.gitRemoteUrl, payload.commit.sha, f.file, f.line);
         if (url) parts.push(`  - URL: ${url}`);
       }

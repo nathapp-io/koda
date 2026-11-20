@@ -26,4 +26,5 @@ export interface CiProjectDomain {
   key: string;
   deletedAt: Date | null;
   ciWebhookToken: string | null;
+  gitRemoteUrl: string | null;
 }

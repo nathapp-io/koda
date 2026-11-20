@@ -247,6 +247,49 @@ describe('CiWebhookService', () => {
       expect(description).toContain('AuthService.validateToken');
     });
 
+    it('AC-9: includes the source URL for each file failure when project remote is known', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        commit: { sha: 'abc123' },
+        failures: [{ test: 'T', file: 'src/a.ts', line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(mockRepo.createTicket.mock.calls[0][1].description).toContain(
+        '  - URL: https://github.com/acme/app/blob/abc123/src/a.ts#L7',
+      );
+    });
+
+    it('AC-10: omits the source URL when the project has no remote', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: null });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = {
+        ...validPayload,
+        failures: [{ test: 'T', file: 'src/a.ts', line: 7 }],
+      };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(
+        mockRepo.createTicket.mock.calls[0][1].description.split('\n').some((line) => line.startsWith('  - URL:')),
+      ).toBe(false);
+    });
+
+    it('AC-11: omits the source URL for a failure without a file', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, gitRemoteUrl: 'https://github.com/acme/app' });
+      mockRepo.createTicket.mockResolvedValue(mockTicket);
+      const payload: CiWebhookPayloadDto = { ...validPayload, failures: [{ test: 'T' }] };
+
+      await service.processCiWebhook('koda', payload);
+
+      expect(
+        mockRepo.createTicket.mock.calls[0][1].description.split('\n').some((line) => line.startsWith('  - URL:')),
+      ).toBe(false);
+    });
+
     /**
      * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous` (US-002).
      * Creating the ticket is the system's own write, so `processCiWebhook` overrides it with `SYSTEM/ci`.

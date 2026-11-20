@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsArray, ValidateNested, IsIn, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsIn, IsInt, Min, IsDefined, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CiPipelineDto {
@@ -49,11 +49,15 @@ export class CiWebhookPayloadDto {
   event!: string;
 
   @ApiProperty({ description: 'Pipeline information', type: CiPipelineDto })
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => CiPipelineDto)
   pipeline!: CiPipelineDto;
 
   @ApiProperty({ description: 'Commit information', type: CiCommitDto })
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => CiCommitDto)
   commit!: CiCommitDto;
