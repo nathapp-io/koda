@@ -52,6 +52,17 @@ export class CommandHandler {
     });
   }
 
+  /**
+   * B2: the durable write of a re-applied READOPT. `Supervisor.readopt` calls it with a rejection INSIDE the journal
+   * transaction that sets the row's `doneAt`, so the two commit together and a crash leaves neither behind: the record
+   * stays `ok` and the row stays open, which makes the next boot re-apply the command instead of replaying stale ok.
+   */
+  private persistOutcome(command: FleetCommandOut): (outcome: Outcome) => void {
+    return (outcome) => this.deps.journal.updateCommandOutcome(command.commandId, {
+      result: outcome.result, detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString(),
+    });
+  }
+
   private async handleOne(command: FleetCommandOut): Promise<CommandAck> {
     const prior = this.deps.journal.getCommand(command.commandId);
     if (prior) {
@@ -59,11 +70,13 @@ export class CommandHandler {
       if (prior.type === 'READOPT' && prior.result === 'ok') {
         const row = this.deps.journal.getJob(prior.jobId, prior.leaseEpoch);
         if (row && row.doneAt === null) {
+          // K10/B2: the re-applied readopt's outcome is journaled inside the transaction that finalizes a rejected
+          // row (see `persistOutcome`), so a crash cannot preserve the previous `ok` beside a done row — the replay
+          // that follows then acks the rejection, and the API marks the job CRASHED instead of recording it adopted.
+          const persist = this.persistOutcome(command);
           try {
-            const outcome = await this.deps.supervisor.readopt(prior.jobId, prior.leaseEpoch);
-            this.deps.journal.updateCommandOutcome(command.commandId, {
-              result: outcome.result, detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString(),
-            });
+            const outcome = await this.deps.supervisor.readopt(prior.jobId, prior.leaseEpoch, persist);
+            persist(outcome);   // the ok path writes nothing else; a rejection is already stored (idempotent re-write)
             return this.ack(command, outcome);
           } catch {
             return this.ack(command, { result: 'rejected', detail: 'runner error' });
@@ -126,7 +139,11 @@ export class CommandHandler {
     }
   }
 
-  /** D63: an ASSIGN that was journaled and acked, but whose run was lost in a restart, starts again (a no-op while a run exists). */
+  /**
+   * D63: an ASSIGN that was journaled and acked, but whose run was lost in a restart, starts again (a no-op while a
+   * run exists). B1: `begin` rebuilds the older-epoch retirement this restart lost, so the replayed epoch still starts
+   * only after any older epoch of the job is gone.
+   */
   private resumeStranded(jobId: string, leaseEpoch: number): void {
     const row = this.deps.journal.getJob(jobId, leaseEpoch);
     if (row && row.state === 'ASSIGNED' && row.pid === null && row.doneAt === null) this.deps.supervisor.begin(row, 'reprepare');

@@ -321,6 +321,99 @@ describe('READOPT replay after restart (K10)', () => {
   });
 });
 
+describe('a restart reconstructs the older-epoch retirement (B1)', () => {
+  /**
+   * The two rows a daemon crash between "ASSIGN acked" and "older epochs retired" leaves behind: epoch 1 RUNNING with
+   * the detached process it spawned, epoch 2 ASSIGNED with no pid. The retirement promise lasted only in the process
+   * that died with it.
+   */
+  const seedCrashedRequeue = (b: ReturnType<typeof build>): void => {
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 2, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+  };
+  /** D64 kept across the restart: epoch 1 is killed and gone before epoch 2 prepares, and epoch 2 finishes normally. */
+  const expectRetiredBeforePrepare = (b: ReturnType<typeof build>, atPrepare: () => JobRow | null | undefined): void => {
+    expect(atPrepare()).toBeNull();
+    expect(b.journal.getJob('j1', 1)).toBeNull();
+    expect(b.ex.killed).toContainEqual({ pgid: 4242, signal: 'SIGKILL' });
+    expect(b.journal.getJob('j1', 2)?.state).toBe('COMPLETED');
+  };
+  const watchPrepare = (b: ReturnType<typeof build>): (() => JobRow | null | undefined) => {
+    let olderAtPrepare: JobRow | null | undefined;
+    const prepare = b.ex.prepare.bind(b.ex);
+    b.ex.prepare = async (job) => { olderAtPrepare = b.journal.getJob('j1', 1); return prepare(job); };
+    return () => olderAtPrepare;
+  };
+
+  test('B1: a READOPT replay of the new ASSIGNED epoch retires the older row before it prepares', async () => {
+    const b = build();
+    seedCrashedRequeue(b);
+    b.journal.recordCommand({ commandId: 'r1', jobId: 'j1', leaseEpoch: 2, type: 'READOPT', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    b.ex.alive = true;                                             // epoch 1's detached nax is still ours and running
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const atPrepare = watchPrepare(b);
+    expect(await b.handler.handle([other('READOPT', 'r1', 2)])).toEqual([{ commandId: 'r1', leaseEpoch: 2, result: 'ok' }]);
+    await b.supervisor.idle();
+    expectRetiredBeforePrepare(b, atPrepare);
+  });
+
+  test('B1: an ASSIGN replay (resumeStranded) retires the older row before it prepares', async () => {
+    const b = build();
+    seedCrashedRequeue(b);
+    b.journal.recordCommand({ commandId: 'c2', jobId: 'j1', leaseEpoch: 2, type: 'ASSIGN', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    b.ex.alive = true;
+    b.ex.dieAfterTicks(b.ex.ticks + 2);
+    const atPrepare = watchPrepare(b);
+    expect(await b.handler.handle([assignCmd('c2', 'j1', 2)])).toEqual([{ commandId: 'c2', leaseEpoch: 2, result: 'ok' }]);
+    await b.supervisor.idle();
+    expectRetiredBeforePrepare(b, atPrepare);
+  });
+});
+
+describe('a READOPT rejection is durable with its finalization (B2)', () => {
+  /** The r1 record acked `ok` before the restart, over a RUN row whose journaled run id is gone: readopt rejects. */
+  const seed = () => {
+    const b = build();
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, naxRunId: null });
+    b.journal.recordCommand({ commandId: 'r1', jobId: 'j1', leaseEpoch: 1, type: 'READOPT', result: 'ok', detail: null, appliedAt: b.time.now().toISOString() });
+    return b;
+  };
+  const replay = [other('READOPT', 'r1')];
+
+  test('B2: a crash right after readopt returns leaves the rejection journaled, never a stale ok', async () => {
+    const b = seed();
+    const real = b.supervisor.readopt.bind(b.supervisor);
+    // The daemon dies between readopt's answer and the handler's own write: nothing after the call runs.
+    b.supervisor.readopt = async (jobId, leaseEpoch, finalize) => {
+      await real(jobId, leaseEpoch, finalize);
+      throw new Error('daemon died here');
+    };
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'rejected', detail: 'run id mismatch' });
+    // The next boot replays the rejection, so the API marks the job CRASHED instead of recording it as adopted.
+    b.supervisor.readopt = real;
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }]);
+  });
+
+  test('B2: a crash inside the finalization rolls back doneAt and the outcome together, so the next boot re-applies', async () => {
+    const b = seed();
+    const markDone = b.journal.markDone.bind(b.journal);
+    b.journal.markDone = (jobId, leaseEpoch) => {
+      markDone(jobId, leaseEpoch);
+      throw new Error('daemon died here');
+    };
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+    // One durable step: the row is not done either, so no boot can see a done row beside the stale ok.
+    expect(b.journal.getJob('j1', 1)?.doneAt).toBeNull();
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'ok' });
+    b.journal.markDone = markDone;
+    expect(await b.handler.handle(replay)).toEqual([{ commandId: 'r1', leaseEpoch: 1, result: 'rejected', detail: 'run id mismatch' }]);
+    expect(b.journal.getCommand('r1')).toMatchObject({ result: 'rejected', detail: 'run id mismatch' });
+  });
+});
+
 describe('CANCEL, ABANDON, READOPT and unknown types', () => {
   test('CANCEL of a held job is ok; of an unknown job is rejected with does not hold job', async () => {
     const b = build();

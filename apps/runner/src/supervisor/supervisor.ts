@@ -16,6 +16,13 @@ export interface SupervisorDeps extends JobRunDeps {
 
 export type ReadoptResult = { result: 'ok' | 'rejected'; detail?: string };
 
+/**
+ * B2: handed the outcome INSIDE the journal transaction that finalizes a rejected row, so the row's `doneAt` and the
+ * durable record of the rejection commit together. A crash between them used to leave a done row beside a stale `ok`
+ * record, and the next boot's replay then acked `ok` for a job nobody supervised (K10).
+ */
+export type ReadoptFinalize = (outcome: ReadoptResult) => void;
+
 const OK: ReadoptResult = { result: 'ok' };
 
 /** One run in the map: a nax job, or (Fleet S5a) a thread session. Both start, halt and abandon the same way. */
@@ -84,8 +91,13 @@ export class Supervisor {
   begin(row: JobRow, from: RunStart, after?: Promise<void>): void {
     const key = this.key(row.jobId, row.leaseEpoch);
     if (this.runs.has(key)) return;
+    // K11/D64 and B1: `'prepare'` comes from an ASSIGN, which passes its own retirement promise. `'reprepare'` is a
+    // RECOVERY start — an ASSIGN replay or a READOPT of an ASSIGNED row — found after a restart, so the retirement the
+    // crashed daemon still held is gone with it. Rebuilding it here is what keeps retirement-before-prepare across a
+    // restart: without it the new epoch would prepare on the checkout while the older epoch's detached nax still ran.
+    const retiring = after ?? (from === 'reprepare' ? this.retireOlderEpochs(row.jobId, row.leaseEpoch) : undefined);
     if (!isThreadKind(row.command)) {
-      this.track(key, new JobRun(this.deps, row.jobId, row.leaseEpoch), from, after);
+      this.track(key, new JobRun(this.deps, row.jobId, row.leaseEpoch), from, retiring);
       return;
     }
     const threads = this.deps.threads;
@@ -165,7 +177,7 @@ export class Supervisor {
     return this.deps.now().getTime() - Math.max(...stamps) < this.deps.readoptHeartbeatMs;
   }
 
-  private async reject(row: JobRow, detail: string): Promise<ReadoptResult> {
+  private async reject(row: JobRow, detail: string, finalize?: ReadoptFinalize): Promise<ReadoptResult> {
     try {
       await killIfOurs(this.deps.executor, row, this.deps.log);   // SEC-2: void return (D65)
       await this.deps.executor.reap(row, new Date(row.createdAt));
@@ -173,12 +185,18 @@ export class Supervisor {
     } catch (error) {
       this.deps.log.warn('readopt cleanup failed', { jobId: row.jobId, error: errorMessage(error) });
     }
-    this.deps.journal.markDone(row.jobId, row.leaseEpoch);
-    return { result: 'rejected', detail };
+    const outcome: ReadoptResult = { result: 'rejected', detail };
+    // B2: the row's `doneAt` and whatever `finalize` records are ONE durable step, so a crash cannot leave a finalized
+    // row beside a stale outcome; a crash inside it rolls both back and the next boot re-applies the command.
+    this.deps.journal.tx(() => {
+      this.deps.journal.markDone(row.jobId, row.leaseEpoch);
+      finalize?.(outcome);
+    });
+    return outcome;
   }
 
   /** Fleet S5a §5: a thread job cannot be resumed — a session lives only in the daemon that opened it. */
-  private readoptThread(row: JobRow): ReadoptResult {
+  private readoptThread(row: JobRow, finalize?: ReadoptFinalize): ReadoptResult {
     if (isTerminalState(row.state)) {
       this.deps.journal.markDone(row.jobId, row.leaseEpoch);
       return OK;
@@ -187,17 +205,21 @@ export class Supervisor {
       this.begin(row, 'reprepare');
       return OK;
     }
-    this.deps.journal.markDone(row.jobId, row.leaseEpoch);
-    return { result: 'rejected', detail: 'thread session ended by a runner restart' };
+    const outcome: ReadoptResult = { result: 'rejected', detail: 'thread session ended by a runner restart' };
+    this.deps.journal.tx(() => {                                 // B2: the same one durable step as `reject`
+      this.deps.journal.markDone(row.jobId, row.leaseEpoch);
+      finalize?.(outcome);
+    });
+    return outcome;
   }
 
   /** S1 spec §5.3 and design §2 control paths; D33 and D54 cover the cases the design leaves open. */
-  async readopt(jobId: string, leaseEpoch: number): Promise<ReadoptResult> {
+  async readopt(jobId: string, leaseEpoch: number, finalize?: ReadoptFinalize): Promise<ReadoptResult> {
     const row = this.deps.journal.getJob(jobId, leaseEpoch);
     if (!row) return { result: 'rejected', detail: 'unknown job' };
     if (this.runs.has(this.key(jobId, leaseEpoch))) return OK;
     // Fleet S5a §5: a restarted runner holds no session, so a THREAD row never goes through the nax readopt path.
-    if (isThreadKind(row.command)) return this.readoptThread(row);
+    if (isThreadKind(row.command)) return this.readoptThread(row, finalize);
     if (isTerminalState(row.state)) {
       await this.deps.executor.cleanup(row).catch(() => undefined);
       this.deps.journal.markDone(jobId, leaseEpoch);
@@ -209,8 +231,8 @@ export class Supervisor {
     }
     // D485: a config job's work happens inside this daemon's process (no detached nax to watch), so a restart ends it;
     // the server marks it CRASHED and a requeue starts it over on a fresh lease.
-    if (isConfigKind(row.command)) return this.reject(row, 'config job interrupted by a runner restart');
-    if (row.pid === null) return this.reject(row, 'no process recorded');
+    if (isConfigKind(row.command)) return this.reject(row, 'config job interrupted by a runner restart', finalize);
+    if (row.pid === null) return this.reject(row, 'no process recorded', finalize);
     const alive = this.deps.executor.isAlive(row.pid);
     // fleet-agent-job US-007: an AGENT writes no status.json and has no nax run id, so it resumes exactly like PLAN,
     // REVIEW and FIX — a live process of ours is watched, a gone one finishes.
@@ -229,7 +251,7 @@ export class Supervisor {
       this.begin(row, 'finish');
       return OK;
     }
-    return this.reject(row, !matches ? 'run id mismatch' : alive ? 'stale heartbeat' : 'process gone');
+    return this.reject(row, !matches ? 'run id mismatch' : alive ? 'stale heartbeat' : 'process gone', finalize);
   }
 
   shutdown(): void {
