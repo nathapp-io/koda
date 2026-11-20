@@ -42,10 +42,17 @@ function unextractableArchive(name = 'conflicting.tar.gz'): string {
   const tarPath = join(fixtureRoot(), 'conflicting.tar');
   const tar = spawnSync('tar', ['-cf', tarPath, '-C', first, 'a/b', '-C', second, 'a'], { encoding: 'utf8' });
   if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
-  const listed = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' });
-  if (listed.status !== 0) throw new Error(`the fixture must list: ${listed.stderr}`);
   const archive = join(fixtureRoot(), name);
-  writeFileSync(archive, spawnSync('gzip', ['-c', tarPath]).stdout);
+  const gzip = spawnSync('gzip', ['-c', tarPath]);
+  if (gzip.status !== 0) throw new Error(`gzip failed: ${gzip.stderr?.toString() ?? ''}`);
+  writeFileSync(archive, gzip.stdout);
+  // Both checks run on the gzipped archive, never on the intermediate tar: listing an uncompressed tar with
+  // `-z` silently works on bsdtar (macOS) but fails on GNU tar (CI), which cannot read a non-gzip stream
+  // through the gzip filter ("gzip: stdin: not in gzip format").
+  const integrity = spawnSync('gzip', ['-t', archive], { encoding: 'utf8' });
+  if (integrity.status !== 0) throw new Error(`the fixture must be a valid gzip: ${integrity.stderr}`);
+  const listed = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8' });
+  if (listed.status !== 0) throw new Error(`the fixture must list: ${listed.stderr}`);
   return archive;
 }
 afterEach(() => cleanupDeployScriptRuns());
