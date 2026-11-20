@@ -3,7 +3,7 @@
   "feature": "review-1120-deploy-ci",
   "branchName": "feat/review-1120-deploy-ci",
   "createdAt": "2026-11-20T02:33:55.236Z",
-  "updatedAt": "2026-11-20T03:31:58.850Z",
+  "updatedAt": "2026-11-20T03:43:12.140Z",
   "userStories": [
     {
       "id": "US-001",
@@ -317,14 +317,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The restore reuses the Compose one-off pattern and the env update uses standard same-directory replacement; a focused suite on the existing harness covers both without new abstractions."
+        "reasoning": "The restore reuses the Compose one-off pattern and the env update uses standard same-directory replacement; a focused suite on the existing harness covers both without new abstractions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "deployments/example/rollback.sh",
@@ -348,7 +351,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3037edc8fffcf0e7b656a0f95ea43fad0f4b71c2"
     },
     {
       "id": "US-007",
