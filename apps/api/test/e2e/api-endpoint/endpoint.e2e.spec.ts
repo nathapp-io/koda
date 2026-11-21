@@ -955,6 +955,87 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  describe('13. Ticket title search', () => {
+    let searchProjectSlug: string;
+    let searchMemberToken: string;
+
+    beforeAll(async () => {
+      const suffix = randomUUID().slice(0, 8);
+      const project = body<{ slug: string }>(await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: `Ticket Search ${suffix}`, slug: `ticket-search-${suffix}`, key: 'TSRCH' })
+        .expect(201));
+      searchProjectSlug = project.slug;
+
+      const member = body<{ accessToken: string; user: { id: string } }>(await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: `ticket-search-${suffix}@koda.test`, name: 'Ticket Search Member', password: 'Search1234!Aa' })
+        .expect(201));
+      searchMemberToken = member.accessToken;
+
+      const prisma = prismaClient();
+      const searchProject = await prisma.project.findUniqueOrThrow({ where: { slug: searchProjectSlug } });
+      await grantBaseline(prisma, { type: 'USER', id: member.user.id });
+      await grantRole(prisma, { type: 'USER', id: member.user.id }, 'project-admin', searchProject.id);
+      await app.get(MembershipService).invalidatePermissions();
+
+      for (const ticket of [
+        { title: 'Fix Login button', priority: 'HIGH' },
+        { title: 'Login page copy', priority: 'LOW' },
+        { title: 'Logout crash', priority: 'HIGH' },
+      ]) {
+        await request(httpServer)
+          .post(`/api/projects/${searchProjectSlug}/tickets`)
+          .set('Authorization', `Bearer ${searchMemberToken}`)
+          .send({ type: 'BUG', ...ticket })
+          .expect(201);
+      }
+    });
+
+    const listSearch = (search?: string) => {
+      const query = search === undefined ? '' : `?search=${encodeURIComponent(search)}`;
+      return request(httpServer)
+        .get(`/api/projects/${searchProjectSlug}/tickets${query}`)
+        .set('Authorization', `Bearer ${searchMemberToken}`);
+    };
+
+    it('AC-1: searches ticket titles case-insensitively within the isolated project', async () => {
+      const response = await listSearch('LOGIN').expect(200);
+      expect(body<{ records: { title: string }[] }>(response).records.map(({ title }) => title).sort())
+        .toEqual(['Fix Login button', 'Login page copy']);
+    });
+
+    it('AC-2: trims surrounding whitespace from the search', async () => {
+      const response = await listSearch(' login ').expect(200);
+      expect(body<{ records: { title: string }[] }>(response).records.map(({ title }) => title).sort())
+        .toEqual(['Fix Login button', 'Login page copy']);
+    });
+
+    it('AC-3: treats a whitespace-only search as no filter', async () => {
+      const response = await listSearch('  ').expect(200);
+      expect(body<{ records: { title: string }[] }>(response).records.map(({ title }) => title).sort())
+        .toEqual(['Fix Login button', 'Login page copy', 'Logout crash']);
+    });
+
+    it('AC-4: combines title search with the priority filter', async () => {
+      const response = await request(httpServer)
+        .get(`/api/projects/${searchProjectSlug}/tickets?search=login&priority=HIGH`)
+        .set('Authorization', `Bearer ${searchMemberToken}`)
+        .expect(200);
+      expect(body<{ records: { title: string }[] }>(response).records.map(({ title }) => title))
+        .toEqual(['Fix Login button']);
+    });
+
+    it('AC-5: rejects a search longer than 100 characters', async () => {
+      await listSearch('x'.repeat(101)).expect(400);
+    });
+
+    it('AC-6: accepts a search of exactly 100 characters', async () => {
+      await listSearch('x'.repeat(100)).expect(200);
+    });
+  });
+
   // ─────────────────────────────────────────────────────────────────
   // 4. Labels
   // ─────────────────────────────────────────────────────────────────
