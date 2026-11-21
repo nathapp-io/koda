@@ -153,10 +153,12 @@ describe('authCommand', () => {
     });
 
     it('does not promise universal revocation in Commander help', () => {
-      const auth = program.commands.find((command) => command.name() === 'auth')!;
-      const logout = auth.commands.find((command) => command.name() === 'logout')!;
-      expect(logout.description()).toContain('logout request');
-      expect(logout.description()).not.toMatch(/all outstanding|revoke/i);
+      const auth = program.commands.find((command) => command.name() === 'auth');
+      const logout = auth?.commands.find((command) => command.name() === 'logout');
+      expect(auth).toBeDefined();
+      expect(logout).toBeDefined();
+      expect(logout?.description()).toContain('logout request');
+      expect(logout?.description()).not.toMatch(/all outstanding|revoke/i);
     });
 
     it('outputs JSON when --json is set', async () => {

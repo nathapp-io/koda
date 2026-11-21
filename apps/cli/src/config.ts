@@ -214,8 +214,8 @@ export async function resolveContext(
     ? { source: 'flag', key: apiKey }
     : process.env.KODA_API_KEY !== undefined
       ? { source: 'environment', key: apiKey }
-      : profile?.apiKey !== undefined
-        ? { source: 'profile', key: apiKey, profileName: profileName!, owningUrl: profile?.apiUrl || undefined }
+      : profileName !== undefined && profile?.apiKey !== undefined
+        ? { source: 'profile', key: apiKey, profileName, owningUrl: profile.apiUrl || undefined }
         : globalConfig.apiKey !== undefined && globalConfig.apiKey !== ''
           ? { source: 'global', key: apiKey, owningUrl: globalConfig.apiUrl || DEFAULT_API_URL }
           : { source: 'none', key: apiKey };
