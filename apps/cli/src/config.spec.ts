@@ -440,6 +440,57 @@ describe('config', () => {
       expect(mockData.apiUrl).toBe('https://a.example/api/');
     });
 
+    it.each([
+      ['host', 'https://other.example'],
+      ['nondefault port', 'https://a.example:8443'],
+      ['base path', 'https://a.example/v2'],
+    ])('does not clear a selected profile when endpoint %s differs', async (_case, usedUrl) => {
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://a.example' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(clearUsedCredential({ ...ctx, apiUrl: usedUrl })).toBe('none');
+      expect((mockData.profiles as Record<string, Profile>).selected).toEqual({
+        apiKey: 'profile-key-12345', apiUrl: 'https://a.example',
+      });
+    });
+
+    it('preserves a selected profile with an empty owning URL despite a global endpoint fallback', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://global.example';
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: '' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(ctx.apiUrl).toBe('https://global.example');
+      expect(clearUsedCredential(ctx)).toBe('none');
+      const storedProfiles = mockData.profiles as Record<string, Profile>;
+      expect(storedProfiles.selected).toEqual({ apiKey: 'profile-key-12345', apiUrl: '' });
+      expect(mockData.apiKey).toBe('global-key-12345');
+    });
+
+    it('preserves a selected profile whose owning URL changes while logout is pending', async () => {
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      const storedProfiles = mockData.profiles as Record<string, Profile>;
+      storedProfiles.selected.apiUrl = 'https://replacement.example';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(storedProfiles.selected).toEqual({ apiKey: 'profile-key-12345', apiUrl: 'https://replacement.example' });
+    });
+
+    it('preserves a profile URL replaced with an empty value while logout is pending', async () => {
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      const storedProfiles = mockData.profiles as Record<string, Profile>;
+      storedProfiles.selected.apiUrl = '';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(storedProfiles.selected).toEqual({ apiKey: 'profile-key-12345', apiUrl: '' });
+    });
+
     it('does not clear a replaced credential while logout is pending', async () => {
       mockData.apiKey = 'original-key-12345';
       mockData.apiUrl = 'https://a.example';

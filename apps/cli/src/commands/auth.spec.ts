@@ -6,10 +6,10 @@ jest.mock('chalk', () => ({
   yellow: (s: string) => s,
 }));
 
-const mockData: Record<string, string> = {};
+const mockData: Record<string, unknown> = {};
 const mockStore = {
-  get: jest.fn((key: string) => mockData[key] || ''),
-  set: jest.fn((key: string, value: string) => { mockData[key] = value; }),
+  get: jest.fn((key: string) => key in mockData ? mockData[key] : key === 'profiles' ? {} : ''),
+  set: jest.fn((key: string, value: unknown) => { mockData[key] = value; }),
 };
 jest.mock('conf', () => jest.fn(() => mockStore));
 
@@ -20,9 +20,20 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../config', () => ({
-  resolveContext: jest.fn(),
-  clearUsedCredential: jest.fn(() => 'none'),
+jest.mock('../config', () => {
+  const actual = jest.requireActual('../config');
+  return {
+    ...actual,
+    resolveContext: jest.fn(),
+    clearUsedCredential: jest.fn(() => 'none'),
+  };
+});
+
+jest.mock('../generated/client.gen', () => ({
+  client: {
+    setConfig: jest.fn(),
+    interceptors: { response: { use: jest.fn() } },
+  },
 }));
 
 jest.mock('../utils/output', () => ({
@@ -34,7 +45,10 @@ import { Command } from 'commander';
 import { authCommand } from './auth';
 import { authControllerMe, authControllerRegister, authControllerLogout } from '../generated';
 import { resolveContext, clearUsedCredential } from '../config';
+import { client } from '../generated/client.gen';
 import { table } from '../utils/output';
+
+const actualConfig = jest.requireActual<typeof import('../config')>('../config');
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockMe = authControllerMe as jest.Mock;
@@ -50,6 +64,9 @@ describe('authCommand', () => {
   let logSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    Object.keys(mockData).forEach((key) => delete mockData[key]);
+    delete process.env.KODA_API_KEY;
+    delete process.env.KODA_API_URL;
     program = new Command();
     program.exitOverride();
     authCommand(program);
@@ -131,6 +148,30 @@ describe('authCommand', () => {
   });
 
   describe('logout', () => {
+    it.each([
+      ['different', 'environment-key-12345'],
+      ['equal to saved global key', 'saved-global-key-12345'],
+    ])('uses the environment endpoint and bearer without mutating saved config when key is %s', async (_case, environmentKey) => {
+      mockData.apiKey = 'saved-global-key-12345';
+      mockData.apiUrl = 'https://deployment-a.example/base';
+      process.env.KODA_API_KEY = environmentKey;
+      process.env.KODA_API_URL = 'https://deployment-b.example/prefix/api';
+      mockResolveContext.mockImplementation(actualConfig.resolveContext);
+      mockClearUsedCredential.mockImplementation(actualConfig.clearUsedCredential);
+      mockLogout.mockResolvedValue({ ret: 0, data: {} });
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout']);
+
+      expect(mockLogout).toHaveBeenCalled();
+      expect(client.setConfig).toHaveBeenCalledWith({
+        baseUrl: 'https://deployment-b.example/prefix',
+        headers: { Authorization: `Bearer ${environmentKey}` },
+      });
+      expect(mockData.apiKey).toBe('saved-global-key-12345');
+      expect(mockData.apiUrl).toBe('https://deployment-a.example/base');
+      expect(mockStore.set).not.toHaveBeenCalled();
+    });
+
     it('sends logout and conditionally clears the used local credential', async () => {
       mockLogout.mockResolvedValue({ ret: 0, data: {} });
 

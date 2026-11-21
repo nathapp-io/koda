@@ -95,7 +95,7 @@ export function clearUsedCredential(ctx: ResolvedContext): LogoutCleanup {
       normalizedApiBase(ctx.apiUrl) === normalizedApiBase(provenance.owningUrl)) {
     const current = getConfig();
     const profile = current.profiles[provenance.profileName];
-    if (profile?.apiKey !== provenance.key || normalizedApiBase(profile.apiUrl) !== normalizedApiBase(provenance.owningUrl)) return 'none';
+    if (!profile?.apiUrl || profile.apiKey !== provenance.key || normalizedApiBase(profile.apiUrl) !== normalizedApiBase(provenance.owningUrl)) return 'none';
     store.set('profiles', { ...current.profiles, [provenance.profileName]: { ...profile, apiKey: '' } });
     secureConfigFile();
     return { profileName: provenance.profileName };
