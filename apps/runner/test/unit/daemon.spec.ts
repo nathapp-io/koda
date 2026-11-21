@@ -6,6 +6,7 @@ import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, FleetCommandOut, SyncRequest } from '@nathapp/fleet-protocol';
 import type { FetchFn } from '../../src/sync/http';
 import { parseRunnerConfig, resolveHome } from '../../src/config/runner-config';
+import type { CredentialBroker } from '../../src/credentials/broker';
 import { startDaemon } from '../../src/daemon/daemon';
 import { Journal } from '../../src/journal/journal';
 import type { Git } from '../../src/executor/git';
@@ -616,6 +617,82 @@ describe('startDaemon, runner.log rotation (OPS-1)', () => {
     try {
       expect(log.lines.some((l) => l.level === 'warn' && l.message.includes('could not rotate runner.log'))).toBe(true);
       await waitFor(() => server.syncs.length >= 1);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+});
+
+/**
+ * US-001: the graceful stop closes the broker before it joins the outstanding runs, cleanups and command-outcome
+ * writers, and closes the journal last. A run that waits for a broker credential must not hold the stop for the
+ * credential timeout.
+ */
+describe('startDaemon, graceful stop (US-001)', () => {
+  const shortDirs: string[] = [];
+  const shortSocketDir = async (): Promise<string> => {
+    const dir = await mkdtemp(join(tmpdir(), 'x'));
+    shortDirs.push(dir);
+    return dir;
+  };
+  afterAll(async () => { await Promise.all(shortDirs.map((dir) => rm(dir, { recursive: true, force: true }))); });
+
+  test('AC-6: the broker close releases the credential waiter before the drain joins, and the retirement settles before the journal closes', async () => {
+    const server = fakeServer();
+    const s = await setup(server, { socketDir: await shortSocketDir() });
+    const order: string[] = [];
+    let broker: CredentialBroker | undefined;
+    let credential: { reason: string } | undefined;
+    let preparing = false;
+    s.ex.prepare = async (job, options) => {
+      preparing = true;
+      const current = broker;
+      if (!current) throw new Error('the daemon did not hand its broker to the executor');
+      // The run waits for a broker credential. The halt alone does not release it: only the broker's close does.
+      const watcher = (async () => { while (!options?.isCancelled?.()) await Bun.sleep(5); order.push('halted'); })();
+      const answer = await current.freshToken(job, 0);
+      await watcher;
+      const reason = answer.ok ? 'granted' : answer.reason;
+      credential = { reason };
+      order.push('credential-released');
+      return { ok: false, cancelled: true, reason };
+    };
+    const daemon = await startDaemon({
+      fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(),
+      executorFactory: (b) => {
+        broker = b;
+        const closeAll = b.closeAll.bind(b);
+        b.closeAll = async () => { order.push('broker-close'); await closeAll(); };
+        return s.ex;
+      },
+    });
+    try {
+      server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
+      await waitFor(() => preparing);
+      server.queue.push({ commandId: 'a1', type: 'ABANDON', jobId: 'j1', leaseEpoch: 1, payload: { reason: 'stale_lease' } });
+      await waitFor(() => order.includes('halted'));               // the retirement started and halted the run
+      expect(s.ex.calls).not.toContain('cleanup:j1');             // it waits behind the run that holds the repo lock
+
+      const close = daemon.journal.close.bind(daemon.journal);
+      let recordAtClose: unknown;
+      let callsAtClose: string[] = [];
+      daemon.journal.close = () => {
+        recordAtClose = daemon.journal.getCommand('a1');
+        callsAtClose = [...s.ex.calls];
+        order.push('journal-close');
+        close();
+      };
+      const idle = daemon.supervisor.idle.bind(daemon.supervisor);
+      daemon.supervisor.idle = async () => { order.push('drain-join'); const result = await idle(); order.push('drain-done'); return result; };
+
+      await daemon.stop();
+
+      expect(order.indexOf('broker-close')).toBeLessThan(order.indexOf('drain-join'));   // the broker closes before the drain joins
+      expect(credential?.reason).toBe('cancelled');                                    // the close released it, not the 120 s timeout
+      expect(callsAtClose).toContain('cleanup:j1');                                     // the retirement settled
+      expect(recordAtClose).toMatchObject({ result: 'ok', type: 'ABANDON' });           // and its outcome write
+      expect(order.at(-1)).toBe('journal-close');                                       // the journal closes last
     } finally {
       await daemon.stop();
       server.stop();

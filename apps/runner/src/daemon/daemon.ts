@@ -1,5 +1,6 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { CommandAck } from '@nathapp/fleet-protocol';
 import { configureCredentials as defaultConfigureCredentials, type CredentialsConfig } from '@nathapp/nax-agent';
 import { uploadWithRetry } from '../bundle/upload-bundle';
 import { ApprovalRelay } from '../approvals/approval-relay';
@@ -55,7 +56,11 @@ export interface DaemonOptions {
   readonly now?: Now;
   readonly sleep?: Sleep;
   readonly bootId?: string;
-  readonly executorFactory?: () => JobExecutor;
+  /**
+   * US-001: the factory receives the credential broker, so a test's fake executor can wait for a credential the way
+   * the real one does.
+   */
+  readonly executorFactory?: (broker: CredentialBroker) => JobExecutor;
   readonly git?: Git;
   /** D84: how git and the shims run this runner; tests pass ['bun', <src/main.ts>]. */
   readonly selfCommand?: readonly string[];
@@ -224,7 +229,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       retries: tuning.jobCheckRetries, backoffMs: tuning.jobCheckRetryBackoffMs, sleep,
     })
     : new StaticJobCheck({ capabilities: () => reporter.latest() });
-  const executor = options.executorFactory?.() ?? new HostExecutor({
+  const executor = options.executorFactory?.(broker) ?? new HostExecutor({
     config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, jobCheck,
     // review-1118 US-001: test-only; unset in production, where a job clones over https only.
     allowLocalCloneUrls: options.allowLocalCloneUrls === true,
@@ -273,10 +278,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // threadBackends, so its THREAD rows fail `backend_unavailable` in the supervisor.
     ...(threads ? { threads } : {}),
   });
+  /**
+   * US-001: an ABANDON's ack is offered when its retirement's outcome is durable. The loop is wired once it exists,
+   * so the ack rides a later request instead of being lost.
+   */
+  const deferredAck: { sink: (ack: CommandAck) => void } = { sink: () => undefined };
   const handler = new CommandHandler({
     journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals,
     // review-1118 US-001: test-only; a real runner's ASSIGN must carry an https clone URL.
     allowLocalCloneUrls: options.allowLocalCloneUrls === true,
+    onDeferredAck: (ack) => { deferredAck.sink(ack); },
   });
 
   let stopReason: StopReason | null = null;
@@ -287,7 +298,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     capabilityReport: () => reporter.report(),
     onCapabilitiesSent: (hash) => reporter.markSent(hash),
     handleCommands: (commands) => handler.handle(commands),
-    abandonUnknown: async (jobIds) => { for (const id of jobIds) await supervisor.abandonAll(id); },
+    // US-001: the epochs of a job the server does not know are retired in the background; the poll goes on.
+    abandonUnknown: (jobIds) => { for (const id of jobIds) supervisor.retireUnknown(id); },
     tokenRequests: () => tokens.requests(Date.now()),
     // US-008: the provider keys a job's model calls are waiting for, and the server's answer, applied at once.
     providerRequests: () => providerKeys.requests(),
@@ -306,6 +318,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     },
     log, sleep, random: Math.random, nowMs: () => performance.now(), minGapMs: tuning.syncMinGapMs,
   });
+  deferredAck.sink = (ack) => { loop.queueAck(ack); };
   const stopNeedListener = tokens.onNeed(() => loop.wake());
   const stopProviderKeyNeedListener = providerKeys.onNeed(() => loop.wake());   // US-008: a new request wakes the poll
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
@@ -345,6 +358,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const notice = setTimeout(() => log.warn('waiting for halted job runs to end before closing the journal'), SHUTDOWN_NOTICE_MS);
       try {
         await supervisor.idle();
+        // US-001: the command-outcome writers settle too: a retiring ABANDON writes its outcome after its cleanup,
+        // and that write must reach the journal before the journal closes.
+        await handler.idle();
       } finally {
         clearTimeout(notice);
       }

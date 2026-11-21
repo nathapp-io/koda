@@ -36,7 +36,11 @@ export interface SyncLoopDeps {
   readonly capabilityReport: () => CapabilityReport | null;
   readonly onCapabilitiesSent: (hash: string) => void;
   readonly handleCommands: (commands: readonly FleetCommandOut[]) => Promise<CommandAck[]>;
-  readonly abandonUnknown: (jobIds: readonly string[]) => Promise<void>;
+  /**
+   * US-001: the jobs the server does not know. Their epochs are retired in the background, so the poll is not held
+   * by a cleanup that waits for the repo mutex.
+   */
+  readonly abandonUnknown: (jobIds: readonly string[]) => void;
   /** Design §3.1: which jobs need a git token now (TokenCache.requests). */
   readonly tokenRequests: () => readonly TokenRequest[];
   /** The server's answer to this request's token requests (TokenCache.apply). */
@@ -95,6 +99,17 @@ export class SyncLoop {
       }
     }
     return pruned;
+  }
+
+  /**
+   * US-001: an ack whose command finished after its sync — an ABANDON whose retirement became durable while the
+   * poll went on. It rides the next request, and the poll is woken so it does not wait out a long poll for an ack
+   * the server is waiting for.
+   */
+  queueAck(ack: CommandAck): void {
+    this.pendingAcks.set(ack.commandId, clampAck(ack));
+    this.pendingAcksAt.set(ack.commandId, this.deps.nowMs());
+    this.wake();
   }
 
   stop(): void {
@@ -166,7 +181,7 @@ export class SyncLoop {
     // Fleet S5a §3: the prune pass keeps the latest list; a response without the field keeps the previous one.
     if (response.archivedThreadIds !== undefined) this.deps.onArchivedThreads?.(response.archivedThreadIds);
     const unknown = response.unknownJobIds ?? [];
-    if (unknown.length > 0) await this.deps.abandonUnknown(unknown);
+    if (unknown.length > 0) this.deps.abandonUnknown(unknown);
     const commands = response.commands ?? [];
     if (commands.length > 0) {
       const stamp = this.deps.nowMs();

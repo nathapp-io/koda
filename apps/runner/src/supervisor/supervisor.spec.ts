@@ -94,11 +94,12 @@ describe('abandon (D49, Review focus 4)', () => {
     expect(b.ex.killed).toEqual([]);
     await b.supervisor.abandon('ghost', 9);
   });
-  test('abandonAll drops every epoch of a job the server does not know', async () => {
+  test('US-001: retireUnknown drops every epoch of a job the server does not know', async () => {
     const b = build();
     b.add({}, 1);
     b.add({}, 2);
-    await b.supervisor.abandonAll('j1');
+    b.supervisor.retireUnknown('j1');
+    await b.supervisor.idle();
     expect(b.journal.jobsById('j1')).toEqual([]);
   });
   test('abandoning a live run stops it without further events', async () => {

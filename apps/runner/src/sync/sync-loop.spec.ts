@@ -3,7 +3,14 @@ import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, CommandAck, FleetCommandOut, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
-import { systemSleep } from '../time';
+import { systemNow, systemSleep } from '../time';
+import { assignFor } from '../../test/helpers/assign';
+import { FakeExecutor } from '../../test/helpers/fake-executor';
+import { NO_LOG_SHIPPING } from '../../test/helpers/fake-log-shipping';
+import { waitFor } from '../../test/helpers/wait';
+import { CommandHandler } from '../supervisor/command-handler';
+import { RepoMutex } from '../supervisor/repo-mutex';
+import { Supervisor } from '../supervisor/supervisor';
 import { ServerError, NetworkError } from './http';
 import { SyncLoop, PENDING_ACK_TTL_MS, type CapabilityReport, type StopReason, type SyncLoopDeps } from './sync-loop';
 
@@ -43,7 +50,7 @@ function makeLoop(over: Partial<SyncLoopDeps> = {}): SyncLoop {
     journal, bootId: 'boot-1', daemonVersion: '0.1.0', freeSlots: () => 1,
     capabilityReport: () => capsNow, onCapabilitiesSent: (h) => { sentHashes.push(h); },
     handleCommands: async (cmds) => { handled.push([...cmds]); return commandAcks; },
-    abandonUnknown: async (ids) => { abandoned.push([...ids]); },
+    abandonUnknown: (ids) => { abandoned.push([...ids]); },
     onStop: (r) => { stops.push(r); }, log: createMemoryLogger(),
     sleep: async (ms) => { sleeps.push(ms); }, random: () => 0.5, nowMs: () => now, minGapMs: 250,
     tokenRequests: () => tokenAsks,
@@ -611,5 +618,182 @@ describe('git tokens (design §3.1, D81)', () => {
     release();
     await pending;
     expect(aborted).toBe(false);
+  });
+});
+
+/**
+ * US-001: the real sync loop, command handler, supervisor, journal and FIFO repo mutex with a fake executor.
+ * The script answers each request in turn; `tokenAsks` is what the fake executor asked a token for.
+ */
+function realLoop() {
+  const journal = Journal.open(':memory:');
+  const ex = new FakeExecutor();
+  const log = createMemoryLogger();
+  const mutex = new RepoMutex();
+  const supervisor = new Supervisor({
+    journal, executor: ex, mutex, log, now: systemNow, sleep: systemSleep,
+    uploader: { upload: async () => ({ kind: 'ok' }) },
+    tuning: { statusPollMs: 10, killGraceMs: 1_000, ackPollMs: 5, uploadAckWaitMs: 0, logDrainTimeoutMs: 1_000 },
+    readoptHeartbeatMs: 120_000,
+    logs: NO_LOG_SHIPPING,
+  });
+  // The ABANDON's ack is offered when its outcome is durable; the loop carries it on a later request.
+  const deferred: { sink: (ack: CommandAck) => void } = { sink: () => undefined };
+  const handler = new CommandHandler({
+    journal, supervisor, workspaceRoot: '/w', log, now: systemNow,
+    approvals: { answer: async () => ({ result: 'ok' }) },
+    onDeferredAck: (ack) => { deferred.sink(ack); },
+  });
+  const requests: SyncRequest[] = [];
+  const tokenAsks: Array<{ jobId: string; leaseEpoch: number }> = [];
+  const loop = new SyncLoop({
+    client: { sync: async (req) => {
+      requests.push(structuredClone(req));
+      const step = script.shift();
+      if (!step) throw new Error('script exhausted');
+      return step(req);
+    } },
+    journal, bootId: 'boot-1', daemonVersion: '0.1.0', freeSlots: () => 4,
+    capabilityReport: () => null, onCapabilitiesSent: () => undefined,
+    handleCommands: (cmds) => handler.handle(cmds),
+    abandonUnknown: (ids) => { for (const id of ids) supervisor.retireUnknown(id); },
+    tokenRequests: () => tokenAsks,
+    onTokens: () => undefined,
+    onStop: () => undefined, log, sleep: async () => undefined, random: () => 0.5, nowMs: () => Date.now(), minGapMs: 0,
+  });
+  deferred.sink = (ack) => { loop.queueAck(ack); };
+  return { journal, ex, log, mutex, supervisor, handler, loop, requests, tokenAsks };
+}
+
+/** A work that must not wait for the repo lock a test holds; a regression that waits fails on the race. */
+async function settlesWithin<T>(work: Promise<T>, ms = 500): Promise<{ done: true; value: T } | { done: false }> {
+  const timeout = new Promise<{ done: false }>((resolve) => { setTimeout(() => resolve({ done: false }), ms); });
+  return Promise.race([work.then((value) => ({ done: true as const, value })), timeout]);
+}
+
+describe('the poll stays free while a stale epoch retires (US-001)', () => {
+  const assignJob = (commandId: string, jobId: string, leaseEpoch = 1): FleetCommandOut =>
+    ({ commandId, type: 'ASSIGN', jobId, leaseEpoch, payload: assign(jobId) });
+  const abandonJob = (commandId: string, jobId: string, leaseEpoch = 1): FleetCommandOut =>
+    ({ commandId, type: 'ABANDON', jobId, leaseEpoch, payload: { reason: 'stale_lease' } });
+
+  test('AC-1: the sync after the retirement asks for the token of the job that waits behind it', async () => {
+    const f = realLoop();
+    let releaseA = (): void => undefined;
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+    let grantB = (): void => undefined;
+    const tokenB = new Promise<void>((resolve) => { grantB = resolve; });
+    const prepare = f.ex.prepare.bind(f.ex);
+    f.ex.prepare = async (job, options) => {
+      await prepare(job, options);                              // the fake records the call
+      if (job.jobId === 'jA') { await gateA; return { ok: true, branch: 'feat/a' }; }
+      f.tokenAsks.push({ jobId: job.jobId, leaseEpoch: job.leaseEpoch });
+      await tokenB;
+      return { ok: true, branch: 'feat/b' };
+    };
+    try {
+      script.push(ok({ commands: [assignJob('cA', 'jA')] }));
+      await f.loop.syncOnce();
+      await waitFor(() => f.ex.calls.includes('prepare:jA'));                 // A holds the repo lock
+
+      script.push(ok({ commands: [assignJob('cB', 'jB'), abandonJob('aA', 'jA')] }));
+      // The retirement waits for A's cleanup; the poll must not wait with it.
+      expect(await settlesWithin(f.loop.syncOnce())).toEqual({ done: true, value: { kind: 'ok' } });
+
+      releaseA();                                                          // the halted A lets go of the repo lock
+      await waitFor(() => f.tokenAsks.length > 0);                           // B now waits for its token
+      script.push(ok());
+      await f.loop.syncOnce();
+      expect(f.requests.at(-1)?.tokenRequests).toEqual([{ jobId: 'jB', leaseEpoch: 1 }]);
+      grantB();
+      await waitFor(() => f.ex.calls.includes('spawn:jB'));                   // B resumes
+    } finally {
+      releaseA();
+      grantB();
+      f.supervisor.shutdown();
+    }
+  });
+
+  test('AC-2: the abandonment is not acknowledged before its cleanup, and the next delivery carries the recorded ack', async () => {
+    const f = realLoop();
+    f.ex.dieAfterTicks(1);
+    let releaseA = (): void => undefined;
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+    let grantB = (): void => undefined;
+    const tokenB = new Promise<void>((resolve) => { grantB = resolve; });
+    const prepare = f.ex.prepare.bind(f.ex);
+    f.ex.prepare = async (job, options) => {
+      await prepare(job, options);                              // the fake records the call
+      if (job.jobId === 'jA') { await gateA; return { ok: true, branch: 'feat/a' }; }
+      await tokenB;                                            // B waits for its token, holding the repo lock
+      return { ok: true, branch: 'feat/b' };
+    };
+    try {
+      script.push(ok({ commands: [assignJob('cA', 'jA')] }));
+      await f.loop.syncOnce();
+      await waitFor(() => f.ex.calls.includes('prepare:jA'));
+
+      script.push(ok({ commands: [assignJob('cB', 'jB'), abandonJob('aA', 'jA')] }));
+      // The retirement waits for the repo lock; the poll must not wait with it.
+      expect(await settlesWithin(f.loop.syncOnce())).toEqual({ done: true, value: { kind: 'ok' } });
+      releaseA();
+      await waitFor(() => f.ex.calls.includes('prepare:jB'));   // B took the repo lock; A's cleanup waits behind it
+      // The cleanup has not run, so no request carries the abandonment's ack.
+      expect(f.ex.calls).not.toContain('cleanup:jA');
+      expect(f.requests.flatMap((r) => r.commandAcks).filter((a) => a.commandId === 'aA')).toEqual([]);
+
+      grantB();
+      await waitFor(() => f.ex.calls.includes('cleanup:jA'));   // B is done; A's cleanup ran
+      await f.handler.idle();                                 // and its outcome is durable
+      script.push(ok());
+      await f.loop.syncOnce();
+      expect(f.requests.at(-1)?.commandAcks).toContainEqual({ commandId: 'aA', leaseEpoch: 1, result: 'ok' });
+    } finally {
+      releaseA();
+      grantB();
+      f.supervisor.shutdown();
+    }
+  });
+
+  test('AC-4: a job reported missing twice is swept once, and a lease that arrives later is preserved', async () => {
+    const f = realLoop();
+    let releaseX = (): void => undefined;
+    const gateX = new Promise<void>((resolve) => { releaseX = resolve; });
+    const prepare = f.ex.prepare.bind(f.ex);
+    f.ex.prepare = async (job, options) => {
+      await prepare(job, options);                              // the fake records the call
+      if (job.leaseEpoch === 1) { await gateX; return { ok: true, branch: 'feat/x' }; }
+      return { ok: true, branch: 'feat/x2' };
+    };
+    // An unrelated job with a pending event: the poll keeps delivering while the retirement waits.
+    f.journal.insertJob({ assign: assignFor('RUN', { jobId: 'jY' }), leaseEpoch: 1, repoKey: 'a/other', jobDir: '/w/jY' });
+    f.journal.appendEvent('jY', 1, 'log', { stream: 'run', text: 'hello' });
+    try {
+      script.push(ok({ commands: [assignJob('cX', 'jX')] }));
+      await f.loop.syncOnce();
+      await waitFor(() => f.ex.calls.includes('prepare:jX'));                 // jX holds the repo lock
+
+      script.push(ok({ unknownJobIds: ['jX'] }));
+      expect(await settlesWithin(f.loop.syncOnce())).toEqual({ done: true, value: { kind: 'ok' } });
+      script.push(ok({ unknownJobIds: ['jX'] }));
+      expect(await settlesWithin(f.loop.syncOnce())).toEqual({ done: true, value: { kind: 'ok' } });
+
+      // A higher epoch arrives after both missing-job reports: it is not part of the sweep.
+      script.push(ok({ commands: [assignJob('cX2', 'jX', 2)] }));
+      expect(await settlesWithin(f.loop.syncOnce())).toEqual({ done: true, value: { kind: 'ok' } });
+
+      script.push(ok());
+      await f.loop.syncOnce();
+      expect(f.requests.at(-1)?.jobs.map((j) => j.jobId)).toContain('jY');
+
+      releaseX();
+      await waitFor(() => f.journal.getJob('jX', 1) === null);
+      // One cleanup pass for the captured epoch (the shared checkout is left to the live higher epoch, AC-8).
+      expect(f.ex.calls.filter((c) => c === 'releaseCredentials:jX')).toHaveLength(1);
+      expect(f.journal.getJob('jX', 2)).not.toBeNull();                      // the later lease is preserved
+    } finally {
+      releaseX();
+      f.supervisor.shutdown();
+    }
   });
 });
