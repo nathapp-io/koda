@@ -22,6 +22,8 @@
   "sessionOtherPrincipal": { "409": "This thread's live session was started by someone else; end the session first" },
   "notRepoThread": { "409": "This action needs a repository thread" },
   "noFleetRepo": { "409": "This project has no repository, so a project thread cannot run" },
+  "homeNoRepo": { "409": "The chosen home project has no repository. Choose a project that has one." },
+  "noDefaultHome": { "409": "No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one." },
   "backendUnavailable": { "409": "No enabled runner offers {value} ({field}), so this thread could never run" },
   "projectThreadsUnavailable": { "409": "No enabled runner can host a project thread, so this thread could never run" },
   "workspaceThreadsUnavailable": { "409": "No enabled runner can host a workspace thread, so this thread could never run" },

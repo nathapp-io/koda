@@ -22,6 +22,8 @@
   "sessionOtherPrincipal": { "409": "该会话由其他主体发起，请先结束会话" },
   "notRepoThread": { "409": "此操作需要仓库线程" },
   "noFleetRepo": { "409": "此项目没有仓库，无法运行项目线程" },
+  "homeNoRepo": { "409": "所选主项目没有代码库，请选择一个有代码库的项目。" },
+  "noDefaultHome": { "409": "你所属的项目都没有代码库，无法自动选择主项目，请手动选择。" },
   "backendUnavailable": { "409": "没有已启用的运行器提供 {value}（{field}），此线程将无法运行" },
   "projectThreadsUnavailable": { "409": "没有已启用的运行器可以承载项目线程，此线程将无法运行" },
   "workspaceThreadsUnavailable": { "409": "没有已启用的运行器可以承载工作区线程，此线程将无法运行" },
