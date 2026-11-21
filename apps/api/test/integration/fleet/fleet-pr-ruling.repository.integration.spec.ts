@@ -111,6 +111,26 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
     await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(gitlabRepoId, 60)).resolves.toBeNull();
   });
 
+  it('AC-5: applies configured origin including port to latest, ready, and retirement lookups', async () => {
+    await db.fleetRepo.update({ where: { id: repoId }, data: { host: 'https://github.com:8443' } });
+    try {
+      const canonical = await newUrlJob('port-canonical', 'https://github.com:8443/acme/app/pull/61');
+      const foreignPort = await newUrlJob('port-foreign', 'https://github.com:9443/acme/app/pull/61');
+      const newer = new Date(canonical.createdAt.getTime() + 1000);
+      await db.fleetJob.update({ where: { id: foreignPort.id }, data: { createdAt: newer } });
+      await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 61)).resolves.toBe(canonical.id);
+      await expect(app.get(PrismaFleetPrRulingRepository).runsForPr(repoId, 61)).resolves.toEqual([canonical.id]);
+      const pending = await db.fleetPrRuling.create({ data: {
+        projectId, repoId, prNumber: 61, jobId: canonical.id, itemId: 'D-1', itemKind: 'review', text: 'verified',
+        disposition: 'verified', actorType: 'AGENT', actorId: principal.id, state: 'pending',
+      } });
+      await app.get(PrismaFleetPrRulingRepository).replaceOlderRuns(foreignPort.id);
+      expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: pending.id } })).state).toBe('pending');
+    } finally {
+      await db.fleetRepo.update({ where: { id: repoId }, data: { host: 'https://github.com' } });
+    }
+  });
+
   it('AC-7: create accepts the latest draft RUN when its PR URL has a trailing slash', async () => {
     const older = await newUrlJob('ruling-variant-older', 'https://github.com/acme/app/pull/57');
     const newer = await newUrlJob('ruling-variant-newer', 'https://github.com/acme/app/pull/57/');
