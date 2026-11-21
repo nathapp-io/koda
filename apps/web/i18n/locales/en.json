@@ -126,8 +126,9 @@
   "palette": {
     "trigger": "Search or jump to…",
     "title": "Command palette",
-    "description": "Search pages and projects, then press Enter to open.",
-    "placeholder": "Type a page or project name…",
+    "description": "Search pages, projects and tickets, then press Enter to open.",
+    "placeholder": "Type a page, project or ticket…",
+    "openTicket": "Open ticket {ref}",
     "empty": "No matches.",
     "project": "Project",
     "toggleTheme": "Toggle light/dark theme"

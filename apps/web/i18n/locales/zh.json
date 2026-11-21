@@ -126,8 +126,9 @@
   "palette": {
     "trigger": "搜索或跳转…",
     "title": "命令面板",
-    "description": "搜索页面和项目，按回车打开。",
-    "placeholder": "输入页面或项目名称…",
+    "description": "搜索页面、项目和工单，按回车打开。",
+    "placeholder": "输入页面、项目或工单…",
+    "openTicket": "打开工单 {ref}",
     "empty": "没有匹配项。",
     "project": "项目",
     "toggleTheme": "切换浅色/深色主题"

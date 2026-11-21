@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare, ScrollText, Inbox } from 'lucide-vue-next'
+import { Search, Ticket, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare, ScrollText, Inbox } from 'lucide-vue-next'
 import type { Component } from 'vue'
+import { parseTicketRefQuery } from '~/lib/palette-tickets'
 
-interface Project { id: number; name: string; slug: string }
+interface Project { id: string | number; name: string; slug: string; key: string }
 interface Command { id: string; label: string; hint?: string; icon: Component; run: () => void }
 
 const props = defineProps<{ open: boolean; projectSlug?: string }>()
@@ -83,10 +84,26 @@ const commands = computed<Command[]>(() => {
   return list
 })
 
+const refCommand = computed<Command | null>(() => {
+  const parsed = parseTicketRefQuery(query.value)
+  if (!parsed) return null
+  const project = projects.value.find((candidate) => candidate.key === parsed.key)
+  if (!project) return null
+  const ticketRef = `${parsed.key}-${parsed.number}`
+  return {
+    id: 'ticket-ref',
+    label: t('palette.openTicket', { ref: ticketRef }),
+    hint: project.name,
+    icon: Ticket,
+    run: go(`/${project.slug}/tickets/${ticketRef}`),
+  }
+})
+
 const results = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return commands.value
-  return commands.value.filter((c) => `${c.label} ${c.hint ?? ''}`.toLowerCase().includes(q))
+  const matches = commands.value.filter((c) => `${c.label} ${c.hint ?? ''}`.toLowerCase().includes(q))
+  return refCommand.value ? [refCommand.value, ...matches] : matches
 })
 
 watch(query, () => { active.value = 0 })
@@ -105,6 +122,10 @@ watch(() => props.open, async (isOpen) => {
   ;(el instanceof HTMLInputElement ? el : el?.$el)?.focus()
 })
 
+function onQueryInput(e: Event) {
+  query.value = (e.target as HTMLInputElement).value
+}
+
 function onKeydown(e: KeyboardEvent) {
   const n = results.value.length
   if (e.key === 'ArrowDown') { e.preventDefault(); active.value = n ? (active.value + 1) % n : 0 }
@@ -122,7 +143,8 @@ function onKeydown(e: KeyboardEvent) {
         <Search class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <input
           ref="inputRef"
-          v-model="query"
+          :value="query"
+          @input="onQueryInput"
           type="text"
           role="combobox"
           aria-expanded="true"
