@@ -94,6 +94,12 @@ const { data: allLabelsData } = useAsyncData(
 
 const ticket = computed(() => ticketData.value ?? null)
 const ticketNotFound = computed(() => !pending.value && !error.value && ticketData.value === null)
+const pageTitle = computed(() => {
+  if (ticket.value) return `${ticket.value.ref} ${ticket.value.title} · Koda`
+  if (ticketNotFound.value) return `${t('tickets.notFound.title')} · Koda`
+  return `${ref} · Koda`
+})
+useHead(() => ({ title: pageTitle.value }))
 
 // Track 1 Slice 5: live updates for the open ticket. Never refresh(): it flips
 // `pending`, which swaps the page for LoadingState and unmounts an open edit form.

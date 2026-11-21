@@ -3086,6 +3086,10 @@
     }
   },
   "errorPage": {
+    "notFound": {
+      "title": "页面不存在",
+      "body": "该页面或项目不存在，或已被删除。"
+    },
     "unavailable": {
       "title": "Koda 暂时无法使用",
       "body": "无法验证您的会话，请重试。"

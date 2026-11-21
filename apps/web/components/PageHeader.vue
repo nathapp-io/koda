@@ -1,8 +1,10 @@
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   title: string
   subtitle?: string
 }>()
+
+useHead(() => ({ title: `${props.title} · Koda` }))
 </script>
 
 <template>

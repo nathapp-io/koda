@@ -3086,6 +3086,10 @@
     }
   },
   "errorPage": {
+    "notFound": {
+      "title": "Page not found",
+      "body": "This page or project does not exist, or it was removed."
+    },
     "unavailable": {
       "title": "Koda is unavailable",
       "body": "We could not verify your session. Please try again."
