@@ -3,7 +3,7 @@
   "feature": "review-1120-client-behavior",
   "branchName": "feat/review-1120-client-behavior",
   "createdAt": "2026-11-21T05:43:08.881Z",
-  "updatedAt": "2026-11-21T06:10:16.256Z",
+  "updatedAt": "2026-11-21T06:15:32.236Z",
   "userStories": [
     {
       "id": "US-001",
@@ -179,14 +179,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A standard additive resolver field and field-specific precedence/validation in one command; credential selection and cleanup stay in US-002 and are not changed here."
+        "reasoning": "A standard additive resolver field and field-specific precedence/validation in one command; credential selection and cleanup stay in US-002 and are not changed here.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/config.ts",
@@ -217,7 +220,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "34b98faf67d486e3a9b9f02fb35bd5a9e21b59b5"
     },
     {
       "id": "US-004",
