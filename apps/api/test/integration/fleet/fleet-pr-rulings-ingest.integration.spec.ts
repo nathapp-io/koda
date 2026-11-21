@@ -13,6 +13,7 @@ import { tarGz } from '../../helpers/tar-gz';
 import { BundleService } from '../../../src/fleet/artifacts/bundle.service';
 import { LogFallbackService } from '../../../src/fleet/logs/log-fallback.service';
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
+import { FleetPrRulingsService } from '../../../src/fleet/rulings/fleet-pr-rulings.service';
 import { BUNDLE_INGEST_REPOSITORY, type IBundleIngestRepository } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { IngestRequeueService } from '../../../src/fleet/ingest/ingest-requeue.service';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
@@ -117,7 +118,9 @@ const now = new Date('2026-11-15T12:00:00Z');
       createdAt: new Date('2027-01-02T00:00:00Z'),
       workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'advisor' }] },
     } });
+    const retirement = vi.spyOn(app.get(FleetPrRulingsService), 'replaceOlderRuns');
     await attachRunWorkflow(newer.run.id, earlier.run.resultPrUrl ?? undefined);
+    expect(retirement).toHaveBeenCalledWith(expect.objectContaining({ id: newer.run.id }));
     expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: earlier.ruling.id } })).state).toBe('replaced');
     expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: settled.ruling.id } })).state).toBe('applied');
     expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: otherPr.ruling.id } })).state).toBe('pending');
