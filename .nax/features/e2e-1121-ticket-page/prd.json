@@ -3,7 +3,7 @@
   "feature": "e2e-1121-ticket-page",
   "branchName": "feat/e2e-1121-ticket-page",
   "createdAt": "2026-11-21T13:22:53.364Z",
-  "updatedAt": "2026-11-21T13:36:53.168Z",
+  "updatedAt": "2026-11-21T13:48:14.567Z",
   "userStories": [
     {
       "id": "US-001",
@@ -94,14 +94,17 @@
         "comments"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module rendering change introduces agent-authored HTML and repairs a stored-XSS boundary after regex mutation; real-stack sanitizer verification warrants strict security TDD."
+        "reasoning": "Cross-module rendering change introduces agent-authored HTML and repairs a stored-XSS boundary after regex mutation; real-stack sanitizer verification warrants strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/thread-markdown.ts",
@@ -145,7 +148,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e1ebe1ee13465822507059713e898e12bb0edf6a"
     },
     {
       "id": "US-003",
