@@ -338,16 +338,23 @@ describe('B1: a `>` inside a quoted attribute value is not a tag boundary', () =
     sanitizeDouble.mockClear()
     renderThreadMarkdown('see /sandbox/tickets/SB-3 now', 'sandbox')
 
-    expect(sanitizeDouble).toHaveBeenCalledTimes(2)
-    // The second pass is the final output, anchors included — not the source HTML.
-    expect(sanitizeDouble.mock.calls[1][0]).toContain('<a href="/sandbox/tickets/SB-3">')
+    // US-002: three passes — the renderer's own, the one after the image strip, and the one after
+    // the rewrite.
+    expect(sanitizeDouble).toHaveBeenCalledTimes(3)
+    // The last pass is the final output, anchors included — not the source HTML.
+    expect(sanitizeDouble.mock.calls[2][0]).toContain('<a href="/sandbox/tickets/SB-3">')
   })
 
-  test('without a slug the output is sanitized once (the S5a behaviour is unchanged)', () => {
+  test('without a slug the output is sanitized twice: the renderer, then after the images are removed (US-002)', () => {
     sanitizeDouble.mockClear()
-    renderThreadMarkdown('see /sandbox/tickets/SB-3 now')
+    const html = renderThreadMarkdown('see ![x](https://example.com/a.png) /sandbox/tickets/SB-3 now')
 
-    expect(sanitizeDouble).toHaveBeenCalledTimes(1)
+    expect(sanitizeDouble).toHaveBeenCalledTimes(2)
+    // The second pass is the image-free HTML, and the no-slug branch returns its result — it used
+    // to return the regex output unsanitized.
+    expect(sanitizeDouble.mock.calls[1][0]).not.toContain('<img')
+    expect(sanitizeDouble.mock.results[1].value).toBe(html)
+    expect(html).not.toContain('<img')
   })
 })
 

@@ -5,7 +5,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
-import { splitMentions } from '~/lib/mentions'
+import { renderMarkdownWithoutImages } from '~/lib/markdown'
+import { withMentionChips } from '~/lib/mentions'
 import { useLocalDates } from '~/lib/local-dates'
 
 interface Comment {
@@ -153,7 +154,19 @@ async function deleteComment(comment: Comment) {
           </div>
         </div>
         <template v-else>
-          <p class="text-sm whitespace-pre-wrap"><template v-for="(part, index) in splitMentions(comment.body)" :key="index"><span v-if="'userId' in part" class="mention-chip">@{{ memberNames.nameOf(part.userId) ?? part.label }}</span><template v-else>{{ part.text }}</template></template></p>
+          <!--
+            US-002: a comment body is markdown, and a comment can be written by an agent (MCP, fleet),
+            so it renders through `renderMarkdownWithoutImages` — images removed, and the output
+            sanitized after the removal. This is a deliberate second exception to the web rule that
+            agent-written text renders through `{{ }}` only (the first is thread assistant content),
+            with the same guarantees. `breaks: true` keeps a single typed newline as a line break,
+            which the `whitespace-pre-wrap` paragraph used to show.
+          -->
+          <div
+            class="markdown-body text-sm"
+            data-testid="comment-body"
+            v-html="renderMarkdownWithoutImages(withMentionChips(comment.body, id => memberNames.nameOf(id) ?? null), { breaks: true })"
+          />
           <Button v-if="comment.type === 'GENERAL'" size="sm" variant="ghost" @click="startEdit(comment)">
             {{ t('common.edit') }}
           </Button>

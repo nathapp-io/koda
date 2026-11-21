@@ -50,7 +50,8 @@ const sectionHeadingClass = 'text-xs font-medium text-muted-foreground'
       />
       <div
         v-else-if="renderedDescription"
-        class="whitespace-pre-wrap rounded-lg border bg-card p-4 text-sm"
+        class="markdown-body whitespace-pre-wrap rounded-lg border bg-card p-4 text-sm"
+        data-testid="ticket-description-body"
         v-html="renderedDescription"
       />
     </section>

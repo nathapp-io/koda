@@ -37,6 +37,10 @@ function mountThread(comments: unknown[] = []) {
   const toast = { success: jest.fn(), error: jest.fn() }
   const app = mountSfc(threadFile, {
     props: { projectSlug: 'proj', ticketRef: 'ABC-1' },
+    // The comment body now renders through `~/lib/markdown`, which pulls isomorphic-dompurify (ESM)
+    // that this Jest setup cannot load; the rendering itself is covered by
+    // tests/components/comment-thread-markdown.spec.ts and the real-stack harness.
+    alias: { '~/lib/markdown': { renderMarkdownWithoutImages: (markdown: string) => markdown } },
     globals: {
       useApi: () => ({ $api: api }),
       useI18n: () => enI18n(),

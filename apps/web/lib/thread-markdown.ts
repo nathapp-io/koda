@@ -1,8 +1,8 @@
 /**
  * Fleet S5a B4-D1/D6 (US-006): the one piece of runner/agent text that reaches the DOM as HTML.
  *
- * Assistant thread message `content` renders through the shared sanitizer
- * (`renderMarkdownOrEscape`) and then every `img` element is removed, so agent-steered text
+ * Assistant thread message `content` renders through `renderMarkdownWithoutImages` — the shared
+ * sanitizer, every `img` element removed, and the result sanitized once more — so agent-steered text
  * (repo content, prompt injection) can never make the browser fetch a URL. Links stay — they
  * need a click.
  *
@@ -25,10 +25,7 @@
  * whole text is one of the paths or citations is wrapped, code element and all.
  */
 
-import { renderMarkdownOrEscape, sanitizeHtmlFragment } from '~/lib/markdown'
-
-/** Every `<img …>` element, case-insensitively, with or without a trailing slash or attributes. */
-const IMG_TAG = /<img\b[^>]*>/gi
+import { renderMarkdownWithoutImages, sanitizeHtmlFragment } from '~/lib/markdown'
 
 /** A ticket ref (`SB-3`) and a fleet job id (`cmv9h6bqq000508tn60pd189y`). */
 const TICKET_REF = '[A-Za-z0-9]+-\\d+'
@@ -341,7 +338,10 @@ function linkifyPaths(html: string, slug: string): string {
 
 /** B4-D6: assistant content through the shared sanitizer, images stripped, koda paths linked. */
 export function renderThreadMarkdown(content: string, slug?: string): string {
-  const html = renderMarkdownOrEscape(content).replace(IMG_TAG, '')
+  // US-002: the image-free HTML (sanitized before *and* after the strip) comes from the shared
+  // helper, so the no-slug branch below returns sanitized HTML too — it used to return the regex
+  // output unsanitized, which `ThreadTimeline` reached through its default empty slug.
+  const html = renderMarkdownWithoutImages(content)
   if (!slug) return html
   // B1: the rewrite reads and re-serialises sanitized HTML, so its own output goes through the
   // sanitizer again — what this returns is sanitized whatever the rewrite did.

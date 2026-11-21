@@ -22,6 +22,9 @@ const MarkdownEditor = defineComponent({ props: { modelValue: String }, emits: [
 function mountComments(comments: unknown[]) {
   return mountSfc(threadFile, {
     props: { projectSlug: 'proj', ticketRef: 'ABC-1' },
+    // The comment body renders through `~/lib/markdown` now, which jest cannot load
+    // (isomorphic-dompurify is ESM); this spec is about the edit control, not the rendering.
+    alias: { '~/lib/markdown': { renderMarkdownWithoutImages: (markdown: string) => markdown } },
     globals: {
       useApi: () => ({ $api: { get: async () => comments, post: async () => ({}), patch: async () => ({}), delete: async () => ({}) } }),
       useI18n: () => enI18n(), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),

@@ -146,7 +146,8 @@ function handleKeydown(event: KeyboardEvent) {
     <TabsContent value="preview" class="mt-2">
       <!-- marked renders fenced code blocks as <pre><code> elements -->
       <div
-        class="min-h-[200px] p-4 border rounded-md bg-background overflow-auto prose prose-sm dark:prose-invert max-w-none"
+        class="markdown-body text-sm min-h-[200px] p-4 border rounded-md bg-background overflow-auto"
+        data-testid="markdown-preview"
         v-html="renderedHtml"
       />
     </TabsContent>
