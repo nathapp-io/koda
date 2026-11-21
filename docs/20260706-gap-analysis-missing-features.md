@@ -130,6 +130,8 @@ Existing-page gaps:
 
 ---
 
+**2026-11-21 (Bun 1.4.5):** Both `bun audit` and `bun audit --production` now report only the Zod 3 finding. Hono is locked at 4.13.16, Prisma config uses Effect 3.22.1, and removing the unused `@nuxt/eslint` module eliminated the vulnerable Nuxt schema 3 dependency. For Zod, prefer a stable 3.x release containing [the upstream backport](https://github.com/colinhacks/zod/pull/6699) when published. Until then, do not force Zod 4 into the web adapter or runner sandbox.
+
 ## 4. Suggested priority order
 
 1. **Security/reliability defects** — CORS/Helmet ✅, token revocation + logout ✅, webhook→outbox unification (still open), outbox backoff fix ✅, LanceDB mutex ✅, GitLab provider ✅.
