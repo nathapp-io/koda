@@ -1,0 +1,428 @@
+{
+  "project": "koda",
+  "feature": "e2e-1121-not-found-nav",
+  "branchName": "feat/e2e-1121-not-found-nav",
+  "createdAt": "2026-11-21T16:51:25.362Z",
+  "updatedAt": "2026-11-21T16:51:25.362Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Expose ticket-title search on the ticket list API",
+      "description": "**Goal** — Add the optional ticket-list search query and regenerate its OpenAPI/CLI contract.\n\n**Motivation** — Only the agent tool can pass `titleContains`, which the repository already implements as a case-insensitive `contains`.\n\n**Approach** — Apply these Design requirements verbatim:\n- `ListTicketsQuery` in `apps/api/src/tickets/dto/list-tickets.query.ts`.\n  - Baseline: `status`, `type`, `priority`, `assignedTo`, `unassigned`.\n  - Target: it also has `search?: string`, declared with `@ApiPropertyOptional({ maxLength: 100, description: 'Case-insensitive substring of the ticket title' })`, `@IsOptional()`, `@IsString()` and `@MaxLength(100)`.\n- `TicketsController.findAll` in `apps/api/src/tickets/tickets.controller.ts`.\n  - Baseline: `const { current, size, ...filters } = parseQuery(...)`.\n  - Target: `const { current, size, search, ...filters } = parseQuery(...)`. The trimmed `search` is passed as `titleContains` when it is non-empty. A blank or absent `search` passes no `titleContains` key.\n  - The route's `@ApiResponse` 400 description becomes 'Invalid filter, search or paging parameter'.\n- `TicketListFilterInput` in `apps/api/src/tickets/tickets.service.ts` becomes `Omit<ListTicketsQuery, 'current' | 'size' | 'search'> & { assignedToAgentId?: string; titleContains?: string }`. Three comments change from \"only the koda tool search\" to \"the koda tool search and the REST `search` query\": the `TicketListFilterInput` doc comment in `tickets.service.ts`, the `titleContains` field comment in `apps/api/src/tickets/domain/ticket.domain.ts`, and the S5b comment above the `titleContains` line in `findTicketPage` (`prisma-tickets.repository.ts`). The repository code does not change.\n\n`TicketsService.findAll(slug, filters: TicketListFilterInput, page)` already forwards `filters.titleContains` to `PrismaTicketsRepository.findTicketPage`. That method applies `{ contains, mode: 'insensitive' }` to `title`. The koda agent tool (`fleet/assistant/tools/ticket-tools.ts`) is its only caller today.\n\nAfter the API contract change, `bun run generate` from the repo root regenerates `openapi.json` and the CLI client. Check that the regenerated diff carries only the `search` change; drift from an outdated checkout is not part of this story. Include the specified 400-description update, not unrelated contract drift. Never hand-edit `apps/cli/src/generated/types.gen.ts`. Preserve existing guards, resolveSelfAssignee, JsonResponse pagination and repository behavior.\n\n**Scope** — In: DTO/controller mapping, filter type and three comments, existing endpoint/controller tests, generated OpenAPI/CLI artifacts. Out: palette consumers (US-006/US-007), web not-found/navigation work (US-002–US-005), schema changes. A CLI flag for the new `search` query: the generated client is only regenerated. An index for the title search: it is the repository's existing whole-column `contains`, bounded here by a 2-character minimum, a 250 ms debounce and a page size of 8. `%` and `_` in `search`: they mean whatever the existing `titleContains` query gives them, the same as the koda tool search.\n\n**Interface**\n```ts\n@ApiPropertyOptional({ maxLength: 100, description: 'Case-insensitive substring of the ticket title' })\n@IsOptional()\n@IsString()\n@MaxLength(100)\nsearch?: string;\n\nexport type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size' | 'search'> & { assignedToAgentId?: string; titleContains?: string };\n```\n\n**Test implementation** — AC-1 to AC-6 run in a new `describe` in section 13 of `endpoint.e2e.spec.ts`. In its own `beforeAll` it creates a new project with its own member, granted through `grantRole`/`grantBaseline` as the api-testing rule requires. That project holds exactly three tickets: `Fix Login button` (priority `HIGH`), `Login page copy` (priority `LOW`) and `Logout crash` (priority `HIGH`). Tickets other sections create in the shared project never appear in these results. Add AC-7 and AC-8 next to the existing `findAll` unit tests. Those assert with `expect.objectContaining` and stay unchanged. Every existing endpoint case stays unchanged. Use Vitest and the shared DB gate; execute DB cases outside the sandbox through host testScoped, not as skipped verification.",
+      "acceptanceCriteria": [
+        "[integration] Given the isolated three-ticket project, GET /api/projects/:slug/tickets?search=LOGIN returns 200 with exactly the two tickets Fix Login button and Login page copy.",
+        "[integration] Given the isolated three-ticket project, GET /api/projects/:slug/tickets?search=%20login%20 returns the same two tickets as search=login.",
+        "[integration] Given the isolated three-ticket project, GET /api/projects/:slug/tickets?search=%20%20 returns all three tickets.",
+        "[integration] Given the isolated three-ticket project, GET /api/projects/:slug/tickets?search=login&priority=HIGH returns exactly Fix Login button.",
+        "[integration] GET /api/projects/:slug/tickets with a search of 101 characters returns 400.",
+        "[integration] GET /api/projects/:slug/tickets with a search of 100 characters returns 200.",
+        "[unit] TicketsController.findAll('koda', { search: ' login ' }) calls TicketsService.findAll with filters whose titleContains is login and which have no search key.",
+        "[unit] TicketsController.findAll('koda', {}) calls TicketsService.findAll with filters that have no titleContains key."
+      ],
+      "tags": [
+        "api",
+        "tickets",
+        "search",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This is an additive DTO/controller mapping onto an already implemented service/repository filter, with existing test and generation paths; role-bound fixtures reuse existing helpers and no authentication or authorization implementation changes."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/prisma-tickets.repository.ts",
+        "apps/api/src/approvals/dto/list-approval-policies.query.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+        "apps/api/src/tickets/tickets.controller.spec.ts",
+        "apps/api/src/permissions/test-helpers/permission-fixtures.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add a new `describe` in section 13 holding the AC-1 to AC-6 cases. The api-testing rule keeps endpoint coverage in this file, and every existing case stays unchanged."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "add the AC-7 and AC-8 cases next to the existing `findAll` tests. Those assert with `expect.objectContaining` and stay unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the new `search` query on the ticket list route."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate` for the new `search` query; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Classify not-found errors and project route verdicts",
+      "description": "**Goal** — Add reusable error classification and an injected project-existence verdict helper.\n\n**Motivation** — Nothing ever asks whether the project exists.\n\n**Approach** — Apply these Design requirements verbatim:\n- New `apps/web/lib/not-found.ts`: `isNotFoundError(err: unknown): boolean`, importing `ApiError` and `extractErrorStatus` from `~/composables/useApi`. It is true when `err` is an `ApiError` whose `code` is `404` or `40004`, or when `extractErrorStatus(err)` is `404`. It is false otherwise.\n- New `apps/web/lib/project-route-check.ts`:\n\n```ts\nimport { isNotFoundError } from '~/lib/not-found'\n\nexport type ProjectRouteVerdict = 'skip' | 'known' | 'found' | 'notFound' | 'unverified'\n\nexport interface ProjectRouteDeps {\n  /** Slugs this tab already proved exist. */\n  known: readonly string[]\n  fetchProject: (slug: string) => Promise<unknown>\n}\n\nexport async function checkProjectRoute(slug: unknown, deps: ProjectRouteDeps): Promise<ProjectRouteVerdict> {\n  if (typeof slug !== 'string' || slug === '') return 'skip'\n  if (deps.known.includes(slug)) return 'known'\n  try {\n    await deps.fetchProject(slug)\n    return 'found'\n  } catch (err) {\n    return isNotFoundError(err) ? 'notFound' : 'unverified'\n  }\n}\n```\n\nRead-only integrations: `ApiError` in `apps/web/composables/useApi.ts`: `code: number`, thrown by `$api` for every enveloped failure. A missing project or ticket arrives as `code` `40004` (`NotFoundAppException`). Precedents: `isNotFound` in `pages/[project]/flows/[id].vue` and `pages/[project]/fleet/schedules/[id].vue` accept `404` or `40004`. `extractErrorStatus(err): number | undefined` in the same file: the HTTP status of a FetchError without an envelope.\n\n**Scope** — In: these two pure modules and their unit tests. Out: wiring middleware/cache/navigation (US-003), ticket page state (US-004), title/error-page UI (US-005), palette/API changes (US-001/US-006/US-007), changing existing flows/schedules.\n\n**Interface** — `isNotFoundError(err: unknown): boolean`; `ProjectRouteVerdict`, `ProjectRouteDeps` and `checkProjectRoute(slug: unknown, deps: ProjectRouteDeps): Promise<ProjectRouteVerdict>` exactly as above.\n\n**Test implementation** — Create `tests/lib/not-found.spec.ts` for AC-1 to AC-4 and `tests/lib/project-route-check.spec.ts` for AC-5 to AC-10. Use the real ApiError export and injected fetchProject spies. No DB or network is necessary. Keep known-cache ownership out of the helper; only the later middleware appends successful slugs.",
+      "acceptanceCriteria": [
+        "[unit] isNotFoundError(new ApiError(40004, 'gone')) returns true.",
+        "[unit] isNotFoundError(new ApiError(404, 'gone')) returns true.",
+        "[unit] isNotFoundError({ status: 404 }) returns true.",
+        "[unit] isNotFoundError(new ApiError(40003, 'forbidden')) returns false.",
+        "[unit] checkProjectRoute('web', { known: ['web'], fetchProject }) resolves 'known'.",
+        "[unit] When checkProjectRoute('web', { known: ['web'], fetchProject }) runs, the fetchProject spy is called 0 times.",
+        "[unit] checkProjectRoute('web', { known: [], fetchProject }) resolves 'found' when fetchProject resolves.",
+        "[unit] checkProjectRoute('nope', { known: [], fetchProject }) resolves 'notFound' when fetchProject rejects with new ApiError(40004, 'gone').",
+        "[unit] checkProjectRoute('web', { known: [], fetchProject }) resolves 'unverified' when fetchProject rejects with new ApiError(50000, 'down').",
+        "[unit] checkProjectRoute(undefined, { known: [], fetchProject }) resolves 'skip'."
+      ],
+      "tags": [
+        "web",
+        "not-found",
+        "routing",
+        "helpers"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two small deterministic helpers reuse existing error exports with injected IO; no session, authorization or persistence behavior changes."
+      },
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/pages/[project]/flows/[id].vue",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/not-found.ts",
+        "apps/web/lib/project-route-check.ts",
+        "apps/web/tests/lib/not-found.spec.ts",
+        "apps/web/tests/lib/project-route-check.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "isNotFoundError({ response: { status: 404 } }) returns true.",
+        "isNotFoundError(null) returns false.",
+        "isNotFoundError({ code: 40004 }) returns false.",
+        "checkProjectRoute('', { known: [], fetchProject }) resolves 'skip'.",
+        "checkProjectRoute(['web'], { known: [], fetchProject }) resolves 'skip'."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Abort unknown project routes with a full-page 404",
+      "description": "**Goal** — Check authenticated project routes before page mount and cache only successfully verified slugs.\n\n**Motivation** — On that page the live-update stream keeps reopening against a 404 (F30).\n\n**Approach** — Apply this Design verbatim:\n- New `apps/web/middleware/project.global.ts`. It sorts after `auth.global.ts`, so it runs second:\n\n```ts\nimport { apiPath } from '~/lib/api-path'\nimport { checkProjectRoute } from '~/lib/project-route-check'\n\nexport default defineNuxtRouteMiddleware(async (to) => {\n  if (!useAuth().isAuthenticated.value) return\n  const known = useState<string[]>('koda-known-projects', () => [])\n  const { $api } = useApi()\n  const slug = to.params.project\n  const verdict = await checkProjectRoute(slug, { known: known.value, fetchProject: s => $api.get(apiPath`/projects/${s}`) })\n  if (verdict === 'found' && typeof slug === 'string') known.value = [...known.value, slug]\n  if (verdict === 'notFound') {\n    return abortNavigation(createError({ statusCode: 404, statusMessage: 'Not Found', fatal: true }))\n  }\n})\n```\n\n`useState` carries the verified slugs from SSR into hydration, so a project is checked at most once per tab. A `'unverified'` verdict (a 403, an outage) is not cached, and navigation continues to the page's own states.\n\nFailure Handling: The project check gets a failure that is not a 404 (403, 5xx, network): the verdict is `'unverified'`, navigation continues, the slug is not cached, and the page shows its own loading and error states, as today.\n\nRead-only integrations: `apiPath` (tagged template) in `apps/web/lib/api-path.ts`: encodes each interpolated segment. `useAuth().isAuthenticated: ComputedRef<boolean>`. `middleware/auth.global.ts` runs first (global middleware run in file-name order), so it has already hydrated the session or redirected. `GET /api/projects/:slug` (`ProjectsController.findBySlug`): `200` with the project, `404` (`40004`) for an unknown or soft-deleted slug, and `403` for a non-member.\n\nExtend the mount harness so that a route middleware can be loaded, and so that every component calling `useHead` mounts without a test-supplied stub. Another merged feature (`e2e-1121-ticket-page`) already edited the same `mount-sfc.ts` lists; keep this edit additive. In `apps/web/tests/helpers/mount-sfc.ts`, add `defineNuxtRouteMiddleware`, `abortNavigation` and `createError` to `NUXT_AUTO_IMPORTS`, so that the middleware spec can supply them through `globals`. Also add `useHead: () => undefined` to `AUTO_IMPORT_DEFAULTS`, so that every existing mount of a component that later calls `useHead` (`PageHeader`, `AppErrorPage`, the ticket page) still runs. A spec that tests a title overrides it through `globals`. Preserve all existing auto-import entries, including useNuxtData.\n\n**Scope** — In: global middleware, additive shared harness support and real-middleware unit tests. Out: helper implementations (US-002), ticket state (US-004), 404-page presentation/titles (US-005), palette/API work, modifications to auth.global.ts. A project route answered with 403 (the viewer is not a member) keeps today's page error states: only a 404 becomes the not-found page. The verified-slug cache is never invalidated within a tab. A project deleted or renamed while the tab is open falls back to the page's own error states and the stream's existing capped retry. The live-update stream's handling of a 404 is unchanged: an `EventSource` cannot read the status, and the fix is that a missing project's page never mounts. Clearing the verified-slug cache (`koda-known-projects`) on logout or on a sign-in as another user in the same tab: it only skips a repeat existence check, and the page's own states still apply. Do not redesign the layout to hide a mounted unknown project; prevent mount instead.\n\n**Interface** — Use the exact middleware above and US-002's `checkProjectRoute(slug: unknown, deps: ProjectRouteDeps): Promise<ProjectRouteVerdict>`. The cache key is exactly `koda-known-projects`.\n\n**Test implementation** — Every AC loads the real `middleware/project.global.ts` through `loadSfc`, with `defineNuxtRouteMiddleware: fn => fn`, `createError: input => input`, a recording `abortNavigation`, authenticated useAuth by default, one shared `ref([])` for useState per test, and `useApi` returning `$api.get`. Pass `alias: { '~/composables/useApi': apiModule }` with the real ApiError module so instanceof uses the same class. Invoke the loaded default export with the route objects in the criteria. Create `tests/middleware/project-global.spec.ts`. Treat this as an authenticated navigation boundary: strict three-session TDD applies.",
+      "acceptanceCriteria": [
+        "[unit] When the real project middleware is called with { params: { project: 'nope' } } while $api.get rejects with new ApiError(40004, 'gone'), it calls abortNavigation exactly once.",
+        "[unit] In that unknown-project call, the error passed to abortNavigation has statusCode 404 and fatal true.",
+        "[unit] When the real project middleware is called with { params: { project: 'web' } } while $api.get resolves, it calls $api.get exactly once.",
+        "[unit] In that successful project call, the path passed to $api.get is /projects/web.",
+        "[unit] After that successful call, a second middleware call with { params: { project: 'web' } } in the same test makes no further $api.get call.",
+        "[unit] When the middleware is called with { params: { project: 'web' } } while useAuth().isAuthenticated.value is false, it makes no $api.get call.",
+        "[unit] When the middleware is called with { params: {} }, a route without a project, it makes no $api.get call.",
+        "[unit] When the middleware is called with { params: { project: 'web' } } while $api.get rejects with new ApiError(50000, 'down'), it never calls abortNavigation.",
+        "[unit] After that failed call, a second middleware call with { params: { project: 'web' } } in the same test calls $api.get again, for 2 calls in total."
+      ],
+      "tags": [
+        "web",
+        "routing",
+        "not-found",
+        "auth-boundary",
+        "ssr"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard helper-backed middleware and additive harness changes, but it reads authenticated session state and controls protected navigation while distinguishing authorization failures; the security override requires strict isolation."
+      },
+      "contextFiles": [
+        "apps/web/middleware/auth.global.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/lib/project-route-check.ts",
+        "apps/web/lib/api-path.ts",
+        "apps/web/tests/components/command-palette-threads.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/middleware/project.global.ts",
+        "apps/web/tests/middleware/project-global.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "add `defineNuxtRouteMiddleware`, `abortNavigation` and `createError` to `NUXT_AUTO_IMPORTS`, so that the middleware spec can supply them through `globals`. Also add `useHead: () => undefined` to `AUTO_IMPORT_DEFAULTS`, so that every existing mount of a component that later calls `useHead` (`PageHeader`, `AppErrorPage`, the ticket page) still runs. A spec that tests a title overrides it through `globals`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "suggestedCriteria": [
+        "[unit] When the project check fails with a 403, a 5xx failure or a network error, the middleware resolves undefined, leaving navigation to the page's own loading and error states, as today."
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Show a dedicated ticket-not-found state",
+      "description": "**Goal** — Render a localized, non-retryable ticket-not-found state for the primary ticket fetch's 404 failures.\n\n**Motivation** — Retrying cannot help.\n\n**Approach** — Apply these Design requirements verbatim:\n- New `apps/web/components/NotFoundState.vue`, with props `title: string`, `body?: string`, `backTo: string` and `backLabel: string`. It renders:\n  - `div data-testid=\"not-found-state\"` (`text-center py-12`);\n  - `h1 data-testid=\"not-found-title\"` with `title`;\n  - `p.text-muted-foreground data-testid=\"not-found-body\"` with `body`, rendered only when `body` is set;\n  - a `NuxtLink data-testid=\"not-found-back\"` to `backTo`, reading `backLabel`.\n\n  It has no Retry.\n- `apps/web/pages/[project]/tickets/[ref].vue`.\n  - Baseline: the ticket `useAsyncData` fetcher is `() => $api.get(apiPath\\`/projects/${slug}/tickets/${ref}\\`)`. The template branches are `LoadingState` (pending), `ErrorState` (error), then the ticket grid.\n  - Target: the fetcher awaits the same call in a `try`. A rejection for which `isNotFoundError` is true resolves `null`. Any other rejection is rethrown.\n  - Target: `ticketNotFound = computed(() => !pending.value && !error.value && ticketData.value === null)`. Nuxt 4 starts `data` as `undefined`, so `null` only ever means not found.\n  - Target: a new branch after `ErrorState`, `<NotFoundState v-else-if=\"ticketNotFound\">`, with:\n    - `title` `t('tickets.notFound.title')`;\n    - `body` `t('tickets.notFound.body', { ref })`;\n    - `back-to` `` `/${slug}` ``;\n    - `back-label` `t('tickets.notFound.back')`.\n\nFailure Handling: The ticket fetch fails with anything other than a 404: it is rethrown, and the page keeps showing `ErrorState` with Retry, as today.\n\nAdd these exact values to both locale files:\n| key | en | zh |\n| tickets.notFound.title | Ticket not found | 工单不存在 |\n| tickets.notFound.body | {ref} does not exist in this project, or it was deleted. | 此项目中不存在 {ref}，或它已被删除。 |\n| tickets.notFound.back | Back to board | 返回看板 |\n\n**Scope** — In: NotFoundState, primary ticket fetch normalization, strict-null computed, template branch, ticket translations and state/page tests. Out: global project route checking (US-003), document titles and AppErrorPage's full-page 404 (US-005), palette/API search. The HTTP status of the ticket not-found state: it stays 200, because only the project check aborts navigation. Not-found states on other detail pages (thread, fleet job, job logs, repo config): unchanged. Flows and schedules already have their own. Do not change live deletion behavior, secondary fetches or permission controls.\n\n**Interface**\n```ts\ndefineProps<{ title: string; body?: string; backTo: string; backLabel: string }>()\n```\nUse US-002's `isNotFoundError(err: unknown): boolean` in the real page fetcher; do not duplicate classification.\n\n**Test implementation** — Create `tests/pages/ticket-not-found.spec.ts` for AC-1 to AC-7 and `tests/components/not-found-state.spec.ts` for AC-8 to AC-11. AC-1 to AC-7 mount the real ticket page with route `{ project: 'web', ref: 'WEB-404' }`. `NotFoundState`, `ErrorState` and `LoadingState` are stubbed and their props recorded. A `useAsyncData` stub records each fetcher by key and returns the `data`, `pending` and `error` refs the AC names. The mount passes `alias: { '~/composables/useApi': apiModule }`, so the `ApiError` the test constructs is the class `isNotFoundError` checks, and it aliases the page's child components to inert stubs as `ticket-detail-grid.spec.ts` does. Existing ticket page mounts start their ticket `useAsyncData` pending (`fakeAsyncData`) or with a loaded ticket, so none of them reaches the new not-found branch.",
+      "acceptanceCriteria": [
+        "[unit] When the real ticket page is mounted for project web and ref WEB-404, the fetcher recorded for key ticket-web-WEB-404 resolves null when $api.get rejects with new ApiError(40004, 'gone').",
+        "[unit] That ticket fetcher rejects with the same error object when $api.get rejects with new ApiError(50000, 'down').",
+        "[unit] With the ticket useAsyncData returning data null, pending false and error null, the real ticket page renders one NotFoundState whose title is t('tickets.notFound.title').",
+        "[unit] In that not-found ticket mount, NotFoundState back-to is /web.",
+        "[unit] In that not-found ticket mount, NotFoundState body is t('tickets.notFound.body', { ref: 'WEB-404' }).",
+        "[unit] With the ticket useAsyncData returning data null and a non-null error, the page renders ErrorState.",
+        "[unit] In that error mount, the page renders no NotFoundState.",
+        "[unit] NotFoundState mounted with title Gone, back-to /web and back-label Back renders Gone in [data-testid=\"not-found-title\"].",
+        "[unit] In that NotFoundState mount, [data-testid=\"not-found-back\"] is a link whose to is /web.",
+        "[unit] In that NotFoundState mount, [data-testid=\"not-found-back\"] reads Back.",
+        "[unit] NotFoundState mounted without body renders no [data-testid=\"not-found-body\"] element."
+      ],
+      "tags": [
+        "web",
+        "tickets",
+        "not-found",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small state component and a localized existing-page branch reuse the established classifier; primary-fetch normalization is bounded and does not change access control or live behavior."
+      },
+      "contextFiles": [
+        "apps/web/components/ErrorState.vue",
+        "apps/web/tests/helpers/permission-nav.ts",
+        "apps/web/tests/pages/ticket-detail-grid.spec.ts",
+        "apps/web/lib/not-found.ts",
+        "apps/web/pages/[project]/tickets/[ref].vue"
+      ],
+      "expectedFiles": [
+        "apps/web/components/NotFoundState.vue",
+        "apps/web/tests/components/not-found-state.spec.ts",
+        "apps/web/tests/pages/ticket-not-found.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the ticket useAsyncData has data undefined, pending false and error null, the page renders no NotFoundState.",
+        "When the ticket useAsyncData is pending with data null and error null, the page renders LoadingState.",
+        "NotFoundState mounted with a non-empty body renders that body in [data-testid=\"not-found-body\"].",
+        "[unit] Given a non-404 primary ticket fetch error, invoking the rendered ErrorState's retry listener calls the ticket useAsyncData refresh(), preserving Retry behavior, as today."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Render the full-page 404 and descriptive document titles",
+      "description": "**Goal** — Add localized full-page 404 presentation and reactive titles from shared headings, ticket state and error headings.\n\n**Motivation** — Almost every page's browser title is the bare word \"Koda\" (F20).\n\n**Approach** — Apply these Design requirements verbatim:\n- `apps/web/components/AppErrorPage.vue`.\n  - Baseline: a 503 branch (unavailable, Retry) and a generic branch (`errorPage.generic.title` with the status code, Go to home).\n  - Target: a new `v-else-if=\"error.statusCode === 404\"` branch between them, containing:\n    - `h1 data-testid=\"error-page-not-found-title\"` with `t('errorPage.notFound.title')`;\n    - `p.text-muted-foreground data-testid=\"error-page-not-found-body\"` with `t('errorPage.notFound.body')`;\n    - the same `error-page-home` button, which calls `goHome`.\n\n    It has no Retry. The component also calls `useHead`, whose `title` is `${heading} · Koda`. `heading` is `t('errorPage.unavailable.title')` for 503, `t('errorPage.notFound.title')` for 404, and `t('errorPage.generic.title', { statusCode })` otherwise.\n- `apps/web/pages/[project]/tickets/[ref].vue`.\n  - Target: the page calls `useHead(() => ({ title: pageTitle.value }))`, where `pageTitle` is:\n    - `${ticket.ref} ${ticket.title} · Koda` when the ticket is loaded;\n    - `${t('tickets.notFound.title')} · Koda` when `ticketNotFound`;\n    - `${ref} · Koda` otherwise, using the route ref.\n- `apps/web/components/PageHeader.vue`: the props object is kept (`const props = defineProps<...>()`), and the component calls `useHead(() => ({ title: \\`${props.title} · Koda\\` }))`. Every page that renders a `PageHeader` gets a title from its heading. The `ApprovalBadge` `titleTemplate` still adds its count prefix.\n\nThe current checkout's PageHeader has an unassigned defineProps call; bind its result as const props when implementing this target. Do not set a new titleTemplate or alter ApprovalBadge.\n\nAdd these exact values to both locale files:\n| key | en | zh |\n| errorPage.notFound.title | Page not found | 页面不存在 |\n| errorPage.notFound.body | This page or project does not exist, or it was removed. | 该页面或项目不存在，或已被删除。 |\n\n**Scope** — In: AppErrorPage 404 branch, PageHeader/ticket/error-page titles, localized 404 copy and existing regression-test adjustments. Out: project middleware/cache (US-003), ticket-fetch/state implementation (US-004), all palette/API work, changes to the ApprovalBadge prefix. The thread detail pages' titles (the bare thread title, with no \"· Koda\"): unchanged. Adding the project name to project sub-page titles. Checking the SSR HTTP status of `/nope-404`, the browser tab titles, and the palette in a real browser: a post-deploy manual check on koda-wk, not a story.\n\n**Interface**\n```ts\nuseHead(() => ({ title: pageTitle.value }))\nuseHead(() => ({ title: `${props.title} · Koda` }))\n```\nAppErrorPage keeps its existing error prop and goHome calls `clearError({ redirect: '/' })`. Titles must react to heading/ticket state rather than capture a one-time value.\n\n**Test implementation** — Add AC-1 to AC-5 to `tests/components/app-error-page.spec.ts`. The tests \"AC-10 generic error renders translated title\", \"post-review B5: the generic title renders through the real translator in both locales\" and \"AC-11 home clears error and redirects home\" mount `statusCode: 404`. 404 now has its own branch, so those three mounts change to `statusCode: 500`, and B5 expects `['Something went wrong (500)', '发生错误（500）']`. The invariant: the generic branch renders `errorPage.generic.title` with the status code through the real translator in both locales, and its home button still redirects home. The 503 tests stay unchanged. The additional generic-title, generic-home and 503-Retry regression acceptance criteria are exercised by these retained tests, not by replacing them.\n\nCreate `tests/components/page-titles.spec.ts` for AC-6 to AC-13. AC-6 to AC-13 supply a recording `useHead` through `globals`. Each evaluates the title of the last recorded input, calling it first when it is a function. AC-13 mounts the board page through `mountSfc`, with `PageHeader` in `components` set to `loadSfc(webFile('components', 'PageHeader.vue'), sameGlobals)`. That is the real component, loaded with the same recording `useHead`, not the `uiStubs` stub. Ticket page mounts alias the page's child components to inert stubs as `ticket-detail-grid.spec.ts` does, so a partial ticket fixture such as `{ ref, title }` renders. US-003 supplies the default useHead harness stub; tests under this story override it for observation.",
+      "acceptanceCriteria": [
+        "[unit] AppErrorPage mounted with { statusCode: 404 } shows t('errorPage.notFound.title') in [data-testid=\"error-page-not-found-title\"].",
+        "[unit] In that 404 mount, [data-testid=\"error-page-not-found-body\"] shows t('errorPage.notFound.body').",
+        "[unit] In that 404 mount, clicking [data-testid=\"error-page-home\"] calls clearError with { redirect: '/' }.",
+        "[unit] In that 404 mount, no [data-testid=\"error-page-retry\"] element is rendered.",
+        "[unit] AppErrorPage mounted with { statusCode: 500 } renders no [data-testid=\"error-page-not-found-title\"] element.",
+        "[unit] PageHeader mounted with title Labels records a title of Labels · Koda.",
+        "[unit] The ticket page, with the ticket loaded as { ref: 'WEB-7', title: 'Fix login' }, records a title of WEB-7 Fix login · Koda.",
+        "[unit] The ticket page, with the ticket useAsyncData returning data null, pending false and error null, records a title of t('tickets.notFound.title') followed by ' · Koda'.",
+        "[unit] The ticket page with route ref WEB-7, while its ticket useAsyncData is still pending, records a title of WEB-7 · Koda.",
+        "[unit] AppErrorPage mounted with { statusCode: 404 } records a title of t('errorPage.notFound.title') followed by ' · Koda'.",
+        "[unit] AppErrorPage mounted with { statusCode: 503 } records a title of t('errorPage.unavailable.title') followed by ' · Koda'.",
+        "[unit] AppErrorPage mounted with { statusCode: 500 } records a title of t('errorPage.generic.title', { statusCode: 500 }) followed by ' · Koda'.",
+        "[unit] pages/[project]/index.vue, mounted for project web with the real PageHeader, records a title of web · Koda."
+      ],
+      "tags": [
+        "web",
+        "not-found",
+        "titles",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Shared reactive title calls and a standard conditional error branch use existing Nuxt patterns; the broad PageHeader impact is bounded by the upstream harness default and real-component seam tests."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/ApprovalBadge.vue",
+        "apps/web/pages/login.vue",
+        "apps/web/pages/[project]/index.vue",
+        "apps/web/tests/components/app-error-page.spec.ts",
+        "apps/web/components/PageHeader.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/page-titles.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When PageHeader title changes from Labels to Agents, its recorded reactive head input yields Agents · Koda.",
+        "When a mounted ticket page's loaded ticket title changes from Fix login to Fix logout, its recorded reactive head input yields WEB-7 Fix logout · Koda.",
+        "[unit] AppErrorPage mounted with statusCode 500 through the real translators renders h1 titles ['Something went wrong (500)', '发生错误（500）'] for en and zh, preserving the generic branch's status-code interpolation in both locales.",
+        "[unit] When the generic 500 branch's error-page-home button is clicked, clearError receives { redirect: '/' }, preserving the existing home action.",
+        "[unit] AppErrorPage mounted with statusCode 503 renders error-page-retry, preserving the existing unavailable branch unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/app-error-page.spec.ts",
+          "reason": "the tests \"AC-10 generic error renders translated title\", \"post-review B5: the generic title renders through the real translator in both locales\" and \"AC-11 home clears error and redirects home\" mount `statusCode: 404`. 404 now has its own branch, so those three mounts change to `statusCode: 500`, and B5 expects `['Something went wrong (500)', '发生错误（500）']`. The invariant: the generic branch renders `errorPage.generic.title` with the status code through the real translator in both locales, and its home button still redirects home. Add this story's AC-1 to AC-5 to this file. The 503 tests stay unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Jump to typed ticket references from the palette",
+      "description": "**Goal** — Parse typed ticket refs and offer a first-position jump to the matching loaded project.\n\n**Motivation** — Typing `SB-1` shows \"No matches\".\n\n**Approach** — Apply these Design requirements verbatim:\n- New `apps/web/lib/palette-tickets.ts`:\n  - `PALETTE_TICKET_SEARCH_MIN = 2`, `PALETTE_TICKET_SEARCH_SIZE = 8`, `PALETTE_TICKET_SEARCH_DEBOUNCE_MS = 250`;\n  - `parseTicketRefQuery(query: string): { key: string; number: number } | null`. It trims the query and matches `/^([A-Za-z]+)-(\\d+)$/`. It returns the upper-cased letters and the parsed integer. It returns `null` when there is no match, when the digits are more than 9, or when the number is `0`.\n- `apps/web/components/CommandPalette.vue`.\n  - Baseline: the search box uses `v-model=\"query\"`. `results` filters `commands` by label and hint. The local `Project` type has `id`, `name` and `slug`.\n  - Target, input: the search box uses `:value=\"query\"` and `@input=\"onQueryInput\"`, where `onQueryInput(e: Event)` sets `query` from `(e.target as HTMLInputElement).value`. The behavior is the same, and the mount harness can type into it.\n  - Target, project type: `Project` gains `key: string`, and its `id` becomes `string | number` (the API sends a string id).\n  - Target, ref command: `refCommand` is a computed. When `parseTicketRefQuery(query)` returns `{ key, number }` and a loaded project has `key === parsed.key`, it is `{ id: 'ticket-ref', label: t('palette.openTicket', { ref: \\`${key}-${number}\\` }), hint: project.name, icon: Ticket, run: go(\\`/${project.slug}/tickets/${key}-${number}\\`) }`. Otherwise it is `null`.\n\nFor a non-empty query, prepend refCommand when non-null to the existing static/project label-and-hint matches; for an empty query return commands as today. US-007 will later append ticketResults after those matches. Keep existing permission-gated destinations, ordering, keyboard navigation, go()/close() behavior and theme toggle unchanged. `/projects` returns `ProjectResponseDto[]`, which carry `id`, `name`, `slug` and `key` (the ref prefix). `TICKET_REF_PATTERN = /^([A-Z]+)-(\\d+)$/` in `apps/api/src/common/utils/ticket-ref.util.ts`: a ref prefix is upper-case letters only. The new parser accepts lowercase input and normalizes before navigation; it does not change the backend parser.\n\nAdd/change these exact values in both locale files:\n| key | en | zh |\n| palette.openTicket | Open ticket {ref} | 打开工单 {ref} |\n| palette.description | Search pages, projects and tickets, then press Enter to open. | 搜索页面、项目和工单，按回车打开。 |\n| palette.placeholder | Type a page, project or ticket… | 输入页面、项目或工单… |\n\n**Scope** — In: palette-tickets helper and constants, input handler, Project type, refCommand/result composition, translations and real-palette tests. Out: debounced title requests/loading state (US-007), REST query (US-001), not-found/titles (US-002–US-005), fetching ticket existence before jumping. Palette ticket search across projects, by description or by ref number, and past the first 8 results. This excludes cross-project title search, not the specified ref jump: a ref jump may match any project already returned by /projects.\n\n**Interface**\n```ts\nexport const PALETTE_TICKET_SEARCH_MIN = 2\nexport const PALETTE_TICKET_SEARCH_SIZE = 8\nexport const PALETTE_TICKET_SEARCH_DEBOUNCE_MS = 250\nexport function parseTicketRefQuery(query: string): { key: string; number: number } | null\n```\n`onQueryInput(e: Event)` uses `(e.target as HTMLInputElement).value`; the existing Command shape remains unchanged.\n\n**Test implementation** — Create `tests/lib/palette-tickets.spec.ts` for AC-1 to AC-4 and `tests/components/command-palette-ticket-ref.spec.ts` for AC-5 to AC-7 and the empty-query regression criterion. AC-5 to AC-7 and that regression mount the real `CommandPalette.vue` with `open: false`, then call `setProps({ open: true })` and flush with `await Promise.resolve()` plus `nextTick()` (never `setImmediate`), so the palette's `open` watcher loads `/projects`. The spec defines `globalThis.HTMLInputElement` as an empty class in `beforeAll` and restores the previous value in `afterAll`, because the watcher's focus line reads it and Jest runs in the `node` environment. Every `onInput` call is followed by the same flush. Typing calls the search box's `onInput` handler with `{ target: { value } }`. `$api.get` for `/projects` resolves `[{ id: 'p1', name: 'Sandbox', slug: 'sandbox', key: 'SB' }, { id: 'p2', name: 'Web', slug: 'web', key: 'WEB' }]`. The palette specs that copy the component and replace `v-model=\"query\"` with `:value=\"query\"` still work: once the component uses `:value=\"query\"`, the replace is a no-op and every existing assertion stands.",
+      "acceptanceCriteria": [
+        "[unit] parseTicketRefQuery(' sb-12 ') returns { key: 'SB', number: 12 }.",
+        "[unit] parseTicketRefQuery('SB-') returns null.",
+        "[unit] parseTicketRefQuery('WEB-0') returns null.",
+        "[unit] parseTicketRefQuery('WEB-1234567890'), with 10 digits, returns null.",
+        "[unit] With no projectSlug, typing sb-1 in the real opened palette makes ticket-ref the first option id.",
+        "[unit] In that palette mount, activating the ticket-ref option navigates to /sandbox/tickets/SB-1.",
+        "[unit] With no projectSlug, typing ZZ-1, where no loaded project has key ZZ, renders no ticket-ref option.",
+        "[unit] Given no projectSlug, no global permission keys and the two loaded fixture projects, an empty palette query yields command ids ['dashboard', 'account', 'agents', 'my-threads', 'slos', 'project-p1', 'project-p2', 'theme'] in the existing order."
+      ],
+      "tags": [
+        "web",
+        "palette",
+        "navigation",
+        "tickets",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A pure bounded parser and computed command extend an existing palette without a new integration or changes to authorization gates."
+      },
+      "contextFiles": [
+        "apps/web/components/CommandPalette.vue",
+        "apps/web/tests/components/command-palette-threads.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/helpers/permission-nav.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/palette-tickets.ts",
+        "apps/web/tests/lib/palette-tickets.spec.ts",
+        "apps/web/tests/components/command-palette-ticket-ref.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseTicketRefQuery('WEB-123456789') returns { key: 'WEB', number: 123456789 }.",
+        "parseTicketRefQuery('W3B-1') returns null."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Search current-project ticket titles in the palette",
+      "description": "**Goal** — Add bounded, debounced ticket-title search to the current project's palette with stale-response protection.\n\n**Motivation** — The Cmd+K palette finds no tickets (F10).\n\n**Approach** — Apply these Design requirements verbatim:\n- `apps/web/components/CommandPalette.vue`.\n  - Target, title search: `ticketResults` (`Command[]`) and `searching` (`boolean`) are refs, and a `requestSeq` counter starts at 0. A `watch(query)` handler cancels the debouncer, empties `ticketResults` and sets `searching` false. It then arms a new search only when all of these hold:\n    - `props.projectSlug` is set;\n    - the trimmed query is at least `PALETTE_TICKET_SEARCH_MIN` long;\n    - `parseTicketRefQuery(query)` is `null`.\n\n    The handler also increments `requestSeq` on every query change, before deciding whether to arm, so a response to an earlier query can never be applied. Arming sets `searching` true and triggers a `createDebouncer(runTicketSearch, PALETTE_TICKET_SEARCH_DEBOUNCE_MS)`.\n  - Target, the search request: `runTicketSearch` takes `seq = ++requestSeq` and the trimmed query `q`. It calls `$api.get(apiPath\\`/projects/${slug}/tickets\\`, { query: { search: q, size: PALETTE_TICKET_SEARCH_SIZE } })`.\n    - On success it maps `records` to `{ id: \\`ticket-${t.id}\\`, label: \\`${t.ref} ${t.title}\\`, hint: t('palette.ticket'), icon: Ticket, run: go(\\`/${slug}/tickets/${t.ref}\\`) }`.\n    - On failure the result is an empty list, with no toast.\n    - The result and `searching = false` apply only when `seq === requestSeq`.\n  - Target, closing: closing the palette (`open` becomes false) cancels the debouncer, increments `requestSeq`, empties `ticketResults` and sets `searching` false.\n  - Target, `results`: for a non-empty query, `results` is `[refCommand (when non-null), ...static matches as today, ...ticketResults]`. For an empty query it is `commands` as today.\n  - Target, list items: while `searching` is true, the list shows `li data-testid=\"palette-searching\"` with `t('palette.searching')`. The `palette.empty` item shows only when `results` is empty and `searching` is false.\n\nThe mapping's ticket record variable must not shadow the translator `t`; keep its label/hint semantics exactly as specified. Use `createDebouncer(fn, ms): { trigger, cancel }` from `apps/web/lib/debounce.ts` (trailing edge). US-006 supplies `PALETTE_TICKET_SEARCH_MIN = 2`, `PALETTE_TICKET_SEARCH_SIZE = 8`, `PALETTE_TICKET_SEARCH_DEBOUNCE_MS = 250` and `parseTicketRefQuery`. Use `apiPath` to encode interpolated segments and US-001's REST `search` query, consuming the existing paginated `records` envelope.\n\nFailure Handling:\n- A palette title search fails: it shows no ticket results and no toast, and the palette keeps working for its other entries.\n- A palette search response arrives after the query changed: it is dropped. (Closing also bumps `requestSeq`; reopening resets the query, which empties the results.)\n\nAdd these exact values in both locale files:\n| key | en | zh |\n| palette.ticket | Ticket | 工单 |\n| palette.searching | Searching tickets… | 正在搜索工单… |\n\n**Scope** — In: debouncer/search refs/sequence guard, current-project wire request and command mapping, closing cleanup, result/loading composition, translations and real-palette async tests. Out: helper/ref/input implementation (US-006), API implementation/generation (US-001), not-found/titles (US-002–US-005), Palette ticket search across projects, by description or by ref number, and past the first 8 results. An index for the title search: it is the repository's existing whole-column `contains`, bounded here by a 2-character minimum, a 250 ms debounce and a page size of 8. `%` and `_` in `search`: they mean whatever the existing `titleContains` query gives them, the same as the koda tool search. Preserve all static/project commands and their permission gates.\n\n**Interface**\n```ts\nexport function createDebouncer(fn: () => void, ms: number): { trigger: () => void; cancel: () => void }\n```\nWire request: `$api.get(apiPath\\`/projects/${slug}/tickets\\`, { query: { search: q, size: PALETTE_TICKET_SEARCH_SIZE } })`. The existing `Command` interface remains the output shape; initialize ticketResults to an empty Command array, searching to false, and requestSeq to 0. Invalidate before deciding whether a new request will ever run; guard both successful/failed results and final loading state.\n\n**Test implementation** — Create `tests/components/command-palette-ticket-search.spec.ts`. Every AC mounts the real `CommandPalette.vue` with `open: false`, then calls `setProps({ open: true })` and flushes with `await Promise.resolve()` plus `nextTick()` (never `setImmediate`, which fake timers hold), so the `open` watcher loads `/projects`. The spec defines `globalThis.HTMLInputElement` as an empty class in `beforeAll` and restores it in `afterAll` (Jest runs in the `node` environment). It types by calling the search box's `onInput` handler with `{ target: { value } }` and flushes after every `onInput`, so the query watcher runs once per keystroke. It runs the 250 ms debounce with Jest fake timers. `$api.get` is a recording spy: `/projects` resolves `[{ id: 'p2', name: 'Web', slug: 'web', key: 'WEB' }]`, and `/projects/web/tickets` resolves `{ records: [{ id: 't1', ref: 'WEB-3', title: 'Fix login' }] }` unless the AC says otherwise. Existing specs do not pin results beyond unchanged static and project entries; do not weaken or replace them. Use deferred promises to prove responses are ignored even before any timer for a changed query advances.",
+      "acceptanceCriteria": [
+        "[unit] With projectSlug web, typing login in the real opened palette and advancing 250 ms calls $api.get with /projects/web/tickets and { query: { search: 'login', size: 8 } }.",
+        "[unit] After that request resolves, the palette renders an option with id ticket-t1.",
+        "[unit] In that search mount, the ticket-t1 option's label reads WEB-3 Fix login.",
+        "[unit] Activating the ticket-t1 option navigates to /web/tickets/WEB-3.",
+        "[unit] With projectSlug web, typing l and advancing 250 ms makes no /projects/web/tickets request.",
+        "[unit] With no projectSlug, typing login and advancing 250 ms makes no request to any path ending in /tickets.",
+        "[unit] With projectSlug web, typing lo and then login within 100 ms, then advancing 250 ms, makes exactly one /projects/web/tickets request.",
+        "[unit] In that debounced mount, that one request's search is login.",
+        "[unit] With projectSlug web, a /projects/web/tickets request for logi that resolves only after the query was changed to xyz, with no timer advanced after the change, adds no ticket-t1 option.",
+        "[unit] With projectSlug web, a /projects/web/tickets request for logi that resolves only after the query was changed to l, with no timer advanced after the change, adds no ticket-t1 option.",
+        "[unit] With projectSlug web and /projects/web/tickets rejecting, typing login and settling the request shows t('palette.empty').",
+        "[unit] In that failed-search mount, no option id starts with ticket-.",
+        "[unit] With projectSlug web, typing zzz-q and advancing 250 ms while /projects/web/tickets has not yet resolved renders [data-testid=\"palette-searching\"].",
+        "[unit] With projectSlug web, typing WEB-3 and advancing 250 ms makes no /projects/web/tickets request.",
+        "[unit] When an in-flight palette search response arrives after the palette closes, it adds no ticket option."
+      ],
+      "tags": [
+        "web",
+        "palette",
+        "tickets",
+        "search",
+        "async",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The sequence guard and close/query cleanup are bounded local state in one existing component using the existing debouncer and upstream REST contract; deferred-promise and fake-timer tests cover the races without a new abstraction or integration layer."
+      },
+      "contextFiles": [
+        "apps/web/components/CommandPalette.vue",
+        "apps/web/tests/components/command-palette-threads.spec.ts",
+        "apps/web/lib/debounce.ts",
+        "apps/web/lib/palette-tickets.ts",
+        "apps/web/lib/api-path.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/command-palette-ticket-search.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "With projectSlug web, typing ' login ' sends search 'login' in the ticket request.",
+        "When a stale request settles while a newer search remains pending, [data-testid=\"palette-searching\"] remains rendered.",
+        "When the palette closes before the 250 ms debounce expires, no ticket request is issued.",
+        "When searching is true and results is empty, the palette renders no palette.empty message.",
+        "[unit] When a palette title search fails, no toast is emitted.",
+        "[unit] Given projectSlug web and query web, when the ticket-title request fails, activating either the existing board command or project-p2 command navigates to /web, preserving navigation through the palette's other entries.",
+        "[unit] When the palette reopens after a previous search, the search input's value is '', reflecting the reset query."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository exploration and architecture\n- The execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The codebase-memory MCP tools are unavailable in this session; structural discovery therefore used direct Read, Grep and Glob tools. No graph index or external findings report was independently queried. The supplied 2026-11-21 findings and design are the product source of truth. This is an enhancement of an existing application, not greenfield work.\n- Correct the auto-detected stack assumption: apps/web is Nuxt 4 SSR with Vue, not Next.js. apps/web/nuxt.config.ts:24 registers Nuxt configuration, components and Nuxt modules; .nax/mono/apps/web/context.md:23 identifies Nuxt 4 and Jest/Playwright. apps/api is NestJS on Fastify with Prisma/Postgres and Vitest, not a bare Fastify service (.nax/mono/apps/api/context.md:25). Keep domain rules and persistence in the API, use Nuxt composables in web, and do not add a generated web client. Read the matching app context before implementation.\n- Read .nax/rules/nathapp-packages.md before API implementation; its catalog identifies JsonResponse, business exceptions and pagination platform packages (.nax/rules/nathapp-packages.md:29). Nathapp documentation MCP tools are not exposed in this drafting session. Preserve current platform usage rather than introducing replacements. Never edit generated AGENTS.md or generated CLI files manually.\n\nUS-001: ticket-list search contract and consumers\n- apps/api/src/tickets/dto/list-tickets.query.ts:1-37 currently imports IsString but not MaxLength and exposes status/type/priority/assignedTo/unassigned, extending KodaPageQuery. Add optional search with the exact Swagger maxLength/description and IsOptional/IsString/MaxLength(100) contract. apps/api/src/approvals/dto/list-approval-policies.query.ts:1-12 provides the existing query MaxLength precedent. Validate the raw length before trimming in the controller; the feature adds no new minimum length on the server.\n- apps/api/src/tickets/tickets.controller.ts:194-210 owns GET /projects/:slug/tickets. It is guarded by ProjectMembershipGuard and RequiresGuard with ticket.read, calls parseQuery, resolves assignedTo=self against the principal, invokes TicketsService.findAll, then returns JsonResponse.Ok(toPageResult(page)). Destructure search separately and conditionally add trimmed titleContains without leaking search into service filters. Preserve resolveSelfAssignee and the paging envelope exactly; this is not a new access-control implementation. Change only the 400 description to 'Invalid filter, search or paging parameter'.\n- apps/api/src/tickets/tickets.service.ts:31-38 currently defines TicketListFilterInput without excluding search. It must become Omit<ListTicketsQuery, 'current' | 'size' | 'search'> & { assignedToAgentId?: string; titleContains?: string }. findAll already checks the project and its deletedAt and forwards titleContains to the repository (apps/api/src/tickets/tickets.service.ts:154-183). No service algorithm change is needed.\n- apps/api/src/tickets/domain/ticket.domain.ts:76-85 already declares titleContains. apps/api/src/tickets/prisma-tickets.repository.ts:185-212 already combines projectId, deletedAt:null, existing filters and case-insensitive title contains, then paginates by ticket number. Only the titleContains explanatory comments in these files and the service doc comment change. Do not change repository query semantics, add a schema migration, add an index, or implement a parallel search query. Existing wildcard semantics remain.\n- apps/api/src/fleet/assistant/tools/ticket-tools.ts:119-123 is an existing consumer that passes titleContains directly into TicketsService.findAll; preserve it. REST consumers without search and generated CLI consumers remain backward compatible. The optional search query is additive. No CLI command flag is added.\n- apps/api/src/tickets/tickets.controller.spec.ts:242-299 has findAll tests for parseQuery, default paging, the six page fields and assignedTo=self for users/agents. Existing expect.objectContaining assertions must remain unchanged; append the two new controller cases. The endpoint suite uses the shared DB gate at apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:61 and section 13 starts at :1456. The checked-out section is named '13. Validation'; add a new describe there, not a separate endpoint spec. Keep every existing case unchanged.\n- Endpoint fixture isolation is essential: its own beforeAll creates one project and one member with exactly Fix Login button/HIGH, Login page copy/LOW and Logout crash/HIGH. Use role bindings, not legacy membership rows. grantRole is defined in apps/api/src/permissions/test-helpers/permission-fixtures.ts:52 and grantBaseline at :96. .nax/rules/api-testing.md:17-23 requires lifecycle endpoint coverage in the existing endpoint suite and baseline/role bindings for fixtures. Existing shared-project tickets must not contaminate exact result assertions.\n- package.json:19-23 defines api:export-spec, generate:cli and generate. Run bun run generate from the repository root after API changes to regenerate openapi.json and apps/cli/src/generated/types.gen.ts. Review generated changes for only the intended ticket-list search contract and associated specified 400 description, not unrelated stale-checkout drift. This story retains workdir apps/api as explicitly bound even though generation updates root and CLI artifacts.\n\nUS-002 and US-003: classify missing resources and stop unknown project pages before mount\n- ApiError is a real exported class with numeric code (apps/web/composables/useApi.ts:20-39). extractErrorStatus checks numeric err.status and err.response.status and returns undefined otherwise (apps/web/composables/useApi.ts:112-118). New isNotFoundError must reuse these exports: recognize only ApiError codes 404/40004 or extracted HTTP 404, not 403 or arbitrary code-like plain objects. A flows precedent exists at apps/web/pages/[project]/flows/[id].vue:67. Do not refactor other detail pages into the helper.\n- New project-route-check.ts isolates the exact skip/known/found/notFound/unverified algorithm and dependency interface. It accepts unknown slug, reads only the supplied known list, and never manages the cache itself. Its fetchProject is injected for deterministic DB-free tests.\n- apps/web/middleware/auth.global.ts:3-41 hydrates auth, handles unavailable sessions with fatal 503, redirects unauthenticated visitors and permits public invites. New project.global.ts runs after it by filename order and must not modify it. Read useAuth().isAuthenticated before fetching; use request-scoped/hydration-preserved useState('koda-known-projects', () => []) rather than module-global state. Only successful lookups append the slug. Confirmed 404 aborts with createError({statusCode:404,statusMessage:'Not Found',fatal:true}); 403/5xx/network failure continues without caching. This is existence checking, never a substitute for API authorization.\n- apiPath encodes each interpolation and rejects empty segments (apps/web/lib/api-path.ts:11-20). Fetch /projects/:slug through useApi and this tag; do not embed /api twice or concatenate an unencoded slug.\n- The board currently calls useAsyncData and useProjectEvents during setup (apps/web/pages/[project]/index.vue:36-58), always renders PageHeader with the raw slug (at :92) and uses ErrorState on list error (at :104). The layout takes projectSlug directly from route params and renders its project navigation from it (apps/web/layouts/default.vue:85, :281-390). Stop the route before page setup, rather than hiding chrome after mount or changing layout tests. error.vue already delegates to AppErrorPage (apps/web/error.vue:1-7).\n- apps/web/lib/project-event-stream.ts:1-15 documents terminal backoff/auth refresh behavior and :113-115 defines MAX_TERMINAL_FAILURES=5. Leave this stream and auth/session machinery unchanged: unknown project routes no longer mount their page and therefore do not subscribe. Known slugs are deliberately not invalidated for deletion/rename/account changes within a tab.\n- apps/web/tests/helpers/mount-sfc.ts:138-188 injects Nuxt auto-import names and defaults; :207-219 already supports compiling .ts as well as .vue, and :224 onward resolves aliases recursively. Add defineNuxtRouteMiddleware, abortNavigation and createError to the existing names, plus useHead: () => undefined to defaults. Do not replace those lists: useNuxtData and other recently merged ticket-page additions must survive. Middleware tests load the real default export through loadSfc, sharing the ApiError module through alias to avoid instanceof identity mismatch.\n\nUS-004 and US-005: stable ticket not-found state and titles\n- apps/web/pages/[project]/tickets/[ref].vue:65-68 currently passes a straight ticket promise to useAsyncData under ticket-${slug}-${ref}; :70-86 separately loads links/labels and computes ticket. Catch only classified 404s in the primary ticket fetcher and resolve null. All other errors retain the original object and are rethrown for ErrorState/Retry. Nuxt 4 initially uses undefined, so ticketNotFound must explicitly compare ticketData.value === null and exclude pending/error, not test falsiness of ticket. Do not alter secondary requests, live reload/deletion semantics, editing or permission gates (existing live handlers begin at :133).\n- The existing template begins LoadingState then ErrorState (apps/web/pages/[project]/tickets/[ref].vue:263-264). Insert NotFoundState immediately after ErrorState, before the loaded grid. New NotFoundState is a small interpolation-only state component, with the specified test IDs, optional body, board link and no Retry. ErrorState is the transient sibling, with common.loadFailed and Retry (apps/web/components/ErrorState.vue:1-15); leave it unchanged. The ticket missing state deliberately remains HTTP 200.\n- apps/web/tests/pages/ticket-detail-grid.spec.ts:8-37 demonstrates mounting the real ticket page, stubbing window, providing route/async-data/permissions/live globals and aliasing TicketHeader/Activity/Properties/FleetRuns/WatchButton to inert components. Follow that aliasing pattern for partial fixtures. apps/web/tests/helpers/permission-nav.ts:42-61 fakeAsyncData starts pending and loads asynchronously; its null initialization is a harness detail, not a reason to replace the production strict-null rule. Existing mounts remain pending or loaded and should not be rewritten for the new branch.\n- PageHeader currently discards the defineProps return value (apps/web/components/PageHeader.vue:1-6); bind it as const props so reactive useHead can read props.title. Although the supplied design says the props object is kept, this checkout needs that binding added. Set title only, not titleTemplate, to `${props.title} · Koda`. Any mounted PageHeader now invokes useHead, motivating the shared default in US-003.\n- apps/web/components/AppErrorPage.vue:1-46 implements outage retries and local-only redirect protection, with a 503 branch at :51 and generic branch at :58. Insert a distinct 404 branch between them; do not change retryTarget, retry or goHome semantics. Its heading/title calculation must be reactive and localized for 503, 404 and generic status. Existing 503 document-reload/fragment/open-redirect regression assertions stay unchanged.\n- apps/web/tests/components/app-error-page.spec.ts:117-145 currently uses 404 to test the generic title and goHome, including Vue I18n real-translator verification. Change only those three mounts to 500 and expect ['Something went wrong (500)', '发生错误（500）']; then add this feature's 404 cases. Keep the generic interpolation invariant and the 503 tests.\n- apps/web/components/fleet/ApprovalBadge.vue:88-91 provides a dynamic titleTemplate that prefixes the pending approval count and falls back to Koda. Preserve it. New PageHeader, ticket and AppErrorPage calls supply title, allowing the existing count prefix to continue wrapping it. Do not change thread detail titles or add project names to sub-page titles.\n- For US-005 title tests, record useHead inputs and evaluate the last one (invoke it if functional). The board seam must mount the real PageHeader using loadSfc with the same globals instead of uiStubs.PageHeader. uiStubs replaces PageHeader, NuxtLink, LoadingState and ErrorState (apps/web/tests/helpers/fleet-harness.ts:81-100), which otherwise hides title behavior.\n\nUS-006 and US-007: palette integration and concurrency\n- apps/web/components/CommandPalette.vue:5 defines Project with numeric id only and :6 defines Command; add key and widen id without changing the commands' interface. :33-83 builds static/project destinations, with existing permission-key-gated admin destinations and project navigation. Keep these gates, order and navigation untouched. The layout already passes projectSlug into the palette (apps/web/layouts/default.vue:467).\n- Current results only filter static/project labels and hints (apps/web/components/CommandPalette.vue:85-89); its open watcher resets query, loads /projects, then accesses HTMLInputElement to focus (at :93-105). The input currently uses v-model at :126. US-006 switches to :value/@input, adds a computed ref command before static matches, and loads project keys from the existing /projects response. A ref jump works with no current project by matching the parsed uppercased key to any loaded project's key; it does not fetch ticket existence first.\n- Backend refs use uppercase letters only (apps/api/src/common/utils/ticket-ref.util.ts:8); the new palette parser accepts lowercase input and normalizes it, limits the digit string to nine characters, rejects zero and returns a number. Do not import API runtime code into web or broaden prefix syntax. All three search constants live in palette-tickets.ts created by US-006, even though US-007 consumes them.\n- apps/web/tests/components/command-palette-threads.spec.ts:15-25 copies the palette and replaces its v-model attribute for the fake renderer; the replacement becomes a harmless no-op after US-006. :62-94 supplies existing dialog/slot stubs, Nuxt globals, apiModule alias and permission doubles. New tests mount the real component closed first, then open it to trigger the non-immediate watcher. Define and restore globalThis.HTMLInputElement in node tests. Flush with Promise.resolve plus nextTick, not setImmediate, especially under Jest fake timers. Option DOM IDs remain palette-${cmd.id}; assertion helpers strip that prefix to compare ticket-ref/ticket-t1.\n- apps/web/lib/debounce.ts:1-18 already implements a cancellable trailing-edge timer; reuse it for 250 ms instead of creating a new debouncing abstraction. US-007 requires projectSlug, trimmed length >=2, and no parsed ref before arming; query changes cancel, clear and invalidate first, even when the new query is too short or no timer will run. runTicketSearch snapshots trimmed query/slug and takes seq=++requestSeq; success/failure/final searching updates apply only to the current sequence. Guard both result assignment and searching=false so a stale request cannot dismiss a newer loading state. Closing also cancels/invalidates/clears; reopening's existing reset prevents stale results.\n- The wire contract is $api.get(apiPath`/projects/${slug}/tickets`, { query: { search: q, size: 8 } }), consuming the paginated records field. Map each ticket to ticket-${id}, `${ref} ${title}`, localized hint and Ticket icon with go() navigation. Fail quietly without toast, preserve static matches, display palette-searching while pending and do not render palette.empty until searching is false. Search is current-project title substring only, not a cross-project/ref/description search.\n\nCross-story rollout, verification and risks\n- Exact dependency graph: US-001, US-002 and US-006 are independent; US-003 and US-004 follow US-002; US-005 follows both US-003 and US-004; US-007 follows US-001 and US-006. Exactly these seven stories are required. No additional analysis, testing-only, migration or browser-verification story is introduced. API generation precedes the palette title-search consumer. Helpers and harness defaults precede title-bearing components.\n- Code modifications are additive and require no database migration or new runtime dependency. Roll out the optional server query before its web consumer. Primary risks are class identity in the mount loader, misclassifying 403/outages as 404, SSR/hydration cache behavior, broad PageHeader impact, title-template collisions, stale debounced responses and shared endpoint fixture leakage. Each is addressed by the specified real-helper seam tests, existing regression anchors, sequence guards and isolated fixtures.\n- Web strings belong only in apps/web/i18n/locales/en.json and zh.json, using the exact supplied values; API/web keys are separate. Render ticket/project text through interpolation, never v-html. Follow token classes rather than new colors. docs/ux/redesign/MASTER-PLAN.md:36-43 pins layout source order and additive board edits; :47-68 tracks navigation changes and :89-100 describes palette/board architecture. Read it before navigation implementation and update its Status table/Decisions log in the same PR per app guidance, without turning that bookkeeping into another story or redesigning the layout.\n- API unit tests use Vitest vi.*, alongside source; endpoint cases stay in endpoint.e2e.spec.ts. Run DB-backed scoped tests on the host with KODA_DB_TESTS=1 via the declared testScoped command; sandbox skips are not verification. The shared setup selects an explicit test URL, compose test Postgres or private Testcontainers, never inherited development DATABASE_URL (.nax/mono/apps/api/context.md:187-197). Do not run concurrent DB resets against the same test database. Web uses Jest node mounts for the required ACs. Tests are built into each implementation story, not separate tasks or acceptance quality gates.\n- US-003 uses the authenticated navigation boundary, so strict three-session-tdd applies. US-001 is a medium additive mapping onto existing filtering and does not change authentication/authorization; role-bound test setup reuses existing helpers, so tdd-simple is sufficient. Error helper/UI stories are deterministic medium changes. US-007 is also medium: its specified sequence guard, existing debouncer and upstream REST contract require local fake-timer/deferred-promise tests, not a new cross-module abstraction.\n- The spec's full-browser SSR status/title/palette check is a post-deploy manual check on koda-wk, not an implementation story. This drafting session did not run code generation, tests or browser verification and makes no claim that the feature is implemented.\n\nRefine-pass audit against spec.md and current source\n- Enumerated all 72 numbered spec criteria below. For every US-XXX/AC-N listed, acceptanceCriteria[N-1] in the same story retains the original assertion; new failure/regression assertions are appended so these mappings do not shift. No deprecated file-content tags were present.\n- US-001: AC-1 LOGIN returns exactly the two login titles/200; AC-2 padded login returns the same two as login; AC-3 blank search returns all three; AC-4 login plus HIGH returns only Fix Login button; AC-5 101 characters returns 400; AC-6 100 characters returns 200; AC-7 trimmed titleContains without search key; AC-8 absent search omits titleContains. All eight retained, including the same-two-tickets comparison and no-search-key qualifier.\n- US-002: AC-1 ApiError40004 true; AC-2 ApiError404 true; AC-3 HTTP status404 true; AC-4 ApiError40003 false; AC-5 known slug resolves known; AC-6 known slug fetch count zero; AC-7 successful fetch resolves found; AC-8 missing project resolves notFound; AC-9 outage resolves unverified; AC-10 undefined slug resolves skip. All ten retained with the original inputs and error objects.\n- US-003: AC-1 missing-project abort called once; AC-2 abort error statusCode404/fataltrue; AC-3 successful project get called once; AC-4 exact /projects/web path; AC-5 second same-test known-project call makes no further request; AC-6 unauthenticated no request; AC-7 route without project no request; AC-8 outage no abort; AC-9 second same-test outage call retries, two total requests. All nine retained, including same-test cache/retry qualifications.\n- US-004: AC-1 real primary fetcher resolves null on ApiError40004; AC-2 rethrows the same ApiError50000 object; AC-3 null/nonpending/no-error renders one localized NotFoundState; AC-4 board path /web; AC-5 body interpolates WEB-404; AC-6 non-null error renders ErrorState; AC-7 that error mount has no NotFoundState; AC-8 standalone Gone heading; AC-9 standalone back link to /web; AC-10 standalone back link text Back; AC-11 omitted body renders no body element. All eleven retained, including same-error-object and branch-precedence anchors.\n- US-005: AC-1 localized full-page404 heading; AC-2 localized404 body; AC-3 404-home clears error to /; AC-4 404 has no Retry; AC-5 generic500 has no404 heading; AC-6 Labels PageHeader title; AC-7 loaded WEB-7 Fix login title; AC-8 null ticket not-found title; AC-9 pending WEB-7 route-ref fallback; AC-10 error404 title; AC-11 error503 title; AC-12 error500 interpolated generic title; AC-13 board web title through the real PageHeader. All thirteen retained, including the real-component seam and all title suffixes. Appended regression assertions pin the specified real-translator500 titles, existing generic-home action and unchanged503 Retry.\n- US-006: AC-1 spaced lowercase sb-12 normalizes; AC-2 incomplete SB- rejected; AC-3 zero rejected; AC-4 ten digits rejected; AC-5 no-project sb-1 jump is first; AC-6 jump navigates to Sandbox's SB-1; AC-7 unknown ZZ prefix has no jump. All seven retained, including no-project and no-key-match conditions. Added an observable empty-query command-id array to protect existing static/project order rather than leaving that backward-compatibility check only suggested.\n- US-007: AC-1 exact search/size8 request after250ms; AC-2 ticket-t1 option; AC-3 WEB-3 Fix login label; AC-4 correct ticket navigation; AC-5 one-character query no request; AC-6 absent project no ticket request; AC-7 lo/login burst produces one request; AC-8 its search is login; AC-9 stale logi response after xyz ignored with no changed-query timer advance; AC-10 stale logi response after l ignored with no changed-query timer advance; AC-11 failed login search shows empty; AC-12 failed-search mount has no ticket-prefixed options; AC-13 unresolved zzz-q shows searching; AC-14 parsed WEB-3 suppresses title search. All fourteen retained, especially both no-timer-advanced race qualifiers.\n- Negative-path audit: US-001/AC-5 rejects oversized input; US-002/AC-4 and AC-9 cover forbidden/outage; US-003/AC-1 and AC-8 cover missing/outage; US-004/AC-2 and AC-6 cover non404 errors; US-005/AC-4 and AC-5 prevent wrong Retry/not-found branches; US-006/AC-2 through AC-4 and AC-7 reject invalid/unmatched refs; US-007/AC-5, AC-6, AC-9 through AC-12 and AC-14 cover suppressed, stale and failed searches. No story lacks a negative acceptance assertion.\n- Testability fixes: unverified middleware continuation is now its observable undefined result, retaining the page's-own-states/as-today qualifier. Ticket Retry is an observable refresh() call. Palette failure fallback is an observable existing-command navigation. Reopening is observed through the input value rather than an inaccessible setup variable. Logical option ids in palette criteria use the existing helper's palette- prefix removal, not a change to DOM ids.\n- Context alignment: every explicitly spec-recommended context file is included; US-005 now includes pages/login.vue (useHead precedent at :70), retaining all four recommended files within the five-file limit. Existing PageHeader is the fifth. Expected outputs and upstream-created helper references match the binding dependency graph.\n- Dependency audit: all seven IDs exist and every binding dependency/workdir remains exact; none was minimized contrary to the binding table. Routing was reduced to medium/tdd-simple for the existing-filter API mapping and local palette-search state. Only US-003 retains strict three-session-tdd because it adds authenticated navigation logic. No story implements new authorization policy.\n- Out-of-scope audit: all fourteen feature-level exclusions remain verbatim and separate, in the original order. Nearby story Scope-Out text repeats the relevant boundaries without excluding another story's actual deliverables. The spec has no story-local Out-of-scope blocks to hoist. Scope, interface, description and AC data flow were cross-checked against the current guarded controller, palette commands/input, mount auto-import lists, PageHeader and AppErrorPage; no remaining description/AC contradiction was identified.",
+  "outOfScope": [
+    "A project route answered with 403 (the viewer is not a member) keeps today's page error states: only a 404 becomes the not-found page.",
+    "The verified-slug cache is never invalidated within a tab. A project deleted or renamed while the tab is open falls back to the page's own error states and the stream's existing capped retry.",
+    "The live-update stream's handling of a 404 is unchanged: an `EventSource` cannot read the status, and the fix is that a missing project's page never mounts.",
+    "Not-found states on other detail pages (thread, fleet job, job logs, repo config): unchanged. Flows and schedules already have their own.",
+    "The HTTP status of the ticket not-found state: it stays 200, because only the project check aborts navigation.",
+    "Palette ticket search across projects, by description or by ref number, and past the first 8 results.",
+    "A CLI flag for the new `search` query: the generated client is only regenerated.",
+    "An index for the title search: it is the repository's existing whole-column `contains`, bounded here by a 2-character minimum, a 250 ms debounce and a page size of 8.",
+    "`%` and `_` in `search`: they mean whatever the existing `titleContains` query gives them, the same as the koda tool search.",
+    "The thread detail pages' titles (the bare thread title, with no \"· Koda\"): unchanged.",
+    "Adding the project name to project sub-page titles.",
+    "Clearing the verified-slug cache (`koda-known-projects`) on logout or on a sign-in as another user in the same tab: it only skips a repeat existence check, and the page's own states still apply.",
+    "Checking the SSR HTTP status of `/nope-404`, the browser tab titles, and the palette in a real browser: a post-deploy manual check on koda-wk, not a story.",
+    "F11 and F13 (readable names, dashboard rows) and F3 and F18 (runner ACP probe): separate bundles."
+  ],
+  "routingProfile": "native-codex-ds"
+}
