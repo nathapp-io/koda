@@ -38,8 +38,9 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function mountPalette(projectSlug: string | undefined, ticketGet?: Get): Mounted & { get: jest.Mock<Get>; navigated: string[] } {
+function mountPalette(projectSlug: string | undefined, ticketGet?: Get): Mounted & { get: jest.Mock<Get>; navigated: string[]; toastError: jest.Mock<(message: string) => void> } {
   const navigated: string[] = []
+  const toastError = jest.fn<(message: string) => void>()
   const get = jest.fn<Get>(async (path: string, options?: unknown) => {
     if (path === '/projects') return [{ id: 'p2', name: 'Web', slug: 'web', key: 'WEB' }]
     if (path === '/projects/web/tickets') return ticketGet ? ticketGet(path, options) : ticketResponse
@@ -58,6 +59,7 @@ function mountPalette(projectSlug: string | undefined, ticketGet?: Get): Mounted
     globals: {
       ref, computed, watch, nextTick,
       useI18n: () => enI18n(),
+      useAppToast: () => ({ error: toastError }),
       useApi: () => ({ $api: { get } }),
       useColorMode: () => ({ value: 'light', preference: 'light' }),
       navigateTo: (to: string) => { navigated.push(to) },
@@ -65,7 +67,7 @@ function mountPalette(projectSlug: string | undefined, ticketGet?: Get): Mounted
       useGlobalPermissions: () => globalPermissionsStub(),
     },
   })
-  return { ...app, get, navigated }
+  return { ...app, get, navigated, toastError }
 }
 
 async function flush(_app: Mounted) {
@@ -83,6 +85,9 @@ async function type(app: Mounted, value: string) {
   await flush(app)
 }
 function ticketCalls(get: jest.Mock<Get>) { return get.mock.calls.filter(([path]) => path.endsWith('/tickets')) }
+function expectSearchRequest(app: { get: jest.Mock<Get> }, search: string) {
+  expect(ticketCalls(app.get)).toEqual([['/projects/web/tickets', { query: { search, size: 8 } }]])
+}
 function option(app: Mounted, id: string): FakeNode | undefined {
   return app.find('[role="option"]').find((node) => node.props.id === `palette-${id}`)
 }
@@ -164,6 +169,7 @@ describe('CommandPalette ticket title search', () => {
     const pending = deferred<unknown>()
     const app = mountPalette('web', () => pending.promise)
     await openPalette(app); await type(app, 'logi'); await advance(250)
+    expectSearchRequest(app, 'logi')
     await type(app, 'xyz')
     pending.resolve(ticketResponse); await flush(app)
     expect(option(app, 'ticket-t1')).toBeUndefined()
@@ -174,6 +180,7 @@ describe('CommandPalette ticket title search', () => {
     const pending = deferred<unknown>()
     const app = mountPalette('web', () => pending.promise)
     await openPalette(app); await type(app, 'logi'); await advance(250)
+    expectSearchRequest(app, 'logi')
     await type(app, 'l')
     pending.resolve(ticketResponse); await flush(app)
     expect(option(app, 'ticket-t1')).toBeUndefined()
@@ -182,14 +189,19 @@ describe('CommandPalette ticket title search', () => {
 
   test('AC-11: a failed search leaves the translated empty state', async () => {
     const app = mountPalette('web', async () => { throw new Error('offline') })
-    await openPalette(app); await type(app, 'login'); await advance(250); await flush(app)
+    await openPalette(app); await type(app, 'login'); await advance(250)
+    expectSearchRequest(app, 'login')
+    await flush(app)
     expect(app.text()).toContain('No matches')
+    expect(app.toastError).not.toHaveBeenCalled()
     app.unmount()
   })
 
   test('AC-12: a failed search renders no ticket options', async () => {
     const app = mountPalette('web', async () => { throw new Error('offline') })
-    await openPalette(app); await type(app, 'login'); await advance(250); await flush(app)
+    await openPalette(app); await type(app, 'login'); await advance(250)
+    expectSearchRequest(app, 'login')
+    await flush(app)
     expect(app.find('[role="option"]').some((node) => String(node.props.id).startsWith('palette-ticket-'))).toBe(false)
     app.unmount()
   })
@@ -213,6 +225,7 @@ describe('CommandPalette ticket title search', () => {
     const pending = deferred<unknown>()
     const app = mountPalette('web', () => pending.promise)
     await openPalette(app); await type(app, 'logi'); await advance(250)
+    expectSearchRequest(app, 'logi')
     app.setProps({ open: false }); await flush(app)
     pending.resolve(ticketResponse); await flush(app)
     expect(option(app, 'ticket-t1')).toBeUndefined()
