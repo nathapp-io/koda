@@ -48,7 +48,7 @@ The detailed architecture reference lives in `docs/architecture.md`.
 
 | Layer | Choice |
 |:------|:-------|
-| Runtime | Node.js 22.22.3+ and Bun 1.4.4 workspaces |
+| Runtime | Node.js 22.22.3+ and Bun 1.4.5 workspaces |
 | Language | TypeScript strict |
 | Monorepo | Turborepo |
 | API | NestJS 12 + Fastify + Prisma |
