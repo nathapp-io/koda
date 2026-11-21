@@ -515,6 +515,7 @@ describe('US-007 AC-8: the new-thread link and the create form follow thread.cre
     await settle()
 
     expect(byTestId(app, 'thread-create-form')).toBeDefined()
+    expect(byTestId(app, 'thread-new-unavailable')).toBeDefined()
     app.unmount()
   })
 
@@ -544,17 +545,21 @@ function mountNewThreadPage(project: readonly string[]): Mounted {
       useProjectPermissions,
       useRoute: () => ({ params: { project: 'web' } }),
       navigateTo: jest.fn(async () => undefined),
-      useFleetDispatchOptions: () => ({
-        repos: ref([]),
-        runners: ref([]),
-        moreRepos: ref(false),
-        moreRunners: ref(false),
-        profileOptions: ref([]),
-        labelOptions: ref([]),
-        load: jest.fn(async () => undefined),
-        repoName: (id: string) => id,
-        runnerName: (id: string | null) => id,
-      }),
+      useFleetDispatchOptions: () => {
+        const settled = ref(false)
+        return {
+          repos: ref([]),
+          runners: ref([]),
+          moreRepos: ref(false),
+          moreRunners: ref(false),
+          settled,
+          profileOptions: ref([]),
+          labelOptions: ref([]),
+          load: jest.fn(async () => { settled.value = true }),
+          repoName: (id: string) => id,
+          runnerName: (id: string | null) => id,
+        }
+      },
       useProjectSkills: () => ({ list: jest.fn(async () => []) }),
     },
   })

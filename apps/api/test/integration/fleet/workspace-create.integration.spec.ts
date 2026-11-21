@@ -78,7 +78,7 @@ describeDb('workspace create HTTP', () => {
     });
     await revokeProjectRoles(prisma, root(), world.projectId);
     await revokeProjectRoles(prisma, root(), world.opsProjectId);
-    try { message(await post({}, world.tokens.root).expect(409), 'This project has no repository, so a project thread cannot run'); }
+    try { message(await post({}, world.tokens.root).expect(409), 'No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one.'); }
     finally {
       for (const binding of bindings) await grantRole(prisma, root(), binding.role.key, binding.projectId);
       await invalidatePermissions();
@@ -87,7 +87,7 @@ describeDb('workspace create HTTP', () => {
   it('AC-11: explicit VIEWER home is refused with the permissions code', async () => { message(await post({ homeProject: 'web' }, world.tokens.viewer).expect(403), 'You do not have permissions to perform this action'); });
   it('AC-12: explicit home without repo', async () => {
     const repo = await prisma.fleetRepo.findUniqueOrThrow({ where: { id: world.repoId } }); await prisma.fleetRepo.delete({ where: { id: repo.id } });
-    try { message(await post({ homeProject: 'web' }).expect(409), 'This project has no repository, so a project thread cannot run'); }
+    try { message(await post({ homeProject: 'web' }).expect(409), 'The chosen home project has no repository. Choose a project that has one.'); }
     finally { await prisma.fleetRepo.create({ data: repo }); }
   });
   it('AC-13/14: unknown and unreachable have identical 404s', async () => {

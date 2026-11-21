@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { costText, sessionLabel } from '~/lib/thread-view'
+import { costText, isUnmeteredThread, sessionLabel } from '~/lib/thread-view'
 import { useLocalDates } from '~/lib/local-dates'
 import type { ThreadDto } from '~/lib/thread-types'
 
@@ -70,7 +70,10 @@ function featureLabel(thread: ThreadDto): string {
           <td class="px-3 py-2">{{ thread.backend.kind }}<span v-if="thread.backend.model"> · {{ thread.backend.model }}</span></td>
           <td class="px-3 py-2"><span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ t(`fleet.threads.session.${sessionLabel(thread)}`) }}</span></td>
           <td class="whitespace-nowrap px-3 py-2 text-muted-foreground">{{ activityText(thread.lastActivityAt) }}</td>
-          <td class="whitespace-nowrap px-3 py-2 text-right font-mono text-xs">{{ costText(thread) }}</td>
+          <td class="whitespace-nowrap px-3 py-2 text-right font-mono text-xs">
+            <span v-if="isUnmeteredThread(thread)" :title="t('fleet.threads.detail.unmeteredHint')">{{ t('fleet.threads.detail.unmetered') }}</span>
+            <template v-else>{{ costText(thread) }}</template>
+          </td>
         </tr>
       </tbody>
     </table>

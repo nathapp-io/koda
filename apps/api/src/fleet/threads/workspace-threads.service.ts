@@ -66,7 +66,7 @@ export class WorkspaceThreadsService {
       if (!home) throw new NotFoundAppException({}, 'projects');
       // US-003: hosting is the home project's `thread.create` key, and its refusal is the permissions code.
       if (!await this.canHost(home.id, principal)) throw new ForbiddenAppException({}, 'permissions');
-      if (!await this.repos.findAnchor(home.id)) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      if (!await this.repos.findAnchor(home.id)) throw new ConflictAppException({}, 'threads.homeNoRepo');
     } else {
       reachable.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       for (const project of reachable) {
@@ -77,7 +77,7 @@ export class WorkspaceThreadsService {
         home = project;
         break;
       }
-      if (!home) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      if (!home) throw new ConflictAppException({}, 'threads.noDefaultHome');
     }
     // #399, US-001, again at execution: the fleet may have changed.
     await this.assertThreadServed({ backend: normalized.backend, kind: 'WORKSPACE', mode: 'read' });

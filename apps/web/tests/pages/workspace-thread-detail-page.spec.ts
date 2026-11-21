@@ -128,7 +128,10 @@ function marker(name: string, props: string[] = []): Component {
     setup(markerProps: Record<string, unknown>) {
       return () => h('div', {
         'data-testid': name,
-        ...Object.fromEntries(props.map(prop => [`data-prop-${prop}`, JSON.stringify(markerProps[prop] ?? null)])),
+        ...Object.fromEntries(props.map((prop) => {
+          const value = markerProps[prop]
+          return [`data-prop-${prop}`, typeof value === 'function' ? 'function' : JSON.stringify(value ?? null)]
+        })),
       })
     },
   })
@@ -138,14 +141,14 @@ function marker(name: string, props: string[] = []): Component {
 const MARKERS: Record<string, Component> = {
   ThreadHeader: marker('page-thread-header'),
   FleetThreadsThreadHeader: marker('page-thread-header'),
-  ThreadControls: marker('page-thread-controls', ['isCreator']),
-  FleetThreadsThreadControls: marker('page-thread-controls', ['isCreator']),
+  ThreadControls: marker('page-thread-controls', ['isCreator', 'maxCostUsd']),
+  FleetThreadsThreadControls: marker('page-thread-controls', ['isCreator', 'maxCostUsd']),
   ThreadKodaToolsNotice: marker('page-thread-koda-tools-notice'),
   FleetThreadsThreadKodaToolsNotice: marker('page-thread-koda-tools-notice'),
   ThreadTimeline: marker('page-thread-timeline', ['slug']),
   FleetThreadsThreadTimeline: marker('page-thread-timeline', ['slug']),
-  ThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning']),
-  FleetThreadsThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning']),
+  ThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning', 'send']),
+  FleetThreadsThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning', 'send']),
   ThreadActionBar: marker('page-thread-action-bar'),
   FleetThreadsThreadActionBar: marker('page-thread-action-bar'),
   ThreadStaleBanner: marker('page-thread-stale-banner'),
@@ -266,6 +269,7 @@ function mountPage(over: {
   const post = jest.fn(async (path: string, body?: unknown) => {
     posts.push({ path, body })
     if (path === '/threads/t1/messages' && over.sendError !== undefined) throw over.sendError
+    if (path === '/threads/t1/messages') return { message: message({ content: String((body as { text?: unknown } | undefined)?.text ?? '') }) }
     return {}
   })
   const patch = jest.fn(async () => ({}))
@@ -401,6 +405,15 @@ describe('US-004 queued-turn notice and refresh', () => {
   })
 })
 
+describe('US-002: workspace thread cap wiring', () => {
+  test('AC-7: passes workspace maxCostUsd to ThreadControls', async () => {
+    const m = mountPage({ thread: workspaceThread({ maxCostUsd: '0.5' }) })
+    await m.settle()
+    expect(markerProp(m.app, 'page-thread-controls', 'maxCostUsd')).toBe('0.5')
+    m.app.unmount()
+  })
+})
+
 describe('US-006 AC-1..AC-6: pages/threads/[id].vue — the loaded thread', () => {
   test('AC-1: mounting for route id t1 loads the thread through useWorkspaceThread(t1) and requests GET /threads/t1', async () => {
     const m = mountPage()
@@ -501,6 +514,7 @@ describe('US-006 AC-7..AC-9: pages/threads/[id].vue — send and archive', () =>
     await m.settle()
 
     expect(m.posts).toEqual([{ path: '/threads/t1/messages', body: { text: 'hello', clientMessageId: expect.any(String) } }])
+    expect(byTestId(m.app, 'thread-composer-input')?.props['model-value']).toBe('')
     m.app.unmount()
   })
 

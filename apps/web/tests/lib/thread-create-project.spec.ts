@@ -2,6 +2,8 @@ import { describe, expect, test } from '@jest/globals'
 import { buildThreadCreateSchema, eligibleModels, toCreateThreadBody } from '~/lib/thread-create'
 import type { ThreadCreateValues } from '~/lib/thread-create'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
+import en from '../../i18n/locales/en.json'
+import zh from '../../i18n/locales/zh.json'
 
 /**
  * US-007 (fleet S5b): the scope-aware half of the new-thread form helpers. A PROJECT thread carries
@@ -61,6 +63,25 @@ describe('buildThreadCreateSchema scope (US-007 AC1-AC2)', () => {
       .toContainEqual(['repoId', 'fleet.threads.new.validation.repoRequired'])
   })
 
+  test('US-004 AC-1: an empty REPO feature reports featureRequired', () => {
+    const result = schema.safeParse(projectValues({ kind: 'REPO', repoId: 'r1', feature: '' }))
+
+    expect(result.success).toBe(false)
+    const issue = result.success ? undefined : result.error.issues.find(item => item.path.join('.') === 'feature')
+    expect(issue?.message).toBe('fleet.threads.new.validation.featureRequired')
+  })
+
+  test('US-004 AC-2: invalid REPO names keep feature validation, while PROJECT repository fields stay optional', () => {
+    for (const feature of ['a..b', '-bad']) {
+      const result = schema.safeParse(projectValues({ kind: 'REPO', repoId: 'r1', feature }))
+      expect(result.success).toBe(false)
+      const issue = result.success ? undefined : result.error.issues.find(item => item.path.join('.') === 'feature')
+      expect(issue?.message).toBe('fleet.threads.new.validation.feature')
+    }
+    const projectResult = schema.safeParse(projectValues({ feature: '' }))
+    expect(projectResult.success).toBe(true)
+  })
+
   test('AC2 (guard): the moved REPO rules still report base-ref and feature on their own fields', () => {
     const result = schema.safeParse(projectValues({ kind: 'REPO', repoId: 'r1', feature: 'a..b', baseRef: 'x'.repeat(256) }))
 
@@ -70,6 +91,27 @@ describe('buildThreadCreateSchema scope (US-007 AC1-AC2)', () => {
       ['baseRef', 'fleet.threads.new.validation.baseRef'],
       ['feature', 'fleet.threads.new.validation.feature'],
     ]))
+  })
+})
+
+describe('US-004 AC-10: thread-create guidance translations', () => {
+  test('both locales define all create hints and the Base ref branch placeholder', () => {
+    const read = (locale: unknown, keys: string[]): string => {
+      let value: unknown = locale
+      for (const key of keys) value = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined
+      return typeof value === 'string' ? value : ''
+    }
+    for (const locale of [en, zh]) {
+      const keys = [
+        ['fleet', 'threads', 'new', 'validation', 'featureRequired'],
+        ['fleet', 'threads', 'new', 'featureHint'],
+        ['fleet', 'threads', 'new', 'baseRefHint'],
+        ['fleet', 'threads', 'new', 'agentUnavailable'],
+        ['fleet', 'threads', 'workspace', 'homeProjectAutoHint'],
+      ]
+      for (const key of keys) expect(read(locale, key).trim().length).toBeGreaterThan(0)
+      expect(read(locale, ['fleet', 'threads', 'new', 'baseRefHint'])).toContain('{branch}')
+    }
   })
 })
 

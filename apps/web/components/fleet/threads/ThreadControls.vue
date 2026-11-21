@@ -17,6 +17,7 @@ const props = defineProps<{
   canManage: boolean
   sessionLabel: SessionLabel
   archived: boolean
+  maxCostUsd: string
 }>()
 const emit = defineEmits<{
   (event: 'endSession'): void
@@ -30,7 +31,7 @@ const capValue = ref('')
 const archiveOpen = ref(false)
 
 const showEnd = computed(() => props.isCreator && props.sessionLabel === 'live')
-const showRaise = computed(() => props.isCreator)
+const showRaise = computed(() => props.isCreator && !props.archived)
 const showArchive = computed(() => !props.archived && (props.isCreator || props.canManage))
 
 function onCapInput(event: Event): void {
@@ -38,6 +39,7 @@ function onCapInput(event: Event): void {
 }
 
 function openCap(): void {
+  capValue.value = props.maxCostUsd
   capOpen.value = true
 }
 

@@ -137,6 +137,7 @@ const submit = handleSubmit(async (formValues: WorkspaceThreadCreateFormValues) 
         <FormItem>
           <FormLabel>{{ t('fleet.threads.workspace.homeProject') }}</FormLabel>
           <FormControl><FleetNativeSelect v-bind="componentField" :options="homeProjectOptions" testid="thread-new-home-project" /></FormControl>
+          <p v-if="values.homeProject === ''" class="text-sm text-muted-foreground">{{ t('fleet.threads.workspace.homeProjectAutoHint') }}</p>
           <FormMessage />
         </FormItem>
       </FormField>

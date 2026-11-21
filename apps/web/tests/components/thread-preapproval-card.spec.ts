@@ -1,4 +1,6 @@
 import { describe, expect, test } from '@jest/globals'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import * as Vue from 'vue'
 import { formatDateTime } from '~/lib/format-date-time'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
@@ -29,6 +31,21 @@ async function mountCard(value: ThreadDetailDto, held = true) {
 }
 
 describe('ThreadPreApprovalCard', () => {
+  test('AC-9: both locale JSON files define a non-empty pre-approval hint', () => {
+    for (const locale of ['en', 'zh']) {
+      const messages = JSON.parse(readFileSync(join(__dirname, `../../i18n/locales/${locale}.json`), 'utf8')) as {
+        fleet: { flows: { preapproval: { hint: string } } }
+      }
+      expect(messages.fleet.flows.preapproval.hint.trim().length).toBeGreaterThan(0)
+    }
+  })
+  test('AC-8: renders the explanatory cap hint next to the pre-approval input', async () => {
+    const mounted = await mountCard(thread())
+    expect(mounted.one('[data-testid="preapproval-cap-input"]')).toBeDefined()
+    expect(mounted.text()).toContain('Flows the agent starts from this thread run without asking you')
+    mounted.unmount()
+  })
+
   test('AC-1, AC-2: displays Set and cap input on an authorized REPO thread without a tick', async () => {
     const mounted = await mountCard(thread())
     expect(mounted.text()).toContain('Set')

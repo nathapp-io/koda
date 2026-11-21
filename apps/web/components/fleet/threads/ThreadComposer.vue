@@ -3,19 +3,20 @@ import { useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { buildThreadMessageSchema } from '~/lib/thread-create'
 import type { ComposerReason } from '~/lib/thread-types'
+import type { ThreadActionResult } from '~/lib/thread-controller'
 
 /**
  * Fleet S5a §4.62 (US-007): the thread composer — the creator's message box and the
  * viewer's read-only note.
  *
  * Contract: props `composerState: { canSend, reason }` (`reason` is a `ComposerReason`:
- * a `ThreadSendRefusal` or `readOnly`) and `turnRunning: boolean`; emits `send(text)`
- * and `stop`. Enter sends the validated draft, Shift+Enter inserts a newline (never
- * sends), whitespace sends nothing, a refusing `composerState` renders the
- * `fleet.threads.refusal.<reason>` text, a readOnly state renders
- * `fleet.threads.composer.readOnly` instead of a textarea, and a running turn renders
- * a Stop control that emits `stop`. The refusal reason comes from the thread view
- * (`composerState` in `~/lib/thread-view`), never a copied server send rule.
+ * a `ThreadSendRefusal` or `readOnly`), `turnRunning: boolean` and an async `send(text)`
+ * action; emits `stop` only. Enter sends the validated draft and awaits the result,
+ * clearing the draft on success; Shift+Enter inserts a newline (never sends), whitespace
+ * sends nothing, a refusing `composerState` renders the `fleet.threads.refusal.<reason>`
+ * text, a readOnly state renders `fleet.threads.composer.readOnly` instead of a textarea,
+ * and a running turn renders a Stop control that emits `stop`. The refusal reason comes
+ * from the thread view (`composerState` in `~/lib/thread-view`), never a copied server send rule.
  *
  * US-007: the draft is validated with vee-validate + a zod schema
  * (`buildThreadMessageSchema`: trimmed, non-empty, at most 32768 UTF-8 bytes — the
@@ -25,14 +26,14 @@ import type { ComposerReason } from '~/lib/thread-types'
 const props = defineProps<{
   composerState: { canSend: boolean; reason: ComposerReason | null }
   turnRunning: boolean
+  send: (text: string) => Promise<ThreadActionResult>
 }>()
 const emit = defineEmits<{
-  (event: 'send', text: string): void
   (event: 'stop'): void
 }>()
 const { t } = useI18n()
 
-const { value: draft, errorMessage, validate } = useField(
+const { value: draft, errorMessage, validate, resetField } = useField(
   'message',
   toTypedSchema(buildThreadMessageSchema(t)),
   { initialValue: '' },
@@ -53,12 +54,31 @@ function handleKeydown(event: KeyboardEvent): void {
   void sendDraft()
 }
 
-/** Sends the trimmed draft when it passes the schema (non-empty, ≤32768 UTF-8 bytes). */
+/**
+ * Sends the trimmed draft when it passes the schema (non-empty, ≤32768 UTF-8 bytes).
+ *
+ * The submission is captured synchronously, before the async validation: an edit made while the
+ * schema validates or while the POST is in flight must not cancel the send the user already asked
+ * for. The equality check afterwards only guards the *reset*, so a success for the older text can
+ * never discard a newer draft.
+ */
+const sending = ref(false)
+
 async function sendDraft(): Promise<void> {
-  if (!props.composerState.canSend) return
-  const { valid } = await validate()
-  if (!valid) return
-  emit('send', String(draft.value ?? '').trim())
+  if (!props.composerState.canSend || sending.value) return
+  sending.value = true
+  const submittedDraft = String(draft.value ?? '')
+  const text = submittedDraft.trim()
+  try {
+    const { valid } = await validate()
+    if (!valid) return
+    const result = await props.send(text)
+    if (result.ok && String(draft.value ?? '') === submittedDraft) resetField({ value: '' })
+  } catch {
+    // The page owns error presentation; keep the draft and release the in-flight guard.
+  } finally {
+    sending.value = false
+  }
 }
 
 function stop(): void {
@@ -70,6 +90,9 @@ function stop(): void {
   <div class="space-y-2" data-testid="thread-composer">
     <p v-if="props.composerState.reason === 'readOnly'" class="text-sm text-muted-foreground">
       {{ t('fleet.threads.composer.readOnly') }}
+    </p>
+    <p v-else-if="props.composerState.reason === 'archived'" class="text-sm text-muted-foreground" role="status">
+      {{ t('fleet.threads.refusal.archived') }}
     </p>
     <template v-else>
       <p v-if="props.composerState.reason !== null" class="text-sm text-muted-foreground" role="status">
@@ -96,7 +119,7 @@ function stop(): void {
         >{{ t('fleet.threads.composer.stop') }}</Button>
         <Button
           type="button"
-          :disabled="!props.composerState.canSend || String(draft ?? '').trim().length === 0"
+          :disabled="sending || !props.composerState.canSend || String(draft ?? '').trim().length === 0"
           data-testid="thread-send"
           @click="sendDraft"
         >{{ t('fleet.threads.composer.send') }}</Button>

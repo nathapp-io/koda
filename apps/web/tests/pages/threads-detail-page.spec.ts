@@ -206,6 +206,8 @@ function mountPage(over: {
       FleetThreadsThreadFlowsPanel: { props: ['slug', 'threadId'], template: '<aside data-testid="thread-flows-panel" :data-slug="slug" :data-thread-id="threadId" />' },
       FleetThreadsThreadStartFlow: { props: ['slug', 'thread'], template: '<aside data-testid="thread-start-flow" :data-slug="slug" :data-thread-id="thread.id" />' },
       FleetThreadsThreadPreApprovalCard: { props: ['slug', 'thread'], emits: ['changed'], template: '<button data-testid="thread-preapproval-card" :data-slug="slug" :data-thread-id="thread.id" @click="$emit(\'changed\')" />' },
+      FleetThreadsThreadControls: { props: ['maxCostUsd'], template: '<div data-testid="page-controls" :data-max-cost="maxCostUsd" />' },
+      FleetThreadsThreadComposer: { template: '<div data-testid="page-composer" />' },
       ThreadTimeline: timeline,
       FleetThreadsThreadTimeline: timeline,
       ThreadMessage: threadMessage,
@@ -294,6 +296,31 @@ describe('US-004 queued-turn notice and refresh', () => {
     await jest.advanceTimersByTimeAsync(30_000)
     expect(m.reloadThread).toHaveBeenCalledTimes(1)
     jest.useRealTimers()
+  })
+})
+
+describe('US-002: project thread conversation ordering and cap wiring', () => {
+  test('AC-6: controls precede the timeline, and conversation precedes flow panels', async () => {
+    const m = mountPage()
+    const ids: string[] = []
+    const walk = (node: FakeNode): void => {
+      const id = node.props['data-testid']
+      if (typeof id === 'string') ids.push(id)
+      node.children.forEach(walk)
+    }
+    walk(m.app.root)
+    expect(ids.indexOf('page-controls')).toBeLessThan(ids.indexOf('thread-timeline'))
+    expect(ids.indexOf('thread-timeline')).toBeLessThan(ids.indexOf('page-composer'))
+    for (const panel of ['thread-flows-panel', 'thread-start-flow', 'thread-preapproval-card']) {
+      expect(ids.indexOf('page-composer')).toBeLessThan(ids.indexOf(panel))
+    }
+    m.app.unmount()
+  })
+
+  test('AC-7: passes the project thread maxCostUsd to controls', async () => {
+    const m = mountPage({ thread: threadDetail({ maxCostUsd: '0.5' }) })
+    expect(m.app.one('[data-testid="page-controls"]')?.props['data-max-cost']).toBe('0.5')
+    m.app.unmount()
   })
 })
 

@@ -61,6 +61,7 @@ Principles:
 
 | 13 | Unslop audit follow-ups U01–U09 | **Verified** — `style/koda-unslop-page-audit`; accessible Dispatch, responsive Labels, guarded invitations, quieter interior/auth/status treatments and localized knowledge results; [resolution record](./UNSLOP-FIXES-2026-11-13.md) |
 | 14 | Account password navigation | **Implemented** — header and command palette expose account password settings (auth-passwords US-006) |
+| 15 | Thread conversation-first UX | **Implemented** — e2e-1121-thread-ux US-002 reorders project thread panels, hides archived cap editing and explains flow pre-approval caps |
 
 ## 4b. Effort estimate (2026-10-05, a guess from file sizes, not measured)
 
@@ -210,3 +211,4 @@ Update these in Slice 3 (or sooner if you touch the area):
 | 2026-11-13 | Shared UI follow-up US-001: add exact-route project breadcrumb leaves for approvals, approval policies, timeline, memory, code intel and settings; make breadcrumb links `min-h-11` below `sm` | Resolves R2-10 without changing sidebar order or global-page breadcrumbs; follows the existing 44 px narrow-screen control convention |
 | 2026-11-13 | Focused unslop polish: retain slate/indigo, system font, shell dimensions and workflows; neutralize dark surfaces and ticket types, soften shared headings, use sentence-case group labels, plain tabular board counts and 1.5px Lucide strokes | User approved the focused audit; color stays meaningful for priority, workflow and fleet data. Unslop by Damir Sokolovsky (https://x.com/heydamir), CC BY 4.0 |
 | 2026-11-13 | Unslop U01–U09: explicit Dispatch label/error associations and native placement radios; stack Labels controls below sm; gate invitation submission on a loaded preview; sentence-case section labels, 28px/500 auth headings, muted comment pills, outlined passed work, static approval count and localized knowledge similarity | Fix observed accessibility, mobile and error-state defects while preserving API workflow rules, permission keys, routes, graph layout and established tokens. Populated conditional states checked in both themes; knowledge/registration-open responses were synthetic fixtures. |
+| 2026-11-16 | Thread detail puts controls and conversation before the project flow panels; archived threads show a refusal-only composer and no Raise cap; cap prefill and pre-approval hint distinguish per-thread and flow caps | e2e-1121-thread-ux US-002 (F14): reduce the panels ahead of the conversation without redesigning the workspace thread page or changing API refusal rules. |

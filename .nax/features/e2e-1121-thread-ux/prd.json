@@ -1,0 +1,450 @@
+{
+  "project": "koda",
+  "feature": "e2e-1121-thread-ux",
+  "branchName": "feat/e2e-1121-thread-ux",
+  "createdAt": "2026-11-21T10:36:18.440Z",
+  "updatedAt": "2026-11-21T11:40:07.398Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Clear successful drafts and prevent concurrent sends",
+      "description": "**Goal** — Make the project and workspace thread composers await send results, clear successful drafts and prevent duplicate in-flight submissions.\n\n**Motivation** — F1: `ThreadComposer.vue` emits `send(text)` and never learns whether the POST succeeded, so the draft stays in the box.\n\n**Approach** — `ThreadComposer.vue` contract.\n- Baseline: props `composerState`, `turnRunning`; emits `send(text)` and `stop`.\n- Target: props `composerState`, `turnRunning`, and `send: (text: string) => Promise<ThreadActionResult>`; emits `stop` only. The composer holds a local `sending` flag, set synchronously on entry to `sendDraft` (before `await validate()`) and cleared in a `finally`, so a second Enter during validation or during the send is ignored. While `sending` is true, Send is disabled and Enter does nothing. On `{ ok: true }` the field is reset with vee-validate's `resetField` (value empty, no validation error shown). On `{ ok: false }` the draft is kept and Send is enabled again.\n\nBoth thread detail pages (`pages/[project]/threads/[id].vue`, `pages/threads/[id].vue`).\n- Baseline: `onSend` returns `Promise<void>` and is bound to `@send`.\n- Target: `onSend(text)` is no longer built on the page's `runAction` (which returns `Promise<void>`); the other actions keep `runAction`. It calls `controller.send(text)`, toasts `extractApiError(result.error)` once on `{ ok: false }` (unchanged), and returns the `ThreadActionResult`. It is bound to the composer's `:send` prop.\n\n`useThread(slug, id).send(text)` already resolves it: `{ ok: true }` after the POST returns, `{ ok: false, error }` after a refusal (it drops its optimistic echo). Precedents for a function prop instead of an emit: `ThreadModeControl` takes `:change-mode` and `ThreadApprovalCard` takes `:decide`, both `(...) => Promise<ThreadActionResult>`.\n\nFailure Handling:\n- `onSend` toasts a refusal once and still returns the `{ ok: false }` result to the composer.\n- A send refusal (`{ ok: false }`) keeps the draft, re-enables Send and toasts `extractApiError(error)` as today.\n- A `send` promise that rejects instead of resolving keeps the draft and re-enables Send (the `finally` clears `sending`); the composer does not toast, since the page owns error presentation.\n\nImplementation/test seam: US-001 drives the real `ThreadComposer` from each real thread detail page: a real Enter keypress reaches `useThread().send` through the page's `onSend`, and the composer reacts to the result the page returns. The workspace page actually uses `useWorkspaceThread`; retain that composable. In tests/components/thread-composer.spec.ts replace emitted('send') assertions with send-prop calls, preserving texts, Shift+Enter, whitespace, UTF-8 over-length, readOnly, refusal and Stop assertions. In tests/pages/threads-detail-actions-page.spec.ts replace the emit-only ComposerStub with the real ThreadComposer loaded through loadSfc, following workspace-thread-detail-page.spec.ts; preserve controller/toast/action assertions. Add send to both workspace composer marker prop lists and strengthen the real Enter test to assert clearing. The existing marker JSON.stringify logic cannot serialize a function; record callable presence observably rather than expecting send to survive JSON.stringify, and use the real composer seam to prove invocation and returned-result handling.\n\n**Scope** — In: ThreadComposer.vue, both detail pages, thread-composer.spec.ts, threads-detail-actions-page.spec.ts and workspace-thread-detail-page.spec.ts. Out: archived-only rendering, controls maxCostUsd and panel order belong to US-002; message/cost labels belong to US-003; create forms and API errors belong to US-004/US-005. Controller retry/idempotency behavior remains unchanged.\n\n**Interface** — `send: (text: string) => Promise<ThreadActionResult>`; `onSend(text: string): Promise<ThreadActionResult>`; emits `stop` only. Import the existing `ThreadActionResult` from `apps/web/lib/thread-controller.ts` unchanged (the repository declares `interface ThreadActionResult { ok: boolean; error?: unknown }`, whose success/failure behavior is the spec's `{ ok: true } | { ok: false; error?: unknown }`).",
+      "acceptanceCriteria": [
+        "AC-1 [unit] When ThreadComposer is mounted with composerState { canSend: true, reason: null } and a send prop resolving { ok: true }, typing hello and pressing Enter calls send once with hello; after the promise settles the textarea value is the empty string and no thread-composer-error element is rendered.",
+        "AC-2 [unit] When the send prop resolves { ok: false, error }, pressing Enter on hello calls send once; after it settles the textarea still holds hello and the thread-send button is enabled.",
+        "AC-3 [unit] While a send call is still pending, a second Enter press and a click on thread-send make zero additional send calls, and thread-send is disabled until the first call settles.",
+        "AC-4 [unit] When the send prop's promise rejects, Enter on hello calls send once; after the rejection the textarea still holds hello and thread-send is enabled.",
+        "AC-5 [unit] After an update:modelValue from the textarea with hello, thread-send is enabled; after one with only whitespace, it is disabled.",
+        "AC-6 [unit] Shift+Enter inserts a newline and makes zero send calls. A whitespace-only draft or a draft over 32768 UTF-8 bytes makes zero send calls on Enter, and the over-length draft shows the thread-composer-error message.",
+        "AC-7 [integration] In threads-detail-actions-page.spec.ts, mounting pages/[project]/threads/[id].vue with the real ThreadComposer and a useThread double whose send resolves { ok: true }, typing hello and pressing Enter calls the double's send once with hello, and the composer textarea is empty afterwards.",
+        "AC-8 [integration] On the same project page with the double's send resolving { ok: false, error }, Enter on hello toasts extractApiError(error) once and the textarea still holds hello.",
+        "AC-9 [integration] Mounting pages/threads/[id].vue (workspace thread) with the real composer and a useWorkspaceThread double whose send resolves { ok: true }, Enter on hello calls the double's send once with hello, and the textarea is empty afterwards.",
+        "AC-10 [unit; Failure Handling] When the send promise rejects, ThreadComposer produces no toast, since error presentation belongs to the page."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "composer",
+        "async-state",
+        "F1"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A bounded component-contract migration across two existing pages using established promise-result props; deferred-promise TDD covers validation/send concurrency and result propagation without new infrastructure.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-controller.ts",
+        "apps/web/components/fleet/threads/ThreadModeControl.vue",
+        "apps/web/tests/components/thread-composer.spec.ts",
+        "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+        "apps/web/tests/pages/workspace-thread-detail-page.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/fleet/threads/ThreadComposer.vue",
+          "reason": "replace the `send` emit with the `send` function prop, and add the in-flight guard and the clear-on-success behaviour."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "`onSend` stops using `runAction`, returns the `ThreadActionResult` and binds to the composer's `:send` prop."
+        },
+        {
+          "path": "apps/web/pages/threads/[id].vue",
+          "reason": "`onSend` stops using `runAction`, returns the `ThreadActionResult` and binds to the composer's `:send` prop."
+        },
+        {
+          "path": "apps/web/tests/components/thread-composer.spec.ts",
+          "reason": "the AC1/AC2/AC3 and over-length tests assert `emitted('send')`. Mount with a `send` prop double and assert on its calls instead: the same texts reach it, Shift+Enter, whitespace and over-length drafts make zero calls. The readOnly, refusal and Stop tests stay as they are."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "its `ComposerStub` declares `emits: ['send', 'stop']` and emits `send` on Enter, so it cannot show the composer reacting to the page's result. Replace the stub with the real `ThreadComposer` loaded through `loadSfc`, the way the workspace thread detail page spec mounts it, and host US-001 AC-7 and AC-8 here. The page-level assertions (controller `send('hello')` once, toast on a failed send) keep holding."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-thread-detail-page.spec.ts",
+          "reason": "its composer marker records only `composerState` and `turnRunning`. Add `send` to the recorded props where the page passes it, so marker-based assertions stay accurate. The real-composer Enter test keeps its controller assertion."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4a514a2d70e550e7feb64685d32a064d91e7347c"
+    },
+    {
+      "id": "US-002",
+      "title": "Prioritize the conversation and hide archived editing controls",
+      "description": "**Goal** — Put the project conversation before flow panels, remove archived send/cap controls and clarify the two different caps.\n\n**Motivation** — F14: on `pages/[project]/threads/[id].vue` the conversation sits below about 450 px of panels (flows, start flow, pre-approval, controls, mode, action bar).\n\n**Approach** — `ThreadControls.vue`.\n- Baseline: props `isCreator`, `canManage`, `sessionLabel`, `archived`; `showRaise = isCreator`; `capValue` starts as `''`.\n- Target: an added prop `maxCostUsd: string`; `showRaise = isCreator && !archived`; opening the Raise cap dialog sets the input to `maxCostUsd`. Both pages pass `thread.maxCostUsd`.\n\n`ThreadComposer.vue`: For `reason === 'archived'` it renders the refusal text only, with no textarea and no Send, the same way it already renders `readOnly`.\n\n`pages/[project]/threads/[id].vue` child order.\n- Baseline: Header, FlowsPanel, StartFlow, PreApprovalCard, Controls, StaleBanner, ModeControl, notices, ActionBar, QueuedNotice, Timeline, approvals, Composer.\n- Target: Header, Controls, StaleBanner, ModeControl, notices, ActionBar, QueuedNotice, Timeline, approvals, Composer, then FlowsPanel, StartFlow and PreApprovalCard below the composer.\n\n`ThreadPreApprovalCard.vue`: add a hint paragraph `fleet.flows.preapproval.hint` under the cost-cap input. en text: \"Flows the agent starts from this thread run without asking you while their cost stays under this cap. This is separate from the thread's own cost cap.\" zh: \"智能体从此线程发起的流程在成本低于此上限时无需你批准即可运行。此上限与线程自身的成本上限无关。\"\n\n`composerState(thread, messages, viewer)` in `apps/web/lib/thread-view.ts` returns `{ canSend, reason }`; `reason` is a `ComposerReason` (`ThreadSendRefusal | 'readOnly'`), and `'archived'` is a `ThreadSendRefusal` the API sends for an archived thread. Do not reimplement server refusal rules.\n\nFailure Handling: A Raise cap dialog opened with a `maxCostUsd` the validator rejects keeps the existing confirm-time validation. Prefilling never emits.\n\nModify ThreadControls.vue, ThreadComposer.vue, ThreadPreApprovalCard.vue, both detail pages and both locale JSON files. In thread-controls.spec.ts add maxCostUsd to the mount props with a default; replace any archived Raise-cap expectation with the hidden invariant. In threads-detail-page.spec.ts register Controls/Timeline/Composer markers beside existing flow/start/preapproval stubs to assert document order and project maxCostUsd wiring. Add maxCostUsd to ControlsStub in threads-detail-actions-page.spec.ts and to both workspace control markers; assert workspace wiring. Add archived/closing cases in thread-composer.spec.ts and hint rendering in thread-preapproval-card.spec.ts. Retain creator/manager/preapprove permission behavior and the existing cap validator. Read the UX master plan before layout work and record the required PR-level status/decision follow-through without introducing another story.\n\n**Scope** — In: project child reordering, archived note-only composer, current-cap prefilling/wiring and preapproval explanatory copy/tests. Out: send-prop/concurrency behavior is US-001; overflow/unmetered labels are US-003; create-form/API errors are US-004/US-005. Any change to the workspace thread page layout beyond the composer `send` prop and the controls `maxCostUsd` prop; it has no flows or pre-approval panels. Collapsing or merging thread controls beyond the moves listed in Design, and any redesign of the thread page.\n\n**Interface** — added prop `maxCostUsd: string`; `showRaise = isCreator && !archived`; existing `raiseCap(value: number)` emit and validation are retained. The composer keeps US-001's `send: (text: string) => Promise<ThreadActionResult>` and `stop`-only emit.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] ThreadControls with isCreator:true, archived:true and maxCostUsd:'0.5' renders no thread-raise-cap control; with archived:false it renders it.",
+        "AC-2 [unit] With maxCostUsd:'0.5', clicking thread-raise-cap opens the dialog with thread-cap-input holding 0.5; confirming without editing emits raiseCap with the number 0.5.",
+        "AC-3 [unit] With maxCostUsd:'0.00001', opening the Raise cap dialog and confirming without editing emits no raiseCap and keeps the dialog open.",
+        "AC-4 [unit] ThreadComposer with composerState { canSend:false, reason:'archived' } renders the fleet.threads.refusal.archived text and renders neither thread-composer-input nor thread-send.",
+        "AC-5 [unit] ThreadComposer with composerState { canSend:false, reason:'closing' } still renders the fleet.threads.refusal.closing text together with a disabled thread-composer-input.",
+        "AC-6 [integration] When pages/[project]/threads/[id].vue is mounted with a REPO thread, the thread timeline and composer come before the flows panel, start-flow control and pre-approval card in document order, and the thread controls come before the timeline.",
+        "AC-7 [integration] Mounting pages/[project]/threads/[id].vue with maxCostUsd:'0.5' passes maxCostUsd '0.5' to ThreadControls; pages/threads/[id].vue does the same for a workspace thread.",
+        "AC-8 [unit] ThreadPreApprovalCard for a REPO thread with no pre-approval, viewed with fleet.thread.preapprove, renders the fleet.flows.preapproval.hint text next to preapproval-cap-input.",
+        "AC-9 [unit] Both apps/web/i18n/locales/en.json and zh.json, loaded as JSON, define a non-empty string at fleet.flows.preapproval.hint.",
+        "AC-10 [unit; Failure Handling] When the Raise cap dialog opens and prefills from maxCostUsd, no raiseCap event is emitted before confirmation."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "layout",
+        "archived-state",
+        "permission-sensitive",
+        "F14"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard existing-component and template changes, but creator/manager control visibility and preapproval permission gates require the strict security-sensitive testing override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-view.ts",
+        "apps/web/lib/thread-types.ts",
+        "apps/web/components/fleet/threads/ThreadControls.vue",
+        "apps/web/components/fleet/threads/ThreadComposer.vue",
+        "apps/web/pages/[project]/threads/[id].vue"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/fleet/threads/ThreadControls.vue",
+          "reason": "add the `maxCostUsd` prop, hide Raise cap when archived, and prefill the cap dialog."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadComposer.vue",
+          "reason": "render only the refusal text for the `archived` reason."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadPreApprovalCard.vue",
+          "reason": "add the hint paragraph under the cost-cap input."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "reorder the children per Design and pass `maxCostUsd` to the controls."
+        },
+        {
+          "path": "apps/web/pages/threads/[id].vue",
+          "reason": "pass `maxCostUsd` to the controls."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "add `fleet.flows.preapproval.hint`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "add `fleet.flows.preapproval.hint`."
+        },
+        {
+          "path": "apps/web/tests/components/thread-controls.spec.ts",
+          "reason": "the mount helper builds the props object. Add `maxCostUsd` with a default, so existing tests keep their meaning. Any assertion that Raise cap shows for a creator on an archived thread is replaced by the new hidden-when-archived invariant."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "register marker stubs for ThreadControls, ThreadTimeline and ThreadComposer beside its existing FlowsPanel, StartFlow and PreApprovalCard stubs. Host US-002 AC-6 (document order) and the project half of AC-7 (`maxCostUsd` reaches the controls)."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "its `ControlsStub` declares `props: ['isCreator','canManage','sessionLabel','archived']`. Add `maxCostUsd` so the stub keeps accepting the page's props."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-thread-detail-page.spec.ts",
+          "reason": "its ThreadControls marker records only `isCreator`. Record `maxCostUsd` too and host the workspace half of US-002 AC-7."
+        },
+        {
+          "path": "apps/web/tests/components/thread-composer.spec.ts",
+          "reason": "add the archived and closing refusal cases (US-002 AC-4 and AC-5)."
+        },
+        {
+          "path": "apps/web/tests/components/thread-preapproval-card.spec.ts",
+          "reason": "add the hint case (US-002 AC-8)."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c8fe662a050b71d3c59a1cb4ac394d9ecdfc4a65"
+    },
+    {
+      "id": "US-003",
+      "title": "Contain message overflow and label unmetered ACP usage",
+      "description": "**Goal** — Keep assistant code inside the message width and replace misleading zero-dollar ACP costs with an explicit unmetered label.\n\n**Motivation** — F15: `ThreadMessage.vue` renders assistant HTML in a `whitespace-pre-wrap break-words` box with no horizontal scroll container, so a `pre` block or a long token widens the page (288 px of sideways scroll at 390 px). F17: an ACP Codex subscription turn is `unpriced`, so `costUsd` stays `0` while tokens count up.\n\n**Approach** — `ThreadMessage.vue`: the message root gains `min-w-0 max-w-full`. The assistant body becomes a horizontal scroll container (`overflow-x-auto`), so a `pre` block or a long token scrolls inside the message instead of widening the page. Keep `renderThreadMarkdown` and its sanitizer unchanged.\n\n`apps/web/lib/thread-view.ts`: add an export `isUnmeteredThread(thread: Pick<ThreadDto, 'backend' | 'costUsd' | 'tokens'>): boolean`. It is true exactly when `backend.kind === 'acp'`, `Number(costUsd) === 0` (a malformed `costUsd` that parses to `NaN` is false), and `tokens` is non-null with `input + output > 0`. `costText` is unchanged.\n\n`ThreadHeader.vue` and `ThreadListTable.vue`: where `costText(thread)` renders, an unmetered thread renders `t('fleet.threads.detail.unmetered')` instead, with `title` = `t('fleet.threads.detail.unmeteredHint')`. en: \"Not metered\" / \"This agent does not report cost, so the cost cap does not apply.\" zh: \"不计费\" / \"此智能体不报告成本，因此成本上限不适用。\"\n\n`ThreadBackend` in `apps/web/lib/thread-types.ts`: `{ kind: 'native'; ... } | { kind: 'acp'; agent; ... }`. `ThreadDto` carries `backend`, `costUsd: string`, `maxCostUsd: string`, `tokens: ThreadTokens | null` (`input`, `output`, `cacheRead`, `cacheWrite`). `ThreadHeader.vue` computes total tokens as `input + output`. Precedent for a horizontal scroll container: `ThreadListTable.vue` wraps its table in `overflow-x-auto`.\n\nModify the message, view helper, header, list and both web locales. Create apps/web/tests/components/thread-message.spec.ts for code-block containment and interpolated user content; use thread-timeline.spec.ts and thread-markdown.spec.ts as existing harness/regression references. Extend tests/lib/thread-view.spec.ts without changing existing costText expectations, tests/components/thread-header-workspace.spec.ts and thread-list-table.spec.ts. US-003's `isUnmeteredThread` is consumed by `ThreadHeader` and `ThreadListTable` in the same story. Its seam ACs mount those components with an unmetered thread and assert the label, not only the helper. Do not change assistant sanitization or introduce v-html for user/system/error/tool content.\n\n**Scope** — In: message containment, the pure usage predicate, header/list integration and localized labels/tests. Out: send/archive/layout changes are US-001/US-002; create forms and workspace errors are US-004/US-005. Enforcing a cost cap for unmetered (unpriced) backends, or estimating their cost: this feature only labels them. F16 (ACP progress text and answer joined with no separator): the join is in the installed `@nathapp/nax-agent-acp` collector (`parts.join(\"\")`, every text chunk on round 0), not in koda. It is fixed upstream in nax, and koda only picks up the release.\n\n**Interface** — `isUnmeteredThread(thread: Pick<ThreadDto, 'backend' | 'costUsd' | 'tokens'>): boolean`; `costText` is unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Mounting ThreadMessage with an assistant message whose content is a fenced code block with a 300-character line yields an assistant body with class overflow-x-auto, the rendered pre as its descendant, and message root classes min-w-0 and max-w-full.",
+        "AC-2 [unit] Mounting ThreadMessage with a user message keeps its interpolated text (no v-html): markup-looking content appears as literal text rather than parsed HTML elements, and the message root still has min-w-0 and max-w-full.",
+        "AC-3 [unit] isUnmeteredThread returns true for { backend:{ kind:'acp', agent:'codex' }, costUsd:'0', tokens:{ input:800, output:76, cacheRead:0, cacheWrite:0 } }.",
+        "AC-4 [unit] isUnmeteredThread returns false for an ACP thread with costUsd:'0.12', false for an ACP thread with costUsd:'0' and tokens:null, false for an ACP thread with costUsd:'0' and zero input and output tokens, and false for an ACP thread with costUsd:'abc' and 876 total tokens.",
+        "AC-5 [unit] isUnmeteredThread returns false for a native thread with costUsd:'0' and 876 total tokens.",
+        "AC-6 [integration] ThreadHeader mounted with the unmetered ACP thread from AC-3 and maxCostUsd:'0.5' renders t('fleet.threads.detail.unmetered') text with title t('fleet.threads.detail.unmeteredHint'), and renders no $0 / $0.5 text.",
+        "AC-7 [integration] ThreadHeader mounted with a native thread at costUsd:'1.25', maxCostUsd:'5' still renders $1.25 / $5.",
+        "AC-8 [integration] ThreadListTable mounted with one unmetered ACP thread and one native thread renders fleet.threads.detail.unmetered in the first row's cost cell and costText output in the second.",
+        "AC-9 [unit] Both en.json and zh.json, loaded as JSON, define non-empty strings at fleet.threads.detail.unmetered and fleet.threads.detail.unmeteredHint."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "responsive",
+        "cost-display",
+        "F15",
+        "F17"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A pure display predicate plus existing component/CSS integrations; no new abstractions, pricing rules or sanitizer changes. Usage token counts are not credentials.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-markdown.ts",
+        "apps/web/lib/thread-types.ts",
+        "apps/web/tests/components/thread-timeline.spec.ts",
+        "apps/web/components/fleet/threads/ThreadMessage.vue",
+        "apps/web/lib/thread-view.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/thread-message.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/fleet/threads/ThreadMessage.vue",
+          "reason": "add the overflow classes on the message root and the assistant body."
+        },
+        {
+          "path": "apps/web/lib/thread-view.ts",
+          "reason": "add `isUnmeteredThread`."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadHeader.vue",
+          "reason": "render the unmetered label in place of the cost text."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadListTable.vue",
+          "reason": "render the unmetered label in place of the cost text."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "add `fleet.threads.detail.unmetered` and `fleet.threads.detail.unmeteredHint`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "add `fleet.threads.detail.unmetered` and `fleet.threads.detail.unmeteredHint`."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-view.spec.ts",
+          "reason": "add the `isUnmeteredThread` cases (US-003 AC-3 to AC-5); the existing `costText` cases stay."
+        },
+        {
+          "path": "apps/web/tests/components/thread-header-workspace.spec.ts",
+          "reason": "add the unmetered and metered header cases (US-003 AC-6 and AC-7)."
+        },
+        {
+          "path": "apps/web/tests/components/thread-list-table.spec.ts",
+          "reason": "add the mixed unmetered and native rows case (US-003 AC-8)."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b93035d448d5cfbb52119e952ddcfedb273966b1"
+    },
+    {
+      "id": "US-004",
+      "title": "Explain required thread fields and Automatic home selection",
+      "description": "**Goal** — Make repository thread requirements and unavailable-agent blocking visible, and explain workspace Automatic selection and failures.\n\n**Motivation** — F5: in `pages/[project]/threads/new.vue` the Feature field has no required marker and no format hint, an empty Feature gives \"Use a valid feature name\", Base ref has no hint, and clicking Create with no repository showed nothing visible in the live run.\n\n**Approach** — `buildThreadCreateSchema(t)` in `apps/web/lib/thread-create.ts`.\n- Baseline: an empty feature on a REPO form reports `validation.feature`, the same key as a malformed one.\n- Target: the REPO rules stay in `superRefine`; only the feature rule splits. An empty feature reports `fleet.threads.new.validation.featureRequired` (en \"Enter a feature name\", zh \"请输入功能标识\"). A non-empty invalid feature keeps `validation.feature`, whose text gains the format: en \"Use letters, digits, dot, dash or underscore, starting with a letter or digit (up to 128 characters)\", zh \"请使用字母、数字、点、连字符或下划线，并以字母或数字开头（最多 128 个字符）\".\n\n`pages/[project]/threads/new.vue`: on a REPO form, the Repository and Feature labels show a required marker (`*`, `aria-hidden=\"true\"`), and the Feature input carries `aria-required=\"true\"`. When Create is disabled because the chosen agent is not available (a chosen agent exists, its `available` is false, and the form is not submitting; nothing renders while the runner list is still loading and no agent is chosen), a paragraph `data-testid=\"thread-new-unavailable\"` next to Create shows `fleet.threads.new.agentUnavailable` (en \"The chosen agent is not available on an online runner. Choose another agent or try again later.\", zh \"所选智能体在在线运行器上不可用。请选择其他智能体或稍后再试。\"). In the live run this inert disabled button is why Create seemed to do nothing. A hint under Feature uses `fleet.threads.new.featureHint` (en \"Names the branch and the nax feature, for example fix-login-redirect\", zh \"用于分支名和 nax 功能名，例如 fix-login-redirect\"). A hint under Base ref uses `fleet.threads.new.baseRefHint` with `{branch}` = the selected repo's `defaultBranch` (en \"Leave empty to start from {branch}\", zh \"留空则从 {branch} 开始\").\n\n`pages/threads/new.vue`: while Home project is Automatic (`homeProject === ''`), a hint uses `fleet.threads.workspace.homeProjectAutoHint` (en \"Automatic uses the oldest project you are a member of that has a repository\", zh \"自动选择你所属且有代码库的最早项目\").\n\n`FEATURE_RE` in `apps/web/lib/fleet-dispatch.ts`: `/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/` (mirrors the API). Preserve the existing additional '..' rejection, so a..b remains invalid. `extractApiError(err)` in `apps/web/composables/useApi.ts` returns the API envelope `message`, which the API has already localized. Failure Handling: The workspace create 409s surface through the form's existing `submitError` paragraph. No web mapping is added.\n\nModify thread-create.ts, both new-thread pages and en/zh web locales. Extend tests/lib/thread-create-project.spec.ts: empty REPO features use featureRequired, invalid non-empty ones keep feature, and PROJECT repository fields stay optional. Extend tests/pages/threads-new-page.spec.ts with real vee-validate field errors, required markers, hints and availability/loading cases; empty repository submission with a usable agent must produce the existing inline repoRequired error and no POST. Extend tests/pages/workspace-threads-new-page.spec.ts with conditional Automatic copy and a rejected POST /threads API message in role=alert with no navigation. Existing eligibleAgents readiness and offer rules remain unchanged; do not present an unavailable warning solely because discovery has not returned. useFleetDispatchOptions already returns the settled ref, so use that existing load-completion signal if needed rather than inventing another loading abstraction; update relevant options doubles to model pending versus settled loads. A settled load with no usable runner still shows the chosen unavailable agent's explanation.\n\n**Scope** — In: client validation copy, accessibility markers, contextual hints and visible unavailable-agent reason on the project form, Automatic hint and existing API-error presentation on the workspace form. Out: composer/detail changes are US-001/US-002; cost/message display is US-003; API exception-key changes are US-005. Changing the Automatic home rule (membership required, deliberate in the existing workspace-thread design and pinned by the service spec test \"admin default requires actual membership\"), and letting a global binding count as membership. F3 and F18 (runner ACP readiness and offer list), and the ticket, not-found, naming and other findings: these are separate bundles.\n\n**Interface** — `buildThreadCreateSchema(t)` retains its existing form schema and REPO-only `superRefine`; `FEATURE_RE` remains `/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/`; `homeProject === ''` selects Automatic; `{branch}` is the selected repository's `defaultBranch`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] buildThreadCreateSchema(t).safeParse on a REPO form with a valid title and repo and an empty feature reports the feature issue message fleet.threads.new.validation.featureRequired.",
+        "AC-2 [unit] On a REPO form with feature a..b or -bad, the feature issue message is fleet.threads.new.validation.feature; a PROJECT form with an empty feature and repo reports no repoId or feature issue.",
+        "AC-3 [integration] Mounting pages/[project]/threads/new.vue with the chosen agent's available false renders thread-new-unavailable with fleet.threads.new.agentUnavailable text, and the Create button is disabled.",
+        "AC-4 [integration] With the chosen agent's available true, thread-new-unavailable is not rendered, and while the runner list has not loaded and no agent is chosen it is not rendered either.",
+        "AC-5 [integration] In REPO scope with an available agent, a title filled and no repository chosen, clicking Create shows fleet.threads.new.validation.repoRequired text next to the repository select and sends zero POST requests.",
+        "AC-6 [integration] In REPO scope, the Repository and Feature labels each render a required marker, and thread-new-feature carries aria-required=\"true\".",
+        "AC-7 [integration] In REPO scope the Feature field shows fleet.threads.new.featureHint text; with a repo whose defaultBranch is main selected, the Base ref field shows fleet.threads.new.baseRefHint interpolated with branch=main.",
+        "AC-8 [integration] Mounting pages/threads/new.vue with Home project on Automatic shows fleet.threads.workspace.homeProjectAutoHint text; after choosing a named project the hint is not rendered.",
+        "AC-9 [integration] On pages/threads/new.vue, when POST /threads rejects with a 409 envelope whose message is the en noDefaultHome text, 'No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one.', that text is rendered in the form's role=\"alert\" paragraph and no navigation happens.",
+        "AC-10 [unit] Both en.json and zh.json, loaded as JSON, define non-empty strings at fleet.threads.new.validation.featureRequired, fleet.threads.new.featureHint, fleet.threads.new.baseRefHint, fleet.threads.new.agentUnavailable and fleet.threads.workspace.homeProjectAutoHint, and both baseRefHint strings contain the {branch} placeholder.",
+        "AC-11 [integration; Failure Handling] On pages/threads/new.vue, when POST /threads rejects with a 409 envelope whose message is 'The chosen home project has no repository. Choose a project that has one.', that message is rendered by the existing submitError role=\"alert\" paragraph."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "forms",
+        "i18n",
+        "accessibility",
+        "F5",
+        "F4"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Existing schema and two forms gain standard conditional copy and accessibility metadata; permission and runner-readiness algorithms remain unchanged and API errors use the existing envelope path.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-create.ts",
+        "apps/web/lib/fleet-dispatch.ts",
+        "apps/web/pages/[project]/threads/new.vue",
+        "apps/web/pages/threads/new.vue",
+        "apps/web/tests/pages/threads-new-page.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/thread-create.ts",
+          "reason": "add the `featureRequired` key for an empty feature."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/new.vue",
+          "reason": "add the required markers, `aria-required`, the feature hint, the base-ref hint and the agent-unavailable paragraph next to Create."
+        },
+        {
+          "path": "apps/web/pages/threads/new.vue",
+          "reason": "add the Automatic hint."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "add `featureRequired`, `featureHint`, `baseRefHint`, `agentUnavailable` and `homeProjectAutoHint`, and reword `validation.feature`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "add the same keys and reword `validation.feature`."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-create-project.spec.ts",
+          "reason": "if any case expects `validation.feature` for an EMPTY feature, it expects `validation.featureRequired` instead. Invalid non-empty features such as `a..b` keep `validation.feature`."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-new-page.spec.ts",
+          "reason": "host US-004 AC-3 to AC-7 (agent-unavailable paragraph, repo error on submit, required markers, hints)."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-threads-new-page.spec.ts",
+          "reason": "host US-004 AC-8 and AC-9 (Automatic hint, 409 message shown)."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3ca9d9a1b510ce1ea34e735bb4f7f1c1ba4db240"
+    },
+    {
+      "id": "US-005",
+      "title": "Distinguish workspace home-selection errors",
+      "description": "**Goal** — Return specific localized 409 messages for missing explicit-home repositories and failed Automatic home selection without changing host eligibility.\n\n**Motivation** — F4: `WorkspaceThreadsService.create` picks the default home only among projects the caller is a member of (deliberate: `workspace-threads.service.spec.ts` AC-10 \"admin default requires actual membership\"). The live Owner holds only a global binding and no project membership, so the pick fails and throws `threads.noFleetRepo`, whose text \"This project has no repository, so a project thread cannot run\" is about a project thread and names no project. The explicit-home branch throws the same key.\n\n**Approach** — `WorkspaceThreadsService.create` in `apps/api/src/fleet/threads/workspace-threads.service.ts`.\n- Baseline: both the explicit-home anchor check and the auto-pick failure throw `ConflictAppException({}, 'threads.noFleetRepo')`.\n- Target: the explicit-home branch throws `ConflictAppException({}, 'threads.homeNoRepo')`, and the auto-pick failure throws `ConflictAppException({}, 'threads.noDefaultHome')`, for user and agent principals alike. The pick rule (membership, `thread.create`, anchor) is unchanged. API i18n (`apps/api/src/i18n/{en,zh}/threads.json`), each under status `409`:\n  - `homeNoRepo`: en \"The chosen home project has no repository. Choose a project that has one.\", zh \"所选主项目没有代码库，请选择一个有代码库的项目。\"\n  - `noDefaultHome`: en \"No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one.\", zh \"你所属的项目都没有代码库，无法自动选择主项目，请手动选择。\"\n- `threads.noFleetRepo` keeps its text and remains the key for project-thread paths (`threads.service.ts`, `prisma-chat-thread.repository.ts`).\n\nFailure Handling: The workspace create 409s surface through the form's existing `submitError` paragraph. No web mapping is added. US-005 changes only error keys. The web shows them through the existing `extractApiError` path, so no web seam is added.\n\nModify workspace-threads.service.ts, both API threads.json locale files, workspace-threads.service.spec.ts and test/integration/fleet/workspace-create.integration.spec.ts. In service tests AC-10 (\"admin default requires actual membership\") and the agent \"no reachable project hosts the thread\" case change expected prefix from threads.noFleetRepo to threads.noDefaultHome, still asserting httpStatus 409 and no create; AC-12 (\"explicit home needs a repo\") changes to threads.homeNoRepo with httpStatus 409. In the existing HTTP integration spec AC-10 (auto-pick with root project roles revoked) and AC-12 (explicit web home with its repo deleted), replace the old project-thread English sentence with exact new en noDefaultHome and homeNoRepo text respectively. Preserve binding-only fixtures, cleanup, permission-cache invalidation, canRunDbTests and the real database gate. Run modified DB behavior using the host scoped test command; a sandbox skip is not verification. The success path remains WORKSPACE with repoId null and returned homeProject slug. Do not change explicit-home reach/authorization checks or infer project membership from a global binding.\n\n**Scope** — In: two workspace create error prefixes, their en/zh status-409 translations and existing unit/HTTP expectations. Out: web hints/error rendering belong to US-004; thread detail changes belong to US-001/US-002/US-003. Changing the Automatic home rule (membership required, deliberate in the existing workspace-thread design and pinned by the service spec test \"admin default requires actual membership\"), and letting a global binding count as membership. Changing `threads.noFleetRepo` text or its project-thread call sites.\n\n**Interface** — retain `WorkspaceThreadsService.create(principal: UserPrincipal | AgentPrincipal, input: CreateWorkspaceThreadInput): Promise<ChatThreadRecord>`; explicit-home missing anchor throws `ConflictAppException({}, 'threads.homeNoRepo')`; automatic exhaustion throws `ConflictAppException({}, 'threads.noDefaultHome')`; both keep HTTP 409.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] WorkspaceThreadsService.create for a user principal with no project membership and no homeProject rejects with prefix threads.noDefaultHome and httpStatus 409, and the thread repository create is not called.",
+        "AC-2 [unit] For an agent principal for which no reachable project passes the host checks, create without homeProject rejects with prefix threads.noDefaultHome and httpStatus 409.",
+        "AC-3 [unit] With homeProject naming a reachable, hostable project that has no repository anchor, create rejects with prefix threads.homeNoRepo and httpStatus 409.",
+        "AC-4 [unit] With no homeProject and a member project that has thread.create and an anchor, create still creates a WORKSPACE thread homed there with repoId null, and the returned homeProject carries that project's slug.",
+        "AC-5 [unit] Loading apps/api/src/i18n/en/threads.json and zh/threads.json as JSON yields non-empty 409 strings for homeNoRepo, noDefaultHome and noFleetRepo, and the en noDefaultHome string equals 'No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one.'."
+      ],
+      "tags": [
+        "api",
+        "threads",
+        "workspace",
+        "i18n",
+        "access-control-regression",
+        "F4"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The implementation changes only error keys and locale entries, but it exercises membership, agent/user principals and thread.create host authorization; strict security-critical test isolation protects those unchanged access-control invariants.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/workspace-threads.service.ts",
+        "apps/api/src/fleet/threads/workspace-threads.service.spec.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/i18n/en/threads.json",
+        "apps/api/test/integration/fleet/workspace-create.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.ts",
+          "reason": "throw `threads.homeNoRepo` on the explicit-home branch and `threads.noDefaultHome` on the auto-pick failure."
+        },
+        {
+          "path": "apps/api/src/i18n/en/threads.json",
+          "reason": "add `homeNoRepo` and `noDefaultHome`, keeping `noFleetRepo`."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/threads.json",
+          "reason": "add `homeNoRepo` and `noDefaultHome`, keeping `noFleetRepo`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.spec.ts",
+          "reason": "AC-10 (\"admin default requires actual membership\") and the agent \"no reachable project hosts the thread\" test expect prefix `threads.noFleetRepo` for the auto-pick failure; they now expect `threads.noDefaultHome`, still with httpStatus 409 and no create. AC-12 (\"explicit home needs a repo\") expects `threads.noFleetRepo`; it now expects `threads.homeNoRepo` with httpStatus 409."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/workspace-create.integration.spec.ts",
+          "reason": "AC-10 (auto-pick with the root user's project roles revoked) and AC-12 (explicit home `web` with its repo deleted) assert the 409 message \"This project has no repository, so a project thread cannot run\"; AC-10 now expects the en `noDefaultHome` text and AC-12 the en `homeNoRepo` text."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9ed43b37c91b85cc7e46d7b5904f51243f88c772"
+    }
+  ],
+  "analysis": "Refine-pass audit: all 42 numbered specification criteria remain in their original stories. US-001: AC-1 success calls once, clears textarea and clears validation error; AC-2 refusal retains draft and enables Send; AC-3 pending send blocks Enter/click duplicates and disables Send; AC-4 rejection retains draft and enables Send; AC-5 model updates enable nonblank/disable whitespace; AC-6 Shift+Enter newline/no send, whitespace/over-32768-byte blocking and visible length error; AC-7 real project page/composer propagates success and clears; AC-8 real project page/composer propagates failure, toasts once and retains draft; AC-9 real workspace page/composer propagates success and clears. US-002: AC-1 archived creator cannot raise while active creator can; AC-2 current 0.5 prefill and unchanged-confirm numeric emit; AC-3 invalid 0.00001 prefill cannot emit/close; AC-4 archived refusal only; AC-5 closing still retains disabled input; AC-6 timeline/composer before all three flow panels and controls before timeline; AC-7 maxCostUsd reaches controls on both pages; AC-8 preapproval hint beside input under the existing REPO/no-preapproval/permission conditions; AC-9 both locale hint strings. US-003: AC-1 300-character fenced-code pre inside horizontal container and width-limited root; AC-2 user content remains interpolated, not HTML, and root still width-limited; AC-3 zero-cost used ACP true; AC-4 priced/null-usage/zero-usage/malformed-cost ACP false; AC-5 native false; AC-6 header translated unmetered label/title, not zero-dollar cap text; AC-7 native header still shows $1.25 / $5; AC-8 mixed ACP/native list uses label versus unchanged costText; AC-9 both locale label/hint strings. US-004: AC-1 empty REPO feature gets featureRequired; AC-2 a..b/-bad retain feature error and PROJECT retains optional repo/feature; AC-3 unavailable chosen agent explanation and disabled Create; AC-4 no explanation for available agent or pending runner load without a chosen agent; AC-5 missing REPO shows existing inline repoRequired and no POST; AC-6 both required markers and feature aria-required; AC-7 feature hint and selected main branch interpolation; AC-8 Automatic-only hint; AC-9 exact localized noDefaultHome 409 in existing alert without navigation; AC-10 both locales have five keys and branch placeholders. US-005: AC-1 membership-less user automatic failure prefix/status/no create; AC-2 agent automatic failure prefix/status; AC-3 explicit missing anchor prefix/status; AC-4 unchanged successful WORKSPACE/null-repo/home-slug output; AC-5 both locale status-409 strings including retained noFleetRepo and exact English noDefaultHome. No numbered criterion was dropped, reassigned or converted to a quality gate; regression qualifiers such as still, no-v-html, without editing, existing and no-navigation remain with their original scenarios. Composite observations from the spec remain together rather than losing any part. The three additional acceptance entries are explicit Failure Handling requirements (composer rejection does not toast; prefill never emits; explicit-home 409 uses existing submitError), not new product scope. Every story already has negative paths and regression anchors: send refusals/Shift+Enter; invalid cap/closing; false predicates/native money/user interpolation; invalid inputs/PROJECT optionality/409; home-selection failures/unchanged successful creation. All eight top-level exclusions were checked verbatim against the spec and retained. The five bound ids, workdirs and dependency arrays remain exact, with US-002 depending only on US-001. Context-file lists now include every explicitly recommended context file within the five-file limit; the sole new file remains only in US-003 expectedFiles. All routing stays medium; ownership-gated cap visibility and membership/permission-sensitive service paths retain the required strict security testing override, while other stories retain tdd-simple.\n\nRefine-pass codebase corrections: apps/web/composables/useFleetDispatchOptions.ts:15 already exposes settled, set in load's finally at :31 and returned at :46. Use that real loading signal where the unavailable warning needs to distinguish pending discovery from a settled unavailable agent; do not invent a new composable or alter eligibleAgents readiness. Update affected dispatch-options test doubles to expose settled consistently with their simulated load. Workspace marker props at apps/web/tests/pages/workspace-thread-detail-page.spec.ts:124-132 are currently JSON.stringify'd; functions stringify to undefined. Adding send to declared marker props must represent its callable presence observably (for example typeof value), not expect function JSON, while the real-composer Enter seam proves the call/result. Thread-timeline's existing marked double at apps/web/tests/components/thread-timeline.spec.ts:30-47 does not implement fenced blocks: the new thread-message spec needs a fenced-code-capable test setup and must parse assistant innerHTML with the existing real-parser harness pattern, not assume fake-renderer children include the pre. No production markdown/sanitizer edit is needed. The existing result type is interface ThreadActionResult with ok:boolean, not a union; retain it unchanged. Workspace sends go through useWorkspaceThread, so AC-9 identifies that actual composable instead of inventing a useThread call on the workspace page. These are interface/test-harness clarifications, not feature additions. No source changes or test runs were performed for the audit.\n\nThis is a focused enhancement of existing thread surfaces, not greenfield work. Discovery used repository-rooted Read/Grep/Glob because codebase-memory MCP is not exposed in this session. The external workspace findings report was supplied by reference in the spec and was not independently accessed. No implementation or test execution has been performed for this planning deliverable.\n\nArchitecture and guidance: the detected Next.js label is incorrect: .nax/mono/apps/web/context.md:19 specifies Nuxt 4 SSR with Vue SFCs, Tailwind, shadcn-derived primitives, vee-validate/zod and Jest/Playwright. Web uses hand-written Nuxt composables, relative browser /api requests and API-localized envelope messages, not a generated client (.nax/mono/apps/web/context.md:48). API is NestJS/Fastify with Prisma and Vitest (.nax/mono/apps/api/context.md:24). Business rules, authorization and persistence remain API-owned. Both web locale JSON files must be updated together, separately from API threads.json translations. Read the applicable app context before implementation; do not edit generated AGENTS.md. The API capability catalog (.nax/rules/nathapp-packages.md:30) identifies existing Nathapp exception/i18n facilities; reuse the existing ConflictAppException rather than introducing exception infrastructure. Nathapp docs MCP is also not exposed here; an implementation session should use it if available before writing Nest code.\n\nUS-001 source and integration seam: apps/web/components/fleet/threads/ThreadComposer.vue:25 declares only composerState and turnRunning props, emits send/stop at :29, validates asynchronously at :58, and emits without resetting at :61. Its textarea already binds model-value and update:model-value; the Send disabled expression at :98 checks permission and trimmed emptiness but has no in-flight guard. Set a local sending flag synchronously before validation, protect validation and the awaited function prop with try/finally, resetField only on ok:true, and retain the draft on refusal or rejection. Do not add composer toasts. Shift+Enter, trimmed whitespace, the 32768-byte UTF-8 limit and Stop remain regression anchors. apps/web/lib/thread-controller.ts:46 actually exports an interface { ok: boolean; error?: unknown }, rather than the discriminated-union shorthand in the spec. Import that existing ThreadActionResult type unchanged; do not rewrite it into a union. ThreadController.send at :59 already returns Promise<ThreadActionResult>. The implementation at :228 inserts an optimistic echo, posts with a fresh clientMessageId per call, merges success and resolves ok:true; :253-277 handles 409 closing retries with the same id and drops the echo on final failure. Client-side duplicate prevention must wrap this existing operation, not change retries, idempotency or API billing behavior. apps/web/pages/[project]/threads/[id].vue:92-97 and apps/web/pages/threads/[id].vue:72-77 currently erase the result through runAction():Promise<void>. Give only onSend its own result-returning handler, leave the other actions on runAction, and replace @send with :send at project :175 and workspace :121. The workspace controller is useWorkspaceThread, not useThread; seam doubles must match that actual composable. Text search found only these two production composer consumers.\n\nUS-001 tests: apps/web/tests/components/thread-composer.spec.ts:34 mounts without a send prop and :91 onward asserts emitted('send'); migrate these assertions to a resolving/deferred/rejecting prop double without weakening Stop, readOnly, refusal, Shift+Enter, whitespace or multibyte length checks. apps/web/tests/pages/threads-detail-actions-page.spec.ts:71 supplies a fake ComposerStub that emits send and cannot prove result propagation; register the real loadSfc composer under both ThreadComposer and FleetThreadsThreadComposer names and drive its actual update:modelValue and keydown handlers. Preserve the end-session and handoff assertions. apps/web/tests/pages/workspace-thread-detail-page.spec.ts:147-148 records only composerState/turnRunning and :164 already loads the real composer: add send to marker props and strengthen the real Enter assertion to observe cleared text. The harness is a Vue fake renderer, not a browser; use mount-sfc/fleet-harness patterns, settle vee-validate promises and nextTick, and treat innerHTML as parsed HTML when asserting descendants. A deferred send must test the race before validation settles as well as while the POST is pending. Rejections must be observed without unhandled test-runner failures, while draft retention, flag cleanup and page-owned presentation remain observable.\n\nUS-002 source: apps/web/components/fleet/threads/ThreadControls.vue:15 lacks maxCostUsd, :33 sets showRaise to isCreator alone, :40 opens a blank dialog and :64-72 validates finite numeric caps in 0.0001..10000 with four-decimal precision. Add the string prop, hide Raise cap on archive and copy the current prop each time the dialog opens; do not emit while prefilling or relax confirm validation (0.00001 must still fail). Both production pages pass thread.maxCostUsd. Composer view derivation already uses server sendRefusal rather than duplicating send rules (apps/web/lib/thread-view.ts:89-103); ThreadSendRefusal includes archived and closing (apps/web/lib/thread-types.ts:43). Only readOnly and archived become note-only states; closing retains the disabled input. apps/web/pages/[project]/threads/[id].vue:115-118 currently places FlowsPanel, StartFlow and PreApprovalCard immediately after Header. Move those three intact below Composer and preserve all action/approval/event wiring and the exact other child ordering. The workspace page has no flow panels and must not be reordered. apps/web/components/fleet/threads/ThreadPreApprovalCard.vue:53-56 gates visibility by REPO/nonarchived/preapprove permission and :70 has the empty-preapproval cap input. Add explanatory copy under that input only; do not change permissions, cost enforcement or flow behavior. Existing tests are tests/components/thread-controls.spec.ts (mount props at :34), thread-composer.spec.ts, thread-preapproval-card.spec.ts, tests/pages/threads-detail-page.spec.ts, threads-detail-actions-page.spec.ts and workspace-thread-detail-page.spec.ts. Add maxCostUsd defaults/recorder props, document-order marker assertions and current-cap wiring assertions; preserve existing creator/manager behavior except archived Raise cap. project-permission-gates.spec.ts:568 also records ThreadControls for canManage assertions; ensure it still tolerates added props without changing its permission expectations. US-002 must follow US-001 because both edit composer and both detail pages. Repository UX guidance requires reading docs/ux/redesign/MASTER-PLAN.md before layout work and recording the Status/Decisions follow-through in the same PR (.nax/mono/apps/web/context.md:161; plan :44 and :154). This is PR documentation follow-through, not another implementation story or an expansion of the package workdir.\n\nUS-003 source: apps/web/components/fleet/threads/ThreadMessage.vue:23 and :27 have separate system-note and ordinary-message roots with no width constraints; assistant HTML at :29-32 has only whitespace-pre-wrap/break-words. Add root width containment and assistant overflow-x-auto without touching rendering semantics or ancestor layout. apps/web/lib/thread-markdown.ts:1-24 documents sanitized assistant-only HTML, image removal, safe linkification and SSR-safe parsing. It must remain unchanged. User/system/error/tool strings stay interpolation-only. The new component spec must prove a rendered pre is inside the scroll container and user text is not interpreted as markup, not merely search source strings. Tests/components/thread-timeline.spec.ts, thread-system-note.spec.ts and tests/lib/thread-markdown.spec.ts provide existing regression coverage. The only new implementation output file is apps/web/tests/components/thread-message.spec.ts, absent from the current thread-spec file listing. apps/web/lib/thread-view.ts:119 has costText, which must remain unchanged. Add the pure exported isUnmeteredThread using ACP + Number(costUsd)===0 + non-null tokens with input+output>0; NaN, native, null tokens and zero input/output are false, and cache-only counts do not establish a turn. ThreadBackend and ThreadTokens are already defined at apps/web/lib/thread-types.ts:29 and :47. Header at apps/web/components/fleet/threads/ThreadHeader.vue:18 computes input+output and :45 renders costText; list cost cell at ThreadListTable.vue:72 renders costText for both project/workspace list consumers. Both components must consume the new helper and render the same translated label with explanatory title only for unmetered threads. Keep native and priced ACP money formatted exactly as received. Extend tests/lib/thread-view.spec.ts, tests/components/thread-header-workspace.spec.ts and thread-list-table.spec.ts, with both locales checked as loaded JSON. This is labeling, not a cost-cap enforcement or price-estimation change. Usage tokens here are accounting fields, not authentication tokens.\n\nUS-004 source: apps/web/lib/thread-create.ts:195 builds the existing object schema; its superRefine at :216 limits repository rules to REPO, checks repoRequired and length, and :229 currently uses one feature error for empty/invalid values. Split only empty-feature wording. FEATURE_RE in apps/web/lib/fleet-dispatch.ts:8 accepts the documented grammar, but the existing explicit includes('..') rejection in thread-create.ts:229 is additional and must remain: a..b is invalid despite matching the regex. Do not move required rules to base field validators, as PROJECT forms intentionally allow empty/stale repository fields. apps/web/pages/[project]/threads/new.vue:35-46 derives chosenAgent and canSubmit from eligible runner data; :50 already provides selectedRepo.defaultBranch. Labels and fields at :139-158 lack markers/hints, while :204 disables Create silently for unavailable agents. Keep existing vee-validate field errors and POST flow (:111-123), add REPO-only required markers and aria-required, selected-branch hint, feature hint and an unavailable paragraph conditioned on a real chosen unavailable agent and not submitting. A loading state with no chosen agent must not show a premature unavailable warning; agents currently returns native/ACP entries even for an empty runner list, so inspect actual loading/selection state rather than equating empty data with completed discovery. Do not alter eligibleAgents readiness/offer logic, which is outside this feature. apps/web/pages/threads/new.vue:34 defaults homeProject to '', :41 supplies Automatic, :118-125 already catches POST errors through extractApiError into submitError and :172 renders role=alert. Add a hint only while Automatic is selected and preserve that error path; do not map new API keys in web. extractApiError already returns API messages at apps/web/composables/useApi.ts:72-91. tests/pages/threads-new-page.spec.ts:55 uses real vee-validate field registration; :87 has existing runner/readiness/English-copy/repo fixtures. Extend this harness rather than source-content checks. Related existing suites are tests/lib/thread-create-project.spec.ts:46-71, tests/lib/thread-create.spec.ts, tests/lib/thread-create-agents.spec.ts and tests/pages/workspace-threads-new-page.spec.ts. The shared thread-create module also supplies the composer message schema; avoid changes to it while splitting REPO feature messages.\n\nUS-005 source and invariant: apps/api/src/fleet/threads/workspace-threads.service.ts:58-87 resolves reachable projects, handles explicit homes, sorts automatic candidates by createdAt/id, requires actual membership and thread.create, then checks an anchor. Explicit missing anchor at :69 and automatic exhaustion at :80 currently both throw threads.noFleetRepo. Change exactly these error prefixes to homeNoRepo/noDefaultHome for both principal types. Do not change sort order, host checks, actual membership, explicit-home access semantics, backend-served check, skills snapshot or null repository fields. hasMembership at :97-106 intentionally distinguishes global reach from membership. Existing unit cases at workspace-threads.service.spec.ts:113, :115 and :151-155 pin the old keys; change expected prefixes only while retaining 409/no-create assertions. Success creates a WORKSPACE thread with repoId:null and returned homeProject slug. Existing DB HTTP integration cases at apps/api/test/integration/fleet/workspace-create.integration.spec.ts:73-90 assert the old English sentence for revoked root memberships and explicit home without a repo; update them to the exact new translations, retaining status checks, binding-only fixtures, cleanup and cache invalidation. Both API locale files use per-key status-code maps; apps/api/src/i18n/en/threads.json:24 contains noFleetRepo, which must retain its text. The unchanged project paths are apps/api/src/fleet/threads/threads.service.ts:80 and prisma-chat-thread.repository.ts:734/:739. Authorization-sensitive selection is exercised even though behavior changes only in error keys, so US-005 uses strict three-session-tdd. US-002 also preserves creator/manager/preapproval gating and uses that security override; other stories use standard TDD.\n\nExecution, risks and migration: implement exactly five bound stories; only US-002 depends on US-001. Other independent web stories still touch shared en/zh JSON and some thread display helpers, so merge those additions carefully without overwriting other story keys. No DB migration, new dependencies, controller/DTO schema change, generated web client, CLI code, runner code or OpenAPI contract regeneration is needed for the scoped implementation: the API only replaces localized 409 messages. The component API replacement is intentionally breaking internally and must ship atomically with both page consumers and fixture changes; do not retain a second send event that could duplicate requests. Preserve retry/idempotency in the controller. Changing API messages requires existing assertions/consumers that compare text to update, not changes to membership. Unmetered inference deliberately makes no claim before usage arrives or for malformed cost data. CSS class/DOM unit tests demonstrate containment structure, not actual 390px layout; live mobile/double-send/archive re-verification remains a post-deploy manual task outside these stories. Use web Jest suites and the existing custom SFC harness; generated web acceptance runs separately with bun test under .nax and must not be copied/edited. API uses vi, not jest. Run the modified DB integration spec outside NAX_SANDBOXED with the declared host test:scoped command; its canRunDbTests gate at workspace-create.integration.spec.ts:14 skips in sandbox and a skip is not verification. DB runs reset the dedicated test DB, must run serially and use a private container for a second checkout when needed. Preserve real-database assertions and existing no-DB unit test separation. Quality gates are pipeline tasks, not acceptance criteria. Done means the listed observable composer, archive/layout, containment/unmetered, create-form and localized-error scenarios hold with existing security/workflow/sanitization boundaries intact.",
+  "outOfScope": [
+    "F16 (ACP progress text and answer joined with no separator): the join is in the installed `@nathapp/nax-agent-acp` collector (`parts.join(\"\")`, every text chunk on round 0), not in koda. It is fixed upstream in nax, and koda only picks up the release.",
+    "Enforcing a cost cap for unmetered (unpriced) backends, or estimating their cost: this feature only labels them.",
+    "Changing the Automatic home rule (membership required, deliberate in the existing workspace-thread design and pinned by the service spec test \"admin default requires actual membership\"), and letting a global binding count as membership.",
+    "Changing `threads.noFleetRepo` text or its project-thread call sites.",
+    "Any change to the workspace thread page layout beyond the composer `send` prop and the controls `maxCostUsd` prop; it has no flows or pre-approval panels.",
+    "Collapsing or merging thread controls beyond the moves listed in Design, and any redesign of the thread page.",
+    "F3 and F18 (runner ACP readiness and offer list), and the ticket, not-found, naming and other findings: these are separate bundles.",
+    "Live re-verification on koda-wk (390 px overflow, double-send, archived thread): a post-deploy manual check, not a story."
+  ],
+  "routingProfile": "native-codex-ds"
+}

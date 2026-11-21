@@ -13,6 +13,8 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import { FleetCommandType } from '../../common/enums';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { Logger } from '@nestjs/common';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('WorkspaceThreadsService.get queued turn', () => {
   it('AC-8: returns the computed verdict for a queued active job', async () => {
@@ -103,20 +105,30 @@ describe('workspace home project creation', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('AC-6/7: chooses oldest home and persists WORKSPACE with null repo fields', async () => {
+  it('AC-4: Automatic chooses a member hostable project and persists a workspace thread', async () => {
     expect(await service.create(principal, input)).toMatchObject({ kind: 'WORKSPACE', projectId: 'a', homeProject: { slug: 'a', name: 'A' } });
     expect(create).toHaveBeenCalledWith({ kind: 'WORKSPACE', projectId: 'a', repoId: null, feature: null, baseRef: null, title: 't', createdById: 'u', backend: input.backend, skills: [], maxCostUsd: '5' });
     expect(snapshot).toHaveBeenCalledWith('a');
   });
   it('AC-8: skips projects without repos', async () => { anchors.delete('a'); expect(await service.create(principal, input)).toMatchObject({ projectId: 'b' }); });
   it('AC-9: skips a project whose thread.create key is refused', async () => { refused.add('a'); expect(await service.create(principal, input)).toMatchObject({ projectId: 'b' }); });
-  it('AC-10: admin default requires actual membership', async () => { principal.role = 'ADMIN'; roles = {}; await expect(service.create(principal, input)).rejects.toMatchObject({ prefix: 'threads.noFleetRepo', httpStatus: 409 }); expect(create).not.toHaveBeenCalled(); });
+  it('AC-1: user automatic home requires actual membership', async () => { principal.role = 'ADMIN'; roles = {}; await expect(service.create(principal, input)).rejects.toMatchObject({ prefix: 'threads.noDefaultHome', httpStatus: 409 }); expect(create).not.toHaveBeenCalled(); });
   it('AC-11: explicit home whose thread.create key is refused answers 403 permissions', async () => { refused.add('a'); await expect(service.create(principal, { ...input, homeProject: 'a' })).rejects.toMatchObject({ prefix: 'permissions', httpStatus: 403 }); expect(create).not.toHaveBeenCalled(); });
-  it('AC-12: explicit home needs a repo', async () => { anchors.delete('a'); await expect(service.create(principal, { ...input, homeProject: 'a' })).rejects.toMatchObject({ prefix: 'threads.noFleetRepo', httpStatus: 409 }); });
+  it('AC-3: explicit home needs a repo', async () => { anchors.delete('a'); await expect(service.create(principal, { ...input, homeProject: 'a' })).rejects.toMatchObject({ prefix: 'threads.homeNoRepo', httpStatus: 409 }); });
   it.each(['AC-13', 'AC-14'])('%s: unreachable and unknown homes are identical', async () => { reachable = [b]; await expect(service.create(principal, { ...input, homeProject: 'a' })).rejects.toMatchObject({ prefix: 'projects', httpStatus: 404 }); });
   it('AC-15: kill switch precedes validation', async () => { config.threadsEnabled = false; await expect(service.create(principal, { ...input, kind: 'PROJECT' })).rejects.toMatchObject({ prefix: 'threads.disabled', httpStatus: 409 }); });
   it('breaks createdAt ties by id', async () => { reachable = [b, { ...a, createdAt: b.createdAt }]; expect(await service.create(principal, input)).toMatchObject({ projectId: 'a' }); });
   it('explicit admin home need not have a membership row', async () => { principal.role = 'ADMIN'; roles = {}; expect(await service.create(principal, { ...input, homeProject: 'b' })).toMatchObject({ projectId: 'b' }); });
+
+  it('AC-5: localizes workspace home errors while retaining the project-thread repo error', () => {
+    const en = JSON.parse(readFileSync(join(__dirname, '../../i18n/en/threads.json'), 'utf8')) as Record<string, Record<string, string>>;
+    const zh = JSON.parse(readFileSync(join(__dirname, '../../i18n/zh/threads.json'), 'utf8')) as Record<string, Record<string, string>>;
+    for (const key of ['homeNoRepo', 'noDefaultHome', 'noFleetRepo']) {
+      expect(en[key]?.['409']).toBeTruthy();
+      expect(zh[key]?.['409']).toBeTruthy();
+    }
+    expect(en.noDefaultHome?.['409']).toBe('No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one.');
+  });
 
   describe('US-003 default home selection', () => {
     /** US-003 AC-10: p1 is reachable but its `thread.create` is refused; p2 has it, and both have an anchor. */
@@ -148,11 +160,11 @@ describe('workspace home project creation', () => {
       expect(roles).toEqual({ a: 'DEVELOPER', b: 'DEVELOPER' });
     });
 
-    it('answers the agent error unchanged when no reachable project hosts the thread', async () => {
+    it('AC-2: agent automatic home fails when no reachable project hosts the thread', async () => {
       const agent: AgentPrincipal = { actorType: 'agent', id: 'ag', slug: 'ag', status: 'ACTIVE', agentRoles: [], capabilities: [] };
       refused.add('a'); refused.add('b');
 
-      await expect(service.create(agent, input)).rejects.toMatchObject({ prefix: 'threads.noFleetRepo', httpStatus: 409 });
+      await expect(service.create(agent, input)).rejects.toMatchObject({ prefix: 'threads.noDefaultHome', httpStatus: 409 });
       expect(create).not.toHaveBeenCalled();
     });
   });
