@@ -232,6 +232,9 @@ describe('ticketCommand', () => {
       ['missing title', ['--type', 'BUG'], undefined],
       ['unsupported default type', ['--title', 'Bad type'], { type: 'ALIEN', priority: 'HIGH' }],
       ['unsupported default priority', ['--title', 'Bad priority'], { type: 'TASK', priority: 'URGENT' }],
+      ['empty-string default priority', ['--title', 'Empty priority'], { type: 'TASK', priority: '' }],
+      ['false default priority', ['--title', 'False priority'], { type: 'TASK', priority: false as unknown as string }],
+      ['empty explicit priority does not fall back', ['--title', 'Empty explicit', '--type', 'TASK', '--priority', ''], { type: 'TASK', priority: 'HIGH' }],
       ['invalid default type overridden by flag', ['--title', 'Override', '--type', 'BUG'], { type: 'ALIEN', priority: 'HIGH' }, true],
       ['invalid default priority overridden by flag', ['--title', 'Override', '--priority', 'LOW'], { type: 'TASK', priority: 'URGENT' }, true],
       ['invalid explicit type does not fall back', ['--title', 'Invalid explicit', '--type', 'ALIEN'], { type: 'TASK', priority: 'HIGH' }],
@@ -255,6 +258,23 @@ describe('ticketCommand', () => {
         expect(processExitSpy).toHaveBeenCalledWith(3);
         expect(ticketsControllerCreate).not.toHaveBeenCalled();
       }
+    });
+
+    it('names an empty supplied priority in the exit 3 validation message', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'my-project', apiKey: 'stored-key-12345', apiUrl: 'http://localhost:3100',
+        defaults: { type: 'TASK', priority: '' },
+      });
+      (ticketsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ref: 'KODA-5' } });
+      const createCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync(['node', 'test', '--title', 'Blank priority']);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid priority "". Valid values: LOW, MEDIUM, HIGH, CRITICAL'),
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+      expect(ticketsControllerCreate).not.toHaveBeenCalled();
     });
 
     it('creates ticket with required options', async () => {

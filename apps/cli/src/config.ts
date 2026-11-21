@@ -79,28 +79,50 @@ export interface ResolvedContext {
 
 export type LogoutCleanup = 'global' | { profileName: string } | 'none';
 
-function normalizedApiBase(url: string): string {
-  const parsed = new URL(url);
+/**
+ * Normalize an API base URL for the ownership comparison, keeping path prefixes
+ * and nondefault ports while treating trailing slashes and the optional trailing
+ * `/api` as equivalent.
+ *
+ * Returns null for a URL that cannot be parsed. An unusable owning URL proves no
+ * ownership and an unusable used URL can match nothing, so cleanup treats null as
+ * a mismatch instead of letting `new URL` throw out of a successful logout.
+ */
+function normalizedApiBase(url: string | undefined): string | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
   const pathname = parsed.pathname.replace(/\/+$/, '').replace(/\/api$/, '').replace(/\/+$/, '');
   return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}`;
+}
+
+/** True only when both URLs are parseable and denote the same API base. */
+function ownsEndpoint(usedUrl: string | undefined, owningUrl: string | undefined): boolean {
+  const used = normalizedApiBase(usedUrl);
+  const owned = normalizedApiBase(owningUrl);
+  return used !== null && owned !== null && used === owned;
 }
 
 export function clearUsedCredential(ctx: ResolvedContext): LogoutCleanup {
   const provenance = ctx.credential;
   if (provenance.source === 'global' && provenance.owningUrl &&
       provenance.key === getConfig().apiKey &&
-      normalizedApiBase(ctx.apiUrl) === normalizedApiBase(provenance.owningUrl)) {
+      ownsEndpoint(ctx.apiUrl, provenance.owningUrl)) {
     const current = getConfig();
-    if (current.apiKey !== provenance.key || normalizedApiBase(current.apiUrl || DEFAULT_API_URL) !== normalizedApiBase(provenance.owningUrl)) return 'none';
+    if (current.apiKey !== provenance.key || !ownsEndpoint(current.apiUrl || DEFAULT_API_URL, provenance.owningUrl)) return 'none';
     store.set('apiKey', '');
     secureConfigFile();
     return 'global';
   }
   if (provenance.source === 'profile' && provenance.profileName && provenance.owningUrl &&
-      normalizedApiBase(ctx.apiUrl) === normalizedApiBase(provenance.owningUrl)) {
+      ownsEndpoint(ctx.apiUrl, provenance.owningUrl)) {
     const current = getConfig();
     const profile = current.profiles[provenance.profileName];
-    if (!profile?.apiUrl || profile.apiKey !== provenance.key || normalizedApiBase(profile.apiUrl) !== normalizedApiBase(provenance.owningUrl)) return 'none';
+    if (!profile?.apiUrl || profile.apiKey !== provenance.key || !ownsEndpoint(profile.apiUrl, provenance.owningUrl)) return 'none';
     store.set('profiles', { ...current.profiles, [provenance.profileName]: { ...profile, apiKey: '' } });
     secureConfigFile();
     return { profileName: provenance.profileName };

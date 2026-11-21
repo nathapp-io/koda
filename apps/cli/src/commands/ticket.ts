@@ -72,6 +72,16 @@ type TicketLink = {
 const FAILED_STATES = new Set(['FAILED', 'ESCALATED', 'CRASHED']);
 
 /**
+ * Render a supplied-but-invalid ticket field for a validation message. An empty
+ * string or a non-string JSON value (`false`, `0`) would otherwise print as
+ * nothing, so show its JSON form and let the message name what was rejected.
+ */
+function describeSuppliedValue(value: unknown): string {
+  if (typeof value === 'string' && value !== '') return value;
+  return JSON.stringify(value) ?? String(value);
+}
+
+/**
  * Fleet C9 §5: the ticket's fleet jobs. A courtesy section: any failure (an older API without the
  * endpoint, a network error) shows the ticket without it rather than failing `ticket show`.
  */
@@ -114,7 +124,10 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const effectiveType = options.type ?? ctx.defaults?.type;
-        const effectivePriority = options.priority ?? ctx.defaults?.priority;
+        // `unknown` on purpose: a project default is untrusted JSON, so a supplied
+        // value is validated even when it is falsy (`''`, `false`, `0`). Only an
+        // absent value (undefined/null) leaves the priority unspecified.
+        const effectivePriority: unknown = options.priority ?? ctx.defaults?.priority;
         if (!options.title) {
           return handleApiError(new Error('Missing required option: --title is required'), { validationError: true });
         }
@@ -128,8 +141,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-        if (effectivePriority && !validPriorities.includes(effectivePriority)) {
-          return handleApiError(new Error(`Invalid priority ${effectivePriority}. Valid values: ${validPriorities.join(', ')}`), { validationError: true });
+        const prioritySupplied = effectivePriority !== undefined && effectivePriority !== null;
+        if (prioritySupplied && !validPriorities.includes(effectivePriority as string)) {
+          return handleApiError(new Error(`Invalid priority ${describeSuppliedValue(effectivePriority)}. Valid values: ${validPriorities.join(', ')}`), { validationError: true });
         }
 
         const response = await ticketsControllerCreate({

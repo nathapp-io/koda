@@ -172,6 +172,49 @@ describe('authCommand', () => {
       expect(mockStore.set).not.toHaveBeenCalled();
     });
 
+    it('accepts logout when the selected profile owning URL is unusable', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://global.example';
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'not-a-url' } };
+      process.env.KODA_API_URL = 'https://deployment-b.example';
+      mockResolveContext.mockImplementation((flags: unknown) =>
+        actualConfig.resolveContext((flags ?? {}) as never, {
+          findProjectConfig: async () => ({ profile: 'selected' }),
+          getConfig: actualConfig.getConfig,
+        }),
+      );
+      mockClearUsedCredential.mockImplementation(actualConfig.clearUsedCredential);
+      mockLogout.mockResolvedValue({ ret: 0, data: {} });
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout']);
+
+      expect(mockLogout).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Logout request accepted'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('No saved credential was cleared'));
+      expect(mockData.profiles).toEqual({ selected: { apiKey: 'profile-key-12345', apiUrl: 'not-a-url' } });
+      expect(mockData.apiKey).toBe('global-key-12345');
+      expect(mockStore.set).not.toHaveBeenCalled();
+    });
+
+    it('accepts logout when the stored endpoint is replaced with an unusable URL mid-request', async () => {
+      mockData.apiKey = 'saved-global-key-12345';
+      mockData.apiUrl = 'https://deployment-a.example';
+      mockResolveContext.mockImplementation(actualConfig.resolveContext);
+      mockClearUsedCredential.mockImplementation(actualConfig.clearUsedCredential);
+      mockLogout.mockImplementation(async () => {
+        mockData.apiUrl = 'not-a-url';
+        return { ret: 0, data: {} };
+      });
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout']);
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(mockData.apiKey).toBe('saved-global-key-12345');
+      expect(mockData.apiUrl).toBe('not-a-url');
+      expect(mockStore.set).not.toHaveBeenCalled();
+    });
+
     it('sends logout and conditionally clears the used local credential', async () => {
       mockLogout.mockResolvedValue({ ret: 0, data: {} });
 

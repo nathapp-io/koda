@@ -469,6 +469,46 @@ describe('config', () => {
       expect(mockData.apiKey).toBe('global-key-12345');
     });
 
+    it('preserves a selected profile whose stored URL is unusable', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://global.example';
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'not-a-url' } };
+      process.env.KODA_API_URL = 'https://deployment-b.example';
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(ctx.apiUrl).toBe('https://deployment-b.example');
+      expect(ctx.credential).toEqual({
+        source: 'profile', key: 'profile-key-12345', profileName: 'selected', owningUrl: 'not-a-url',
+      });
+      // An unusable owning URL proves no ownership: cleanup must not throw `Invalid URL`.
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect((mockData.profiles as Record<string, Profile>).selected).toEqual({
+        apiKey: 'profile-key-12345', apiUrl: 'not-a-url',
+      });
+      expect(mockData.apiKey).toBe('global-key-12345');
+    });
+
+    it('does not claim ownership when the used endpoint is unusable', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://a.example';
+      process.env.KODA_API_URL = 'not-a-url';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      expect(ctx.apiUrl).toBe('not-a-url');
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(mockData.apiKey).toBe('global-key-12345');
+    });
+
+    it('preserves a stored endpoint replaced with an unusable URL while logout is pending', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://a.example';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      mockData.apiUrl = 'not-a-url';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(mockData.apiKey).toBe('global-key-12345');
+      expect(mockData.apiUrl).toBe('not-a-url');
+    });
+
     it('preserves a selected profile whose owning URL changes while logout is pending', async () => {
       mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example' } };
       const ctx = await resolveContext({}, {
