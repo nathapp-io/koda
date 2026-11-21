@@ -478,6 +478,7 @@
       "placeholder": "https://...",
       "type": "Link type",
       "add": "Add Link",
+      "invalidUrl": "Enter a full http:// or https:// URL",
       "toast": {
         "added": "Link added",
         "deleted": "Link removed"

@@ -478,6 +478,7 @@
       "placeholder": "https://...",
       "type": "链接类型",
       "add": "添加链接",
+      "invalidUrl": "请输入完整的 http:// 或 https:// 链接",
       "toast": {
         "added": "已添加链接",
         "deleted": "已移除链接"

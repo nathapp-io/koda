@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-vue-next'
 import TicketActionPanel from '~/components/TicketActionPanel.vue'
 import AssigneePicker from '~/components/AssigneePicker.vue'
 import { extractApiError } from '~/composables/useApi'
-import { safeHref } from '~/lib/safe-url'
+import { isHttpUrl, safeHref } from '~/lib/safe-url'
 import { apiPath } from '~/lib/api-path'
 import { useLocalDates } from '~/lib/local-dates'
 
@@ -252,6 +252,10 @@ async function removeLabel(labelId: string) {
 const newLinkUrl = vueRef('')
 const newLinkType = vueRef('pr')
 const addingLink = vueRef(false)
+const linkUrlInvalid = computed(() => {
+  const url = newLinkUrl.value.trim()
+  return url.length > 0 && !isHttpUrl(url)
+})
 
 async function addLink() {
   if (!newLinkUrl.value.trim()) return
@@ -490,10 +494,13 @@ async function removeLink(linkId: string) {
               <SelectItem value="url">url</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" :disabled="addingLink || !newLinkUrl.trim()" @click="addLink">
+          <Button size="sm" :disabled="addingLink || !newLinkUrl.trim() || linkUrlInvalid" @click="addLink">
             {{ t('tickets.links.add') }}
           </Button>
         </div>
+        <p v-if="linkUrlInvalid" class="text-xs text-destructive" data-testid="ticket-link-url-error">
+          {{ t('tickets.links.invalidUrl') }}
+        </p>
       </div>
     </details>
 
