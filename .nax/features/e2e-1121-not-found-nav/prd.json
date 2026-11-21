@@ -3,7 +3,7 @@
   "feature": "e2e-1121-not-found-nav",
   "branchName": "feat/e2e-1121-not-found-nav",
   "createdAt": "2026-11-21T16:51:25.362Z",
-  "updatedAt": "2026-11-21T17:21:32.528Z",
+  "updatedAt": "2026-11-21T17:27:27.334Z",
   "userStories": [
     {
       "id": "US-001",
@@ -220,14 +220,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A small state component and a localized existing-page branch reuse the established classifier; primary-fetch normalization is bounded and does not change access control or live behavior."
+        "reasoning": "A small state component and a localized existing-page branch reuse the established classifier; primary-fetch normalization is bounded and does not change access control or live behavior.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/ErrorState.vue",
@@ -251,7 +254,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "369697b515b0f00fdcff6d8df21d15b2747e63e6"
     },
     {
       "id": "US-005",
