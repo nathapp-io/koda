@@ -97,7 +97,7 @@ export class PasswordResetService {
       row,
       'PASSWORD_RESET',
       { url: this.email.webUrl(`/reset-password/${raw}`), expiresAt: expiresAt.toISOString() },
-      user.id,
+      null,
       now,
       // Retry is off: only the hash is stored, so a retry could never present the same link again.
       false,

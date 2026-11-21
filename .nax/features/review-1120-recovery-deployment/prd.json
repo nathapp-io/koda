@@ -1,0 +1,395 @@
+{
+  "project": "koda",
+  "feature": "review-1120-recovery-deployment",
+  "branchName": "feat/review-1120-recovery-deployment",
+  "createdAt": "2026-11-20T14:49:09.751Z",
+  "updatedAt": "2026-11-20T16:56:30.016Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Deliver requested recovery mail independently of notification preferences",
+      "description": "**Goal** — Deliver requested PASSWORD_RESET mail to opted-out accounts while preserving schedule attribution and ordinary notification preferences.\n\n**Motivation** — The reset route reported success while the real notification service skipped the opted-out account.\n\n**Approach** — **Reset delivery.** `PasswordResetService.issueReset` stores user identity on the schedule row and also supplies it to `EmailDispatcher.sendOne`. Pass `null` only for the latter preference lookup, matching the existing invite path. The schedule retains the account and destination. Ordinary notification email continues to apply the master and category preferences. The reset route keeps its generic response and detached delivery.\n\n**Scope** — In: change password-reset.service.ts and its existing unit AC-3 assertion, preserve the attributed schedule assertion, update the separate AC-3 assertion in password-reset-request.integration.spec.ts and add opted-out/opted-in real-notify cases there. Out: Compose forwarding (US-002), timer gating (US-003), preparation retry settlement (US-004), backup and restore (US-005/006); changes to authentication tokens, reset throttling, notification library APIs or the preference schema.\n\n**Interface** — No new public interface is specified. Preserve EmailDispatcher.sendOne's existing nullable userId preference-principal parameter and retryable=false for recovery; retain userId on startPasswordResetSend input and the persisted row.\n\n**Verification** — For these cases call through the suite's NOTIFY_SERVICE.send spy and record the email channel obtained through DELIVERY_CHANNEL_REGISTRY, as in notify-send.integration.spec.ts. Run the ordinary notify control under its existing SYSTEM/email test actor so the preference check and delivery logging have their production action context. Await completion of detached sends before restoring the channel spy or clearing fixtures. Assert the ordinary response, exact provider count, locale/destination/attribution, and that the delivered link hashes to the stored token. Use canRunDbTests() for the real persistence suite and retain existing disabled-account, unconfigured-email and detached-response regressions.",
+      "acceptanceCriteria": [
+        "[integration] When POST /api/auth/password-reset receives an active opted-out fixture account, then it returns the ordinary 200 response {ret:0,data:{}}.",
+        "[integration] When the opted-out account's detached reset send completes through the real NOTIFY_SERVICE, then the recording provider has received exactly one PASSWORD_RESET email.",
+        "[integration] When that detached send finishes, then its EmailSchedule row is SENT with the account ID, destination and selected locale.",
+        "[integration] When the delivered reset link's raw token is hashed, then it matches the persisted password-reset token hash.",
+        "[integration] Given the same account opted in, when POST /api/auth/password-reset is called, then the real notify path still delivers exactly one recovery email.",
+        "[integration] Given the opted-out principal, when an ordinary notification is sent through the real notify path under SYSTEM/email, then the recording provider receives zero calls.",
+        "[unit] When the service request fixture issues a reset, then EmailDispatcher.sendOne receives null as the delivery preference principal.",
+        "[unit] When the service request fixture issues a reset, then EmailDispatcher.sendOne receives retryable=false, keeping retry disabled.",
+        "[unit] When the service request fixture issues a reset, then schedule.startPasswordResetSend receives input.userId equal to the account ID, preserving attribution on the schedule entry."
+      ],
+      "tags": [
+        "api",
+        "email",
+        "security",
+        "password-recovery"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small caller change with real notification-library and detached-task integration risks; password recovery is security-critical and requires strict test/implementation isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/auth/password-reset/password-reset.service.ts",
+        "apps/api/src/email/email-dispatcher.ts",
+        "apps/api/test/integration/auth/password-reset-request.integration.spec.ts",
+        "apps/api/src/projects/invites/invite-mailer.ts",
+        "apps/api/test/integration/email/notify-send.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/password-reset/password-reset.service.ts",
+          "reason": "decouple requested reset delivery from the preference principal while retaining schedule attribution."
+        },
+        {
+          "path": "apps/api/src/auth/password-reset/password-reset.service.spec.ts",
+          "reason": "update the existing AC-3 argument assertion and preserve the attributed schedule assertion."
+        },
+        {
+          "path": "apps/api/test/integration/auth/password-reset-request.integration.spec.ts",
+          "reason": "update its separate AC-3 assertion and exercise the real NOTIFY_SERVICE preference branch for the new cases. For these cases call through the suite's NOTIFY_SERVICE.send spy and record the email channel obtained through DELIVERY_CHANNEL_REGISTRY, as in notify-send.integration.spec.ts. Run the ordinary notify control under its existing SYSTEM/email test actor so the preference check and delivery logging have their production action context. Await completion of detached sends before restoring the channel spy or clearing fixtures."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "82e8d858fe0c972ff653f58fe82a021ba837e069"
+    },
+    {
+      "id": "US-002",
+      "title": "Forward optional email configuration through both Compose deployments",
+      "description": "**Goal** — Expose optional SMTP_URL, EMAIL_FROM and WEB_PUBLIC_URL to the API in both shipped Compose manifests.\n\n**Motivation** — Both Compose renders omitted all three email settings.\n\n**Approach** — **Deploy configuration.** Add optional `SMTP_URL`, `EMAIL_FROM` and `WEB_PUBLIC_URL` to the API service in each Compose environment. An empty setting already means absent to `emailConfig`. Keep its existing validation when SMTP is supplied. Use synthetic credentials for Compose tests and inspect selected fields without logging the rendered environment.\n\n**Scope** — In: root docker-compose.yml, deployments/example/docker-compose.yml and the new compose-email-config.integration.spec.ts; preserve existing test cache inputs in apps/api/turbo.json. Out: recovery preference bypass (US-001), scheduled dispatch behavior (US-003/004), backup/restore tooling (US-005/006), notification library APIs and credential-validation changes.\n\n**Interface** — The deployment interface is the existing optional environment variables SMTP_URL, EMAIL_FROM and WEB_PUBLIC_URL in services.api.environment; no DTO or generated client changes.\n\n**Verification** — The Compose rendering checks require only the Compose CLI. Run their focused Vitest file with DB opt-in unset to bypass the root DB bootstrap. Use explicit synthetic env files, explicit manifest paths and unique explicit project names; inspect evaluated JSON fields and the JWT_EXPIRES_IN=5m control, not raw YAML text. Exercise both supplied and omitted settings for both manifests, checking that neither web nor postgres receives SMTP_URL in either case. Also omit only JWT_SECRET while supplying the other required credentials and assert the existing Compose validation still rejects that render; this is regression verification, not a validation-rule change. Give subprocesses an explicit env file and controlled environment so inherited values cannot override the synthetic inputs. Do not log the rendered environment or leak SMTP credentials, and do not send mail or start deployment services.",
+      "acceptanceCriteria": [
+        "[integration] Given an explicit synthetic env file, when docker compose config renders each shipped manifest, then services.api.environment contains the exact supplied SMTP_URL, EMAIL_FROM and WEB_PUBLIC_URL values plus JWT_EXPIRES_IN=5m.",
+        "[integration] Given only the manifests' required credentials, when each manifest is rendered, then docker compose config returns success.",
+        "[integration] Given only the manifests' required credentials, when each manifest is rendered, then all three email settings are absent or empty on services.api.environment.",
+        "[integration] When each shipped manifest is rendered both with supplied synthetic mail settings and with only its required credentials, then services.web.environment never receives SMTP_URL in either render.",
+        "[integration] When each shipped manifest is rendered both with supplied synthetic mail settings and with only its required credentials, then services.postgres.environment never receives SMTP_URL in either render.",
+        "Given all other required credentials supplied but JWT_SECRET absent from the controlled process environment and explicit synthetic env file, when either shipped manifest is rendered, then docker compose config exits nonzero, preserving the existing required-credential validation (negative-path regression)."
+      ],
+      "tags": [
+        "api",
+        "email",
+        "deployment",
+        "compose",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two additive manifest changes with a real Compose rendering seam; credential propagation and isolation trigger the security strategy override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "docker-compose.yml",
+        "deployments/example/docker-compose.yml",
+        "apps/api/src/config/email.config.ts",
+        "apps/api/turbo.json"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/email/compose-email-config.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "docker-compose.yml",
+          "reason": "forward the three settings to the api service."
+        },
+        {
+          "path": "deployments/example/docker-compose.yml",
+          "reason": "forward the same settings to the api service."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2b72762a91e0b3d7c5ffd247f8eb958d39af7936"
+    },
+    {
+      "id": "US-003",
+      "title": "Preserve queued email across SMTP-disabled restarts",
+      "description": "**Goal** — Suspend the entire periodic dispatcher while SMTP is absent and resume retained queued mail on an enabled process restart.\n\n**Motivation** — With SMTP temporarily disabled, an eligible queued row became permanently failed.\n\n**Approach** — **Scheduled delivery.** Keep the dispatcher injectable for immediate sends. Install its periodic dispatcher only when mail is configured. Use EmailAvailability.configured (SMTP presence) at module initialization. Disabling the scheduled timer defers its whole tick, including closeAbandonedInvites. After restart with SMTP restored, the first scheduled tick closes expired SENDING INVITE and PASSWORD_RESET rows as FAILED/abandoned, then claims eligible queued notification rows. Immediate one-shot rows are never resent. For EmailContentBuilder.build failures use the claimed row’s existing attempt number, configured limit and backoff. Keep repository settlement failures separate from build errors. If settling a failed build itself throws, log it and continue to the next claimed row. Keep skip handling, transport permanent-error classification, existing backoff timings and per-row isolation.\n\n**Scope** — In: implement the lifecycle/availability portion of the shared scheduled-delivery design in email-dispatcher.ts and its unit fixture; preserve NotificationsModule's injectable dispatcher and the repository's existing close/claim behavior. Out: the preparation-error settlement portion of the shared design belongs to dependent US-004; reset principal selection (US-001), Compose wiring (US-002) and backup/restore (US-005/006); distributed email leases, exactly-once SMTP delivery and changes to the existing retry schedule.\n\n**Interface** — Preserve onModuleInit(), onModuleDestroy(), runScheduledTick(now), tick(now) and sendOne(...); use the existing EmailAvailability.configured getter rather than WEB_PUBLIC_URL. Keep SYSTEM/email execution, 30-second timing and non-overlap behavior. This is restart-based configuration, not hot reload.\n\n**Failure handling** — A disabled installation leaves due rows available for the next enabled process.\n\n**Verification** — Extend email-dispatcher.spec.ts with fake timers and a retained queue shared by successive disabled/enabled dispatcher instances. Advance two intervals with SMTP absent and public URL present, then start an enabled instance and advance one interval. Include expired immediate INVITE/PASSWORD_RESET rows in the retained state, assert close-before-claim, terminal abandonment without provider replay, single notification delivery and stopped claims after destruction. Keep this lifecycle/DI verification unit-level and database-free.",
+      "acceptanceCriteria": [
+        "[unit] Given SMTP absent and the public URL present, when the dispatcher initializes and two tick intervals elapse, then the eligible due row remains pending with its original attempt count.",
+        "[unit] Given SMTP absent and the public URL present, when two initialized scheduler intervals elapse, then the provider, closeAbandonedInvites and claimDue each have zero calls.",
+        "[unit] Given the retained queue and an enabled dispatcher, when its first interval elapses, then closeAbandonedInvites is invoked before claimDue.",
+        "[unit] Given the retained queue and an enabled dispatcher, when its first interval elapses, then the retained due notification is claimed exactly once.",
+        "[unit] Given the retained queue and an enabled dispatcher, when its first interval elapses, then the retained notification is delivered exactly once.",
+        "[unit] When that enabled scheduled delivery finishes, then the retained notification row is settled SENT.",
+        "[unit] When the enabled process performs its first existing closeAbandonedInvites operation, then expired SENDING INVITE and PASSWORD_RESET rows are closed as FAILED with lastError=abandoned.",
+        "[unit] When the enabled process handles the retained queue, then expired immediate-send rows are never passed to the provider.",
+        "[unit] When the enabled dispatcher is destroyed and later intervals elapse, then no later scheduled claims occur."
+      ],
+      "tags": [
+        "api",
+        "email",
+        "scheduler",
+        "recovery"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A conditional timer installation and retained-queue fake-timer tests use existing injected seams; immediate-send token handling and authentication logic remain unchanged.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/email/email-dispatcher.ts",
+        "apps/api/src/email/email-dispatcher.spec.ts",
+        "apps/api/src/email/email-availability.ts",
+        "apps/api/src/notifications/notifications.module.ts",
+        "apps/api/src/email/schedule/email-schedule.repository.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/email/email-dispatcher.ts",
+          "reason": "gate periodic dispatch on configured availability."
+        },
+        {
+          "path": "apps/api/src/email/email-dispatcher.spec.ts",
+          "reason": "cover initialization with disabled and subsequently enabled configuration over a retained queue."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8ec2b92ddced9f74e5a0e396355d998009a5f3ef"
+    },
+    {
+      "id": "US-004",
+      "title": "Enforce retry exhaustion during scheduled email preparation",
+      "description": "**Goal** — Apply the existing attempt cap to EmailContentBuilder failures without confusing repository settlement errors with preparation failures or stopping a batch.\n\n**Motivation** — At the configured fifth attempt a build error queued another retry.\n\n**Approach** — **Scheduled delivery.** Keep the dispatcher injectable for immediate sends. Install its periodic dispatcher only when mail is configured. Use EmailAvailability.configured (SMTP presence) at module initialization. Disabling the scheduled timer defers its whole tick, including closeAbandonedInvites. After restart with SMTP restored, the first scheduled tick closes expired SENDING INVITE and PASSWORD_RESET rows as FAILED/abandoned, then claims eligible queued notification rows. Immediate one-shot rows are never resent. For EmailContentBuilder.build failures use the claimed row’s existing attempt number, configured limit and backoff. Keep repository settlement failures separate from build errors. If settling a failed build itself throws, log it and continue to the next claimed row. Keep skip handling, transport permanent-error classification, existing backoff timings and per-row isolation.\n\n**Scope** — In: implement preparation-error classification and settlement in email-dispatcher.ts and unit boundary/batch cases in email-dispatcher.spec.ts. Preserve the lifecycle behavior provided by US-003. Out: altering US-003's timer design, reset preference-principal selection (US-001), Compose configuration (US-002), backup/restore (US-005/006); distributed leases, exactly-once SMTP delivery and changes to the existing retry schedule.\n\n**Interface** — Reuse EmailScheduleRow.attempts, EmailAvailability.config().maxAttempts, schedule.markFailed(id,error), schedule.retryAt(id,dueAt,error) and the existing backoffDue algorithm. claimDue already increments attempts: do not increment again. Narrow the build exception boundary; failed markSkipped/send settlement must not be relabeled as build errors. Keep per-row isolation and existing skip/permanent transport behavior.\n\n**Failure handling** — Retry exhaustion ends a row in FAILED with its capped error.\n\n**Verification** — Add builder preference-lookup failures at attempts one, five and six with maxAttempts five. At/above the cap assert markFailed with the original error and no retry; below it assert the existing two-minute backoff and retryable state. Exercise an exhausted row followed by eligible content, a transient transport error at the limit, and markFailed throwing while settling an exhausted build error. Assert settlement-error logging and continued processing of the next row. Retain repository error capping at LAST_ERROR_MAX=500 and existing transport classification tests. Verify capping at the existing EmailScheduleRepository seam with an injected Prisma fake so the unit assertion observes the persisted update arguments without requiring a real database.",
+      "acceptanceCriteria": [
+        "[unit] Given claim attempts=5 and maxAttempts=5, when EmailContentBuilder.build throws a preference lookup error, then the dispatcher settles the row FAILED with that error.",
+        "[unit] Given claim attempts=5 and maxAttempts=5, when the builder throws that error, then the dispatcher issues no retry.",
+        "[unit] Given claim attempts=6 and maxAttempts=5, when the builder throws the same error, then the row is settled FAILED with that error rather than retried.",
+        "[unit] Given claim attempts=1 and maxAttempts=5, when the builder throws the same error, then retryAt schedules the existing two-minute backoff and leaves the row retryable.",
+        "[unit] Given an exhausted preparation failure followed by an eligible row, when one scheduled batch runs, then exactly one failure is recorded for the exhausted row.",
+        "[unit] Given an exhausted preparation failure followed by an eligible row, when one scheduled batch runs, then the eligible row delivers exactly one message.",
+        "[unit] Given a transient transport failure at the configured attempt limit, when scheduled delivery runs, then the row still ends FAILED.",
+        "[unit] When marking an exhausted build failure throws at the repository seam, then the dispatcher logs the settlement error.",
+        "[unit] When marking an exhausted build failure throws at the repository seam, then the dispatcher still calls the injected NOTIFY_SERVICE.send exactly once with the next eligible row's recipient.",
+        "Given an exhausted preparation failure with an error longer than LAST_ERROR_MAX, when its failure is persisted, then lastError contains the error capped at the existing 500-character limit (spec Failure Handling)."
+      ],
+      "tags": [
+        "api",
+        "email",
+        "retry",
+        "resilience"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized dispatcher control-flow correction using existing attempts, backoff and settlement APIs; no authentication, token or access-control behavior changes in this story.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/email/email-dispatcher.ts",
+        "apps/api/src/email/email-dispatcher.spec.ts",
+        "apps/api/src/email/email-content.builder.ts",
+        "apps/api/src/email/schedule/email-schedule.types.ts",
+        "apps/api/src/email/schedule/email-schedule.repository.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/email/email-dispatcher.ts",
+          "reason": "distinguish preparation failure from dispatch bookkeeping and apply the attempt limit to preparation errors."
+        },
+        {
+          "path": "apps/api/src/email/email-dispatcher.spec.ts",
+          "reason": "exercise below-limit, final and over-limit preparation failures and continued batch processing."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "868ac3f16abfc0b6112c55916e9c2bc70c0bf77c"
+    },
+    {
+      "id": "US-005",
+      "title": "Create private host-owned PostgreSQL and data backups",
+      "description": "**Goal** — Make new backup artifacts private from creation and readable by the invoking host account while retaining complete dump validation and numeric data ownership metadata.\n\n**Motivation** — Separately, under umask 022 the backup created a 0755 directory and 0644 compressed and plaintext database files.\n\n**Approach** — **Backup.** Set the host umask before creating any artifacts, enforce 0700 on the script's own backups directory even when it already exists, and create dump, temporary archive and published archive as owner-readable/writable only. Fail before dumping if the directory cannot be secured. Stream the archive from the project API container with no TTY (for example `compose run -T --rm --no-deps --user root --entrypoint tar api -czf - -C /data .`) into a host-created private partial; the invoking host account then owns and can recover it even on Linux. Keep project resolution and numeric ownership metadata inside the archive. Verify the exact existing pg_dump completion-marker line by consuming the entire decompressed stream under pipefail, without storing a plaintext copy. Keep gzip integrity checks, failure cleanup and timestamp/PID names.\n\n**Scope** — In: backup-db.sh, existing backup script unit tests, shared docker stub and deploy-script-harness.ts, plus the new real backup-permissions fixture. Preserve deploy.sh callers and rollback stub behavior. Out: PostgreSQL restore runbook and fixture (US-006), all mail changes (US-001–004); encrypting backups, changing historical backup file ownership, operating on an existing deployment, changing the dump format or the LanceDB rollback procedure.\n\n**Interface** — Preserve the shipped script's sibling Compose/.env resolution and timestamp/PID artifact naming. Produce koda-db-<stamp>.sql.gz and koda_data-<stamp>.tar.gz; tar writes binary stdout without a TTY and the host owns the private partial and final file. The exact completion marker remains '-- PostgreSQL database dump complete'.\n\n**Failure handling** — A failed archive write removes its partial and leaves the independently verified SQL dump available.\n\n**Verification** — Replace the old exact bind-mount argv, archive-command stamp extraction and tar failure matcher with equivalent assertions for binary stdout, host partial publication, private modes and cleanup. Retain complete-marker, large-stream, gzip content, stop-on-failure and uniqueness coverage. Have the docker stub emit synthetic archive bytes to stdout for the new archive command, including a prefix on injected failure, while preserving existing pg_dump and rollback behavior. Extend the harness for per-child umask and pre-existing-directory fixtures without changing the parent process's umask.\n\nUse the existing canRunDbTests() opt-in for real Docker/PostgreSQL suites. Copy the shipped backup script alongside a synthetic docker-compose.yml and .env in a private fixture directory since it resolves services relative to its own path. Use unique explicit Compose project names and restrict cleanup to the synthetic containers, databases and files created by that case. For real fixtures canRunDbTests() requires KODA_DB_TESTS=1 outside NAX_SANDBOXED=1. The shared Vitest setup may provision its own test database there. Neither Compose fixture uses the inherited DATABASE_URL, KODA_TEST_DATABASE_URL or project name to address a service. Give its subprocesses an explicit env file and controlled environment so inherited values cannot override the synthetic inputs. Use an actual root tar producer and host redirection, compare host UID where available and report root-only ownership control as unexercised while still checking modes/readability/content. Inspect numeric UID/GID in tar headers rather than requiring the non-root host extractor to chown files.",
+      "acceptanceCriteria": [
+        "[unit] Given child umask 022, when backup-db.sh starts, then a new backups directory is 0700 before the first dump output. Given child umask 022 and an existing 0755 backups directory, when backup-db.sh starts, then the directory is tightened to 0700 before the first dump output.",
+        "[unit] Given child umask 022, when the compressed dump and partial archive are created, then each is owner-readable/writable only from creation. When backup-db.sh verifies the SQL gzip, then no plaintext dump file is created.",
+        "[unit] Given a regular file where the backups directory should be, when backup-db.sh runs, then it fails before any pg_dump call.",
+        "[unit] Given a completion-marker line followed by more than 1 MiB of data, when the verifier consumes the stream under pipefail, then verification succeeds. Given a dump missing the exact completion-marker line, when backup-db.sh runs, then it returns nonzero with no accepted SQL dump.",
+        "[unit] Given invalid compressed input, when backup-db.sh verifies the dump, then it returns nonzero with no accepted SQL dump. Given a failed pg_dump, when backup-db.sh runs, then it returns nonzero with no accepted SQL dump.",
+        "[unit] Given a container tar failure after writing partial stdout, when backup-db.sh runs, then it returns nonzero. Given a container tar failure after writing partial stdout, when cleanup finishes, then no partial or published volume archive remains and only the independently verified SQL dump is retained as a backup artifact.",
+        "[unit] Given two successful same-second invocations, when their backups are published, then their final artifact names are distinct.",
+        "[integration] Given an isolated Docker Compose fixture and invoking umask 022, when the shipped script succeeds, then its backups directory is 0700. Given that real Compose fixture, when the shipped script succeeds, then both final artifacts have mode 0600.",
+        "[integration] Given that real Compose fixture, when the shipped script succeeds, then both final artifacts are readable by the invoking host user. Given an available invoking host UID, when the real backup artifacts are inspected, then their host file owner matches that UID, exercising the Linux ownership regression on a non-root host runner.",
+        "[integration] Given a root-only host, when the real backup fixture runs, then ownership control is reported as unexercised while mode, readability and content checks still execute.",
+        "[integration] When the real data archive's tar headers are inspected, then they contain the synthetic source files' numeric UID and GID, without requiring a non-root host extractor to chown extracted files. When the real data archive is extracted in the fixture, then the synthetic source-file contents are reproduced.",
+        "[integration] When the real SQL gzip is decompressed, then it contains a complete dump including the synthetic database fixture."
+      ],
+      "tags": [
+        "api",
+        "deployment",
+        "backup",
+        "security",
+        "docker"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Host/container ownership, private creation modes, binary stdout pipelines and shared shell harness behavior cross multiple seams; confidential backup access control requires strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "deployments/example/backup-db.sh",
+        "deployments/example/deploy.sh",
+        "apps/api/test/unit/tooling/backup-db-script.spec.ts",
+        "apps/api/test/unit/tooling/deploy-script.spec.ts",
+        "apps/api/test/unit/tooling/deploy-script-harness.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/db/backup-permissions.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/backup-db.sh",
+          "reason": "create private host artifacts, verify SQL by streaming and publish only a completed volume archive."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/backup-db-script.spec.ts",
+          "reason": "replace the old exact bind-mount argv, archive-command stamp extraction and tar failure matcher with equivalent assertions for binary stdout, host partial publication, private modes and cleanup. Retain complete-marker, large-stream, gzip content, stop-on-failure and uniqueness coverage."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/helpers/deploy-script-stubs/docker",
+          "reason": "emit synthetic archive bytes to stdout for the new archive command, including a prefix on injected failure. Preserve existing pg_dump and rollback stub behavior."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/helpers/deploy-script-harness.ts",
+          "reason": "provide per-child umask and pre-existing-directory fixtures for the backup tests without changing the parent test process's umask."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "49731dc097fbbf4a137950d26c6f5a4abf0f92e8"
+    },
+    {
+      "id": "US-006",
+      "title": "Restore PostgreSQL into a verified fresh target before cutover",
+      "description": "**Goal** — Replace unsafe in-place recovery shortcuts with an executable fresh-target restore, verification, persistent cutover and reversal procedure exercised on disposable PostgreSQL 16.\n\n**Motivation** — The existing restore command exited zero on a populated PostgreSQL 16 fixture despite SQL errors and retained newer rows.\n\n**Approach** — **PostgreSQL restore.** Replace the in-place SQL replay in the example guide and the equivalent shortcut in the PostgreSQL guide. Give a shell procedure with explicit Compose file/project and configured role, archive, current DB and distinct new DB names. Stop all writers before recovery, keep the original DB for fallback, use a newly created database from template0, and abort if creation fails (including an existing name). Run the marked command blocks in a Bash script with errexit and pipefail so a nonzero step terminates the procedure. Require `psql -X -v ON_ERROR_STOP=1`. Test gzip integrity, treat decompression or SQL failure as a failed restore, and leave a failed staging DB offline. Show successful completion plus database-level checks such as known application row counts and migration records against an expected baseline captured for that backup. Make an actual mismatch terminate the procedure with nonzero status before the connection setting is changed. A SELECT that merely prints false is insufficient. Give the operator explicit cutover instructions for changing the bundled Compose project’s persistent POSTGRES_DB setting, from which the api service derives DATABASE_URL, and recreating the affected service containers with the same project and volumes. A plain compose restart does not reread environment values. Reversal restores the original setting and recreates the services in that project. Stage fixture data in explicitly named databases using the configured role. Parameterize database names through PostgreSQL client arguments or identifier quoting, and check current and target names before creation. Document the separate LanceDB archive restored by rollback.sh.\n\n**Scope** — In: replace the example README's PostgreSQL replay shortcut with marked executable recovery/verification/cutover/reversal blocks, update docs/deployment/postgresql.md to link to that procedure, and create documented-restore.integration.spec.ts executing those exact blocks. Pair the gzip recovery procedure with a gzip backup example and explain how an existing plain SQL dump reaches the same fresh-target psql step. Out: changes to US-005's backup format or implementation, all mail changes (US-001–004); automating PostgreSQL cutover in rollback.sh, changing the dump format, changing the LanceDB rollback procedure, or operating on an existing deployment.\n\n**Interface** — Use explicit shell inputs for Compose file/project/env file, configured role, gzip archive, current and distinct target database names, and backup-specific expected row/migration baselines. Mark the actual command blocks consumed by the fixture; do not substitute a test-only reimplementation. Preserve the persistent bundled POSTGRES_DB interface and the same named volumes. Cutover and reversal recreate affected services rather than calling restart.\n\n**Failure handling** — A failed restore never authorizes cutover or a writer restart.\n\n**Verification** — Exercise actual marked blocks with a disposable PostgreSQL 16 service and a synthetic API database client. Seed (1,before), capture the snapshot/baseline, then change the original to (1,after) and (2,new). Check exact restored rows, retained original rows, existing-target sentinel preservation, immediate SQL-error termination before a following sentinel INSERT, invalid/truncated gzip failures, actual cutover/reversal client reads and a wrong-baseline failure with unchanged persisted DB selection and zero writer starts. Leave failed staging databases offline for application writers: retain the original persistent POSTGRES_DB setting, issue no writer-start commands, and keep any newly created target available only for stopped-service operator inspection. Use known application row counts and migration records as real nonzero gates, not SELECT output that merely prints false.\n\nUse the existing canRunDbTests() opt-in for real Docker/PostgreSQL suites. Use unique explicit Compose project names and restrict cleanup to the synthetic containers, databases and files created by that case. For real fixtures canRunDbTests() requires KODA_DB_TESTS=1 outside NAX_SANDBOXED=1. The shared Vitest setup may provision its own test database there. Neither Compose fixture uses the inherited DATABASE_URL, KODA_TEST_DATABASE_URL or project name to address a service. Give its subprocesses an explicit env file and controlled environment so inherited values cannot override the synthetic inputs. Never select a database from developer environment settings. Keep the LanceDB archive and rollback.sh's existing recovery instructions separate from this PostgreSQL runbook.",
+      "acceptanceCriteria": [
+        "[integration] Given a PostgreSQL 16 snapshot containing (1,before) and an original database later holding (1,after) and (2,new), when the documented commands restore into a distinct newly created database, then a target query returns exactly (1,before). Given that snapshot and later original database, when the documented fresh-target restore completes, then both newer rows remain in the original database.",
+        "[integration] Given an already existing target, when the documented preparation and restore sequence runs, then it returns nonzero before replay. Given an already existing target, when the documented sequence refuses it, then its pre-existing sentinel row remains unchanged.",
+        "[integration] Given an already existing target, when the documented sequence refuses it, then the original database contents remain unchanged.",
+        "[integration] Given valid gzip containing invalid SQL, when the documented restore sequence runs, then it returns nonzero at the SQL error. Given invalid SQL followed by a sentinel INSERT in the gzip stream, when the documented sequence encounters the error, then the following sentinel insert never executes.",
+        "[integration] Given valid gzip containing invalid SQL, when the documented sequence fails, then the persistent POSTGRES_DB setting remains the original database, so no cutover occurs.",
+        "[integration] Given an invalid gzip archive, when the documented procedure runs, then it exits nonzero. Given a truncated gzip archive, when the documented procedure runs, then it exits nonzero.",
+        "[integration] Given either invalid or truncated gzip, when the documented procedure fails, then the original database remains queryable with its pre-restore contents.",
+        "[integration] Given successful fresh-target checks in an isolated Compose fixture, when the documented cutover changes persistent POSTGRES_DB and recreates the affected client services with the same project and volumes, then the synthetic API database client reads the backup sentinel from the restored database. Given a successful cutover, when the documented reversal restores the original setting and recreates the affected services in that project, then the synthetic client reads the newer sentinel from the retained original database.",
+        "[integration] Given an incorrect expected row baseline, when the same marked procedure runs, then it returns nonzero. Given an incorrect expected row baseline, when the same marked procedure fails, then the persisted POSTGRES_DB setting stays equal to the original database name.",
+        "[integration] Given an incorrect expected row baseline, when the same marked procedure fails, then the fixture records zero writer starts after the failure.",
+        "When a preparation, SQL replay, decompression or baseline-verification step fails, then the fixture records zero writer-start commands and the persistent connection setting never selects the failed staging database, leaving it offline for application writers rather than authorizing cutover or a writer restart (spec Failure Handling)."
+      ],
+      "tags": [
+        "api",
+        "deployment",
+        "postgresql",
+        "recovery",
+        "runbook"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Existing Compose/PostgreSQL interfaces support the runbook without architectural changes, but executable blocks, failure gates and a real synthetic-client cutover/reversal fixture require multi-session integration verification.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "deployments/example/README.md",
+        "deployments/example/backup-db.sh",
+        "deployments/example/docker-compose.yml",
+        "deployments/example/rollback.sh",
+        "apps/api/test/helpers/test-environment.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/db/documented-restore.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/README.md",
+          "reason": "replace the in-place pipeline with the fresh-target recovery, verification, cutover and fallback runbook. Mark the executable example consumed by the integration fixture."
+        },
+        {
+          "path": "docs/deployment/postgresql.md",
+          "reason": "replace its existing populated-target psql shortcut with guidance linked to the example recovery procedure, accounting for role and project names. Pair the gzip procedure with a gzip backup example, and explain how an existing plain SQL dump reaches the same fresh-target psql step."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "161141ae76f5179c0087f27a2fcac4b781946177"
+    }
+  ],
+  "analysis": "FEATURE AND EVIDENCE\nThis is a targeted enhancement of an existing deployment and email subsystem, implementing only verified-review findings 1, 3, 4, 5, 6 and 7. The evidence and observed regressions are recorded in docs/20261120-review-37b396c49.md:7 and docs/20261120-review-37b396c49.md:43. Done means recovery mail bypasses notification opt-out without losing attribution, both shipped Compose manifests forward optional mail configuration, disabled SMTP preserves the scheduled queue, preparation failures respect the existing attempt cap, backup artifacts are private and host-owned, and the documented fresh-target restore fails closed before any cutover. No implementation or validation commands were run during this PRD drafting pass. codebase-memory and package-documentation MCP tools are not exposed in this session; navigation used direct reads and targeted text searches instead.\n\nARCHITECTURE AND REPOSITORY RULES\nThe API is NestJS 12 on Fastify with Prisma 7/PostgreSQL 16 and Vitest, not a standalone Fastify application. The web app is Nuxt, despite the supplied detector calling it Next.js; it requires no changes for this feature. Read .nax/mono/apps/api/context.md:1 and the capability catalog at .nax/rules/nathapp-packages.md:9 before Nest changes; consult the Nathapp docs MCP when available rather than introducing notification-library replacements. Existing packages are sufficient: apps/api/package.json:48 lists the notification platform and apps/api/package.json:80 already provides tar-stream for archive-header inspection. Use vi mocks, SWC decorator metadata, generated Prisma imports and existing action-context helpers. Preserve generic auth envelopes, detached reset delivery and token secrecy. Do not edit generated AGENTS.md or generated clients. Every story has the binding workdir apps/api, even US-002/005/006, whose repo-root deployment/documentation paths must still be edited relative to the repository root. Exactly six stories and their declared dependencies are retained.\n\nUS-001: RECOVERY DELIVERY\napps/api/src/auth/password-reset/password-reset.service.ts:60 checks user existence, disabled status and EmailAvailability before detaching startReset. At :77 the detached task uses bookkeeping('auth.password-reset-request'); issueReset at :85 writes only a token hash, creates an attributed PASSWORD_RESET schedule row, and at :99 calls sendOne with user.id and retryable=false. The defect is the fourth sendOne argument, not schedule attribution or the HTTP contract. Change only that preference principal to null. The existing invite precedent is apps/api/src/projects/invites/invite-mailer.ts:51, which sends with null and retry disabled. apps/api/src/email/email-dispatcher.ts:109 accepts a nullable preference principal and maps null to an absent notify userId; never replace row.userId with null. Ordinary notification master/category checks remain in apps/api/src/email/email-content.builder.ts:47 and the real notify service.\nExisting assertions needing updates are apps/api/src/auth/password-reset/password-reset.service.spec.ts:103 and apps/api/test/integration/auth/password-reset-request.integration.spec.ts:186. Both currently expect user.id as sendOne's preference principal. Preserve their schedule attribution checks. The integration suite currently spies on NOTIFY_SERVICE.send and stubs it to resolve in beforeEach (apps/api/test/integration/auth/password-reset-request.integration.spec.ts:116 and :135), which would conceal this regression. For the new preference cases call through that same spy to the real service and record the registered email channel obtained through DELIVERY_CHANNEL_REGISTRY, following apps/api/test/integration/email/notify-send.integration.spec.ts:36. That sibling demonstrates real template rendering/delivery logging and the opted-out preference branch at :73. Run the ordinary-notification negative control under withTestActor({type:'SYSTEM', id:'email'}), as at :60; otherwise action-context failures can masquerade as preference behavior. Await terminal completion of detached work before restoring the recording channel or clearing fixtures. Observe both provider delivery and SENT schedule state, locale, destination, userId and the persisted token hash. Do not alter reset confirmation, throttling, cache/session revocation or token APIs.\n\nUS-002: COMPOSE CONFIGURATION\nRoot docker-compose.yml:20 and deployments/example/docker-compose.yml:11 define API environment mappings, but neither forwards SMTP_URL, EMAIL_FROM or WEB_PUBLIC_URL. Add optional interpolation only to api in both manifests; omitted values may render empty. Existing behavior in apps/api/src/config/email.config.ts:25 treats empty SMTP as absent, validates smtp/smtps protocols without echoing credentials, and at :47 requires EMAIL_FROM and WEB_PUBLIC_URL when SMTP is supplied. Keep that behavior. EmailAvailability.configured is specifically SMTP presence (apps/api/src/email/email-availability.ts:14), not WEB_PUBLIC_URL presence. Root Compose also has a migrate service; do not spread SMTP to it, web or postgres. New apps/api/test/integration/email/compose-email-config.integration.spec.ts must use the actual Compose CLI evaluated environment with explicit synthetic env files and project names, inspect only selected fields and include JWT_EXPIRES_IN=5m as a control. It does not need a daemon or Postgres. Run this focused Vitest file with KODA_DB_TESTS unset, NOT the scoped integration wrapper that opts into DB mode. apps/api/turbo.json:6 already includes root docker-compose.yml and deployments/** in test inputs, so the existing cache contract covers these changes. Avoid printing the rendered environment: SMTP URLs carry credentials.\n\nUS-003/004: DISPATCHER LIFECYCLE AND SETTLEMENT\nEmailDispatcher is provided and exported by apps/api/src/notifications/notifications.module.ts:53 and :68, consumed by PasswordResetModule (apps/api/src/auth/password-reset/password-reset.module.ts:19) and ProjectInvitesModule (apps/api/src/projects/invites/project-invites.module.ts:23). AppModule imports NotificationsModule (apps/api/src/app.module.ts:124). Keep the provider injectable even when SMTP is absent; remove only periodic timer installation under that condition, not the module/provider. EmailCoreModule globally exports availability and scheduling; the channel remains registered even without a provider (apps/api/src/email/email.module.ts:17 and :29). Its absent-provider send throws PermanentNotificationError (apps/api/src/email/smtp-delivery.channel.ts:36), explaining why disabled scheduled delivery currently loses eligible mail.\napps/api/src/email/email-dispatcher.ts:49 unconditionally installs an unref'd 30-second interval. At :69 runScheduledTick preserves SYSTEM/email through runAsSystemWriter, and :72 prevents overlapping scheduled ticks and logs tick failures. Gate initialization using EmailAvailability.configured, not public URL, and preserve destruction and non-overlap behavior. SMTP recovery is a process restart with an enabled dispatcher, not hot reconfiguration. The disabled timer must defer the whole tick, including abandonment. tick currently closes abandoned one-shots before claiming due rows (:84). The repository already closes expired SENDING INVITE and PASSWORD_RESET rows as FAILED with lastError='abandoned' at apps/api/src/email/schedule/email-schedule.repository.ts:113; preserve that behavior and ordering. claimDue at :89 claims only NOTIFICATION/MEMBER_ADDED and increments attempts atomically before returning the row, including expired-lock recovery. Immediate token-bearing messages must never enter this resend path.\nThe current tick catch at apps/api/src/email/email-dispatcher.ts:94 wraps build, skip settlement and sendOne, and always calls retryAt regardless of attempts. Narrow preparation-error handling so a builder error uses the claimed row's existing attempts, maxAttempts and existing backoff, not another attempt increment. At/above the cap use markFailed; below it retain the existing retry. Distinguish preparation exceptions from repository bookkeeping failures; do not reclassify failed markSent/markSkipped/retryAt/markFailed writes as content-build errors. A failed attempt to settle a build error is logged and does not stop the next claimed row. Preserve sendOne's permanent-error classification and terminal transient transport behavior at :129. Backoff at :143 is 2 ** max(1, attempts - 1) minutes, hence attempts 1/2 wait two minutes, attempt 3 four minutes. LAST_ERROR_MAX is already 500 (apps/api/src/email/schedule/email-schedule.types.ts:20); markFailed and retryAt already cap lastError through the repository (apps/api/src/email/schedule/email-schedule.repository.ts:136). No new persistence abstraction or retry schedule is required.\nExtend apps/api/src/email/email-dispatcher.spec.ts:17's injected seam and fake-timer lifecycle cases at :166 with a retained in-memory queue across disabled/enabled dispatcher instances. Check no claims or abandoned-close calls while disabled, then order, single send, terminal settlement and timer destruction when enabled. Add preparation boundary cases 1/5/6, exhausted transport control and failed-settlement batch continuation. Existing integration regressions include apps/api/test/integration/email/email-dispatcher.integration.spec.ts:99 (scheduled delivery, no resend, READ skip) and apps/api/test/integration/email/email-schedule.integration.spec.ts:127 (claims/locks/one-shot exclusion/error caps). Existing unit tests also assert SYSTEM/email action context at apps/api/src/email/email-dispatcher.spec.ts:199; retain this and the DI module tests. US-004 depends on US-003 because both edit the same dispatcher and unit file; keep US-001's caller-only fix independent.\n\nUS-005: BACKUP CONFIDENTIALITY AND OWNERSHIP\ndeployments/example/backup-db.sh:4 resolves all services and artifacts relative to its own script, pins its sibling .env when present at :26, starts postgres with --wait at :49 and performs pg_dump using container POSTGRES_USER/POSTGRES_DB at :55. Preserve those project-resolution and dump-format contracts. deploy.sh invokes this script before migrations at deployments/example/deploy.sh:150; failures must still prevent deployment from proceeding. Filenames already combine date/time and PID (:11). The current mkdir (:36) does not enforce private modes, the verifier writes an entire plaintext .check file (:62), and tar writes through a root-container bind mount (:70), potentially yielding inaccessible root-owned archives on Linux.\nSet host umask before artifacts, create/tighten the script-owned backups directory to 0700 and fail before pg_dump if it cannot be secured, including a regular-file path collision. Host redirections should create SQL gzip and binary archive partial as 0600; atomically publish the archive only after successful tar stdout transfer with no TTY. The archive producer remains root in the project api container to read /data and retain numeric uid/gid metadata, but never creates the host file itself. Preserve --no-deps and project service selection. Verify gzip integrity and the exact full line '-- PostgreSQL database dump complete' by consuming the whole decompressed stream under pipefail. A non-early-exit fixed-string full-line matcher redirected to /dev/null can consume without storing plaintext; do not use grep -q, whose early exit can SIGPIPE a large gzip stream. Failed dumps or verification leave no accepted SQL; tar failure after partial stdout removes the partial and preserves the independently verified dump.\nUpdate apps/api/test/unit/tooling/backup-db-script.spec.ts:80 and :102, which extract timestamps from the old tar command and assert exact bind-mounted argv, plus its old failOn matcher at :202. Derive uniqueness from host artifact names instead. The recording docker stub at apps/api/test/unit/tooling/helpers/deploy-script-stubs/docker:33 currently writes a fake archive on the host; change only the archive branch to produce synthetic binary gzip/tar bytes on stdout, emitting a prefix before injected failure. Preserve pg_dump and rollback shell emulation. The harness at apps/api/test/unit/tooling/helpers/deploy-script-harness.ts:148 copies only deployment scripts/manifests and constructs a controlled child environment at :187; extend it for a per-child umask and pre-existing directory/file fixtures without mutating process.umask in the parallel parent. The harness must support checking modes at creation, not only post-run chmod. Preserve deploy-script-harness.spec.ts isolation assertions and deploy-script.spec.ts:98's matching project/env-file selections.\nCreate apps/api/test/integration/db/backup-permissions.integration.spec.ts using a private temporary directory containing the shipped backup script plus synthetic docker-compose.yml and .env. Drive real PostgreSQL 16 and an actual root tar producer attached to a synthetic /data volume; use explicit unique project names and controlled child environments. Verify host modes, readability, host uid ownership where available, complete SQL fixture content, tar header numeric ownership and extracted content. A non-root Linux host is required to exercise the ownership regression; root-only hosts must explicitly report that control as unexercised while still running all mode/content checks. Reading tar headers avoids requiring host chown permission for extraction.\n\nUS-006: EXECUTABLE FRESH-TARGET RESTORE\ndeployments/example/README.md:97 currently suggests replaying gzip SQL directly into the current database, without ON_ERROR_STOP. docs/deployment/postgresql.md:108 similarly pairs a plain SQL backup with a populated-target psql shortcut. Replace both unsafe entry points; the PostgreSQL guide should link to the canonical example procedure, pair gzip recovery with a gzip backup example and explain feeding an existing plain SQL dump into the same fresh-target psql step. This binding story intentionally includes executable documentation and its integration fixture; do not split it into a documentation or test-only story.\nMark actual executable shell blocks in the example guide for extraction and execution by apps/api/test/integration/db/documented-restore.integration.spec.ts. They must form a Bash procedure with errexit and pipefail; invoking a block as an unchecked interactive pipeline or reproducing its logic only in tests would not verify the guide. Inputs must explicitly name the Compose file/project/env file, configured PostgreSQL role, archive, current database and distinct new database. Stop all writers before recovery, preserve the original database for fallback, validate current/target names and create a new target from template0 with creation failure fatal. Use PostgreSQL client dbname arguments or proper identifier quoting, never raw SQL identifier interpolation. Use psql -X -v ON_ERROR_STOP=1, gzip -t and a pipefail-protected decompression/replay pipeline. On any SQL/decompression/validation failure leave the staging target offline and do not change the persistent connection selection or start writers.\nVerification must compare known application row counts and migration records to an expected baseline captured for that backup and exit nonzero on a mismatch; printing a false SELECT result does not gate cutover. Only successful restore and checks permit updating the persistent POSTGRES_DB setting in this project's .env, from which deployments/example/docker-compose.yml:12 derives API DATABASE_URL and :42 configures postgres. Recreate affected service containers with the same explicit project and volumes; restart alone retains stale environments. Changing POSTGRES_DB on an existing PGDATA volume selects the already-created target, it does not create it. Healthchecks and API configuration must agree. Preserve the original setting and explain reversal via setting restoration and container recreation. Do not run a new-volume initialization, remove volumes, use deploy.sh's automatic migrations as restore verification or automate PostgreSQL recovery in rollback.sh.\nThe fixture must execute the guide's marked preparation, replay, baseline gate, cutover and reversal blocks against disposable PostgreSQL 16 and a synthetic API database client. Seed explicitly named databases through the configured role, capture (1,before), then mutate the original to (1,after)/(2,new). Verify exact restored rows and untouched original; existing-target sentinel preservation; fatal SQL before a following sentinel INSERT; invalid/truncated gzip failure; actual client reconnection after recreation; reversal; and wrong-baseline nonzero with unchanged persisted target and zero writer starts. No developer database URL or inherited project selector may address fixture services. The separate /data archive remains recovered by rollback.sh:350; its staged restore and volume lock behavior are outside this change. README.md:130's interrupted LanceDB restore instructions must remain intact.\n\nTEST EXECUTION AND SAFETY\napps/api/test/helpers/test-environment.ts:1 re-exports the shared gate; test/helpers/test-environment.ts:9 requires KODA_DB_TESTS=1 and NAX_SANDBOXED!=1 for real Docker/PostgreSQL tests. Use this gate for the new backup/restore suites; sandbox skips are not verification. On the host use the declared scoped commands for real integration suites; never run two DB-mode suites concurrently against the shared test database. apps/api/vitest.config.ts:27 selects serial DB projects with SWC, and apps/api/test/global-setup.ts:33 can provision/force-reset a separate safe test Postgres during DB-mode runs. That shared setup database is not either synthetic Compose fixture. The new Compose-render-only test deliberately runs direct focused Vitest with DB opt-in unset to bypass provisioning; its integration filename alone does not imply it needs canRunDbTests. Give fixture subprocesses a minimal controlled environment (retaining only tool-discovery/Docker connectivity values actually needed), explicit --env-file, explicit -f and unique -p; exclude inherited DATABASE_URL, KODA_TEST_DATABASE_URL, COMPOSE_PROJECT_NAME and other Compose interpolation selectors. Clean up only each case's own containers, databases, volumes and temporary files, never globally prune or address a developer stack. Avoid logging any full Compose render or real credentials.\n\nRISKS, COMPATIBILITY AND ROLLOUT\nNo database schema/data migration, DTO/controller contract change, OpenAPI regeneration, client generation or new dependency is expected. Keep the existing plain gzip SQL format, numeric archive metadata and timestamp/PID naming so rollback archives stay compatible. Tightening an existing backups directory affects directory permissions, not historical file ownership. New backups are private by creation and host-readable; validate Bash 3.2/macOS and Linux behavior without platform-specific host stat shell assumptions. Timer gating changes only scheduled work when SMTP is off, deliberately postponing immediate-send abandonment until enabled restart. Restore does not modify any live deployment as part of this feature: all executable validation is synthetic. Operator rollout is container recreation to pick up optional mail settings, enabled-process restart to resume queued mail, and an explicitly authorized fresh-target restore/cutover only after backup-specific checks. Keep the original database and data volumes for reversal. Treat a failed recovery as offline, not a reason to restart writers. No findings outside the six selected review items should be folded into these stories.\n\nREFINE-PASS SELF-AUDIT\nAll 21 source acceptance criteria were enumerated against the revised story arrays; compound source criteria remain split into independently observable assertions without losing their regression qualifiers. Mapping uses each story's one-based acceptanceCriteria positions: US-001 AC-1 -> 1-2 (ordinary response and eventual exactly-once real-notify provider delivery), AC-2 -> 3-4 (SENT attribution/destination/selected locale after detached completion and persisted token-hash match), AC-3 -> 5-6 (same opted-in account still delivers once; ordinary opted-out notify makes zero provider calls), AC-4 -> 7-9 (null preference principal, retry disabled, attributed schedule input). US-002 AC-1 -> 1 (exact three evaluated API values and JWT_EXPIRES_IN=5m), AC-2 -> 2-5 (required-only renders succeed, optional values absent/empty, neither web nor postgres receives SMTP in either configured or required-only render); position 6 is the explicit missing-JWT_SECRET negative-path regression added in this audit. US-003 AC-1 -> 1-2 (SMTP absent/public URL present, two intervals, original pending attempts and zero provider/close/claim calls), AC-2 -> 3-9 (enabled first interval, existing close before claim, retained notification claimed/delivered once and SENT, expired immediate rows closed by the existing operation without provider replay, destruction stops claims). US-004 AC-1 -> 1-2 (attempt five/max five, original preference error and no retry), AC-2 -> 3-4 (same error at six fails; attempt one preserves existing two-minute backoff/retryability), AC-3 -> 5-9 (one exhausted failure plus one delivery, transient transport at the cap still fails, failed repository settlement logs and continues). Position 10 preserves Failure Handling's existing capped error. US-005 AC-1 -> 1-5 (child umask 022, new/existing 0755 directory secured to 0700 before dump output, private files from creation, no plaintext, regular-file collision refuses before pg_dump), AC-2 -> 6-9 (marker plus over 1 MiB succeeds, missing marker/invalid compressed input/failed dump refuse with no accepted SQL), AC-3 -> 10-12 (partial-stdout tar failure returns nonzero, removes archive partial while retaining independently verified SQL, same-second names distinct), AC-4 -> 13-17 (real fixture under 022, 0700/0600, host readability/UID ownership where available, non-root Linux ownership coverage and explicit root-only unexercised report while other checks run), AC-5 -> 18-20 (numeric UID/GID headers without requiring host chown, extraction contents, complete synthetic SQL dump). US-006 AC-1 -> 1-2 (PostgreSQL 16 exact before snapshot in a distinct fresh target; newer original rows retained), AC-2 -> 3-5 (existing target refuses before replay; both its sentinel and original contents unchanged), AC-3 -> 6-8 (valid gzip/invalid SQL nonzero, subsequent sentinel never inserted, no persistent cutover), AC-4 -> 9-11 (invalid and truncated gzip nonzero; original remains queryable with pre-restore contents), AC-5 -> 12-16 (actual recreated-client cutover/reversal reads, incorrect baseline nonzero, persistent original setting and zero writer starts). Position 17 makes Failure Handling's no-cutover/no-writer-restart rule observable through recorded commands and persistent selection.\nEvery story has a negative path: ordinary preference opt-out (US-001), missing required secret (US-002), disabled SMTP and no replay (US-003), exhaustion/settlement error (US-004), file collision/dump/archive failures (US-005), and existing target/SQL/gzip/baseline failures (US-006). Backward compatibility is anchored by opted-in delivery and retry-disabled attribution, optional unset configuration and required credentials, existing abandonment and destruction, existing transport exhaustion/backoff/error cap, naming and dump/archive contents, and retained original databases plus reversal. No description contradicts these assertions. No source AC was removed.\nContext alignment was corrected: US-001 includes all three spec-recommended invite/dispatcher/real-notify files; US-005 includes deploy.sh, deploy-script.spec.ts and deploy-script-harness.spec.ts alongside the backup script and its direct tests; US-006 includes all four spec-recommended backup/Compose/rollback/shared-gate files plus the canonical README. Other implementation files remain explicitly named in descriptions and the analysis where the five-context limit prevents listing them. All expectedFiles remain the three new integration specs and no created file is listed as context. The binding story IDs, workdirs and dependency arrays are unchanged. US-003 uses ordinary single-session TDD for a lifecycle-only conditional, and US-006 is complex rather than expert because it integrates existing PostgreSQL/Compose interfaces without an architectural redesign. Recovery authentication, credential forwarding and private backup access retain strict security isolation where their implementation changes those behaviors. All four feature-level out-of-scope bullets remain verbatim in the top-level array; adjacent story boundaries echo them without excluding another story's required work.",
+  "outOfScope": [
+    "Changes to authentication tokens, reset throttling, notification library APIs or the preference schema.",
+    "Distributed email leases, exactly-once SMTP delivery and changes to the existing retry schedule.",
+    "Encrypting backups, changing historical backup file ownership, or operating on an existing deployment.",
+    "Automating PostgreSQL cutover in rollback.sh, changing the dump format, or changing the LanceDB rollback procedure."
+  ],
+  "routingProfile": "native-codex-ds"
+}

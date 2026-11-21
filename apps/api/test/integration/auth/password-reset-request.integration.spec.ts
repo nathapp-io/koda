@@ -3,7 +3,9 @@ import { Logger } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { NOTIFY_SERVICE } from '@nathapp/nestjs-notify';
+import {
+  DELIVERY_CHANNEL_REGISTRY, DeliveryChannelRegistry, INotifyService, NOTIFY_SERVICE, NotificationChannel,
+} from '@nathapp/nestjs-notify';
 import { AUTH_LOGIN_LIMIT } from '../../../src/auth/auth-throttle';
 import { PASSWORD_RESET_TTL_MS } from '../../../src/auth/password-reset/password-reset.constants';
 import { hashPasswordResetToken } from '../../../src/auth/password-reset/password-reset-token';
@@ -14,7 +16,7 @@ import { grantBaseline } from '../../../src/permissions/test-helpers/permission-
 import { canRunDbTests } from '../../helpers/test-environment';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
-import { fixtureDb } from '../../helpers/action-context';
+import { fixtureDb, withTestActor } from '../../helpers/action-context';
 
 /**
  * auth-passwords US-003 — the public reset-request route.
@@ -74,6 +76,7 @@ describeDb('password reset request (PG)', () => {
   let dispatcher: EmailDispatcher;
   let email: EmailAvailability;
   let send: ReturnType<typeof vi.spyOn>;
+  let providerSend: ReturnType<typeof vi.spyOn>;
   let sendOne: ReturnType<typeof vi.spyOn>;
   let warn: ReturnType<typeof vi.spyOn>;
   let userId: string;
@@ -84,14 +87,39 @@ describeDb('password reset request (PG)', () => {
     WEB_PUBLIC_URL: process.env['WEB_PUBLIC_URL'],
   };
 
-  const requestReset = (address: string, acceptLanguage?: string) => {
+  const requestedDeliveryCounts = new Map<string, number>();
+  const requestReset = async (address: string, acceptLanguage?: string, expectedStatus = 200) => {
     const call = request(server).post('/api/auth/password-reset').send({ email: address });
-    return acceptLanguage === undefined ? call : call.set('Accept-Language', acceptLanguage);
+    if (acceptLanguage !== undefined) call.set('Accept-Language', acceptLanguage);
+    const response = await call.expect(expectedStatus);
+    if (response.status === 200 && email.configured) {
+      const user = await db.user.findUnique({ where: { email: address }, select: { disabled: true } });
+      if (user && !user.disabled) {
+        requestedDeliveryCounts.set(address, (requestedDeliveryCounts.get(address) ?? 0) + 1);
+      }
+    }
+    return response;
   };
   const tokenRows = (id: string) => db.passwordResetToken.findMany({ where: { userId: id } });
   const unusedRows = (id: string) => db.passwordResetToken.findMany({ where: { userId: id, usedAt: null } });
   const scheduleRows = (address: string) =>
     db.emailSchedule.findMany({ where: { toEmail: address, kind: 'PASSWORD_RESET' } });
+  /**
+   * The teardown step between cases: waits until every reset this case requested has a terminal schedule row,
+   * so a send that is still in flight cannot outlive the case that started it (and land in the next one). It is
+   * the `afterEach` and it is also callable inside a case, so the drain can be exercised without depending on
+   * another case having run first.
+   */
+  const drainDetachedSends = async (): Promise<void> => {
+    const terminal = new Set(['SENT', 'FAILED', 'SKIPPED']);
+    for (const [address, expectedCount] of requestedDeliveryCounts) {
+      await waitFor(async () => {
+        const rows = await scheduleRows(address);
+        return rows.length >= expectedCount && rows.every((row) => terminal.has(row.status)) ? true : null;
+      }, `all ${expectedCount} detached reset send(s) for ${address} to finish`);
+    }
+    requestedDeliveryCounts.clear();
+  };
   const createUser = async (address: string, disabled = false): Promise<string> => {
     const user = await db.user.create({
       data: { email: address, name: 'Reset User', passwordHash: await bcrypt.hash(TEST_PASSWORD, 4), disabled },
@@ -113,7 +141,10 @@ describeDb('password reset request (PG)', () => {
     email = app.get(EmailAvailability);
     // File-level spies: a detached task can still be running when a test ends, and a restored spy
     // would hand that send to the real SMTP channel.
-    send = vi.spyOn(app.get<{ send: () => Promise<unknown> }>(NOTIFY_SERVICE), 'send');
+    send = vi.spyOn(app.get<INotifyService>(NOTIFY_SERVICE), 'send');
+    const channel = app.get<DeliveryChannelRegistry>(DELIVERY_CHANNEL_REGISTRY).get(NotificationChannel.EMAIL);
+    if (!channel) throw new Error('email channel not registered');
+    providerSend = vi.spyOn(channel, 'send').mockResolvedValue({ providerMessageId: 'reset-test' });
     sendOne = vi.spyOn(dispatcher, 'sendOne');
     warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
@@ -125,22 +156,52 @@ describeDb('password reset request (PG)', () => {
     }
     await app?.close();
     send.mockRestore();
+    providerSend.mockRestore();
     sendOne.mockRestore();
   });
 
+  afterEach(async () => {
+    await drainDetachedSends();
+  });
+
   beforeEach(async () => {
+    requestedDeliveryCounts.clear();
     resetThrottle(app);
     userEmail = `${randomUUID()}@example.test`;
     userId = await createUser(userEmail);
     // The send step runs for real; only the SMTP call is stubbed.
-    send.mockReset().mockResolvedValue({} as never);
+    send.mockClear();
+    providerSend.mockClear().mockResolvedValue({ providerMessageId: 'reset-test' });
     sendOne.mockClear();
     warn.mockClear();
   });
 
+  it('waits for a delayed detached provider call before the case ends', async () => {
+    // The case that used to be split in two: a delayed provider call is still in flight when the response is
+    // written, and the teardown drain is what makes the case wait for it instead of leaving it to the next one.
+    // Both halves run here, so this case passes on its own and in any order.
+    let completed = false;
+    providerSend.mockImplementation(async () => {
+      await sleep(500);
+      completed = true;
+      return { providerMessageId: 'delayed-reset' };
+    });
+
+    await requestReset(userEmail);
+    await waitFor(async () => providerSend.mock.calls.length > 0, 'the delayed detached provider call');
+    // The call has started and has not finished: this is the window the drain exists for.
+    expect(completed).toBe(false);
+
+    await drainDetachedSends();
+
+    expect(completed).toBe(true);
+    // ... and the row it settled is terminal, so nothing is left for the next case.
+    expect((await scheduleRows(userEmail)).map((row) => row.status)).toEqual(['SENT']);
+  });
+
   it('AC-1: answers 200 {} and writes one unused token expiring in 30 minutes', async () => {
     const requestedAt = Date.now();
-    const response = await requestReset(userEmail).expect(200);
+    const response = await requestReset(userEmail);
 
     expect(response.body).toEqual({ ret: 0, data: {} });
 
@@ -155,7 +216,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-2: stores the lowercase sha256 hex of the emailed token and no raw token anywhere', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     const [row] = await waitFor(async () => {
       const rows = await unusedRows(userId);
       return rows.length > 0 ? rows : null;
@@ -176,10 +237,10 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-3: sends PASSWORD_RESET through sendOne with the web url and retry disabled', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     const [call] = await waitFor(async () => {
       const calls = sendOne.mock.calls as unknown as [
-        { id: string; kind: string }, string, { url: string; expiresAt: string }, string, Date, boolean,
+        { id: string; kind: string }, string, { url: string; expiresAt: string }, string | null, Date, boolean,
       ][];
       return calls.length > 0 ? calls : null;
     }, 'the reset email');
@@ -190,13 +251,73 @@ describeDb('password reset request (PG)', () => {
     expect(templateCode).toBe('PASSWORD_RESET');
     expect(payload.url).toBe(email.webUrl(`/reset-password/${raw}`));
     expect(payload.expiresAt).toEqual(expect.any(String));
-    expect(recipient).toBe(userId);
+    expect(recipient).toBeNull();
     expect(now).toBeInstanceOf(Date);
     expect(retryable).toBe(false);
   });
 
+  it('AC-1/AC-2/AC-3/AC-4: delivers opted-out reset mail through real notify with attribution and token match', async () => {
+    await db.notificationPreference.create({
+      data: { userId, tenantId: 'default', channel: 'email', enabled: false },
+    });
+
+    const response = await requestReset(userEmail, 'zh-CN');
+    expect(response.body).toEqual({ ret: 0, data: {} });
+
+    const row = await waitFor(async () => {
+      const rows = await scheduleRows(userEmail);
+      return rows.find((entry) => entry.status === 'SENT') ?? null;
+    }, 'the opted-out reset schedule row to finish');
+    expect(row).toMatchObject({ status: 'SENT', kind: 'PASSWORD_RESET', userId, toEmail: userEmail, locale: 'zh' });
+    expect(providerSend).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    const [payload, rendered] = providerSend.mock.calls[0] as unknown as [
+      { recipient: string; locale: string; templateCode: string }, string,
+    ];
+    expect(payload).toMatchObject({ recipient: userEmail, locale: 'zh', templateCode: 'PASSWORD_RESET' });
+    const raw = rendered.match(/reset-password\/([A-Za-z0-9_-]+)/)?.[1];
+    if (!raw) throw new Error('rendered reset email did not contain its reset link');
+    expect(rendered).toContain(email.webUrl(`/reset-password/${raw}`));
+    const [token] = await unusedRows(userId);
+    expect(token.tokenHash).toBe(hashPasswordResetToken(raw));
+  });
+
+  it('AC-5: delivers one recovery email for an opted-in account through real notify', async () => {
+    await db.notificationPreference.create({
+      data: { userId, tenantId: 'default', channel: 'email', enabled: true },
+    });
+
+    await requestReset(userEmail);
+    const row = await waitFor(async () => {
+      const rows = await scheduleRows(userEmail);
+      return rows.find((entry) => entry.status === 'SENT') ?? null;
+    }, 'the opted-in reset schedule row to finish');
+
+    expect(row).toMatchObject({ userId, toEmail: userEmail, status: 'SENT' });
+    expect((sendOne.mock.calls[0] as unknown[])[3]).toBeNull();
+    expect(providerSend).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-6: ordinary notification email still respects the opted-out preference under SYSTEM/email', async () => {
+    await db.notificationPreference.create({
+      data: { userId, tenantId: 'default', channel: 'email', enabled: false },
+    });
+
+    await withTestActor({ type: 'SYSTEM', id: 'email' }, () => app.get<INotifyService>(NOTIFY_SERVICE).send({
+      tenantId: 'default', channel: NotificationChannel.EMAIL, templateCode: 'NOTIFICATION', locale: 'en',
+      recipient: userEmail, userId, data: {
+        title: 'ordinary notice', body: '', url: 'https://koda.test', prefsUrl: 'https://koda.test/prefs',
+      },
+    }));
+
+    expect(providerSend).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('AC-4: writes one PASSWORD_RESET schedule row for the user and ends it SENT', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
 
     const row = await waitFor(async () => {
       const rows = await scheduleRows(userEmail);
@@ -209,9 +330,9 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-5: a throwing email channel still answers 200 {} and ends the row FAILED, logged as a warning', async () => {
-    send.mockRejectedValue(new Error('smtp refused the connection'));
+    providerSend.mockRejectedValue(new Error('smtp refused the connection'));
 
-    const response = await requestReset(userEmail).expect(200);
+    const response = await requestReset(userEmail);
     expect(response.body).toEqual({ ret: 0, data: {} });
 
     const row = await waitFor(async () => {
@@ -226,7 +347,7 @@ describeDb('password reset request (PG)', () => {
 
   it('AC-6: an unknown address answers 200 {} and writes nothing across the full observation window', async () => {
     const unknown = `nobody-${randomUUID()}@example.test`;
-    const response = await requestReset(unknown).expect(200);
+    const response = await requestReset(unknown);
     expect(response.body).toEqual({ ret: 0, data: {} });
 
     // The specified wait, spent on the unknown address itself: it is watched for the whole bound the
@@ -262,7 +383,7 @@ describeDb('password reset request (PG)', () => {
     const disabledEmail = `${randomUUID()}@example.test`;
     const disabledId = await createUser(disabledEmail, true);
 
-    await requestReset(disabledEmail).expect(200);
+    await requestReset(disabledEmail);
     await sleep(250);
 
     expect(await tokenRows(disabledId)).toEqual([]);
@@ -273,7 +394,7 @@ describeDb('password reset request (PG)', () => {
   it('AC-8: with email unconfigured it answers 200 {} and writes nothing', async () => {
     const configured = vi.spyOn(email, 'configured', 'get').mockReturnValue(false);
 
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await sleep(250);
     configured.mockRestore();
 
@@ -285,8 +406,8 @@ describeDb('password reset request (PG)', () => {
   it('AC-9: known and unknown addresses answer the same body and neither is an unaudited write', async () => {
     const unknown = `nobody-${randomUUID()}@example.test`;
 
-    const known = await requestReset(userEmail).expect(200);
-    const anonymous = await requestReset(unknown).expect(200);
+    const known = await requestReset(userEmail);
+    const anonymous = await requestReset(unknown);
 
     expect(known.body).toEqual(anonymous.body);
     expect(known.body).toEqual({ ret: 0, data: {} });
@@ -296,9 +417,9 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-10: a second request leaves exactly one unused token row', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await waitFor(async () => (await scheduleRows(userEmail)).length === 1, 'the first reset');
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await waitFor(async () => (await scheduleRows(userEmail)).length === 2, 'the second reset');
 
     expect(await unusedRows(userId)).toHaveLength(1);
@@ -306,7 +427,7 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-11: Accept-Language zh-CN writes locale zh and fr writes en', async () => {
-    await requestReset(userEmail, 'zh-CN,zh;q=0.9').expect(200);
+    await requestReset(userEmail, 'zh-CN,zh;q=0.9');
     const chinese = await waitFor(async () => {
       const rows = await scheduleRows(userEmail);
       return rows.find((entry) => entry.locale === 'zh') ?? null;
@@ -315,7 +436,7 @@ describeDb('password reset request (PG)', () => {
 
     const frenchEmail = `${randomUUID()}@example.test`;
     await createUser(frenchEmail);
-    await requestReset(frenchEmail, 'fr-FR,fr;q=0.8').expect(200);
+    await requestReset(frenchEmail, 'fr-FR,fr;q=0.8');
     const english = await waitFor(async () => {
       const rows = await scheduleRows(frenchEmail);
       return rows.length > 0 ? rows[0] : null;
@@ -324,12 +445,12 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-12: is throttled like login', async () => {
-    for (let i = 0; i < AUTH_LOGIN_LIMIT; i += 1) await requestReset(userEmail).expect(200);
-    await requestReset(userEmail).expect(429);
+    for (let i = 0; i < AUTH_LOGIN_LIMIT; i += 1) await requestReset(userEmail);
+    await requestReset(userEmail, undefined, 429);
   });
 
   it('AC-14: a successful password change deletes the outstanding reset token', async () => {
-    await requestReset(userEmail).expect(200);
+    await requestReset(userEmail);
     await waitFor(async () => (await unusedRows(userId)).length === 1, 'the reset token row');
 
     const login = await request(server)
@@ -348,10 +469,10 @@ describeDb('password reset request (PG)', () => {
   });
 
   it('AC-15: a body that is not an email address answers localized 400 and writes nothing', async () => {
-    const english = await requestReset('not-an-address').expect(400);
+    const english = await requestReset('not-an-address', undefined, 400);
     expect(english.body.message).toBe('Must be a valid email address');
 
-    const chinese = await requestReset('not-an-address', 'zh-CN').expect(400);
+    const chinese = await requestReset('not-an-address', 'zh-CN', 400);
     expect(chinese.body.message).toBe('必须是有效的邮箱地址');
     expect(chinese.body.errors.email).toEqual(['必须是有效的邮箱地址']);
     expect(JSON.stringify(chinese.body)).not.toContain('$t(');

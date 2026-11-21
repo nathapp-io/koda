@@ -96,4 +96,44 @@ describe('deploy script harness', () => {
       else process.env.KODA_VERSION = previous;
     }
   });
+
+  it('gives the child the requested umask without changing the test process', () => {
+    // `deploy.sh --no-backup` never sets a umask of its own, so every call shows the fixture's.
+    const before = process.umask();
+    const run = runDeployScript('deploy.sh', ['--no-backup'], {
+      umask: '027',
+      envFile: 'POSTGRES_PASSWORD=pw',
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.dockerCalls.length).toBeGreaterThan(0);
+    expect(run.dockerCalls.map((call) => call.umask)).toEqual(run.dockerCalls.map(() => '027'));
+    expect(process.umask()).toBe(before);
+  });
+
+  it('starts the script from a backups directory the fixture already created', () => {
+    // The mode survives until the script itself touches the directory, which is what a backup test starts
+    // from; a script that does not touch it leaves the fixture's mode visible.
+    const run = runDeployScript('deploy.sh', ['--no-backup'], {
+      backupsDirMode: 0o755,
+      envFile: 'POSTGRES_PASSWORD=pw',
+    });
+
+    expect(statSync(join(run.dir, 'backups')).mode & 0o777).toBe(0o755);
+    expect(run.dockerCalls.find((call) => call.argv.includes('config'))?.backupsDirMode).toBe('755');
+  });
+
+  it('places a regular file where the backups directory belongs', () => {
+    const run = runDeployScript('backup-db.sh', [], { backupsIsFile: true });
+
+    expect(statSync(join(run.dir, 'backups')).isFile()).toBe(true);
+    expect(run.status).not.toBe(0);
+  });
+
+  it('writes a gzip stream the script has to reject when the dump is corrupt', () => {
+    const run = runDeployScript('backup-db.sh', [], { env: { KODA_DEPLOY_HARNESS_GZIP_CORRUPT: '1' } });
+
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('❌ Postgres dump failed');
+  });
 });
