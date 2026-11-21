@@ -351,7 +351,7 @@ AC-1 to AC-6 run against the real `marked` and `isomorphic-dompurify`, and parse
 4. [integration] `renderMarkdownWithoutImages('<script>alert(1)</script>ok')` returns HTML with no `script` element.
 5. [integration] `renderMarkdownWithoutImages('line one\nline two', { breaks: true })` returns HTML with a `br` element between `line one` and `line two`.
 6. [integration] `renderThreadMarkdown('[x](https://e.com "a<img b=")\n\n" onmouseover="alert(1)" x="y"')`, called with no slug, returns HTML in which no element carries an `onmouseover` attribute.
-7. [unit] A mounted `CommentThread`, with `~/lib/markdown` aliased to a stub and `useProjectMemberNames().nameOf('u9')` returning `Ada`, calls the stub's `renderMarkdownWithoutImages` for a comment whose body is `hi @[Old](user:u9)` with `hi <span class="mention-chip">@Ada</span>` and `{ breaks: true }`.
+7. [unit] A mounted `CommentThread`, with `~/lib/markdown` aliased to a stub and `useProjectMemberNames().nameOf('c000000000000000000000009')` returning `Ada`, calls the stub's `renderMarkdownWithoutImages` for a comment whose body is `hi @[Old](user:c000000000000000000000009)` (the real `withMentionChips`; mention ids must match `MENTION_TOKEN`'s cuid shape) with `hi <span class="mention-chip">@Ada</span>` and `{ breaks: true }`.
 8. [unit] In that mount, the `innerHTML` of `[data-testid="comment-body"]` equals the string the `renderMarkdownWithoutImages` stub returned.
 9. [unit] In that mount, `[data-testid="comment-body"]` has the class `markdown-body`.
 10. [unit] A mounted `TicketActivity` with a non-empty `ticket.description` and `editing` false renders `[data-testid="ticket-description-body"]` with the class `markdown-body`.
