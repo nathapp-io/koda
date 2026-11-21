@@ -28,6 +28,7 @@ describe('TicketProperties link URL validation', () => {
     const error = app.one('[data-testid="ticket-link-url-error"]')
     expect(error).toBeDefined()
     expect(error ? app.textOf(error) : '').toBe('Enter a full http:// or https:// URL')
+    expect(error?.props.class).toContain('text-status-rejected')
     app.unmount()
   })
 

@@ -498,7 +498,7 @@ async function removeLink(linkId: string) {
             {{ t('tickets.links.add') }}
           </Button>
         </div>
-        <p v-if="linkUrlInvalid" class="text-xs text-destructive" data-testid="ticket-link-url-error">
+        <p v-if="linkUrlInvalid" class="text-xs text-status-rejected" data-testid="ticket-link-url-error">
           {{ t('tickets.links.invalidUrl') }}
         </p>
       </div>
