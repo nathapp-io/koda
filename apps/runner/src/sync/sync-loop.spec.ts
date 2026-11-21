@@ -452,6 +452,50 @@ describe('capability isolation (US-003)', () => {
     expect(sentHashes).toEqual(['h1']);
   });
 
+  test('AC-3: an isolated 413 keeps the same hash retryable instead of running a suppression control', async () => {
+    add('j1');
+    log('j1', 1);
+    capsNow = caps('h1');
+    script.push(
+      async () => { throw new ServerError(400, 'mixed', null); },
+      async () => { throw new ServerError(413, 'too large', null); },
+      ok({ jobAcks: [{ jobId: 'j1', ackedSeq: 1 }] }),
+      ok(),
+    );
+    const loop = makeLoop();
+    expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: 500 });
+    expect(calls).toHaveLength(2); // A size refusal is not validation evidence; no base-only control follows.
+    expect(calls[1].jobs).toEqual([]);
+    expect(calls[1].capabilities?.nax.version).toBe('h1');
+    expect(sentHashes).toEqual([]);
+    expect(journal.pendingEvents('j1', 1, 5)).toHaveLength(1);
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[2].capabilities?.nax.version).toBe('h1');
+    expect(sentHashes).toEqual(['h1']);
+    expect(journal.pendingEvents('j1', 1, 5)).toEqual([]);
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[3].capabilities).toBeUndefined();
+    expect(sentHashes).toEqual(['h1']);
+    expect(script).toEqual([]);
+  });
+
+  test('AC-3: a 413 on the base-only control leaves the hash retryable', async () => {
+    capsNow = caps('h1');
+    script.push(
+      async () => { throw new ServerError(400, 'capabilities', null); },
+      async () => { throw new ServerError(413, 'too large', null); },
+      ok(),
+    );
+    const loop = makeLoop();
+    expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: 500 });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].capabilities).toBeUndefined();
+    expect(sentHashes).toEqual([]);
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[2].capabilities?.nax.version).toBe('h1');
+    expect(sentHashes).toEqual(['h1']);
+  });
+
   test('AC-3: an ambiguous rejection keeps the hash eligible', async () => {
     add('j1');
     log('j1', 1);

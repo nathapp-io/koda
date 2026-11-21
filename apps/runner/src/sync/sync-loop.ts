@@ -282,7 +282,7 @@ export class SyncLoop {
 
   /**
    * US-003: the attempted capability hash is isolated. The capabilities are sent on their own first; the hash is
-   * marked sent when that request succeeds. Only when that request is refused AND the same envelope without the
+   * marked sent when that request succeeds. Only when that request returns 400 AND the same envelope without the
    * capabilities succeeds is the hash suppressed: the base-only control is the positive proof that the capabilities
    * are the cause. An original request that already carried nothing but the capabilities is its own evidence, so it
    * needs no second attempt.
@@ -335,8 +335,8 @@ export class SyncLoop {
   }
 
   /**
-   * One probe request. A 400 or 413 is the request's own refusal; a 401 or 426 stops the loop as before; a network
-   * failure is retried with the ordinary backoff.
+   * One probe request. Only a 400 is validation rejection evidence; a 401 or 426 stops the loop as before.
+   * Other failures, including an ambiguous size refusal (413), retry with the ordinary backoff.
    */
   private async probeRequest(request: SyncRequest, controller: AbortController): Promise<ProbeAnswer> {
     this.inflightIdle = false;   // the probe's answer may carry commands: a journal write must not abort it
@@ -348,7 +348,7 @@ export class SyncLoop {
       if (error instanceof ServerError) {
         if (error.status === 401) return { kind: 'stop', reason: { kind: 'auth', message: error.message } };
         if (error.status === 426) return { kind: 'stop', reason: { kind: 'protocol', message: error.message } };
-        if (error.status === 400 || error.status === 413) return { kind: 'rejected' };
+        if (error.status === 400) return { kind: 'rejected' };
       }
       return { kind: 'failed', error };
     }
