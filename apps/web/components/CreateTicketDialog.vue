@@ -8,9 +8,9 @@
       <form @submit="onSubmit" class="space-y-4">
         <FormField name="title" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>{{ t('tickets.form.titleLabel') }}</FormLabel>
+            <FormLabel for="create-ticket-title">{{ t('tickets.form.titleLabel') }}</FormLabel>
             <FormControl>
-              <Input :placeholder="t('tickets.form.titlePlaceholder')" v-bind="componentField" />
+              <Input id="create-ticket-title" :placeholder="t('tickets.form.titlePlaceholder')" v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -18,11 +18,11 @@
 
         <FormField name="type" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>{{ t('tickets.form.type') }}</FormLabel>
+            <FormLabel for="create-ticket-type">{{ t('tickets.form.type') }}</FormLabel>
             <FormControl>
               <FleetNativeSelect
                 v-bind="componentField"
-                id="type"
+                id="create-ticket-type"
                 :options="typeOptions"
                 :placeholder="t('tickets.form.typePlaceholder')"
                 testid="create-ticket-type"
@@ -34,11 +34,11 @@
 
         <FormField name="priority" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>{{ t('tickets.form.priority') }}</FormLabel>
+            <FormLabel for="create-ticket-priority">{{ t('tickets.form.priority') }}</FormLabel>
             <FormControl>
               <FleetNativeSelect
                 v-bind="componentField"
-                id="priority"
+                id="create-ticket-priority"
                 :options="priorityOptions"
                 :placeholder="t('tickets.form.priorityPlaceholder')"
                 testid="create-ticket-priority"
@@ -50,9 +50,9 @@
 
         <FormField name="description" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>{{ t('tickets.form.description') }}</FormLabel>
+            <FormLabel for="create-ticket-description">{{ t('tickets.form.description') }}</FormLabel>
             <FormControl>
-              <MarkdownEditor v-bind="componentField" :mention-slug="props.projectSlug" />
+              <MarkdownEditor id="create-ticket-description" v-bind="componentField" :mention-slug="props.projectSlug" />
             </FormControl>
             <FormMessage />
           </FormItem>

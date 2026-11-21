@@ -449,7 +449,9 @@
       "approveFix": "Approve Fix",
       "failFix": "Fail Fix",
       "close": "Close",
-      "closeReasonTitle": "Reason for closing"
+      "closeReasonTitle": "Reason for closing",
+      "commentLabel": "Comment",
+      "commentRequired": "A comment is required to continue."
     },
     "assign": {
       "userIdPlaceholder": "User ID",

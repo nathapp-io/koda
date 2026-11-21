@@ -161,11 +161,16 @@ async function handleDialogSubmit() {
           <DialogTitle>{{ dialogTitle }}</DialogTitle>
         </DialogHeader>
         <div class="space-y-4">
+          <Label for="ticket-action-comment">{{ t('tickets.actions.commentLabel') }}</Label>
           <Textarea
+            id="ticket-action-comment"
             v-model="comment"
             :placeholder="t('common.commentPlaceholder')"
+            aria-required="true"
+            aria-describedby="ticket-action-comment-hint"
             rows="4"
           />
+          <p id="ticket-action-comment-hint" data-testid="ticket-action-comment-hint">{{ t('tickets.actions.commentRequired') }}</p>
           <div class="flex justify-end gap-2">
             <Button variant="outline" @click="closeDialog">{{ t('common.cancel') }}</Button>
             <Button :disabled="!canSubmit" @click="handleDialogSubmit">{{ t('common.confirm') }}</Button>

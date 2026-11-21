@@ -449,7 +449,9 @@
       "approveFix": "批准修复",
       "failFix": "修复失败",
       "close": "关闭",
-      "closeReasonTitle": "关闭原因"
+      "closeReasonTitle": "关闭原因",
+      "commentLabel": "评论",
+      "commentRequired": "需要填写评论才能继续。"
     },
     "assign": {
       "userIdPlaceholder": "用户 ID",
