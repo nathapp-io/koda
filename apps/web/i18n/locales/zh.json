@@ -469,7 +469,9 @@
     },
     "labels": {
       "select": "选择标签",
-      "add": "添加标签"
+      "add": "添加标签",
+      "noneInProject": "此项目还没有标签。",
+      "manage": "创建标签"
     },
     "links": {
       "title": "链接",
@@ -484,6 +486,7 @@
     "delete": {
       "button": "删除工单",
       "confirm": "确定要删除该工单？",
+      "confirmBody": "该工单将从看板、搜索和项目中移除，且无法在应用中撤销。",
       "success": "工单已删除"
     },
     "toast": {

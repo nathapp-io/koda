@@ -147,7 +147,7 @@ function mountTicketPage(over: TicketOver = {}): TicketPage {
     routes: {
       [`/projects/web/tickets/${String(ticket.ref)}`]: ticket,
       [`/projects/web/tickets/${String(ticket.ref)}/links`]: ticket.links,
-      '/projects/web/labels': [],
+      '/projects/web/labels': [{ id: 'l9', name: 'ux', color: '#123456' }],
       '/projects/web/fleet/repos': { records: over.fleetRepo === true ? [{ id: 'r1', owner: 'acme', name: 'app' }] : [] },
       '/projects/web/assignees': { items: [] },
     },
@@ -196,7 +196,7 @@ function mountTicketPage(over: TicketOver = {}): TicketPage {
 
 describe('US-007 AC-1: ticket.assign renders the assignee controls alone', () => {
   test('AC-1: only that key renders Change and no label select, link form or delete button', async () => {
-    const { app } = mountTicketPage({ project: ['ticket.assign'] })
+    const { app } = mountTicketPage({ project: ['ticket.assign'], ticket: { assignee: { kind: 'user', id: 'u2', name: 'Bob' } } })
     await settle()
 
     expect(byTestId(app, 'assignee-change')).toBeDefined()

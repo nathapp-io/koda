@@ -202,7 +202,13 @@ async function unassignTicket() {
 
 const deletingTicket = vueRef(false)
 async function deleteTicket() {
-  if (!window.confirm(t('tickets.delete.confirm'))) return
+  const confirmed = await useConfirm().confirm({
+    title: t('tickets.delete.confirm'),
+    body: t('tickets.delete.confirmBody'),
+    confirmLabel: t('tickets.delete.button'),
+    destructive: true,
+  })
+  if (!confirmed) return
   deletingTicket.value = true
   try {
     await $api.delete(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}`)
@@ -317,7 +323,7 @@ async function removeLink(linkId: string) {
             <Button v-else size="sm" variant="outline" data-testid="assignee-change" @click="pickerOpen = true">
               {{ t('tickets.assignee.change') }}
             </Button>
-            <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
+            <Button v-if="ticket.assignee" size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
               {{ t('tickets.assign.unassign') }}
             </Button>
           </div>
@@ -379,7 +385,13 @@ async function removeLink(linkId: string) {
           </button>
           <span v-if="!ticket.labels || ticket.labels.length === 0" class="text-xs text-muted-foreground">{{ t('labels.empty') }}</span>
         </div>
-        <div v-if="canLabel" class="flex items-center gap-2 border-t pt-2.5">
+        <p v-if="canLabel && allLabels.length === 0" class="border-t pt-2.5 text-xs text-muted-foreground" data-testid="ticket-labels-none">
+          {{ t('tickets.labels.noneInProject') }}
+          <NuxtLink :to="`/${projectSlug}/labels`" class="text-accent-foreground underline-offset-2 hover:underline">
+            {{ t('tickets.labels.manage') }}
+          </NuxtLink>
+        </p>
+        <div v-else-if="canLabel" class="flex items-center gap-2 border-t pt-2.5">
           <Select v-model="selectedLabelId">
             <SelectTrigger class="w-[150px]" :aria-label="t('tickets.labels.select')">
               <SelectValue :placeholder="t('tickets.labels.select')" />

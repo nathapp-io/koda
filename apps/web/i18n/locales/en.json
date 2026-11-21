@@ -469,7 +469,9 @@
     },
     "labels": {
       "select": "Select label",
-      "add": "Add Label"
+      "add": "Add Label",
+      "noneInProject": "This project has no labels yet.",
+      "manage": "Create labels"
     },
     "links": {
       "title": "Links",
@@ -484,6 +486,7 @@
     "delete": {
       "button": "Delete Ticket",
       "confirm": "Delete this ticket?",
+      "confirmBody": "The ticket is removed from the board, search and its project. This cannot be undone from the app.",
       "success": "Ticket deleted successfully"
     },
     "toast": {

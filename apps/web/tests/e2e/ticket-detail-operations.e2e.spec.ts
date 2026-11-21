@@ -131,12 +131,12 @@ test.describe('Ticket Detail Operations', () => {
     await confirmTransitionDialog(page, 'closing from e2e');
     await expect(closeRequest).resolves.toBeTruthy();
 
-    page.once('dialog', dialog => dialog.accept());
     const deleteRequest = page.waitForRequest(request =>
       request.method() === 'DELETE' &&
       request.url().includes(`/api/projects/${projectSlug}/tickets/${ticket.ref}`)
     );
     await page.getByRole('button', { name: DELETE_TICKET_REGEX }).click();
+    await page.getByTestId('confirm-dialog-confirm').click();
     await expect(deleteRequest).resolves.toBeTruthy();
   });
 
