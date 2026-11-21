@@ -44,6 +44,7 @@ const efforts = computed(() => chosenAgent.value?.efforts ?? [])
  * offers a native model), while a ready ACP agent may advertise none and run on its own default.
  */
 const canSubmit = computed(() => chosenAgent.value?.available === true)
+const showAgentUnavailable = computed(() => options.settled.value && chosenAgent.value?.available === false && !isSubmitting.value)
 /** US-011: the REPO mode select offers only the modes the caller's project keys allow. */
 const modeOptions = computed(() => threadModeChoices(key => permissions.value.has(key))
   .map(mode => ({ value: mode, label: t(`fleet.threads.new.mode.${mode}`) })))
@@ -139,7 +140,7 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
       </FormField>
       <FormField v-if="!isProject" v-slot="{ componentField }" name="repoId">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.repo') }}</FormLabel>
+          <FormLabel>{{ t('fleet.threads.new.repo') }} <span aria-hidden="true">*</span></FormLabel>
           <FormControl><FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.threads.new.repoPlaceholder')" testid="thread-new-repo" /></FormControl>
           <FormMessage />
         </FormItem>
@@ -148,13 +149,15 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.baseRef') }}</FormLabel>
           <FormControl><Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="thread-new-baseRef" /></FormControl>
+          <p v-if="selectedRepo" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.baseRefHint', { branch: selectedRepo.defaultBranch }) }}</p>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-if="!isProject" v-slot="{ componentField }" name="feature">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.feature') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" data-testid="thread-new-feature" /></FormControl>
+          <FormLabel>{{ t('fleet.threads.new.feature') }} <span aria-hidden="true">*</span></FormLabel>
+          <FormControl><Input v-bind="componentField" aria-required="true" data-testid="thread-new-feature" /></FormControl>
+          <p class="text-sm text-muted-foreground">{{ t('fleet.threads.new.featureHint') }}</p>
           <FormMessage />
         </FormItem>
       </FormField>
@@ -202,6 +205,7 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
         <p v-if="skillsError" class="text-sm" role="alert">{{ skillsError }}</p>
       </section>
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>
+      <p v-if="showAgentUnavailable" class="text-sm text-muted-foreground" data-testid="thread-new-unavailable">{{ t('fleet.threads.new.agentUnavailable') }}</p>
       <Button type="submit" :disabled="isSubmitting || !canSubmit">{{ t('fleet.threads.new.create') }}</Button>
     </form>
   </div>

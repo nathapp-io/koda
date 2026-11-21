@@ -56,12 +56,15 @@ const FormField = defineComponent({
   name: 'TestFormField',
   props: { name: { type: String, required: true } },
   setup(props, { attrs, slots }) {
-    const { value, handleChange, handleBlur } = useField<string>(() => props.name)
-    return () => h('div', { ...attrs, 'data-field': props.name }, slots.default?.({ componentField: {
-      modelValue: value.value,
-      'onUpdate:modelValue': handleChange,
-      onBlur: handleBlur,
-    } }))
+    const { value, handleChange, handleBlur, errorMessage } = useField<string>(() => props.name)
+    return () => h('div', { ...attrs, 'data-field': props.name }, [
+      ...(slots.default?.({ componentField: {
+        modelValue: value.value,
+        'onUpdate:modelValue': handleChange,
+        onBlur: handleBlur,
+      } }) ?? []),
+      errorMessage.value ? h('p', { 'data-field-error': props.name }, errorMessage.value) : null,
+    ])
   },
 })
 
@@ -91,6 +94,7 @@ type PageOver = {
   repos?: Record<string, unknown>[]
   skills?: Record<string, unknown>[]
   post?: jest.Mock
+  settled?: boolean
 }
 
 /** One runner summary as the workspace/project form reads it (threadBackends carries the agents). */
@@ -124,6 +128,7 @@ function mountPage(over: PageOver = {}) {
         runners: ref(runners),
         moreRepos: ref(false),
         moreRunners: ref(false),
+        settled: ref(over.settled ?? true),
         load: jest.fn(async () => undefined),
         profileOptions: ref([]),
         labelOptions: ref([]),
@@ -515,6 +520,68 @@ const TWO_HOST_REPOS = [
   { ...repo(), id: 'r1', host: 'https://gitlab.com' },
   { ...repo(), id: 'r2', host: 'https://gitlab.example.com' },
 ]
+
+describe('US-004 AC-3..AC-7: project thread create guidance', () => {
+  test('AC-3: unavailable chosen agent explains why Create is disabled', async () => {
+    const m = mountPage({ models: ['m1'], englishCopy: true })
+    await m.settle()
+    chooseAgent(m.app, 'codex')
+    await Vue.nextTick()
+
+    expect(m.app.one('[data-testid="thread-new-unavailable"]')).toBeDefined()
+    expect(m.app.text()).toContain('The chosen agent is not available on an online runner. Choose another agent or try again later.')
+    expect(submitButton(m.app)?.props.disabled).toBe(true)
+    m.app.unmount()
+  })
+
+  test('AC-4: available agent and pending runner discovery do not show unavailable warning', async () => {
+    const available = mountPage({ models: ['m1'], englishCopy: true })
+    await available.settle()
+    expect(available.app.one('[data-testid="thread-new-unavailable"]')).toBeUndefined()
+    available.app.unmount()
+
+    const pending = mountPage({ settled: false, englishCopy: true })
+    await pending.settle()
+    expect(pending.app.one('[data-testid="thread-new-unavailable"]')).toBeUndefined()
+    pending.app.unmount()
+  })
+
+  test('AC-5: missing repository shows its field error and sends no POST', async () => {
+    const m = mountPage({ models: ['m1'] })
+    await m.settle()
+    typeInto(m.app, 'title', 'Auth spec')
+    await submitForm(m.app)
+
+    const error = must(m.app.one('[data-field-error="repoId"]'), 'repo field error')
+    expect(m.app.textOf(error)).toBe('fleet.threads.new.validation.repoRequired')
+    expect(m.post).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('AC-6: repository and feature are marked required accessibly', async () => {
+    const m = mountPage({ models: ['m1'] })
+    await m.settle()
+
+    const requiredLabels = m.app.find('[data-stub="form-label"]')
+      .map(node => m.app.textOf(node))
+      .filter(text => text.includes('*'))
+    expect(requiredLabels).toEqual(expect.arrayContaining(['fleet.threads.new.repo *', 'fleet.threads.new.feature *']))
+    expect(m.app.one('[data-testid="thread-new-feature"]')?.props['aria-required']).toBe('true')
+    m.app.unmount()
+  })
+
+  test('AC-7: Feature and selected repository Base ref have contextual hints', async () => {
+    const m = mountPage({ models: ['m1'], englishCopy: true })
+    await m.settle()
+    const repoSelect = must(selectIn(m.app, 'repoId'), 'repo select')
+    ;(repoSelect.props.onChange as (event: unknown) => void)({ target: { value: 'r1' } })
+    await Vue.nextTick()
+
+    expect(m.app.text()).toContain('Names the branch and the nax feature, for example fix-login-redirect')
+    expect(m.app.text()).toContain('Leave empty to start from main')
+    m.app.unmount()
+  })
+})
 
 describe('US-005 AC-9: pages/[project]/threads/new.vue repo chooser', () => {
   test('AC-9: a shared owner/name is labelled with its host', async () => {

@@ -177,6 +177,44 @@ afterEach(() => {
 })
 
 describe('US-005 AC-6..AC-11: pages/threads/new.vue', () => {
+  test('US-004 AC-8: Automatic hint appears only while home project is Automatic', async () => {
+    const m = mountPage()
+    await m.settle()
+
+    expect(m.app.text()).toContain('fleet.threads.workspace.homeProjectAutoHint')
+    pickHomeProject(m.app, 'web')
+    await Vue.nextTick()
+    expect(m.app.text()).not.toContain('fleet.threads.workspace.homeProjectAutoHint')
+    m.app.unmount()
+  })
+
+  test('US-004 AC-9: rejected Automatic create shows API message and does not navigate', async () => {
+    const message = 'No project you are a member of has a repository, so Automatic cannot pick a home project. Choose one.'
+    const post = jest.fn(async () => { throw new ApiError(409, message) })
+    const m = mountPage({ runners: [runner({ id: 'rn1', threadBackends: native(['m1']) })], post })
+    await m.settle()
+    typeInto(m.app, 'title', 't')
+    await submit(m.app)
+
+    expect(m.app.textOf(must(m.app.one('[role="alert"]'), 'submit error alert'))).toBe(message)
+    expect(m.nav).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('US-004 AC-11: rejected explicit home create shows API message in existing alert', async () => {
+    const message = 'The chosen home project has no repository. Choose a project that has one.'
+    const post = jest.fn(async () => { throw new ApiError(409, message) })
+    const m = mountPage({ runners: [runner({ id: 'rn1', threadBackends: native(['m1']) })], post })
+    await m.settle()
+    pickHomeProject(m.app, 'web')
+    await m.settle()
+    typeInto(m.app, 'title', 't')
+    await submit(m.app)
+
+    expect(m.app.textOf(must(m.app.one('[role="alert"]'), 'submit error alert'))).toBe(message)
+    expect(m.nav).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
   test('AC-6: the home project select offers Automatic first, then one option per project', async () => {
     const m = mountPage()
     await m.settle()

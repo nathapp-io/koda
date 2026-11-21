@@ -226,7 +226,10 @@ export function buildThreadCreateSchema(t: Translate) {
     if (values.baseRef.length > 255) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseRef'], message: t('fleet.threads.new.validation.baseRef') })
     }
-    if (!FEATURE_RE.test(values.feature) || values.feature.includes('..')) {
+    if (values.feature.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['feature'], message: t('fleet.threads.new.validation.featureRequired') })
+    }
+    else if (!FEATURE_RE.test(values.feature) || values.feature.includes('..')) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['feature'], message: t('fleet.threads.new.validation.feature') })
     }
   })

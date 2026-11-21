@@ -1102,6 +1102,7 @@
         "title": "我的线程",
         "homeProject": "归属项目",
         "homeAutomatic": "自动",
+        "homeProjectAutoHint": "自动选择你所属且有代码库的最早项目",
         "disabled": "线程功能已停用。"
       },
       "list": {
@@ -1138,6 +1139,9 @@
         "repoPlaceholder": "选择代码库",
         "baseRef": "基础分支",
         "feature": "功能标识",
+        "featureHint": "用于分支名和 nax 功能名，例如 fix-login-redirect",
+        "baseRefHint": "留空则从 {branch} 开始",
+        "agentUnavailable": "所选智能体在在线运行器上不可用。请选择其他智能体或稍后再试。",
         "threadTitle": "标题",
         "maxCost": "费用上限（美元）",
         "backend": "后端",
@@ -1173,7 +1177,8 @@
           "invalid": "请输入有效值",
           "repoRequired": "请选择代码库",
           "baseRef": "基础分支最多为 255 个字符",
-          "feature": "请输入有效的功能标识",
+          "feature": "请使用字母、数字、点、连字符或下划线，并以字母或数字开头（最多 128 个字符）",
+          "featureRequired": "请输入功能标识",
           "title": "标题需为 1 至 200 个字符且不能包含控制字符"
         }
       },

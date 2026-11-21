@@ -1102,6 +1102,7 @@
         "title": "My threads",
         "homeProject": "Home project",
         "homeAutomatic": "Automatic",
+        "homeProjectAutoHint": "Automatic uses the oldest project you are a member of that has a repository",
         "disabled": "Threads are disabled."
       },
       "list": {
@@ -1138,6 +1139,9 @@
         "repoPlaceholder": "Select a repository",
         "baseRef": "Base ref",
         "feature": "Feature",
+        "featureHint": "Names the branch and the nax feature, for example fix-login-redirect",
+        "baseRefHint": "Leave empty to start from {branch}",
+        "agentUnavailable": "The chosen agent is not available on an online runner. Choose another agent or try again later.",
         "threadTitle": "Title",
         "maxCost": "Cost cap in USD",
         "backend": "Backend",
@@ -1173,7 +1177,8 @@
           "invalid": "Enter a valid value",
           "repoRequired": "Choose a repository",
           "baseRef": "Base ref must be at most 255 characters",
-          "feature": "Use a valid feature name",
+          "feature": "Use letters, digits, dot, dash or underscore, starting with a letter or digit (up to 128 characters)",
+          "featureRequired": "Enter a feature name",
           "title": "Title must be 1 to 200 characters without control characters"
         }
       },
