@@ -305,9 +305,10 @@ describe('ThreadJobRun stream startup and cancellation (US-004)', () => {
   }
 
   test('US-004 AC-1: a cancel at the RUNNING notification seals the stream with one started and one closed line', async () => {
+    const clock = manualClock(Date.parse('2026-01-01T00:00:00.000Z'));
     let sent: string | undefined;
     const session: AgentSession = { ...noOpSession, async *send(message: string) { sent = message; yield { type: 'turn_end', status: 'completed' } as never; } };
-    const context = setup({ openResult: { ok: true, session, resumed: false } });
+    const context = setup({ clock, openResult: { ok: true, session, resumed: false } });
     await mkdir(jobDir, { recursive: true });
     const run = context.makeRun();
     // The cancel is delivered at the RUNNING journal notification, while the stream is still being created.
@@ -329,6 +330,16 @@ describe('ThreadJobRun stream startup and cancellation (US-004)', () => {
     expect(lines.some((line) => line.type === 'input_consumed')).toBe(false);
     expect(context.journal.getJob(jobId, leaseEpoch)?.state).toBe('CANCELLED');
     expect(context.journal.getJob(jobId, leaseEpoch)?.doneAt).not.toBeNull();
+    expect(stateEvents(context.journal).map((event) => event.to)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    // Two heartbeat intervals and the idle expiry pass after the run ended: the event count, the final state and
+    // the stream are unchanged, exactly as the PROJECT and WORKSPACE runs keep theirs.
+    const stamped = context.journal.pendingEvents(jobId, leaseEpoch, 100).length;
+    clock.advance(tuning.threadHeartbeatMs * 2 + tuning.threadIdleMs);
+    await Bun.sleep(50);
+    expect(context.journal.pendingEvents(jobId, leaseEpoch, 100).length).toBe(stamped);
+    expect(context.journal.getJob(jobId, leaseEpoch)?.state).toBe('CANCELLED');
+    expect(stateEvents(context.journal).map((event) => event.to)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    expect(await streamLines()).toEqual(lines);
     context.journal.close();
   });
 
