@@ -3,7 +3,7 @@
   "feature": "e2e-1121-not-found-nav",
   "branchName": "feat/e2e-1121-not-found-nav",
   "createdAt": "2026-11-21T16:51:25.362Z",
-  "updatedAt": "2026-11-21T17:27:27.334Z",
+  "updatedAt": "2026-11-21T17:35:36.134Z",
   "userStories": [
     {
       "id": "US-001",
@@ -286,14 +286,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Shared reactive title calls and a standard conditional error branch use existing Nuxt patterns; the broad PageHeader impact is bounded by the upstream harness default and real-component seam tests."
+        "reasoning": "Shared reactive title calls and a standard conditional error branch use existing Nuxt patterns; the broad PageHeader impact is bounded by the upstream harness default and real-component seam tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/ApprovalBadge.vue",
@@ -322,7 +325,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c8a7f362f971422b90f5af7bb74f5ab56c64e35e"
     },
     {
       "id": "US-006",
