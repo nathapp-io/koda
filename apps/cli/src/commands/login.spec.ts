@@ -49,7 +49,7 @@ jest.mock('../config', () => ({
   })),
 }));
 
-import { loginCommand, loginError } from './login';
+import { loginCommand, loginError, loginCommandFailure } from './login';
 import { agentsControllerFindMe } from '../generated';
 import { getStatusAndMessage } from '../utils/error';
 import { setConfig } from '../config';
@@ -275,9 +275,23 @@ describe('loginError — distinguishes auth failures from network and 5xx', () =
     mockData.apiUrl = 'https://saved.example';
     (agentsControllerFindMe as jest.Mock).mockRejectedValue({ ret: 40000, message: 'Unauthorized' });
 
-    await expect(loginCommand('replacement-key', 'http://example.com', {})).rejects.toThrow('Invalid API key');
+    const caught = await loginCommand('replacement-key', 'http://example.com', {}).catch((error: unknown) => error);
+    expect(caught).toMatchObject({ message: 'Invalid API key', status: 401 });
 
     expect(mockData).toMatchObject({ apiKey: 'previous-key', apiUrl: 'https://saved.example' });
     expect(setConfig).not.toHaveBeenCalled();
+
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(() => loginCommandFailure(caught)).toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(2);
+      expect(errorSpy).toHaveBeenCalledWith('Error: Invalid API key');
+    } finally {
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 });

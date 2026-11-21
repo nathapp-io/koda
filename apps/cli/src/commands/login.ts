@@ -37,14 +37,13 @@ export async function loginCommand(
   };
 }
 
-/**
- * Translate whatever the upstream API rejected with into a useful error.
- *
- * CLI-05 reported that login masked every failure (network outage, DNS
- * failure, 5xx, etc.) as "Invalid API key". Only 401/403 mean the key is
- * wrong; everything else should bubble up so the user can act on the
- * actual cause.
- */
+export function loginCommandFailure(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Error: ${message}`);
+  process.exit(2);
+}
+
+/** Classify login failures while preserving the established connectivity diagnostic. */
 export function loginError(err: unknown): Error & { status?: number; transient?: boolean } {
   const { status, message } = getStatusAndMessage(err);
   if (status === 401 || status === 403) {

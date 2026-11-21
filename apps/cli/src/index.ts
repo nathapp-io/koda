@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { loginCommand } from './commands/login';
+import { loginCommand, loginCommandFailure } from './commands/login';
 import { initCommand } from './commands/init';
 import { configShow, configSet, configProfileListAction, configProfileAddAction, configProfileRemoveAction } from './commands/config';
 import { getProfiles, setProfile, removeProfile } from './config';
@@ -95,9 +95,7 @@ program
       console.log(result.message);
       process.exit(0);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`Error: ${errorMessage}`);
-      process.exit(2);
+      loginCommandFailure(error);
     }
   });
 
