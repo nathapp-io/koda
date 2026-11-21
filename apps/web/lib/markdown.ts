@@ -67,11 +67,14 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 })
 
 
-/** M24: never throws and never returns unsanitized HTML. */
-export function renderMarkdownOrEscape(markdown: string): string {
+/**
+ * M24: never throws and never returns unsanitized HTML. `breaks` keeps a single typed newline as a
+ * `<br>`; a one-argument caller gets marked's default (`false`) and renders exactly as before.
+ */
+export function renderMarkdownOrEscape(markdown: string, options: { breaks?: boolean } = {}): string {
   if (!markdown) return ''
   try {
-    return renderSafeMarkdown(markdown)
+    return renderSafeMarkdown(markdown, options)
   } catch {
     return `<p>${escapeHtml(markdown)}</p>`
   }
@@ -89,12 +92,29 @@ function sanitizeHtml(dirty: string): string {
   })
 }
 
-export function renderSafeMarkdown(markdown: string): string {
+export function renderSafeMarkdown(markdown: string, options: { breaks?: boolean } = {}): string {
   if (!markdown) return ''
-  const rendered = marked.parse(markdown, { async: false }) as string
+  const rendered = marked.parse(markdown, { async: false, breaks: options.breaks === true }) as string
   return sanitizeHtml(rendered)
 }
 
 export function sanitizeHtmlFragment(html: string): string {
   return sanitizeHtml(html)
+}
+
+/** Every `<img …>` element, case-insensitively, with or without a trailing slash or attributes. */
+const IMG_TAG = /<img\b[^>]*>/gi
+
+/**
+ * US-002: markdown that may be rendered for anyone — a comment can be written by an agent (MCP,
+ * fleet), so it must never make the browser fetch a URL. The same rule `renderThreadMarkdown`
+ * applies to thread messages: the shared sanitizer, then every image removed.
+ *
+ * The second sanitize is not optional. Stripping an `img` tag with a regex over *serialized* HTML
+ * can end an attribute early — a link `title` holding `<img b=` swallows the anchor's own `>` — so
+ * the text after it re-parses as attributes of that element. A string that re-parses with a live
+ * handler attribute must not reach `v-html`, and the sanitizer is what removes it.
+ */
+export function renderMarkdownWithoutImages(markdown: string, options: { breaks?: boolean } = {}): string {
+  return sanitizeHtmlFragment(renderMarkdownOrEscape(markdown, options).replace(IMG_TAG, ''))
 }

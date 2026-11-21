@@ -141,13 +141,13 @@ export class AuthService {
       // BUG-12: burn the same bcrypt CPU as a real login so response
       // timing cannot enumerate registered emails.
       await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
-      throw new AuthException({}, 'auth');
+      throw new AuthException({}, 'auth.invalidCredentials');
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     // A disabled account answers exactly like a wrong password (no enumeration).
     if (!isPasswordValid || user.disabled) {
-      throw new AuthException({}, 'auth');
+      throw new AuthException({}, 'auth.invalidCredentials');
     }
 
     // Branch fix B1: the hash proved above must still be the account's password at the moment the session

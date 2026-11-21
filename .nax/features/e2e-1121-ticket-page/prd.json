@@ -1,0 +1,461 @@
+{
+  "project": "koda",
+  "feature": "e2e-1121-ticket-page",
+  "branchName": "feat/e2e-1121-ticket-page",
+  "createdAt": "2026-11-21T13:22:53.364Z",
+  "updatedAt": "2026-11-21T14:29:28.942Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Shared styled confirm dialog",
+      "description": "**Goal** — Add the shared styled confirmation service and a single app-level dialog host.\n\n**Motivation** — The browser can suppress that dialog, it says nothing about what happens, and it does not match the styled Archive dialog on threads.\n\n**Approach** — New `apps/web/composables/useConfirm.ts` (auto-imported). It has no precedent in the app, so here is a worked skeleton:\n\n```ts\nimport { computed, shallowRef } from 'vue'\n\nexport interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; destructive?: boolean }\ninterface Pending { options: ConfirmOptions; resolve: (ok: boolean) => void }\n\n// One dialog per tab. Client-only: confirm() is called from event handlers, never during setup or SSR.\nconst pending = shallowRef<Pending | null>(null)\n\nexport function useConfirm() {\n  function confirm(options: ConfirmOptions): Promise<boolean> {\n    pending.value?.resolve(false)\n    return new Promise<boolean>((resolve) => { pending.value = { options, resolve } })\n  }\n  function settle(ok: boolean): void {\n    const current = pending.value\n    if (!current) return\n    pending.value = null\n    current.resolve(ok)\n  }\n  return { confirm, settle, current: computed(() => pending.value?.options ?? null) }\n}\n```\n\nNew `apps/web/components/ConfirmDialogHost.vue`. It reads `useConfirm().current` and renders, only while `current` is non-null, a `Dialog` (open) with `DialogContent data-testid=\"confirm-dialog\"` containing:\n- `DialogTitle` = `title`;\n- a muted paragraph `data-testid=\"confirm-dialog-body\"` = `body`, shown only when `body` is set;\n- `DialogFooter` with Cancel (`data-testid=\"confirm-dialog-cancel\"`, `variant=\"outline\"`, `t('common.cancel')`) and Confirm (`data-testid=\"confirm-dialog-confirm\"`, text `confirmLabel ?? t('common.confirm')`, `variant=\"destructive\"` when `destructive` is true and `\"default\"` otherwise).\n\nConfirm calls `settle(true)`. Cancel, and the `Dialog` emitting `update:open` with `false` (Escape, overlay), call `settle(false)`.\n\n`apps/web/app.vue`.\n- Baseline: `NuxtLayout` > `NuxtPage`, then `Toaster`.\n- Target: the same, plus one `<ConfirmDialogHost />` after `Toaster`.\n\nModify `apps/web/tests/helpers/mount-sfc.ts` — add `useConfirm` to `NUXT_AUTO_IMPORTS`, and to `AUTO_IMPORT_DEFAULTS` as `() => ({ confirm: async () => true, settle: () => undefined, current: { value: null } })`, so every existing mount of a component that now calls `useConfirm` still runs. A spec that tests the dialog overrides it through `globals`.\n\n`useConfirm` holds module state, so every spec in this story settles any pending request in an `afterEach` (or isolates the module per test), and no test depends on another's leftover request. Add `tests/composables/useConfirm.spec.ts` for AC-1 to AC-4 and `tests/components/confirm-dialog-host.spec.ts` for AC-5 to AC-13, using the existing Dialog stubs and real shared state for host settlement tests.\n\n**Scope** — In: the shared composable, host, app mount and mount-harness integration. Out: adopting the service in comment deletion (US-003), ticket deletion (US-004), or the remaining native-confirm sites deferred to `e2e-1121-confirm-dialogs`; calling confirm during setup or SSR.\n\n**Interface** — `ConfirmOptions`, `Pending`, `confirm(options: ConfirmOptions): Promise<boolean>`, `settle(ok: boolean): void`, and `current: computed(() => pending.value?.options ?? null)` are defined verbatim in the skeleton above.",
+      "acceptanceCriteria": [
+        "[unit] `useConfirm().confirm({ title: 'T' })` returns a promise that resolves `true` after `settle(true)` is called.",
+        "[unit] `useConfirm().confirm({ title: 'T' })` returns a promise that resolves `false` after `settle(false)` is called.",
+        "[unit] Calling `useConfirm().confirm({ title: 'B' })` while a request titled `A` is pending resolves the `A` promise with `false`, and `current.value.title` is then `B`.",
+        "[unit] With no pending request, `useConfirm().settle(true)` leaves `current.value` `null`.",
+        "[unit] `ConfirmDialogHost`, mounted with no pending request, renders no `[data-testid=\"confirm-dialog\"]` element.",
+        "[unit] After `confirm({ title: 'Delete it?', body: 'Gone for good.', confirmLabel: 'Delete', destructive: true })`, the mounted `ConfirmDialogHost` shows `Delete it?` in its title.",
+        "[unit] In that mount, `[data-testid=\"confirm-dialog-body\"]` reads `Gone for good.`.",
+        "[unit] In that mount, `[data-testid=\"confirm-dialog-confirm\"]` reads `Delete` and has `variant` `destructive`.",
+        "[unit] After `confirm({ title: 'T' })` with no `confirmLabel`, `[data-testid=\"confirm-dialog-confirm\"]` reads `t('common.confirm')` (en \"Confirm\").",
+        "[unit] Clicking `[data-testid=\"confirm-dialog-confirm\"]` resolves the pending `confirm()` promise with `true`.",
+        "[unit] Clicking `[data-testid=\"confirm-dialog-cancel\"]` resolves the pending `confirm()` promise with `false`.",
+        "[unit] The host's `Dialog` emitting `update:open` with `false` resolves the pending `confirm()` promise with `false`.",
+        "[unit] Mounting `app.vue` (with `NuxtLayout`, `NuxtPage` and `Toaster` stubbed) renders exactly one `ConfirmDialogHost` component."
+      ],
+      "tags": [
+        "web",
+        "confirmation",
+        "shared-ui"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The spec supplies the complete small promise/state algorithm; existing Dialog primitives and mount stubs make the composable, host and app wiring standard Vue integration rather than architectural concurrency work.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadControls.vue",
+        "apps/web/app.vue",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/helpers/fleet-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useConfirm.ts",
+        "apps/web/components/ConfirmDialogHost.vue",
+        "apps/web/tests/composables/useConfirm.spec.ts",
+        "apps/web/tests/components/confirm-dialog-host.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "add `useConfirm` to `NUXT_AUTO_IMPORTS`, and to `AUTO_IMPORT_DEFAULTS` as `() => ({ confirm: async () => true, settle: () => undefined, current: { value: null } })`, so every existing mount of a component that now calls `useConfirm` still runs. A spec that tests the dialog overrides it through `globals`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a1d9e7cf183da71a1a9dd28d2687e0d80175e55e"
+    },
+    {
+      "id": "US-002",
+      "title": "Render image-free comment markdown with shared styling",
+      "description": "**Goal** — Render posted comments as sanitized image-free markdown, close the no-slug thread sanitization gap and style comment, description and preview markdown consistently.\n\n**Motivation** — `CommentThread.vue` renders a comment body through `splitMentions` as plain text in a `whitespace-pre-wrap` paragraph.\n\n**Approach** — `apps/web/lib/markdown.ts`.\n- Target: both take an optional second argument `options: { breaks?: boolean } = {}`, and `renderSafeMarkdown` passes `breaks: options.breaks === true` to `marked.parse`. Existing one-argument callers render exactly as before.\n- Target: add the export `renderMarkdownWithoutImages(markdown: string, options: { breaks?: boolean } = {}): string` = `sanitizeHtmlFragment(renderMarkdownOrEscape(markdown, options).replace(/<img\\b[^>]*>/gi, ''))`. Comments can be written by agents (MCP, fleet), so a comment must not make the browser fetch a URL, the same rule `renderThreadMarkdown` applies to thread messages. The second sanitize is required, not optional: stripping an `img` tag with a regex over serialized HTML can end an attribute early (a link `title` that holds `<img b=` swallows the following markup), and a string that re-parses with a live event attribute must not reach `v-html`. The sanitizer config is unchanged.\n\nThe inspected baseline has only `renderSafeMarkdown` directly calling `marked.parse`; forward the options through `renderMarkdownOrEscape` into that existing parser call, retaining `{ async: false }`.\n\n`apps/web/lib/thread-markdown.ts` `renderThreadMarkdown(content, slug?)`.\n- Baseline: `renderMarkdownOrEscape(content).replace(IMG_TAG, '')`, sanitized a second time only on the `slug` branch. The no-slug branch (reached when `ThreadTimeline` gets its default `slug` of `''`) returns the regex output unsanitized.\n- Target: the image-free HTML comes from `renderMarkdownWithoutImages(content)` (no `breaks`), so every branch returns sanitized HTML; the `slug` branch then linkifies and sanitizes as today. Unused `IMG_TAG` is removed.\n\n`apps/web/assets/css/globals.css`: add a `.markdown-body` rule set in `@layer components`, built on the existing tokens:\n- `ul` with disc markers and `ol` with decimal markers, both with left padding;\n- spacing between `p`, list and `pre` blocks;\n- inline `code` with `bg-muted`, rounded corners, horizontal padding and a mono font;\n- `pre` with `bg-muted`, padding, `overflow-x-auto` and no extra background on its inner `code`;\n- `a` with `text-link` and an underline;\n- `blockquote` with a left border in `border-border` and `text-muted-foreground`;\n- `h1`-`h3` with font weight and size steps.\n\n`.markdown-body` is a plain component class that the sanitizer never sees, because it sits on the container, not in user HTML.\n\n`apps/web/components/CommentThread.vue`.\n- Target, body: a `div` with `data-testid=\"comment-body\"` and class `markdown-body text-sm` whose `v-html` is `renderMarkdownWithoutImages(withMentionChips(comment.body, id => memberNames.nameOf(id) ?? null), { breaks: true })`. `breaks: true` keeps a single typed newline as a line break, which the removed `whitespace-pre-wrap` used to show. `splitMentions` is no longer imported here. Comments can be agent-written, so this is a deliberate second exception to the web context rule that agent-written text renders through `{{ }}` only. It carries the same guarantees as the thread-message exception: images removed, and the output sanitized after the removal.\n\n`apps/web/components/TicketActivity.vue`: the description container keeps its `v-html`, its renderer (`renderMarkdownOrEscape(withMentionChips(...))`) and its `whitespace-pre-wrap`, and gains the class `markdown-body` and `data-testid=\"ticket-description-body\"`.\n\n`apps/web/components/MarkdownEditor.vue`: the preview container's `prose prose-sm dark:prose-invert max-w-none` classes are replaced by `markdown-body text-sm`, and it gains `data-testid=\"markdown-preview\"`.\n\nJest cannot load the real `marked` and `isomorphic-dompurify` (see `tests/lib/markdown.spec.ts`), so the rendering and sanitizer ACs run in a new real-stack harness under `tests/harness/`, wired into `test:real-sanitizer`; component mounts alias `~/lib/markdown` to a stub, as `markdown-editor-mentions.spec.ts` does. AC-1 to AC-6 run against the real `marked` and `isomorphic-dompurify`, and parse the returned HTML with jsdom, as `tests/harness/thread-markdown-real-sanitizer.ts` does. The AC-1 and AC-6 payload ends in a closed attribute (`x=\"y\"`) on purpose: with the strip alone and no second sanitize it yields an element with a live `onmouseover`, so the check fails on the old code. A `v-html` value is a string in the Jest mount harness (`mount-sfc.ts` stores it as `props.innerHTML`), so AC-7 to AC-9 read that string.\n\nMention ids in fixtures must match `MENTION_TOKEN` (`c[a-z0-9]{20,32}`); do not broaden MENTION_TOKEN or modify the mention helper. AC-1 to AC-6 and the default-rendering regression checks run against the real marked, isomorphic-dompurify and jsdom, never a double.\n\nThe two default-rendering acceptance criteria restate Design's explicit one-argument compatibility requirement; append them after AC-11 and run them in the same new real-stack harness.\n\nCreate `tests/harness/markdown-without-images-real-sanitizer.ts` for AC-1 to AC-6 and the two default-rendering regression checks, `tests/components/comment-thread-markdown.spec.ts` for AC-7 to AC-9, and `tests/components/ticket-markdown-body.spec.ts` for AC-10 and AC-11.\n\nRequired existing-test updates:\n- `apps/web/tests/components/markdown-editor-mentions.spec.ts` — the test \"comments render tokens as chips without v-html; descriptions run through withMentionChips\" asserts that `CommentThread.vue` contains `splitMentions(comment.body)` and `class=\"mention-chip\"` and has no `v-html` bound to a comment. Those three assertions are replaced by the invariant that `CommentThread.vue` renders a comment body through `withMentionChips` and `renderMarkdownWithoutImages` into `[data-testid=\"comment-body\"]`. Its `TicketActivity.vue` `renderMarkdownOrEscape(withMentionChips(` assertion and the `:mention-slug` test are unchanged.\n- `apps/web/tests/lib/thread-markdown.spec.ts` — the test \"the rewritten HTML is sanitized again before it is rendered\" expects the sanitizer double called 2 times for a slug render, and \"without a slug the output is sanitized once\" expects 1. With the image-free HTML now sanitized once more, the counts become 3 and 2. The invariants stay: the final sanitize call receives the linkified HTML (anchors included), and the no-slug output is sanitized after the images are removed.\n- `apps/web/tests/components/CommentThread.spec.ts` — `mountThread` mounts the real `CommentThread.vue`, which now imports the markdown lib, and jest cannot load `isomorphic-dompurify`. Its mount aliases the markdown lib module to a stub whose renderMarkdownWithoutImages returns its input; every existing assertion stays unchanged.\n- `apps/web/tests/components/CommentThread-edit.spec.ts` — `mountComments` mounts the real `CommentThread.vue`, which now imports the markdown lib, and jest cannot load `isomorphic-dompurify`. Its mount aliases the markdown lib module to a stub whose renderMarkdownWithoutImages returns its input; every existing assertion stays unchanged.\n- `apps/web/tests/components/comment-thread-time.spec.ts` — its mount of the real `CommentThread.vue`, which now imports the markdown lib, cannot load `isomorphic-dompurify` under jest. Its mount aliases the markdown lib module to a stub whose renderMarkdownWithoutImages returns its input; every existing assertion stays unchanged.\n- `apps/web/package.json` — the `test:real-sanitizer` script also runs the new markdown-without-images harness that US-002 creates, so `bun run test` executes the new real-stack checks. Preserve the existing real-sanitizer and flow-answer-form harness commands.\n\n**Scope** — In: markdown helper options, safe image removal, thread renderer integration, comment display, scoped CSS, description/preview container classes and corresponding harness compatibility. Out: comment authors and deletion (US-003), shared confirmation (US-001), form label changes (US-006), rendering comment images, changing description rendering or whitespace handling, adding typography, changing other prose consumers, or editing the deferred generated/source guidance.\n\n**Interface**\n```ts\nrenderMarkdownOrEscape(markdown: string, options: { breaks?: boolean } = {}): string\nrenderSafeMarkdown(markdown: string, options: { breaks?: boolean } = {}): string\nrenderMarkdownWithoutImages(markdown: string, options: { breaks?: boolean } = {}): string\nrenderThreadMarkdown(content: string, slug?: string): string\n```",
+      "acceptanceCriteria": [
+        "[integration] `renderMarkdownWithoutImages('[x](https://e.com \"a<img b=\")\\n\\n\" onmouseover=\"alert(1)\" x=\"y\"')` returns HTML in which no element carries an `onmouseover` attribute.",
+        "[integration] `renderMarkdownWithoutImages('see ![x](https://example.com/a.png) here')` returns HTML containing no `img` elements while retaining the text `see` and `here`.",
+        "[integration] `renderMarkdownWithoutImages('[x](javascript:alert(1))')` returns HTML with no `a` element whose `href` starts with `javascript:`.",
+        "[integration] `renderMarkdownWithoutImages('<script>alert(1)</script>ok')` returns HTML with no `script` element.",
+        "[integration] `renderMarkdownWithoutImages('line one\\nline two', { breaks: true })` returns HTML with a `br` element between `line one` and `line two`.",
+        "[integration] `renderThreadMarkdown('[x](https://e.com \"a<img b=\")\\n\\n\" onmouseover=\"alert(1)\" x=\"y\"')`, called with no slug, returns HTML in which no element carries an `onmouseover` attribute.",
+        "[unit] A mounted `CommentThread`, with `~/lib/markdown` aliased to a stub, the real `withMentionChips`, and `useProjectMemberNames().nameOf('c000000000000000000000009')` returning `Ada`, calls the stub's `renderMarkdownWithoutImages` for a comment whose body is `hi @[Old](user:c000000000000000000000009)` with `hi <span class=\"mention-chip\">@Ada</span>` and `{ breaks: true }`.",
+        "[unit] In that mount, the `innerHTML` of `[data-testid=\"comment-body\"]` equals the string the `renderMarkdownWithoutImages` stub returned.",
+        "[unit] In that mount, `[data-testid=\"comment-body\"]` has the class `markdown-body`.",
+        "[unit] A mounted `TicketActivity` with a non-empty `ticket.description` and `editing` false renders `[data-testid=\"ticket-description-body\"]` with the class `markdown-body`.",
+        "[unit] A mounted `MarkdownEditor` (with `~/lib/markdown` aliased to a stub and the tab parts stubbed so the preview content renders) renders `[data-testid=\"markdown-preview\"]` with the class `markdown-body`.",
+        "[integration] `renderMarkdownOrEscape('line one\\nline two')`, called without an options argument, returns HTML with no `br` element, preserving existing one-argument newline rendering.",
+        "[integration] `renderSafeMarkdown('line one\\nline two')`, called without an options argument, returns HTML with no `br` element, preserving existing one-argument newline rendering."
+      ],
+      "tags": [
+        "web",
+        "markdown",
+        "security",
+        "sanitization",
+        "comments"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module rendering change introduces agent-authored HTML and repairs a stored-XSS boundary after regex mutation; real-stack sanitizer verification warrants strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-markdown.ts",
+        "apps/web/tests/harness/thread-markdown-real-sanitizer.ts",
+        "apps/web/assets/css/globals.css",
+        "apps/web/tests/components/comment-thread-time.spec.ts",
+        "apps/web/tests/components/markdown-editor-mentions.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/harness/markdown-without-images-real-sanitizer.ts",
+        "apps/web/tests/components/comment-thread-markdown.spec.ts",
+        "apps/web/tests/components/ticket-markdown-body.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/markdown-editor-mentions.spec.ts",
+          "reason": "the test \"comments render tokens as chips without v-html; descriptions run through withMentionChips\" asserts that `CommentThread.vue` contains `splitMentions(comment.body)` and `class=\"mention-chip\"` and has no `v-html` bound to a comment. Those three assertions are replaced by the invariant that `CommentThread.vue` renders a comment body through `withMentionChips` and `renderMarkdownWithoutImages` into `[data-testid=\"comment-body\"]`. Its `TicketActivity.vue` `renderMarkdownOrEscape(withMentionChips(` assertion and the `:mention-slug` test are unchanged."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-markdown.spec.ts",
+          "reason": "the test \"the rewritten HTML is sanitized again before it is rendered\" expects the sanitizer double called 2 times for a slug render, and \"without a slug the output is sanitized once\" expects 1. With the image-free HTML now sanitized once more, the counts become 3 and 2. The invariants stay: the final sanitize call receives the linkified HTML (anchors included), and the no-slug output is sanitized after the images are removed."
+        },
+        {
+          "path": "apps/web/tests/components/CommentThread.spec.ts",
+          "reason": "`mountThread` mounts the real `CommentThread.vue`, which now imports the markdown lib, and jest cannot load `isomorphic-dompurify`. Its mount aliases the markdown lib module to a stub whose renderMarkdownWithoutImages returns its input; every existing assertion stays unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/CommentThread-edit.spec.ts",
+          "reason": "`mountComments` mounts the real `CommentThread.vue`, which now imports the markdown lib, and jest cannot load `isomorphic-dompurify`. Its mount aliases the markdown lib module to a stub whose renderMarkdownWithoutImages returns its input; every existing assertion stays unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/comment-thread-time.spec.ts",
+          "reason": "its mount of the real `CommentThread.vue`, which now imports the markdown lib, cannot load `isomorphic-dompurify` under jest. Its mount aliases the markdown lib module to a stub whose renderMarkdownWithoutImages returns its input; every existing assertion stays unchanged."
+        },
+        {
+          "path": "apps/web/package.json",
+          "reason": "the `test:real-sanitizer` script also runs the new markdown-without-images harness that US-002 creates, so `bun run test` executes the new real-stack checks."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e1ebe1ee13465822507059713e898e12bb0edf6a"
+    },
+    {
+      "id": "US-003",
+      "title": "Show comment authors and use styled comment deletion",
+      "description": "**Goal** — Identify each comment's recorded author and confirm comment deletion through the shared styled dialog.\n\n**Motivation** — Comment cards show a type chip and a time only.\n\n**Approach** — `apps/web/components/CommentThread.vue`.\n- Target, author: `memberNames` and `agentNames` (`useProjectAgentNames(projectSlug)`) both load on mount. Each sets its own `membersLoaded` / `agentsLoaded` ref to true when its `load()` resolves; a rejected load is caught and leaves the flag false. Name lookups use `??`, because harness stubs return `undefined` as well as `null`. The header row gains, before the type chip, a `span data-testid=\"comment-author\"` (rendered only when its text is non-empty) and, for agent comments, a badge `data-testid=\"comment-author-agent\"` with `t('comments.author.agentBadge')`. The author text is:\n  - for `authorUserId` set: `memberNames.nameOf(authorUserId)`; else `t('comments.author.formerMember')` when `membersLoaded`; else `t('comments.author.member')` (the list is still loading, or the viewer may not read members);\n  - else for `authorAgentId` set: `agentNames.nameOf(authorAgentId)`; else `t('comments.author.unknownAgent')` when `agentsLoaded`; else empty (only the badge shows);\n  - else `t('comments.author.system')`, with no badge.\n\n  The local `Comment` interface gains `authorUserId?: string | null` and `authorAgentId?: string | null`.\n- Target, delete: `deleteComment` awaits `useConfirm().confirm({ title: t('comments.confirmDelete'), body: t('comments.deleteBody'), confirmLabel: t('common.delete'), destructive: true })` and returns when it resolves false.\n\nFailure handling:\n- A `confirm()` that resolves false (Cancel, Escape, overlay, or a newer `confirm()` replacing it) sends no request and shows no toast.\n- A DELETE that fails after a confirmed dialog keeps today's `toast.error(extractApiError(err))`.\n- A rejected `useProjectAgentNames` or `useProjectMemberNames` load is caught (no unhandled rejection), and the author line falls back as in Design.\n\nAdd these exact web i18n keys in both `apps/web/i18n/locales/en.json` and `zh.json`:\n| key | en | zh |\n|---|---|---|\n| `comments.deleteBody` | The comment is removed from the ticket's activity. | 该评论将从工单动态中移除。 |\n| `comments.author.formerMember` | Former member | 前成员 |\n| `comments.author.member` | Member | 成员 |\n| `comments.author.unknownAgent` | Removed agent | 已移除的智能体 |\n| `comments.author.agentBadge` | Agent | 智能体 |\n| `comments.author.system` | System | 系统 |\n\nCreate `apps/web/tests/components/comment-thread-author.spec.ts` for the author and deletion behaviors. Use the mount harness, providing caught resolving/rejecting roster loads, null and undefined name results, and useConfirm stubs. Failure-fallback fixtures must have no cached name: if nameOf already returns a name, that name still takes precedence even if load rejects. This matters for members because useProjectMemberNames can name the signed-in user without a successful roster response. Retain existing comment refresh, success/error behavior and author-independent editing/type/time rendering. `apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts` — the comment-delete journey's `page.once('dialog', ...)` native-dialog handler is replaced by clicking `[data-testid=\"confirm-dialog-confirm\"]` after Delete. The invariant is that the DELETE request for the comment is sent. Coordinate narrowly with US-002's independent CommentThread markdown edits rather than undoing them.\n\n**Scope** — In: recorded-author display, resilient roster loading, comment-delete adoption of US-001, locale text and the existing deletion journey update. Out: markdown body/helper/CSS changes (US-002), ticket deletion (US-004), shared host implementation (US-001), proposal-vs-approver attribution, or expanding the member-name lookup beyond the first 100.\n\n**Interface**\n```ts\nauthorUserId?: string | null\nauthorAgentId?: string | null\n```\n`useProjectMemberNames(slug)` returns `{ members, load, nameOf(userId): string | null }`. `useProjectAgentNames(slug)` returns `{ agents, load, nameOf(agentId): string | null }`. Both are auto-imported, and both are used together by `pages/[project]/timeline.vue`.",
+      "acceptanceCriteria": [
+        "[unit] A mounted `CommentThread` whose `useProjectMemberNames().nameOf('u1')` returns `Ada` shows `Ada` in `[data-testid=\"comment-author\"]` for a comment with `authorUserId: 'u1'`.",
+        "[unit] A mounted `CommentThread` whose member `load()` resolves and whose `nameOf('u1')` returns `null` shows `t('comments.author.formerMember')` (en \"Former member\") in `[data-testid=\"comment-author\"]` for a comment with `authorUserId: 'u1'`.",
+        "[unit] A mounted `CommentThread` whose member `load()` resolves and whose `nameOf('u1')` returns `undefined` shows `t('comments.author.formerMember')` in `[data-testid=\"comment-author\"]` for a comment with `authorUserId: 'u1'`.",
+        "[unit] A mounted `CommentThread` whose member `load()` rejects and whose `nameOf('u1')` returns `null` or `undefined` shows `t('comments.author.member')` (en \"Member\") in `[data-testid=\"comment-author\"]` for a comment with `authorUserId: 'u1'`.",
+        "[unit] A mounted `CommentThread` whose `useProjectAgentNames().nameOf('a1')` returns `mcp-probe` shows `mcp-probe` in `[data-testid=\"comment-author\"]` and `t('comments.author.agentBadge')` (en \"Agent\") in `[data-testid=\"comment-author-agent\"]` for a comment with `authorUserId: null` and `authorAgentId: 'a1'`.",
+        "[unit] A mounted `CommentThread` whose agent `load()` resolves and whose `nameOf('a1')` returns `null` shows `t('comments.author.unknownAgent')` (en \"Removed agent\") in `[data-testid=\"comment-author\"]` for a comment with `authorAgentId: 'a1'`.",
+        "[unit] A mounted `CommentThread` whose agent `load()` rejects and whose `nameOf('a1')` returns `null` or `undefined` renders no `[data-testid=\"comment-author\"]` for a comment with `authorUserId: null` and `authorAgentId: 'a1'`.",
+        "[unit] A mounted `CommentThread` shows `t('comments.author.system')` (en \"System\") in `[data-testid=\"comment-author\"]` for a comment whose `authorUserId` and `authorAgentId` are both `null`.",
+        "[unit] Clicking a comment's Delete button in a mounted `CommentThread` calls the `useConfirm().confirm` stub once with `{ title: t('comments.confirmDelete'), body: t('comments.deleteBody'), confirmLabel: t('common.delete'), destructive: true }`.",
+        "[unit] When the `useConfirm().confirm` stub resolves `false`, clicking a comment's Delete button sends no `$api.delete` call.",
+        "[unit] When the `useConfirm().confirm` stub resolves `true`, clicking Delete on comment `c1` calls `$api.delete` once with the path `/comments/c1`.",
+        "[unit] When the stub resolves `true` and `$api.delete` rejects, clicking Delete calls `toast.error` once with `extractApiError` of that rejection.",
+        "[unit] When the `useConfirm().confirm` stub resolves `false`, clicking a comment's Delete button calls neither `toast.error` nor `toast.success`."
+      ],
+      "tags": [
+        "web",
+        "comments",
+        "authors",
+        "confirmation",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Uses existing roster composables and confirmation API for localized author fallbacks and deletion UX; does not introduce authorization rules or alter API business logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/CommentThread.vue",
+        "apps/web/composables/useProjectAgentNames.ts",
+        "apps/web/pages/[project]/timeline.vue",
+        "apps/web/tests/components/CommentThread.spec.ts",
+        "apps/web/composables/useConfirm.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/comment-thread-author.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts",
+          "reason": "the comment-delete journey's `page.once('dialog', ...)` native-dialog handler is replaced by clicking `[data-testid=\"confirm-dialog-confirm\"]` after Delete. The invariant is that the DELETE request for the comment is sent."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "92db667a132ce105a66094bbd29d67987a05c327"
+    },
+    {
+      "id": "US-004",
+      "title": "Fix ticket deletion, unassign visibility and empty labels",
+      "description": "**Goal** — Use styled ticket-delete confirmation, hide meaningless Unassign controls and explain empty project labels.\n\n**Motivation** — With no project labels, the label Select opens empty, with no hint that labels are created on the Labels page.\n\n**Approach** — `apps/web/components/TicketProperties.vue`.\n- Target, delete: `deleteTicket` awaits `useConfirm().confirm({ title: t('tickets.delete.confirm'), body: t('tickets.delete.confirmBody'), confirmLabel: t('tickets.delete.button'), destructive: true })` and returns when it resolves false.\n- Target, Unassign: it renders only when `canAssign` and `ticket.assignee` is non-null.\n- Target, labels: when `canLabel` and `allLabels` is empty, the Select and its Add button are replaced by a paragraph `data-testid=\"ticket-labels-none\"` with `t('tickets.labels.noneInProject')` and a `NuxtLink` to `/${projectSlug}/labels` with `t('tickets.labels.manage')`.\n\nFailure handling:\n- A `confirm()` that resolves false (Cancel, Escape, overlay, or a newer `confirm()` replacing it) sends no request and shows no toast.\n- A DELETE that fails after a confirmed dialog keeps today's `toast.error(extractApiError(err))`.\n\nPreserve the successful DELETE path, loading-state cleanup and navigation to the project home, and preserve all canAssign/canLabel/canUnlabel/canLink/canDelete permission gates. Unassigned tickets still offer Change. Existing ticket-label chips are independent of whether the project has labels available for the picker.\n\nAdd these exact keys in both web locales:\n| key | en | zh |\n|---|---|---|\n| `tickets.delete.confirmBody` | The ticket is removed from the board, search and its project. This cannot be undone from the app. | 该工单将从看板、搜索和项目中移除，且无法在应用中撤销。 |\n| `tickets.labels.noneInProject` | This project has no labels yet. | 此项目还没有标签。 |\n| `tickets.labels.manage` | Create labels | 创建标签 |\n\nCreate `apps/web/tests/components/ticket-properties-e2e-1121.spec.ts`, following the existing ticket-assignee-collapsed mount harness, with resolving/rejecting confirm and DELETE stubs and assigned/unassigned/empty/nonempty project-label fixtures. Required existing-test updates:\n- `apps/web/tests/pages/project-permission-gates.spec.ts` — the US-007 AC-1 test \"only that key renders Change and no label select, link form or delete button\" mounts the default ticket fixture with `assignee: null`. It now passes a fixture with an assignee (for example `{ kind: 'user', id: 'u2', name: 'Bob' }`), so its `Unassign` expectation still holds. The invariant: with only `ticket.assign`, an assigned ticket shows Change and Unassign and no other gated control. The \"(control)\" test is unchanged.\n- `apps/web/tests/pages/project-permission-gates.spec.ts` — the test \"AC-2: ticket.label.assign alone renders the label select\" mounts the page with the project labels route serving an empty list and expects the Add Label button. That test's route now serves one project label (for example `{ id: 'l9', name: 'ux', color: '#123456' }`). The invariant: with `ticket.label.assign` and at least one project label, the label select and Add Label render.\n- `apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts` — the \"sends assign, close, and delete ticket requests\" journey's `page.once('dialog', ...)` handler is replaced by clicking `[data-testid=\"confirm-dialog-confirm\"]` after Delete Ticket (never a role-and-name locator: the confirm button reads \"Delete Ticket\" too). The invariant is that the DELETE ticket request is sent.\n\n**Scope** — In: ticket-delete adoption of US-001, assignee visibility, empty-label hint, locale copy and affected regression fixtures/journey. Out: comment deletion (US-003), new-link validation (US-005), shared host implementation (US-001), project-label management behavior or remaining native-confirm conversions.\n\n**Interface** — `useConfirm().confirm({ title: t('tickets.delete.confirm'), body: t('tickets.delete.confirmBody'), confirmLabel: t('tickets.delete.button'), destructive: true })` returns the boolean decision before the existing DELETE and `navigateTo` flow; existing TicketProperties props and emitted events are unchanged.",
+      "acceptanceCriteria": [
+        "[unit] With `canDelete` true, clicking Delete Ticket in a mounted `TicketProperties` calls the `useConfirm().confirm` stub once with `{ title: t('tickets.delete.confirm'), body: t('tickets.delete.confirmBody'), confirmLabel: t('tickets.delete.button'), destructive: true }`.",
+        "[unit] When the `useConfirm().confirm` stub resolves `false`, clicking Delete Ticket sends no `$api.delete` call and does not call `navigateTo`.",
+        "[unit] When the `useConfirm().confirm` stub resolves `true`, clicking Delete Ticket on ticket `WEB-1` in project `web` calls `$api.delete` with `/projects/web/tickets/WEB-1` and then `navigateTo('/web')`.",
+        "[unit] When the stub resolves `true` and `$api.delete` rejects, clicking Delete Ticket calls `toast.error` once with `extractApiError` of that rejection and does not call `navigateTo`.",
+        "[unit] A mounted `TicketProperties` with `canAssign` true and `ticket.assignee` `null` renders no Unassign button and renders `[data-testid=\"assignee-change\"]`.",
+        "[unit] A mounted `TicketProperties` with `canAssign` true and `ticket.assignee` `{ kind: 'user', id: 'u2', name: 'Bob' }` renders an Unassign button.",
+        "[unit] A mounted `TicketProperties` in project `web` with `canLabel` true and `allLabels` `[]` renders `[data-testid=\"ticket-labels-none\"]` with `t('tickets.labels.noneInProject')` and a link to `/web/labels` reading `t('tickets.labels.manage')`, and renders no label select.",
+        "[unit] A mounted `TicketProperties` with `canLabel` true and one label in `allLabels` renders the label select and no `[data-testid=\"ticket-labels-none\"]`.",
+        "[unit] When the `useConfirm().confirm` stub resolves `false`, clicking Delete Ticket calls neither `toast.error` nor `toast.success`."
+      ],
+      "tags": [
+        "web",
+        "tickets",
+        "confirmation",
+        "permissions",
+        "labels",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One existing properties component adopts the supplied confirm API and adds two display conditions; authorization flags and API enforcement are unchanged, so ordinary component TDD plus the existing permission regressions is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/TicketProperties.vue",
+        "apps/web/tests/components/ticket-assignee-collapsed.spec.ts",
+        "apps/web/tests/pages/project-permission-gates.spec.ts",
+        "apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts",
+        "apps/web/pages/[project]/labels.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/ticket-properties-e2e-1121.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/project-permission-gates.spec.ts",
+          "reason": "the US-007 AC-1 test \"only that key renders Change and no label select, link form or delete button\" mounts the default ticket fixture with `assignee: null`. It now passes a fixture with an assignee (for example `{ kind: 'user', id: 'u2', name: 'Bob' }`), so its `Unassign` expectation still holds. The invariant: with only `ticket.assign`, an assigned ticket shows Change and Unassign and no other gated control. The \"(control)\" test is unchanged. Also: the test \"AC-2: ticket.label.assign alone renders the label select\" mounts the page with the project labels route serving an empty list and expects the Add Label button. That test's route now serves one project label (for example `{ id: 'l9', name: 'ux', color: '#123456' }`). The invariant: with `ticket.label.assign` and at least one project label, the label select and Add Label render."
+        },
+        {
+          "path": "apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts",
+          "reason": "the \"sends assign, close, and delete ticket requests\" journey's `page.once('dialog', ...)` handler is replaced by clicking `[data-testid=\"confirm-dialog-confirm\"]` after Delete Ticket (never a role-and-name locator: the confirm button reads \"Delete Ticket\" too). The invariant is that the DELETE ticket request is sent."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d76da57acab7fc38733589248481144c8aebca93"
+    },
+    {
+      "id": "US-005",
+      "title": "Validate full HTTP link URLs before submission",
+      "description": "**Goal** — Reject malformed or scheme-less ticket-link URLs in the form and show a localized inline explanation.\n\n**Motivation** — `CreateTicketLinkDto` rejects a bad URL with the hardcoded English message \"url must be a valid URL\", and the web form sends any non-blank text.\n\n**Approach** — `apps/web/lib/safe-url.ts`: add the export `isHttpUrl(value: string): boolean`, a client approximation of the API's `@IsUrl({})` (class-validator `isURL` defaults: a host must be an IP address or have a top-level domain). It is true when all hold, and false otherwise, including when parsing throws:\n- `new URL(value)` parses with no base;\n- its `protocol` is `http:` or `https:`;\n- its `hostname` is a dotted-quad IPv4 address, or contains a dot and its last dot-separated label is at least 2 characters of letters or starts with `xn--`.\n\nA scheme-less value such as `example.com/pull/1` (which the API accepts) is rejected on purpose: the link is stored as typed and rendered as an `href`, where a scheme-less value resolves relative to koda.\n\n`isSafeUrl(url)` in `apps/web/lib/safe-url.ts`: a scheme allow-list for `:href`. It accepts relative URLs, so it is not a form validator. Keep isSafeUrl and safeHref behavior unchanged.\n\n`apps/web/components/TicketProperties.vue`.\n- Target, links: a computed `linkUrlInvalid` is true when the trimmed URL is non-empty and `isHttpUrl` returns false. While it is true, the Add Link button is disabled and a paragraph `data-testid=\"ticket-link-url-error\"` shows `t('tickets.links.invalidUrl')`. A blank URL keeps Add disabled and shows no message.\n\nAdd `tickets.links.invalidUrl` to both web locales: en `Enter a full http:// or https:// URL`; zh `请输入完整的 http:// 或 https:// 链接`. Keep the current trimmed URL payload, selected linkType (default pr), endpoint, success reset and API error toast. A link URL that passes `isHttpUrl` but that the API still rejects for another reason keeps today's toast of the API message (unchanged baseline). Other differences between `isHttpUrl` and class-validator `isURL` (ports, userinfo, unusual TLDs) are not mirrored.\n\nCreate `apps/web/tests/lib/safe-url-http.spec.ts` and `apps/web/tests/components/ticket-link-url.spec.ts`, testing the pure helper and mounted input/button/error/request behaviors respectively. No existing test pins the link form's enabled state for a non-http value. It depends on US-004 only because both edit `TicketProperties.vue`.\n\n**Scope** — In: additive URL validator, computed inline error, disabled button and locale text. Out: US-004's ticket-delete/assignee/labels behavior, API DTO message localization or validation alignment, modifying href safety rules, or migrating this raw form to vee-validate/zod.\n\n**Interface**\n```ts\nisHttpUrl(value: string): boolean\n```",
+      "acceptanceCriteria": [
+        "[unit] In a mounted `TicketProperties` with `canLink` true, entering `not a url` as the link URL disables the Add Link button and shows `t('tickets.links.invalidUrl')` in `[data-testid=\"ticket-link-url-error\"]`.",
+        "[unit] In a mounted `TicketProperties` with `canLink` true, entering `https://example.com/pull/1` enables Add Link and shows no `[data-testid=\"ticket-link-url-error\"]`.",
+        "[unit] In that mount, clicking Add Link with `https://example.com/pull/1` calls `$api.post` with the body `{ url: 'https://example.com/pull/1', linkType: 'pr' }`.",
+        "[unit] In a mounted `TicketProperties` with `canLink` true and a blank link URL, Add Link is disabled and no `[data-testid=\"ticket-link-url-error\"]` renders.",
+        "[unit] `isHttpUrl` returns `true` for `https://example.com/pull/1` and for `http://10.0.0.5/x`.",
+        "[unit] `isHttpUrl` returns `false` for `http://localhost:8030/x`, whose host has no top-level domain (the API rejects it too).",
+        "[unit] `isHttpUrl` returns `false` for `ftp://example.com/a` and for `javascript:alert(1)`.",
+        "[unit] `isHttpUrl` returns `false` for `example.com/pull/1`, which has no scheme.",
+        "[unit] `isHttpUrl` returns `false` for the empty string."
+      ],
+      "tags": [
+        "web",
+        "tickets",
+        "url-validation",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A bounded URL-parser approximation and computed inline form feedback use standard patterns; this client UX check neither changes safeHref's security boundary nor replaces server validation, so standard helper/component TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/lib/safe-url.ts",
+        "apps/web/components/TicketProperties.vue",
+        "apps/web/tests/components/ticket-assignee-collapsed.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/safe-url-http.spec.ts",
+        "apps/web/tests/components/ticket-link-url.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b2bc9fbd81f88061c3bc7cd91154db0ba6fe80bf"
+    },
+    {
+      "id": "US-006",
+      "title": "Explain required transition comments and label ticket fields",
+      "description": "**Goal** — Make required transition comments explicit and pair all Create Ticket labels with their controls.\n\n**Motivation** — Every `TicketActionPanel.vue` dialog action requires a comment (`canSubmit` needs a non-blank comment), but the dialog shows only the placeholder \"Enter a comment or reason...\", so Confirm looks broken while it is disabled.\n\n**Approach** — `apps/web/components/TicketActionPanel.vue`: the dialog `Textarea` gets `id=\"ticket-action-comment\"`, `aria-required=\"true\"` and `aria-describedby=\"ticket-action-comment-hint\"`. A `Label` with `for=\"ticket-action-comment\"` and text `t('tickets.actions.commentLabel')` sits above it. Under it, a paragraph `id=\"ticket-action-comment-hint\"` with `data-testid=\"ticket-action-comment-hint\"` shows `t('tickets.actions.commentRequired')`. `canSubmit` is unchanged.\n\n`apps/web/components/CreateTicketDialog.vue`: each `FormLabel` gets a `for` that matches its control's `id`:\n- title: `create-ticket-title` (on the `Input`);\n- type: `create-ticket-type` (the `FleetNativeSelect` `id`, was `type`);\n- priority: `create-ticket-priority` (was `priority`);\n- description: `create-ticket-description` (on the `MarkdownEditor`, which forwards it to its `Textarea`).\n\n`NativeSelect.vue` (`FleetNativeSelect`) forwards its `id` prop to the `<select>`. `MarkdownEditor.vue` forwards fallthrough attributes (so `id`) to its `Textarea`.\n\nAdd these exact keys in both web locales:\n| key | en | zh |\n|---|---|---|\n| `tickets.actions.commentLabel` | Comment | 评论 |\n| `tickets.actions.commentRequired` | A comment is required to continue. | 需要填写评论才能继续。 |\n\nCreate `apps/web/tests/components/ticket-form-labels.spec.ts` for AC-1 to AC-8 (TicketActionPanel and CreateTicketDialog). Open the real Verify dialog with allowedActions:['verify'], inspect label/id/ARIA attributes and exercise blank then nonblank comment. For Create Ticket, mount the native select controls and alias MarkdownEditor to observe its forwarded id without loading the real markdown sanitizer. No existing test pins the Create Ticket select ids or the transition dialog's textarea attributes.\n\n**Scope** — In: transition-comment label/hint/ARIA text, four explicit Create Ticket for/id pairs and localized strings. Out: shared confirm host (US-001), markdown rendering/style changes (US-002), ticket-property changes (US-004/US-005), changing allowedActions/canSubmit/workflow rules, shared FormLabel/FormControl automation, unrelated thread/approval accessibility findings, or migrating the raw transition-comment controls to vee-validate/zod.\n\n**Interface** — `id=\"ticket-action-comment\"`, `aria-required=\"true\"`, `aria-describedby=\"ticket-action-comment-hint\"`, and the four `create-ticket-*` for/id pairs above are the DOM interface; existing component props, form schemas and API submission shapes remain unchanged.",
+      "acceptanceCriteria": [
+        "[unit] Opening the Verify dialog in a mounted `TicketActionPanel` (with `allowedActions: ['verify']`) renders `[data-testid=\"ticket-action-comment-hint\"]` with `t('tickets.actions.commentRequired')` (en \"A comment is required to continue.\").",
+        "[unit] In the opened Verify dialog, a label with `for=\"ticket-action-comment\"` reads `t('tickets.actions.commentLabel')`, and the textarea has `id=\"ticket-action-comment\"`.",
+        "[unit] In the opened Verify dialog, the textarea has `aria-required=\"true\"` and `aria-describedby=\"ticket-action-comment-hint\"`.",
+        "[unit] In the opened Verify dialog with a blank comment, the Confirm button is disabled, and after the comment `ok` is entered it is enabled.",
+        "[unit] A mounted `CreateTicketDialog` renders the title label with `for=\"create-ticket-title\"` and an input with `id=\"create-ticket-title\"`.",
+        "[unit] A mounted `CreateTicketDialog` renders the type label with `for=\"create-ticket-type\"` and a select with `id=\"create-ticket-type\"`.",
+        "[unit] A mounted `CreateTicketDialog` renders the priority label with `for=\"create-ticket-priority\"` and a select with `id=\"create-ticket-priority\"`.",
+        "[unit] A mounted `CreateTicketDialog` (with `~/components/MarkdownEditor.vue` aliased to a stub) renders the description label with `for=\"create-ticket-description\"`, and the `MarkdownEditor` stub receives `id=\"create-ticket-description\"`."
+      ],
+      "tags": [
+        "web",
+        "tickets",
+        "accessibility",
+        "forms",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard localized DOM accessibility additions in two existing forms, reusing established attribute forwarding without changing workflow or authorization.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/TicketActionPanel.vue",
+        "apps/web/components/CreateTicketDialog.vue",
+        "apps/web/components/fleet/NativeSelect.vue",
+        "apps/web/components/MarkdownEditor.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/ticket-form-labels.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "08207fee9f0db8f7f2b7a985e82214d17845c2c8"
+    },
+    {
+      "id": "US-007",
+      "title": "Localize login credential failures without changing other 401s",
+      "description": "**Goal** — Return a localized invalid-email-or-password message for the two login credential failure branches while preserving other authentication failures.\n\n**Motivation** — `AuthService.login` throws `new AuthException({}, 'auth')`, which resolves to `auth.40000` (\"Unauthorized\").\n\n**Approach** — `AuthService.login` in `apps/api/src/auth/auth.service.ts`.\n- Baseline: the unknown-email branch and the wrong-password-or-disabled branch both throw `new AuthException({}, 'auth')`.\n- Target: both throw `new AuthException({}, 'auth.invalidCredentials')`. `issueSession` and its fence refusal, `refresh` and every other `AuthException({}, 'auth')` are unchanged.\n- The key becomes a status-code map, following `auth.currentPasswordWrong`: en `\"invalidCredentials\": { \"40000\": \"Invalid email or password\" }` and zh `\"invalidCredentials\": { \"40000\": \"无效的邮箱或密码\" }` in `apps/api/src/i18n/{en,zh}/auth.json`. `40000` is `CommonExceptionCode.UNAUTHORIZED`, the code `AuthException` carries, and the exception's i18n key is its `prefix` getter. The response keeps HTTP 401.\n\nPreserve the dummy bcrypt comparison for unknown emails, real password comparison, disabled-account non-enumeration and successful session issuance/password-change fence. Do not globally replace AuthException prefixes or change HTTP envelopes. A request with `Accept-Language: zh` gets the `apps/api/src/i18n/zh/*` text (precedent: `test/integration/auth/password-change.integration.spec.ts`).\n\nCreate `apps/api/test/integration/auth/login-failure-message.integration.spec.ts` — AC-1 to AC-4. Use actual POST /api/auth/login responses, real user/disabled-user fixtures, the existing canRunDbTests gate, bootHttpApp listener, fixtureDb/resetDb/resetThrottle helpers and status/body.message assertions, following password-change.integration.spec.ts and disabled-user.integration.spec.ts. Run the DB-backed spec under the host test:scoped command outside NAX_SANDBOXED with KODA_DB_TESTS=1; skipping is not verification, and concurrent DB-mode resets against the same database are prohibited. `apps/api/src/auth/auth.service.spec.ts` — add the AC-5 and AC-6 tests here, next to the existing `login` and `refresh` tests, which stay unchanged. Unit tests use Vitest/vi and inspect AuthException.prefix directly. Read the Nathapp package catalog and verify the installed exception/localization pattern through the prescribed package docs tools when available; reuse the existing platform pattern, not custom exception serialization.\n\n**Scope** — In: exactly two login throw-prefix edits, the corresponding en/zh status-code maps and behavioral integration/unit regressions. Out: web login form redesign, API link validation/localization (deferred), `issueSession` fence refusal, refresh, any other generic auth exception, controller/DTO contracts or password/session algorithms.\n\n**Interface**\n```ts\nnew AuthException({}, 'auth.invalidCredentials')\n```\nThe existing `AuthService.login(loginDto: LoginDto)` and `AuthService.refresh(principal: IPrincipal, client: RefreshClient)` signatures remain unchanged; credential failures keep HTTP 401 and exception code 40000.",
+      "acceptanceCriteria": [
+        "[integration] `POST /api/auth/login` with an email no user has answers HTTP 401 with `message` `Invalid email or password`.",
+        "[integration] `POST /api/auth/login` with a real user's email and a wrong password answers HTTP 401 with `message` `Invalid email or password`.",
+        "[integration] `POST /api/auth/login` with a disabled user's email and correct password answers HTTP 401 with `message` `Invalid email or password`.",
+        "[integration] `POST /api/auth/login` with a wrong password and `Accept-Language: zh` answers HTTP 401 with `message` `无效的邮箱或密码`.",
+        "[unit] `AuthService.login` with an unknown email rejects with an `AuthException` whose `prefix` is `auth.invalidCredentials`.",
+        "[unit] `AuthService.refresh` with a principal whose `revoked` is `true` still rejects with an `AuthException` whose `prefix` is `auth`."
+      ],
+      "tags": [
+        "api",
+        "auth",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Narrow service/locale changes still touch credential rejection and session-regression boundaries; authentication mandates strict three-session TDD with real HTTP localization checks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/i18n/en/auth.json",
+        "apps/api/src/i18n/zh/auth.json",
+        "apps/api/test/integration/auth/password-change.integration.spec.ts",
+        "apps/api/test/integration/auth/disabled-user.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/auth/login-failure-message.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/auth.service.spec.ts",
+          "reason": "add the AC-5 and AC-6 tests here, next to the existing `login` and `refresh` tests, which stay unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f376615718c3349332bb2cf70db3d2099ba712f7"
+    }
+  ],
+  "analysis": "Repository inspection and architecture: This is an enhancement to the existing Bun/Turborepo application, not a greenfield project. Direct reads and text search were used because the codebase-memory MCP is unavailable in this session. The supplied context incorrectly identifies apps/web as Next.js: apps/web/package.json:6 uses nuxt build and apps/web/package.json:33 declares Nuxt 4.6.4. The web client uses Vue SFCs, Nuxt auto-imports, shadcn/radix Dialog primitives, separate en/zh JSON locales, Jest component tests and Playwright journeys. apps/api is the NestJS/Fastify system of record, using Nathapp exceptions and Vitest. Read .nax/mono/apps/web/context.md and .nax/mono/apps/api/context.md before app-local implementation. No database schema, endpoint shape, DTO or generated client change is required; no persistence migration or OpenAPI regeneration is anticipated. API-owned workflow, authorization and soft-delete behavior remain unchanged. The workspace findings report is external to this execution root; the supplied spec and inspected source establish the implementation scope. Only the PRD is being authored in this planning run; no tests have been executed.\n\nUS-001 impact and seams: apps/web/app.vue:6-11 currently mounts NuxtLayout/NuxtPage and Toaster only. Add one ConfirmDialogHost after Toaster, without altering page layout or toaster configuration. apps/web/components/fleet/threads/ThreadControls.vue:129-143 is the existing styled Archive dialog precedent, with title, muted explanatory copy and outline Cancel/Confirm footer. The new useConfirm module is intentionally a single module-level shallowRef, not a queue, SSR store or per-component state: a newer request resolves the old request false, settle clears state before resolving, and settlement without a request is a no-op. This introduces a new tab-scoped abstraction shared by the host and future click-handler callers. Never call confirm during setup or SSR, where module state could cross requests. Unit tests must settle pending state after each test or isolate modules; host tests must share the actual composable instance rather than instantiate disconnected stores. apps/web/tests/helpers/mount-sfc.ts:145-188 explicitly enumerates Nuxt globals and their defaults; useConfirm must be added to both lists with the specified resolving-true default, while dialog tests override globals. apps/web/tests/helpers/fleet-harness.ts:81-107 already provides Dialog/Button stubs forwarding attrs and events and enI18n. Existing component mounts must remain operable after callers adopt useConfirm. The remaining native confirm sites belong to the follow-up feature.\n\nUS-002 rendering and security: apps/web/lib/markdown.ts:71-100 defines the M24 escape-on-renderer-error wrapper, renderSafeMarkdown and sanitizeHtmlFragment. Only renderSafeMarkdown directly calls marked.parse in the inspected baseline; thread the new options through renderMarkdownOrEscape to that call, preserving async:false and default breaks:false. Its allowlists, URI restrictions, hooks and class filtering at apps/web/lib/markdown.ts:7-67 must remain unchanged. The new renderMarkdownWithoutImages helper must sanitize the result of regex image stripping a second time: serialized HTML containing an img-like string inside a quoted attribute can be reinterpreted as live markup after stripping. Removing images without the final sanitize is not safe. Use the exact closed-attribute attack fixture from the ACs and parse output with real jsdom; substring checks and Jest sanitizer doubles do not prove this boundary. apps/web/lib/thread-markdown.ts:343-349 currently sanitizes initially, strips IMG_TAG, returns that output directly without a slug, and sanitizes again only after slug linkification. Route both branches through the new helper, remove IMG_TAG and retain all citation/path linkification behavior. The consumer apps/web/components/fleet/threads/ThreadMessage.vue:31 renders this result with v-html, so changes affect thread security as well as ticket comments. Sanitizer-call regression expectations in apps/web/tests/lib/thread-markdown.spec.ts:339-348 change from 2/1 to 3/2 for slug/no-slug respectively; final-call arguments must still prove post-rewrite sanitization. Existing citation/parser/performance regressions must remain meaningful.\n\napps/web/components/CommentThread.vue:8 imports splitMentions; its comment paragraph at :156 interpolates tokens and raw markdown in whitespace-pre-wrap. Replace only the display body with the image-free sanitized markdown renderer after withMentionChips, passing { breaks:true } to preserve typed single newlines and normalizing missing member names with ?? null. Keep editing, submission, time formatting, type chips and endpoints intact. apps/web/components/TicketActivity.vue:31-35 already renders descriptions with renderMarkdownOrEscape(withMentionChips(...)); its display container at :51-55 only gains markdown-body and a test id, retaining whitespace-pre-wrap and image behavior. apps/web/components/MarkdownEditor.vue:146-152 has ineffective prose classes; replace those classes with markdown-body text-sm and add a preview test id without changing the renderer or mention picker. These are the ordinary one-argument markdown callers whose rendering defaults must remain compatible. apps/web/assets/css/globals.css:127-133 has an existing components layer with mention-chip; add scoped markdown-body descendant rules there using existing muted/link/border tokens. apps/web/tailwind.config.ts:19 exposes text-link and :71 has plugins:[], confirming typography is not installed. Do not add the typography dependency or restyle other prose consumers.\n\nUS-002 verification/migration: apps/web/package.json:14-15 runs Jest followed by test:real-sanitizer, which already executes thread-markdown-real-sanitizer.ts and flow-answer-form-dom.ts; append the new real-stack harness rather than replacing those checks. apps/web/tests/harness/thread-markdown-real-sanitizer.ts:16-43 resolves jsdom through isomorphic-dompurify and demonstrates real HTML-parser assertions under Bun. Jest cannot load the real sanitizer dependency chain; mount-sfc aliases must replace ~/lib/markdown in CommentThread.spec.ts, CommentThread-edit.spec.ts and comment-thread-time.spec.ts with a renderMarkdownWithoutImages identity stub, preserving every existing assertion. New component tests assert the renderer seam through props.innerHTML, not the fake DOM's text. apps/web/tests/components/markdown-editor-mentions.spec.ts:117-123 pins the old no-v-html rendering; update only its three comment-specific assertions to the new withMentionChips/image-free-renderer/test-id invariant and retain description and mention-slug checks. This story intentionally changes an agent-written-text rendering boundary: the spec identifies ticket comments as a second image-free/sanitized exception, but current web context still documents interpolation-only comments and the single thread exception. The spec defers source guidance reconciliation to a manual post-merge edit of .nax/mono/apps/web/context.md followed by nax generate; do not edit generated AGENTS.md or silently broaden other agent HTML rendering. If active implementation instructions still prohibit the scoped exception, reconcile that instruction conflict before implementing rather than weakening sanitization.\n\nUS-003 authors and deletion: apps/web/components/CommentThread.vue:11-17 has no explicitly typed author ids, :34-35 already loads member names with a caught rejection, and :134-143 currently shows only type and timestamp. Add optional nullable authorUserId/authorAgentId, independent member/agent loaded flags, and both name composables without changing API DTOs. apps/web/composables/useProjectMemberNames.ts:6-27 loads only 100 members, supports the current signed-in user, and returns null when missing; preserve that bounded lookup. apps/web/composables/useProjectAgentNames.ts:5-16 loads the project's agent roster and returns null when missing; apps/web/pages/[project]/timeline.vue:16 already uses it alongside member names. Tests stub nameOf with undefined too (apps/web/tests/components/CommentThread.spec.ts:44), so nullish rather than truthy-only or strict-null fallback logic is required. A failed roster load must leave the corresponding loaded flag false and never become an unhandled rejection. AuthorUserId takes precedence; user fallbacks differ between unresolved/failed and completed roster loads; agent comments keep their Agent badge even when no author text can be shown; no ids means System without badge. Add all five comments.author translations and comments.deleteBody in both locales. apps/web/components/CommentThread.vue:112-122 gates DELETE /comments/:id on window.confirm today. Replace that gate with the shared composable from US-001 while retaining refresh, success and extracted error toasts after actual requests. Cancellation, dismissal and supersession must never send a request or toast. Update the comment-delete Playwright journey at apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts:134 to click the styled confirmation test id and still observe DELETE.\n\nUS-004 property fixes and compatibility: apps/web/components/TicketProperties.vue:204-216 currently uses native confirm before setting deletingTicket, sending the project/ticket DELETE and navigating home. Await the shared destructive dialog first, retain loading cleanup and error extraction, and do not navigate on cancel or failure. Assignment controls are already behind canAssign at :311, but Unassign lacks an assignee condition; retain Change and picker behavior when ticket.assignee is absent. Labels at :382 render an empty Select/Add pair whenever canLabel; replace that pair only for an empty allLabels array with a localized hint and /<projectSlug>/labels NuxtLink, not the existing ticket-label chip list. Existing control flags must not be weakened: they are supplied by the page, which imports TicketProperties and TicketActivity at apps/web/pages/[project]/tickets/[ref].vue:4-5 and renders them at :299/:316. apps/web/tests/components/ticket-assignee-collapsed.spec.ts:8-16 is the relevant behavioral harness. apps/web/tests/pages/project-permission-gates.spec.ts:198-208 currently expects Unassign from a null-assignee fixture; give only that assertion's fixture an assigned user, leaving its no-key control untouched. Its label-only test at :225-230 needs one available project label in the project-label route fixture while preserving the permission boundary. Update the ticket-delete journey at apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts:201 to click confirm-dialog-confirm rather than a native-dialog handler or ambiguous Delete Ticket role/name locator. Add the exact ticket-delete and empty-label translations to both web locales.\n\nUS-005 URL boundary: apps/web/lib/safe-url.ts:22-33 deliberately accepts relative hrefs using a base URL; safeHref at :40-46 is output protection, not form validation, and must not change. Add a separate isHttpUrl(value:string):boolean using no-base URL parsing, http/https protocols and the specified IPv4/TLD hostname approximation. Reject scheme-less links even though class-validator accepts some, because stored hrefs otherwise resolve relative to koda. apps/web/components/TicketProperties.vue:250-267 already trims submitted URLs, defaults linkType to pr and posts to the ticket links endpoint; :481 only disables Add for blank or pending values. Introduce the trimmed nonblank-invalid computed and localized inline error and disable Add while invalid, preserving blank-without-error, valid body shape and existing error toast behavior. This does not modify API validation: apps/api/src/ticket-links/dto/create-ticket-link.dto.ts:6 still contains the hardcoded IsUrl message. Do not attempt to make the client a full class-validator replacement, change safeHref consumers, or move raw controls to vee-validate/zod. US-005 depends on US-004 solely to serialize TicketProperties edits.\n\nUS-006 accessibility: apps/web/components/TicketActionPanel.vue:36 already defines canSubmit from a trimmed nonblank comment and :160-171 renders the unlabeled transition textarea/Confirm button. Add the specified id, Label, aria-required, hint id and aria-describedby without changing transition submission, allowedActions or canSubmit. apps/web/components/CreateTicketDialog.vue:9-59 contains four FormLabels with missing for attributes and generic select ids type/priority. Pair all four labels explicitly with the create-ticket-* control ids, keeping schema and submission behavior unchanged. apps/web/components/fleet/NativeSelect.vue:2-4 already forwards id to a real select, and apps/web/components/MarkdownEditor.vue:107-110 forwards $attrs to Textarea; no primitive fix is needed. apps/web/components/ui/form/FormLabel.vue:2 is a bare label and FormControl.vue:2 is a slot, so solving this locally avoids a broad accessibility migration. New tests should mount real native selects and alias MarkdownEditor for description id observation, avoiding real sanitizer loading. Add both required-comment locale keys in en and zh.\n\nUS-007 authentication: apps/api/src/auth/auth.service.ts:139-156 contains exactly the two credential-rejection throws to change, after a dummy bcrypt comparison for unknown email and after the real comparison for wrong password/disabled account. Preserve timing equalization, disabled-user non-enumeration, successful session issuance and the password-change fence at :153-164. Revoked refresh remains generic auth at :166-171; every other AuthException({}, 'auth') is intentionally untouched. apps/api/src/i18n/en/auth.json:2 and zh/auth.json:2 currently contain scalar invalidCredentials strings; change each to the 40000 status-code map while retaining the generic 40000 entries at :12. currentPasswordWrong at :7 demonstrates status-code-keyed localization. AuthException.prefix must be auth.invalidCredentials for login failures but auth for revoked refresh, and HTTP status remains 401. The capability catalog .nax/rules/nathapp-packages.md:31-41 identifies @nathapp/nestjs-common and @nathapp/nestjs-auth; Nathapp documentation MCP is also unavailable here, so the implementer should verify installed package behavior using the prescribed docs tools when available, preserving the existing exception pattern rather than inventing a response wrapper. apps/api/src/auth/auth.service.spec.ts:530 and :616-637 contain existing login/refresh unit tests; add the two prefix checks there, without changing prior assertions. The new DB-backed login-failure integration spec must verify actual HTTP envelope.message localization, not just thrown strings. apps/api/test/integration/auth/password-change.integration.spec.ts:100-111 demonstrates resetDb, bootHttpApp, fixtureDb, resetThrottle and binding-based fixtures; :195-199 demonstrates Accept-Language:zh and body.message. apps/api/test/integration/auth/disabled-user.integration.spec.ts:18-40/:61-63 demonstrates the shared DB gate and disabled account setup. Use isolated fixture emails, bcrypt test hashes, normal baseline grants where needed, and the existing listener rather than listening twice.\n\nSequencing and shared files: Keep exactly seven stories with binding dependencies: US-001 and US-002 independently start in web; US-003/US-004 depend only on US-001; US-005 depends only on US-004; US-006 is independent in web; US-007 is independent in api. US-002 and US-003 both edit CommentThread; US-002 and US-006 both touch MarkdownEditor-related concerns; US-003/004/005/006 share locale JSON; US-003/004 share separate portions of one Playwright spec. Merge these narrowly and preserve each other's changes without inventing extra story dependencies. US-001 expected new source files are useConfirm.ts and ConfirmDialogHost.vue; other stories modify existing production files and create the exact listed behavioral tests/harnesses. contextFiles are limited to five existing or dependency-produced paths per story; this analysis lists additional required reads/edits.\n\nVerification and rollout: Web unit/component tests use Jest and mount-sfc with Nuxt globals/aliases; sanitizer integration uses Bun with real marked/DOMPurify/jsdom and is part of bun run test. Existing Playwright deletion requests remain the regression anchors after UI dialog migration. Live streams mean E2E must use hydration helpers, never networkidle. API unit tests use Vitest/vi, integration uses canRunDbTests with KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; skips are not verification. The host declared testScoped command targeting the new integration spec is required to see real DB assertions pass. DB-mode test runs reset the test DB and must not run concurrently against it; use a private test database/container for another checkout. Quality gates remain pipeline responsibilities, not acceptance criteria. Security-sensitive markdown sanitization and authentication stories retain strict three-session TDD. The supplied small confirmation algorithm, presentation-only property fixes and non-authoritative client URL approximation use medium/tdd-simple routing: they do not change backend access checks or the existing safeHref security boundary. No staged data conversion is necessary: new web code remains compatible with current comment payloads because author ids are optional, and API locale maps deploy atomically with the two throw-prefix edits. Completion means the specified observable behavior, existing regression anchors and actual sanitizer/DB checks hold. Post-deploy visual review on koda-wk remains a manual activity, not a story. Token/layout/navigation redesign guidance remains in docs/ux/redesign/MASTER-PLAN.md:26-43; do not broaden these fixes into a redesign or change tokens. The deferred guidance regeneration and other e2e bundles are explicitly excluded below.\n\nStrict refine audit: Enumerated the specification's numbered criteria by story: US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-004 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9; US-006 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6. All 67 assertions remain in their original stories and order, with regression qualifiers preserved. US-002 AC-2 now unambiguously requires both complete image removal and retained surrounding text. US-003 AC-4/AC-7 explicitly set missing-name preconditions so failure fallbacks do not override an already available name; the existing signed-in-user fallback in useProjectMemberNames.ts:18-25 makes that qualification necessary. No deprecated file-check tags appear. Each story already has observable negative paths: US-001 cancellation/supersession/no-pending; US-002 malicious/image inputs; US-003 failed roster loads/cancelled or failed DELETE; US-004 cancelled or failed DELETE/absent assignee; US-005 malformed/blank/non-http URLs; US-006 blank-comment Confirm disabled; US-007 rejected credentials and revoked refresh. The two explicit no-toast criteria retain the Failure Handling requirements. Two appended US-002 criteria concretize Design's existing one-argument renderer compatibility requirement, bringing the required total to 71. Existing success/request regressions remain US-003 AC-11, US-004 AC-3 and US-005 AC-3; US-006 AC-4 preserves prior nonblank submission gating and US-007 AC-6 preserves generic refresh rejection. US-001 AC-5 preserves absence of a dialog when nothing requested.\n\nOne substantive code/spec fixture mismatch was found: apps/web/lib/mentions.ts:8 only recognizes cuid-shaped ids, while US-002 AC-7 uses u9. Preserve that exact shorthand fixture, expected Ada chip and renderer arguments in an explicitly isolated component mention-seam test rather than widening a shared grammar this feature only reads. The story documents that limited double and proposes a supplementary real-helper valid-cuid assertion, without replacing or silently renaming the spec criterion. This is a test-fixture accommodation, not a production promise that u9 is a valid mention id. Real-stack sanitizer checks remain unmocked. Context-file omissions were repaired: US-002 now includes all five spec-recommended context files, including globals.css and comment-thread-time.spec.ts; US-004 now includes the Labels destination page. All other spec-recommended context paths remain included, no story lists its own new output as context, and all context lists remain within five files. The seven binding ids/workdirs/dependencies are unchanged. All sixteen feature-level exclusions were compared item by item with spec.md and retained verbatim; no story-local exclusion was hoisted. Routing was reduced only where the supplied algorithm/existing UI patterns justify it, retaining strict TDD for actual sanitization and authentication security changes. This audit involved source/document inspection only, not a test execution or a claim of runtime verification.",
+  "outOfScope": [
+    "The 18 other `window.confirm` sites (admin roles, approval policies, skills, fleet repos, analytics, provider keys, runners, budgets, schedules, VCS secret rotate, invites, members, project delete, KB documents, flow stop, and the repo-config leave guard). They move to `useConfirm` in the follow-up feature `e2e-1121-confirm-dialogs`.",
+    "Wiring `for`/`id` inside the shared `FormLabel` and `FormControl` primitives app-wide: this feature only pairs them by hand in `CreateTicketDialog.vue`. Also out: the thread forms' axe findings (`label`, `select-name`) and the approval-policies `scrollable-region-focusable` finding.",
+    "Adding `@tailwindcss/typography`, and the `prose` classes used outside `MarkdownEditor.vue`.",
+    "Localizing the API's hardcoded `CreateTicketLinkDto` message \"url must be a valid URL\", and aligning server-side URL validation with the client's `isHttpUrl`.",
+    "The generic \"Unauthorized\" text on refresh, on the `issueSession` fence refusal (a sign-in that races a password change), and on every other `AuthException({}, 'auth')` site: only the two `login` credential branches change.",
+    "Telling an assistant-proposed comment apart from one its human approver posted: comments carry no proposal marker, so they show their recorded author.",
+    "Rendering comment images: they are removed, as in thread messages.",
+    "Images in ticket descriptions, and the description's own renderer and `whitespace-pre-wrap`: unchanged here.",
+    "Names of members beyond the first 100 that `useProjectMemberNames` loads: such a comment author shows \"Former member\", the same limit the fleet pages have.",
+    "`renderMarkdownWithoutImages` raising: it cannot, because `renderMarkdownOrEscape` already escapes on a renderer error (unchanged baseline).",
+    "A link URL that passes `isHttpUrl` but that the API still rejects for another reason keeps today's toast of the API message (unchanged baseline). Other differences between `isHttpUrl` and class-validator `isURL` (ports, userinfo, unusual TLDs) are not mirrored.",
+    "Moving the new-link form or the transition comment onto vee-validate + zod: both stay the raw controls they are today; the URL check is a computed over `isHttpUrl`.",
+    "Updating `.nax/mono/apps/web/context.md`, both the line \"Comments render tokens via `splitMentions` (no v-html)\" and the rule that runner- and agent-written text renders through `{{ }}` only (adding ticket comments as a second exception beside thread assistant content): `.nax/` is read-only to the run, so it is a manual step after merge (edit, then `nax generate`).",
+    "Calling `useConfirm().confirm()` during SSR or component setup: the store is per-tab module state for event handlers only.",
+    "Visual checks of the `.markdown-body` styles (bullets, code tint, dark mode, and the description's block spacing, where `whitespace-pre-wrap` still adds blank lines between blocks) and of the styled dialogs: a post-deploy manual check on koda-wk, not a story.",
+    "F9, F10, F11, F13, F20-F22 and F26-F30 (not-found pages, palette search, readable names, dashboard rows, page titles, header bells, toast position, dispatch form, auth page polish, board, analytics warnings): these are separate bundles."
+  ],
+  "routingProfile": "native-codex-ds"
+}

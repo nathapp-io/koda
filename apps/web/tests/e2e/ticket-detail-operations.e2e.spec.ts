@@ -131,12 +131,12 @@ test.describe('Ticket Detail Operations', () => {
     await confirmTransitionDialog(page, 'closing from e2e');
     await expect(closeRequest).resolves.toBeTruthy();
 
-    page.once('dialog', dialog => dialog.accept());
     const deleteRequest = page.waitForRequest(request =>
       request.method() === 'DELETE' &&
       request.url().includes(`/api/projects/${projectSlug}/tickets/${ticket.ref}`)
     );
     await page.getByRole('button', { name: DELETE_TICKET_REGEX }).click();
+    await page.getByTestId('confirm-dialog-confirm').click();
     await expect(deleteRequest).resolves.toBeTruthy();
   });
 
@@ -197,12 +197,11 @@ test.describe('Ticket Detail Operations', () => {
     const commentDiv = page.locator('div.border.rounded-md', { hasText: commentBody }).first();
     await expect(commentDiv).toBeVisible({ timeout: 10000 });
 
-    // Set up dialog handler before clicking
-    page.once('dialog', dialog => dialog.accept());
     const deleteCommentRequest = page.waitForRequest(request =>
       request.method() === 'DELETE' && request.url().includes('/api/comments/')
     );
     await commentDiv.getByRole('button', { name: DELETE_REGEX }).click();
+    await page.getByTestId('confirm-dialog-confirm').click();
     await expect(deleteCommentRequest).resolves.toBeTruthy();
   });
 });

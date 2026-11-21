@@ -449,7 +449,9 @@
       "approveFix": "Approve Fix",
       "failFix": "Fail Fix",
       "close": "Close",
-      "closeReasonTitle": "Reason for closing"
+      "closeReasonTitle": "Reason for closing",
+      "commentLabel": "Comment",
+      "commentRequired": "A comment is required to continue."
     },
     "assign": {
       "userIdPlaceholder": "User ID",
@@ -469,13 +471,16 @@
     },
     "labels": {
       "select": "Select label",
-      "add": "Add Label"
+      "add": "Add Label",
+      "noneInProject": "This project has no labels yet.",
+      "manage": "Create labels"
     },
     "links": {
       "title": "Links",
       "placeholder": "https://...",
       "type": "Link type",
       "add": "Add Link",
+      "invalidUrl": "Enter a full http:// or https:// URL",
       "toast": {
         "added": "Link added",
         "deleted": "Link removed"
@@ -484,6 +489,7 @@
     "delete": {
       "button": "Delete Ticket",
       "confirm": "Delete this ticket?",
+      "confirmBody": "The ticket is removed from the board, search and its project. This cannot be undone from the app.",
       "success": "Ticket deleted successfully"
     },
     "toast": {
@@ -603,7 +609,15 @@
     "validation": {
       "bodyRequired": "Comment body is required"
     },
-    "confirmDelete": "Delete this comment?"
+    "confirmDelete": "Delete this comment?",
+    "deleteBody": "The comment is removed from the ticket's activity.",
+    "author": {
+      "formerMember": "Former member",
+      "member": "Member",
+      "unknownAgent": "Removed agent",
+      "agentBadge": "Agent",
+      "system": "System"
+    }
   },
   "agents": {
     "title": "Agents",

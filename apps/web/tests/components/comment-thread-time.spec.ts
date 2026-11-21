@@ -6,7 +6,14 @@ import { formatDateTime } from '../../lib/format-date-time'
 
 const date = '2026-11-10T14:07:45.657Z'
 test.each(['en', 'zh'])('CommentThread renders semantic locale-formatted time (%s)', async (locale) => {
-  const app = mountSfc(webFile('components', 'CommentThread.vue'), { props: { projectSlug: 'web', ticketRef: 'WEB-1' }, components: uiStubs, globals: { useApi: () => ({ $api: { get: async () => [{ id: 'c1', body: 'hello', type: 'GENERAL', createdAt: date }] } }), useI18n: () => ({ ...enI18n(), locale: ref(locale) }), useAppToast: () => ({ success: () => undefined, error: () => undefined }), useProjectMemberNames: () => ({ load: async () => undefined, nameOf: () => null }), useAsyncData: (_key: string, loader: () => Promise<unknown>) => ({ data: ref([{ id: 'c1', body: 'hello', type: 'GENERAL', createdAt: date }]), pending: ref(false), error: ref(null), refresh: loader }) } })
+  const app = mountSfc(webFile('components', 'CommentThread.vue'), {
+    props: { projectSlug: 'web', ticketRef: 'WEB-1' },
+    components: uiStubs,
+    // The comment body now renders through `~/lib/markdown`, which jest cannot load
+    // (isomorphic-dompurify is ESM); this spec is about the time element.
+    alias: { '~/lib/markdown': { renderMarkdownWithoutImages: (markdown: string) => markdown } },
+    globals: { useApi: () => ({ $api: { get: async () => [{ id: 'c1', body: 'hello', type: 'GENERAL', createdAt: date }] } }), useI18n: () => ({ ...enI18n(), locale: ref(locale) }), useAppToast: () => ({ success: () => undefined, error: () => undefined }), useProjectMemberNames: () => ({ load: async () => undefined, nameOf: () => null }), useAsyncData: (_key: string, loader: () => Promise<unknown>) => ({ data: ref([{ id: 'c1', body: 'hello', type: 'GENERAL', createdAt: date }]), pending: ref(false), error: ref(null), refresh: loader }) },
+  })
   const time = app.one('[data-testid="comment-time"]')
   expect(time?.tag).toBe('time')
   expect(time?.props.datetime).toBe(date)

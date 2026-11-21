@@ -601,6 +601,15 @@ describe('AuthService', () => {
       ).rejects.toThrow(AppException);
     });
 
+    it('AC-5: unknown email rejects with the invalid-credentials prefix', async () => {
+      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
+
+      const error = await service.login({ email: 'nonexistent@example.com', password: 'Password123!' })
+        .catch((reason: unknown) => reason);
+      expect(error).toBeInstanceOf(AuthException);
+      expect((error as AuthException).prefix).toBe('auth.invalidCredentials');
+    });
+
     it('should throw 401 error for non-existent user', async () => {
       mockAuthRepository.findUserByEmail.mockResolvedValue(null);
 
@@ -634,6 +643,16 @@ describe('AuthService', () => {
   });
 
   describe('refresh (H1)', () => {
+    it('AC-6: revoked principal still rejects with the generic auth prefix', async () => {
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: true, authorities: [],
+      } as unknown as IPrincipal;
+      const error = await service.refresh(principal, REFRESH_CLIENT)
+        .catch((reason: unknown) => reason);
+      expect(error).toBeInstanceOf(AuthException);
+      expect((error as AuthException).prefix).toBe('auth');
+    });
+
     it('throws AuthException when the refresh token is revoked (pre-logout tokenVersion)', async () => {
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: true, authorities: [],

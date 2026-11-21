@@ -5,7 +5,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
-import { splitMentions } from '~/lib/mentions'
+import { renderMarkdownWithoutImages } from '~/lib/markdown'
+import { withMentionChips } from '~/lib/mentions'
 import { useLocalDates } from '~/lib/local-dates'
 
 interface Comment {
@@ -13,6 +14,8 @@ interface Comment {
   body: string
   type: 'GENERAL' | 'VERIFICATION' | 'FIX_REPORT' | 'REVIEW' | 'RULING'
   createdAt: string
+  authorUserId?: string | null
+  authorAgentId?: string | null
   [key: string]: unknown
 }
 
@@ -30,9 +33,28 @@ const i18n = useI18n()
 const { t } = i18n
 const dates = useLocalDates(i18n)
 const toast = useAppToast()
+const { confirm } = useConfirm()
 // S4a: chips show the member's current name; a former member keeps the token's label.
 const memberNames = useProjectMemberNames(props.projectSlug)
-onMounted(() => { void memberNames.load().catch(() => undefined) })
+const agentNames = useProjectAgentNames(props.projectSlug)
+const membersLoaded = ref(false)
+const agentsLoaded = ref(false)
+onMounted(() => {
+  void memberNames.load().then(() => { membersLoaded.value = true }).catch(() => undefined)
+  void agentNames.load().then(() => { agentsLoaded.value = true }).catch(() => undefined)
+})
+
+function commentAuthor(comment: Comment): string {
+  if (comment.authorUserId != null) {
+    return memberNames.nameOf(comment.authorUserId)
+      ?? (membersLoaded.value ? t('comments.author.formerMember') : t('comments.author.member'))
+  }
+  if (comment.authorAgentId != null) {
+    return agentNames.nameOf(comment.authorAgentId)
+      ?? (agentsLoaded.value ? t('comments.author.unknownAgent') : '')
+  }
+  return t('comments.author.system')
+}
 
 const commentsEndpoint = apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
 
@@ -110,7 +132,13 @@ async function saveEdit(comment: Comment) {
 }
 
 async function deleteComment(comment: Comment) {
-  if (!window.confirm(t('comments.confirmDelete'))) return
+  const confirmed = await confirm({
+    title: t('comments.confirmDelete'),
+    body: t('comments.deleteBody'),
+    confirmLabel: t('common.delete'),
+    destructive: true,
+  })
+  if (!confirmed) return
   try {
     await $api.delete(apiPath`/comments/${comment.id}`)
     await refreshComments()
@@ -132,6 +160,10 @@ async function deleteComment(comment: Comment) {
         class="border rounded-md p-4 space-y-2"
       >
         <div class="flex items-center gap-2">
+          <span v-if="commentAuthor(comment)" data-testid="comment-author">{{ commentAuthor(comment) }}</span>
+          <span v-if="comment.authorAgentId != null" data-testid="comment-author-agent" class="rounded-md border px-2 py-0.5 text-xs font-medium">
+            {{ t('comments.author.agentBadge') }}
+          </span>
           <span
             class="rounded-md border px-2 py-0.5 text-xs font-medium"
             :class="typePillClass[comment.type]"
@@ -153,7 +185,19 @@ async function deleteComment(comment: Comment) {
           </div>
         </div>
         <template v-else>
-          <p class="text-sm whitespace-pre-wrap"><template v-for="(part, index) in splitMentions(comment.body)" :key="index"><span v-if="'userId' in part" class="mention-chip">@{{ memberNames.nameOf(part.userId) ?? part.label }}</span><template v-else>{{ part.text }}</template></template></p>
+          <!--
+            US-002: a comment body is markdown, and a comment can be written by an agent (MCP, fleet),
+            so it renders through `renderMarkdownWithoutImages` — images removed, and the output
+            sanitized after the removal. This is a deliberate second exception to the web rule that
+            agent-written text renders through `{{ }}` only (the first is thread assistant content),
+            with the same guarantees. `breaks: true` keeps a single typed newline as a line break,
+            which the `whitespace-pre-wrap` paragraph used to show.
+          -->
+          <div
+            class="markdown-body text-sm"
+            data-testid="comment-body"
+            v-html="renderMarkdownWithoutImages(withMentionChips(comment.body, id => memberNames.nameOf(id) ?? null), { breaks: true })"
+          />
           <Button v-if="comment.type === 'GENERAL'" size="sm" variant="ghost" @click="startEdit(comment)">
             {{ t('common.edit') }}
           </Button>

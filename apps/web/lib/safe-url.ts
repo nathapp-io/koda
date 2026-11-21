@@ -11,6 +11,26 @@ type SafeUrlScheme = (typeof SAFE_URL_SCHEMES)[number]
 export const SAFE_URL_REPLACEMENT = '#'
 
 /**
+ * Validates a complete HTTP(S) URL suitable for storing as a ticket link.
+ * Unlike `isSafeUrl`, this rejects relative and scheme-less values and requires
+ * an IP host or a dotted host with a plausible top-level domain.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+    const hostname = parsed.hostname
+    const ipv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname)
+    if (ipv4) return true
+    if (!hostname.includes('.')) return false
+    const topLevelDomain = hostname.split('.').at(-1) ?? ''
+    return /^[a-z]{2,}$/i.test(topLevelDomain) || /^xn--/i.test(topLevelDomain)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Returns `true` when `url` parses to a URL whose protocol is one of the
  * safe schemes we allow in the app.
  *

@@ -8,5 +8,6 @@ import { Toaster } from 'vue-sonner'
       <NuxtPage />
     </NuxtLayout>
     <Toaster position="top-right" :visible-toasts="3" rich-colors />
+    <ConfirmDialogHost />
   </div>
 </template>

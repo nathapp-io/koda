@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-vue-next'
 import TicketActionPanel from '~/components/TicketActionPanel.vue'
 import AssigneePicker from '~/components/AssigneePicker.vue'
 import { extractApiError } from '~/composables/useApi'
-import { safeHref } from '~/lib/safe-url'
+import { isHttpUrl, safeHref } from '~/lib/safe-url'
 import { apiPath } from '~/lib/api-path'
 import { useLocalDates } from '~/lib/local-dates'
 
@@ -202,7 +202,13 @@ async function unassignTicket() {
 
 const deletingTicket = vueRef(false)
 async function deleteTicket() {
-  if (!window.confirm(t('tickets.delete.confirm'))) return
+  const confirmed = await useConfirm().confirm({
+    title: t('tickets.delete.confirm'),
+    body: t('tickets.delete.confirmBody'),
+    confirmLabel: t('tickets.delete.button'),
+    destructive: true,
+  })
+  if (!confirmed) return
   deletingTicket.value = true
   try {
     await $api.delete(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}`)
@@ -246,6 +252,10 @@ async function removeLabel(labelId: string) {
 const newLinkUrl = vueRef('')
 const newLinkType = vueRef('pr')
 const addingLink = vueRef(false)
+const linkUrlInvalid = computed(() => {
+  const url = newLinkUrl.value.trim()
+  return url.length > 0 && !isHttpUrl(url)
+})
 
 async function addLink() {
   if (!newLinkUrl.value.trim()) return
@@ -317,7 +327,7 @@ async function removeLink(linkId: string) {
             <Button v-else size="sm" variant="outline" data-testid="assignee-change" @click="pickerOpen = true">
               {{ t('tickets.assignee.change') }}
             </Button>
-            <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
+            <Button v-if="ticket.assignee" size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
               {{ t('tickets.assign.unassign') }}
             </Button>
           </div>
@@ -379,7 +389,13 @@ async function removeLink(linkId: string) {
           </button>
           <span v-if="!ticket.labels || ticket.labels.length === 0" class="text-xs text-muted-foreground">{{ t('labels.empty') }}</span>
         </div>
-        <div v-if="canLabel" class="flex items-center gap-2 border-t pt-2.5">
+        <p v-if="canLabel && allLabels.length === 0" class="border-t pt-2.5 text-xs text-muted-foreground" data-testid="ticket-labels-none">
+          {{ t('tickets.labels.noneInProject') }}
+          <NuxtLink :to="`/${projectSlug}/labels`" class="text-accent-foreground underline underline-offset-2">
+            {{ t('tickets.labels.manage') }}
+          </NuxtLink>
+        </p>
+        <div v-else-if="canLabel" class="flex items-center gap-2 border-t pt-2.5">
           <Select v-model="selectedLabelId">
             <SelectTrigger class="w-[150px]" :aria-label="t('tickets.labels.select')">
               <SelectValue :placeholder="t('tickets.labels.select')" />
@@ -478,10 +494,13 @@ async function removeLink(linkId: string) {
               <SelectItem value="url">url</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" :disabled="addingLink || !newLinkUrl.trim()" @click="addLink">
+          <Button size="sm" :disabled="addingLink || !newLinkUrl.trim() || linkUrlInvalid" @click="addLink">
             {{ t('tickets.links.add') }}
           </Button>
         </div>
+        <p v-if="linkUrlInvalid" class="text-xs text-status-rejected" data-testid="ticket-link-url-error">
+          {{ t('tickets.links.invalidUrl') }}
+        </p>
       </div>
     </details>
 

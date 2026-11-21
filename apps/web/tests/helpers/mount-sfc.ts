@@ -146,7 +146,7 @@ const NUXT_AUTO_IMPORTS = [
   // The personal thread pages (US-005/US-006) auto-import these two; tests override them through globals.
   'useWorkspaceThreads', 'useWorkspaceThread',
   // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
-  'useProjectRunnerSummaries',
+  'useProjectRunnerSummaries', 'useConfirm',
   // Permissions P1 US-006: every gated control reads its keys through one of these two, so any spec
   // that mounts a component holding one must override it through `globals`.
   'useGlobalPermissions', 'useProjectPermissions',
@@ -171,6 +171,7 @@ const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = {
   useThreads: undefined,
   // Pages may mount without exercising roster lookups; these tests should make no API request.
   useProjectAgentNames: () => ({ agents: [], load: async () => undefined, nameOf: () => null }),
+  useConfirm: () => ({ confirm: async () => true, settle: () => undefined, current: { value: null } }),
 }
 
 /** Compiled JS per file: the expensive half, safe to reuse across mounts. */

@@ -114,11 +114,12 @@ describe('mention-slug wiring and chip rendering', () => {
     expect(read('components', 'CreateTicketDialog.vue')).toContain(':mention-slug="props.projectSlug"')
   })
 
-  test('comments render tokens as chips without v-html; descriptions run through withMentionChips', () => {
+  test('comment bodies render chips and image-free markdown into the comment body element; descriptions run through withMentionChips', () => {
     const thread = read('components', 'CommentThread.vue')
-    expect(thread).toContain('splitMentions(comment.body)')
-    expect(thread).toContain('class="mention-chip"')
-    expect(thread).not.toMatch(/v-html="[^"]*comment/)
+    // US-002: a comment body is rendered markdown now (a deliberate exception to the "no v-html for
+    // agent-written text" rule), through the image-free renderer, into the comment body element.
+    expect(thread).toContain('renderMarkdownWithoutImages(withMentionChips(comment.body')
+    expect(thread).toContain('data-testid="comment-body"')
     expect(read('components', 'TicketActivity.vue')).toContain('renderMarkdownOrEscape(withMentionChips(')
   })
 
