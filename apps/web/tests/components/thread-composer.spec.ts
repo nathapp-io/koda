@@ -153,6 +153,24 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     app.unmount()
   })
 
+  test('pending-send regression: successful send preserves a newer draft entered while waiting', async () => {
+    let resolveSend: ((result: { ok: boolean }) => void) | undefined
+    const send = jest.fn(() => new Promise<{ ok: boolean }>((resolve) => { resolveSend = resolve }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
+    typeText(app, 'first message')
+    pressEnter(app)
+    await settle()
+
+    typeText(app, 'next draft')
+    await settle()
+    resolveSend?.({ ok: true })
+    await settle()
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(textarea(app)?.props['model-value']).toBe('next draft')
+    app.unmount()
+  })
+
   test('AC-3: a pending send blocks Enter and click until it settles', async () => {
     let resolveSend: ((result: { ok: boolean }) => void) | undefined
     const send = jest.fn(() => new Promise<{ ok: boolean }>((resolve) => { resolveSend = resolve }))

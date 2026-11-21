@@ -60,11 +60,12 @@ const sending = ref(false)
 async function sendDraft(): Promise<void> {
   if (!props.composerState.canSend || sending.value) return
   sending.value = true
+  const submittedDraft = String(draft.value ?? '')
   try {
     const { valid } = await validate()
-    if (!valid) return
-    const result = await props.send(String(draft.value ?? '').trim())
-    if (result.ok) resetField({ value: '' })
+    if (!valid || String(draft.value ?? '') !== submittedDraft) return
+    const result = await props.send(submittedDraft.trim())
+    if (result.ok && String(draft.value ?? '') === submittedDraft) resetField({ value: '' })
   } catch {
     // The page owns error presentation; keep the draft and release the in-flight guard.
   } finally {
