@@ -3,7 +3,7 @@
   "feature": "e2e-1121-ticket-page",
   "branchName": "feat/e2e-1121-ticket-page",
   "createdAt": "2026-11-21T13:22:53.364Z",
-  "updatedAt": "2026-11-21T13:48:14.567Z",
+  "updatedAt": "2026-11-21T13:56:18.971Z",
   "userStories": [
     {
       "id": "US-001",
@@ -180,14 +180,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Uses existing roster composables and confirmation API for localized author fallbacks and deletion UX; does not introduce authorization rules or alter API business logic."
+        "reasoning": "Uses existing roster composables and confirmation API for localized author fallbacks and deletion UX; does not introduce authorization rules or alter API business logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/CommentThread.vue",
@@ -209,7 +212,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "92db667a132ce105a66094bbd29d67987a05c327"
     },
     {
       "id": "US-004",
