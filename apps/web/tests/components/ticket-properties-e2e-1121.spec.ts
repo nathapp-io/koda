@@ -4,7 +4,6 @@ import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
 
 const file = webFile('components', 'TicketProperties.vue')
-const flush = async () => { await Promise.resolve(); await Promise.resolve() }
 const ticket = (assignee: unknown = null) => ({ id: 't1', ref: 'WEB-1', title: 'Ticket', type: 'TASK', priority: 'LOW', status: 'CREATED', createdAt: '2026-01-01T00:00:00Z', assignee, labels: [] })
 function mount(over: { assignee?: unknown; labels?: Array<{ id: string; name: string; color: string }>; confirm?: () => Promise<boolean>; remove?: () => Promise<void> } = {}) {
   const toast = { success: jest.fn(), error: jest.fn() }
@@ -62,10 +61,12 @@ describe('TicketProperties US-004', () => {
   test('AC-7: empty project labels show management hint and no select', () => {
     const { app } = mount()
     const hint = app.one('[data-testid="ticket-labels-none"]')
-    expect(hint).toBeDefined(); expect(app.textOf(hint!)).toContain('This project has no labels yet.')
+    expect(hint).toBeDefined()
+    expect(hint ? app.textOf(hint) : '').toContain('This project has no labels yet.')
     expect(app.find('select')).toHaveLength(0)
     const link = app.find('[data-stub="nuxt-link"]').find(node => node.props.to === '/web/labels')
-    expect(link).toBeDefined(); expect(app.textOf(link!)).toBe('Create labels')
+    expect(link).toBeDefined()
+    expect(link ? app.textOf(link) : '').toBe('Create labels')
     app.unmount()
   })
   test('AC-8: available project labels render label select without empty hint', () => {
