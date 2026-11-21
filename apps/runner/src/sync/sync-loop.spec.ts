@@ -38,6 +38,7 @@ let abandoned: string[][];
 let now: number;
 let tokenAsks: Array<{ jobId: string; leaseEpoch: number }>;
 let delivered: Array<{ requested: unknown; tokens: unknown; errors: unknown }>;
+let archived: string[][];
 
 function makeLoop(over: Partial<SyncLoopDeps> = {}): SyncLoop {
   return new SyncLoop({
@@ -55,6 +56,7 @@ function makeLoop(over: Partial<SyncLoopDeps> = {}): SyncLoop {
     sleep: async (ms) => { sleeps.push(ms); }, random: () => 0.5, nowMs: () => now, minGapMs: 250,
     tokenRequests: () => tokenAsks,
     onTokens: (requested, tokens, errors) => { delivered.push({ requested: [...requested], tokens: [...tokens], errors: [...errors] }); },
+    onArchivedThreads: (ids) => { archived.push([...ids]); },
     ...over,
   });
 }
@@ -62,11 +64,12 @@ const add = (jobId: string, epoch = 1) => journal.insertJob({ assign: assign(job
 const log = (jobId: string, n: number, epoch = 1) => { for (let i = 0; i < n; i += 1) journal.appendEvent(jobId, epoch, 'log', { stream: 'run', text: `l${i}` }); };
 const ok = (over: Partial<SyncResponse> = {}): Step => async () => ({ ...empty, ...over });
 const assignCmd: FleetCommandOut = { commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assign('j1') };
+const assignCmd2: FleetCommandOut = { commandId: 'c2', type: 'ASSIGN', jobId: 'j2', leaseEpoch: 1, payload: assign('j2') };
 
 beforeEach(() => {
   journal = Journal.open(':memory:');
   calls = []; script = []; sleeps = []; stops = []; capsNow = null; sentHashes = []; handled = []; commandAcks = []; abandoned = []; now = 0;
-  tokenAsks = []; delivered = [];
+  tokenAsks = []; delivered = []; archived = [];
 });
 
 describe('acks and the cursor', () => {
@@ -328,25 +331,211 @@ describe('bad batches', () => {
     expect(calls.some((c) => c.jobs.some((job) => job.events.some((e) => e.type === 'lifecycle')))).toBe(true);
     expect(journal.jobsWithPending()).toEqual([]);
   });
-  test('a 400 on a request carrying capabilities retries without them, logs, and does not resend that hash (D25)', async () => {
+  test('a 400 on a request carrying capabilities retries them on their own first (D25, US-003)', async () => {
     add('j1');
     log('j1', 1);
     capsNow = caps('h1');
-    script.push(async () => { throw new ServerError(400, 'capabilities', null); }, ok({ jobAcks: [{ jobId: 'j1', ackedSeq: 1 }] }), ok());
+    // The batch is refused; the report alone is accepted, so the event is not blamed.
+    script.push(async () => { throw new ServerError(400, 'bad batch', null); }, ok(), ok({ jobAcks: [{ jobId: 'j1', ackedSeq: 1 }] }), ok());
     const loop = makeLoop();
     expect((await loop.syncOnce()).kind).toBe('again');
     expect(calls[0].capabilities).toBeDefined();
+    expect(calls[1].capabilities).toBeDefined();
+    expect(calls[1].jobs).toEqual([]);
+    expect(sentHashes).toEqual(['h1']);
+    // The next ordinary batch carries no capabilities and the event is delivered.
     expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
-    expect(calls[1].capabilities).toBeUndefined();
+    expect(calls[2].capabilities).toBeUndefined();
     expect(journal.pendingEvents('j1', 1, 5)).toEqual([]);      // the event was not blamed
     await loop.syncOnce();
+    expect(calls[3].capabilities).toBeUndefined();
+    expect(sentHashes).toEqual(['h1']);
+  });
+});
+
+/**
+ * US-003: a 400 on a batch that carried capabilities does not prove the capabilities are bad. They are tried on
+ * their own first; the hash is suppressed only when that isolated request is refused and the same envelope without
+ * capabilities succeeds.
+ */
+describe('capability isolation (US-003)', () => {
+  /** The API refuses an event whose payload is over 16 KiB (apps/api/src/fleet/sync/sync-request.parser.ts). */
+  const tooLarge = (payload: unknown): boolean => Buffer.byteLength(JSON.stringify(payload), 'utf8') > 16_384;
+
+  test('AC-1: a valid report survives an oversized event: it is isolated, accepted and marked sent once', async () => {
+    add('j1');
+    journal.appendEvent('j1', 1, 'snapshot', { phase: 'x'.repeat(17_000) } as never);
+    capsNow = caps('h1');
+    const server: Step = async (req) => {
+      const events = req.jobs.flatMap((job) => job.events);
+      if (events.some((e) => tooLarge(e.payload))) throw new ServerError(400, 'event payload too large', null);
+      return { ...empty, jobAcks: events.length > 0 ? [{ jobId: 'j1', ackedSeq: Math.max(...events.map((e) => e.seq)) }] : [] };
+    };
+    const loop = makeLoop();
+    script.push(server, server);
+    expect(await loop.syncOnce()).toEqual({ kind: 'again' });
+    // The report was tried on its own and accepted; the batch was refused for another reason.
+    expect(calls[0].capabilities).toBeDefined();
+    expect(calls[1].capabilities).toBeDefined();
+    expect(calls[1].jobs).toEqual([]);
+    expect(calls[1].commandAcks).toEqual([]);
+    expect(sentHashes).toEqual(['h1']);
+    // The bad event is recovered by the ordinary isolation and the corrected event is acknowledged.
+    for (let i = 0; i < 60 && journal.jobsWithPending().length > 0; i += 1) {
+      script.push(server, server);
+      await loop.syncOnce();
+    }
+    expect(journal.jobsWithPending()).toEqual([]);
+    expect(sentHashes).toEqual(['h1']);
+    expect(calls.some((c) => c.jobs.some((job) => job.events.some((e) => e.type === 'lifecycle')))).toBe(true);
+  });
+
+  test('AC-2: an invalid report is suppressed only after a base-only control succeeds', async () => {
+    add('j1');
+    log('j1', 1);
+    capsNow = caps('h1');
+    const server: Step = async (req) => {
+      if (req.capabilities?.nax.version === 'h1') throw new ServerError(400, 'capabilities invalid', null);
+      const events = req.jobs.flatMap((job) => job.events);
+      return { ...empty, jobAcks: events.length > 0 ? [{ jobId: 'j1', ackedSeq: Math.max(...events.map((e) => e.seq)) }] : [] };
+    };
+    const loop = makeLoop();
+    script.push(server, server, server);
+    expect(await loop.syncOnce()).toEqual({ kind: 'again' });
+    // The report alone was refused; the base-only control confirmed it.
+    expect(calls[1].capabilities).toBeDefined();
+    expect(calls[1].jobs).toEqual([]);
     expect(calls[2].capabilities).toBeUndefined();
+    expect(calls[2].jobs).toEqual([]);
     expect(sentHashes).toEqual([]);
+    // The invalid hash stays suppressed and the unrelated event is delivered.
+    script.push(server);
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[3].capabilities).toBeUndefined();
+    expect(journal.pendingEvents('j1', 1, 5)).toEqual([]);
+    // A changed hash is eligible again.
     capsNow = caps('h2');
+    script.push(server);
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[4].capabilities?.nax.version).toBe('h2');
+    expect(sentHashes).toEqual(['h2']);
+  });
+
+  test('AC-2: an already isolated request is its own evidence: exactly one base-only control is sent', async () => {
+    capsNow = caps('h1');
+    const server: Step = async (req) => {
+      if (req.capabilities) throw new ServerError(400, 'capabilities invalid', null);
+      return { ...empty };
+    };
+    const loop = makeLoop();
+    script.push(server, server);
+    expect(await loop.syncOnce()).toEqual({ kind: 'again' });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].capabilities).toBeDefined();
+    expect(calls[1].capabilities).toBeUndefined();
+    expect(calls[1].jobs).toEqual([]);
+    expect(sentHashes).toEqual([]);
+  });
+
+  test('AC-3: a network failure during the isolation keeps the hash eligible', async () => {
+    add('j1');
+    log('j1', 1);
+    capsNow = caps('h1');
+    script.push(async () => { throw new ServerError(400, 'mixed', null); }, async () => { throw new NetworkError('offline'); });
+    const loop = makeLoop();
+    expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: 500 });
+    expect(sentHashes).toEqual([]);
+    // The hash was neither sent nor suppressed: a later request reports it again.
+    script.push(ok());
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[2].capabilities?.nax.version).toBe('h1');
+    expect(sentHashes).toEqual(['h1']);
+  });
+
+  test('AC-3: an ambiguous rejection keeps the hash eligible', async () => {
+    add('j1');
+    log('j1', 1);
+    capsNow = caps('h1');
+    script.push(
+      async () => { throw new ServerError(400, 'mixed', null); },
+      async () => { throw new ServerError(400, 'capabilities', null); },
+      async () => { throw new ServerError(400, 'base', null); },
+    );
+    const loop = makeLoop();
+    expect(await loop.syncOnce()).toEqual({ kind: 'again' });
+    expect(sentHashes).toEqual([]);
+    // The hash was not suppressed: a later request reports it again.
+    script.push(ok());
+    expect(await loop.syncOnce()).toEqual({ kind: 'ok' });
+    expect(calls[3].capabilities?.nax.version).toBe('h1');
+    expect(sentHashes).toEqual(['h1']);
+  });
+
+  test('AC-3: a 401 or a 426 during the isolation stops the loop', async () => {
+    for (const [status, kind] of [[401, 'auth'], [426, 'protocol']] as const) {
+      journal = Journal.open(':memory:'); calls = []; script = [];
+      add('j1');
+      log('j1', 1);
+      capsNow = caps('h1');
+      script.push(async () => { throw new ServerError(400, 'mixed', null); }, async () => { throw new ServerError(status, 'stop', null); });
+      await makeLoop().run();
+      expect(stops.at(-1)).toEqual({ kind, message: 'stop' });
+      expect(calls).toHaveLength(2);
+      // The refusal came from the isolated report, not from the batch.
+      expect(calls[1].jobs).toEqual([]);
+      expect(calls[1].capabilities).toBeDefined();
+    }
+  });
+
+  test('AC-3: stop aborts an in-flight probe without a follow-up request or a committed answer', async () => {
+    add('j1');
+    log('j1', 1);
+    capsNow = caps('h1');
+    const loop = makeLoop();
+    script.push(async () => { throw new ServerError(400, 'mixed', null); }, async (_req, signal) => {
+      loop.stop();
+      throw signal?.reason;
+    });
+    expect(await loop.syncOnce()).toEqual({ kind: 'woken' });
+    expect(calls).toHaveLength(2);      // the refused batch and the probe; no control follows
+    expect(calls[1].jobs).toEqual([]);
+    expect(sentHashes).toEqual([]);     // the probe's answer was not committed
+  });
+
+  test('AC-5: a mixed 400 at the smallest scale: the control is handled once, the acks keep their detail, the scale is unchanged', async () => {
+    add('j1');
+    log('j1', 3);
+    commandAcks = [{ commandId: 'c9', leaseEpoch: 1, result: 'ok', detail: 'the detail' }];
+    const loop = makeLoop();
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });
+    // A command is handled first: its ack waits for a request that carries it.
+    script.push(ok({ commands: [assignCmd] }));
+    await loop.syncOnce();
+    expect(calls[0].commandAcks).toEqual([]);
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });   // the mixed batch runs at the smallest scale
+    capsNow = caps('h1');
+    // The mixed batch is refused; the report alone is refused too; the base-only control succeeds.
+    script.push(
+      async () => { throw new ServerError(400, 'mixed', null); },
+      async () => { throw new ServerError(400, 'capabilities', null); },
+      ok({ commands: [assignCmd2], archivedThreadIds: ['t1'] }),
+    );
+    expect(await loop.syncOnce()).toEqual({ kind: 'again' });
+    expect(calls[1].commandAcks).toEqual([{ commandId: 'c9', leaseEpoch: 1, result: 'ok', detail: 'the detail' }]);
+    expect(calls[2].commandAcks).toEqual([]);        // the probe carried no ack
+    expect(calls[3].commandAcks).toEqual([]);        // the control carried no ack
+    expect(calls[3].capabilities).toBeUndefined();
+    // The command and the archive notice of the control are handled once.
+    expect(handled).toEqual([[assignCmd], [assignCmd2]]);
+    expect(archived).toEqual([['t1']]);
+    // No capability is marked sent.
+    expect(sentHashes).toEqual([]);
+    // The next ordinary batch resumes at the prior scale and the unsent ack keeps its detail.
     script.push(ok());
     await loop.syncOnce();
-    expect(calls[3].capabilities?.nax.version).toBe('h2');
-    expect(sentHashes).toEqual(['h2']);
+    expect(calls[4].commandAcks).toEqual([{ commandId: 'c9', leaseEpoch: 1, result: 'ok', detail: 'the detail' }]);
+    expect(calls[4].jobs[0].events).toHaveLength(1);
+    expect(calls[4].capabilities).toBeUndefined();
   });
 });
 
@@ -625,7 +814,7 @@ describe('git tokens (design §3.1, D81)', () => {
  * US-001: the real sync loop, command handler, supervisor, journal and FIFO repo mutex with a fake executor.
  * The script answers each request in turn; `tokenAsks` is what the fake executor asked a token for.
  */
-function realLoop() {
+function realLoop(over: { capabilities?: () => CapabilityReport | null; sleep?: (ms: number) => Promise<void> } = {}) {
   const journal = Journal.open(':memory:');
   const ex = new FakeExecutor();
   const log = createMemoryLogger();
@@ -654,12 +843,12 @@ function realLoop() {
       return step(req);
     } },
     journal, bootId: 'boot-1', daemonVersion: '0.1.0', freeSlots: () => 4,
-    capabilityReport: () => null, onCapabilitiesSent: () => undefined,
+    capabilityReport: over.capabilities ?? (() => null), onCapabilitiesSent: (hash) => { sentHashes.push(hash); },
     handleCommands: (cmds) => handler.handle(cmds),
     abandonUnknown: (ids) => { for (const id of ids) supervisor.retireUnknown(id); },
     tokenRequests: () => tokenAsks,
     onTokens: () => undefined,
-    onStop: () => undefined, log, sleep: async () => undefined, random: () => 0.5, nowMs: () => Date.now(), minGapMs: 0,
+    onStop: () => undefined, log, sleep: over.sleep ?? (async () => undefined), random: () => 0.5, nowMs: () => Date.now(), minGapMs: 0,
   });
   deferred.sink = (ack) => { loop.queueAck(ack); };
   return { journal, ex, log, mutex, supervisor, handler, loop, requests, tokenAsks };
@@ -795,5 +984,43 @@ describe('the poll stays free while a stale epoch retires (US-001)', () => {
       releaseX();
       f.supervisor.shutdown();
     }
+  });
+});
+
+describe('the isolated capability probe (US-003)', () => {
+  const abandonJob = (commandId: string, jobId: string, leaseEpoch = 1): FleetCommandOut =>
+    ({ commandId, type: 'ABANDON', jobId, leaseEpoch, payload: { reason: 'stale_lease' } });
+
+  test('AC-4: an ABANDON in the probe answer is handled once and its ack waits for the cleanup', async () => {
+    const f = realLoop({ capabilities: () => caps('h1'), sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, 5); }) });
+    // A job the runner knows: its retirement runs a cleanup.
+    f.journal.insertJob({ assign: assignFor('RUN', { jobId: 'jA' }), leaseEpoch: 1, repoKey: 'a/one', jobDir: '/w/jA' });
+    // An unrelated job with a pending event: it stays pending until a request carries it successfully.
+    f.journal.insertJob({ assign: assignFor('RUN', { jobId: 'jB' }), leaseEpoch: 1, repoKey: 'a/two', jobDir: '/w/jB' });
+    f.journal.appendEvent('jB', 1, 'log', { stream: 'run', text: 'hello' });
+    const keepGoing: Step = async () => { script.push(keepGoing); return { ...empty }; };
+    // The mixed batch is refused; the isolated report carries the abandonment.
+    script.push(async () => { throw new ServerError(400, 'mixed', null); }, ok({ commands: [abandonJob('aA', 'jA')] }), keepGoing);
+    const running = f.loop.run();
+    try {
+      await waitFor(() => f.ex.calls.includes('cleanup:jA'));
+      await waitFor(() => f.requests.some((r) => r.commandAcks.some((a) => a.commandId === 'aA')));
+    } finally {
+      f.loop.stop();
+      await running;
+      f.supervisor.shutdown();
+    }
+    // The command was handled once.
+    expect(f.ex.calls.filter((c) => c === 'cleanup:jA')).toHaveLength(1);
+    expect(f.journal.getCommand('aA')).toMatchObject({ result: 'ok' });
+    // The probe carried no jobs and no acks, so nothing was confirmed by it.
+    expect(f.requests[1].jobs).toEqual([]);
+    expect(f.requests[1].commandAcks).toEqual([]);
+    // The ack rides a later request, and it is not sent again once that request succeeded.
+    const ackIndex = f.requests.findIndex((r) => r.commandAcks.some((a) => a.commandId === 'aA'));
+    expect(ackIndex).toBeGreaterThan(1);
+    expect(f.requests.at(-1)?.commandAcks.some((a) => a.commandId === 'aA')).toBe(false);
+    // The unsent job event is retained.
+    expect(f.journal.pendingEvents('jB', 1, 10)).toHaveLength(1);
   });
 });
