@@ -1,3 +1,4 @@
+import { getCurrentInstance } from 'vue'
 import { clientIpHeaders } from '~/server/utils/client-ip'
 
 /**
@@ -176,6 +177,39 @@ export async function blobErrorToApiError(err: unknown): Promise<unknown> {
   return err
 }
 
+/**
+ * The locale the API should hear: it travels as `Accept-Language` on every request, when one can be
+ * named (see the note on the unresolvable case below).
+ *
+ * `useI18n()` needs a component instance and throws
+ * `SyntaxError: Must be called at the top of a setup function` without one — which is the situation
+ * of any composable built in a route middleware, and `middleware/project.global.ts` builds this one.
+ * Nuxt runs middleware inside the app context (`nuxtApp.runWithContext`), so the nuxt-i18n composer
+ * on the Nuxt app answers the same question there and backs `useI18n()` up.
+ *
+ * The first navigation of a page load is earlier still: it runs inside the pages router plugin,
+ * which Nuxt orders before the i18n plugin (`enforce: 'pre'`), so no composer exists yet and there
+ * is no answer to give. That case returns undefined and the request names no locale, which leaves
+ * the browser's own `Accept-Language` standing — request fetch forwards it on the server, and the
+ * browser sends it itself on the client. Exported so a test can reach it without a mounted
+ * component.
+ */
+export function resolveApiLocale(): { value: string } | undefined {
+  // A component instance always wins: `useI18n()` is the reactive composer that follows the user's
+  // language switch mid-session.
+  if (getCurrentInstance() !== null) return useI18n().locale
+  return nuxtAppLocale()
+}
+
+/** The locale the Nuxt app's i18n composer holds, once the i18n plugin has installed it. */
+function nuxtAppLocale(): { value: string } | undefined {
+  // `typeof` is the guard that keeps this safe where the auto-import is not injected (plain Node
+  // tests): a bare reference would be a ReferenceError, a `typeof` check is not.
+  if (typeof useNuxtApp !== 'function') return undefined
+  const locale = (useNuxtApp() as { $i18n?: { locale?: { value?: unknown } } }).$i18n?.locale
+  return typeof locale?.value === 'string' ? locale as { value: string } : undefined
+}
+
 export const useApi = () => {
   const config = useRuntimeConfig()
   // Server-side: ensure internal URL includes /api (E2E env provides host:port only)
@@ -185,7 +219,9 @@ export const useApi = () => {
     : `${internalBaseUrl}/api`
   const baseURL = import.meta.server ? serverBaseUrl : config.public.apiBaseUrl
 
-  const { locale } = useI18n()
+  // Undefined before the i18n plugin has run (see resolveApiLocale): that request names no locale
+  // instead of guessing one.
+  const locale = resolveApiLocale()
 
   // SSR: this server calls the API itself, so name the browser it serves
   // (resolved by server/middleware/client-ip.ts; never a browser-sent header).
@@ -195,10 +231,9 @@ export const useApi = () => {
     : {}
 
   const getHeaders = (caller?: Record<string, string>) => ({
-    ...mergeHeaders(caller, {
-      'Accept-Language': locale.value,
-      'lang': locale.value,
-    }),
+    ...mergeHeaders(caller, locale
+      ? { 'Accept-Language': locale.value, lang: locale.value }
+      : {}),
     ...ssrClientIpHeaders,
   })
 
