@@ -603,7 +603,15 @@
     "validation": {
       "bodyRequired": "评论内容不能为空"
     },
-    "confirmDelete": "确认删除此评论？"
+    "confirmDelete": "确认删除此评论？",
+    "deleteBody": "该评论将从工单动态中移除。",
+    "author": {
+      "formerMember": "前成员",
+      "member": "成员",
+      "unknownAgent": "已移除的智能体",
+      "agentBadge": "智能体",
+      "system": "系统"
+    }
   },
   "agents": {
     "title": "代理",

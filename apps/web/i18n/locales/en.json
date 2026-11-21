@@ -603,7 +603,15 @@
     "validation": {
       "bodyRequired": "Comment body is required"
     },
-    "confirmDelete": "Delete this comment?"
+    "confirmDelete": "Delete this comment?",
+    "deleteBody": "The comment is removed from the ticket's activity.",
+    "author": {
+      "formerMember": "Former member",
+      "member": "Member",
+      "unknownAgent": "Removed agent",
+      "agentBadge": "Agent",
+      "system": "System"
+    }
   },
   "agents": {
     "title": "Agents",
