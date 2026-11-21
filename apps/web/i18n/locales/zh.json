@@ -367,6 +367,11 @@
     }
   },
   "tickets": {
+    "notFound": {
+      "title": "工单不存在",
+      "body": "此项目中不存在 {ref}，或它已被删除。",
+      "back": "返回看板"
+    },
     "filter": { "search": "按编号或标题筛选…", "priority": "优先级", "clear": "清除筛选", "showing": "显示 {n} / {total}" },
     "newTicket": "新建工单",
     "loadMore": "加载更多",

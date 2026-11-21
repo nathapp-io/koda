@@ -10,7 +10,7 @@ test('mounting the ticket detail page with a loaded ticket renders the two-row d
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener: jest.fn(), removeEventListener: jest.fn() } })
   const ticket = { id: 't1', ref: 'WEB-1', title: 'Ticket', type: 'BUG', priority: 'HIGH', status: 'CREATED', createdAt: '2026-01-01T00:00:00Z', labels: [], links: [] }
   const app = mountSfc(webFile('pages', '[project]', 'tickets', '[ref].vue'), {
-    components: uiStubs,
+    components: { ...uiStubs, NotFoundState: inertComponent },
     globals: {
       useRoute: () => ({ params: { project: 'web', ref: 'WEB-1' } }),
       useI18n: () => ({ t: (key: string) => key }),

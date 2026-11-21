@@ -367,6 +367,11 @@
     }
   },
   "tickets": {
+    "notFound": {
+      "title": "Ticket not found",
+      "body": "{ref} does not exist in this project, or it was deleted.",
+      "back": "Back to board"
+    },
     "filter": { "search": "Filter by ref or title…", "priority": "Priority", "clear": "Clear filters", "showing": "Showing {n} of {total}" },
     "newTicket": "New Ticket",
     "loadMore": "Load more",
