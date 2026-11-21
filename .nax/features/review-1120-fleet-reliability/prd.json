@@ -1,0 +1,279 @@
+{
+  "project": "koda",
+  "feature": "review-1120-fleet-reliability",
+  "branchName": "feat/review-1120-fleet-reliability",
+  "createdAt": "2026-11-21T02:39:04.885Z",
+  "updatedAt": "2026-11-21T04:35:29.822Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Keep polling during stale-lease cleanup",
+      "description": "**Goal** — Keep synchronization polling while stale epochs retire, acknowledging ABANDON only after its outcome is durable and preserving recovery and shutdown ordering.\n\n**Motivation** — B can acquire the repo mutex ahead of A's cleanup and wait for a git token available only through the blocked poll.\n\n**Approach** — **Retirement.** Today `SyncLoop.apply` awaits `abandonUnknown` and `handleCommands`. Keep ordering of command initiation. Initiate ABANDON through the normal command handler so the target halts promptly, but track completion outside the poll. The runner may omit its ack on a sync while cleanup is pending. Deduplicate in-flight delivery by command ID and serialize retirement of the same job and epoch across command and unknown-job paths. Finish cleanup under the existing repo mutex, persist the command outcome using the existing journal and enqueue its ack for a later sync. An already completed command replays its stored outcome. The server redelivers unacknowledged commands on restart. Snapshot the local epochs for a missing job before scheduling their removal so later leases cannot enter an earlier sweep. On graceful daemon stop, stop polling, halt runs and close broker sockets before joining outstanding run, cleanup and command-outcome writers; close the journal last. The separate daemon.crash() hook simulates process death and returns without draining. Recovery follows server redelivery and journal records. Preserve best-effort cleanup errors already handled inside JobRun. If retirement succeeds or an error escapes the supervisor and the handler classifies the command as rejected, persist that outcome before offering the ack. If persisting it fails, withhold the ack, clear the in-flight entry and allow redelivery; keep the journal error observable. A lost ack must replay the recorded outcome. If execution is interrupted before a durable outcome, reconcile whatever epoch resources remain on redelivery without assuming external cleanup ran exactly once. Keeping a polling loop free must not weaken process identity checks or epoch-scoped cleanup.\n\n**Failure handling** — A repeated abandonment rejoins or replays one retirement.\n\n**Scope** — In: modify `src/sync/sync-loop.ts`, `src/supervisor/supervisor.ts`, `src/supervisor/command-handler.ts` and `src/daemon/daemon.ts`; extend existing command-handler, sync-loop and daemon specs with real-loop/FIFO-mutex/SQLite fixtures, persistence faults and restart checkpoints. Out: capability validation isolation belongs to US-003, configured-forge ruling selection to US-002, and thread stream startup coordination to US-004. Changes to API placement, cancellation, fencing, wire envelopes and database schema.\n\n**Interface** — No new TypeScript signatures are prescribed by the spec. Preserve journaled command outcomes and existing command IDs/lease epochs; evolve internal completion delivery between SyncLoop, CommandHandler and daemon wiring as needed. US-003 consumes US-001's deferred command acknowledgement handling through `SyncLoop.run`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given the real sync loop, command handler, supervisor, journal and FIFO repo mutex with a fake executor holding A in prepare, when ASSIGN B followed by ABANDON A is delivered for the same repo and halted A is released, then a second sync requests B's token before B's deadline and granting that token lets B resume.",
+        "AC-2 [integration] Given the stale-lease retirement where ASSIGN B followed by ABANDON A is delivered for the same repo while a fake executor holds A in prepare, when outgoing sync requests are observed, then A's abandonment is not acknowledged before cleanup completes and the next delivery after completion carries the recorded successful ack for the original command ID and epoch.",
+        "AC-3 [unit] When the same ABANDON is redelivered while cleanup is pending and after completion, then one cleanup executes and completed delivery replays the stored outcome.",
+        "AC-4 [integration] Given an unknown job reported on two responses while its repo lock is held, when polling continues and a higher epoch is introduced after both missing-job responses but before releasing the lock, then subsequent syncs deliver unrelated events while retirement waits, and releasing the lock produces one cleanup per originally captured epoch while preserving the new epoch.",
+        "AC-5 [unit] When the command handler restarts against the same journal before a completed command record and after a completed record, then server redelivery respectively finishes outstanding cleanup or returns the stored outcome without repeating execution, for both success and an error escaping supervisor.abandon with a lost ack; a deleted epoch row never turns a recorded rejection into success.",
+        "AC-6 [integration] Given tracked retirement waiting behind a run blocked on a broker credential, when the daemon stops gracefully, then closing the broker releases the waiter before the drain joins and retirement plus its outcome write settle before journal close, without advancing a credential timeout.",
+        "AC-7 [unit] When persisting a completed ABANDON outcome fails, then no ack is queued and redelivery after storage recovers records and returns the outcome; an absent epoch is an idempotent success when there is no prior rejection.",
+        "AC-8 [unit] Given explicit ABANDON and unknown-job cleanup for one epoch while the repo lock is held, when the lock is released, then they share one retirement, a mismatching process identity is never killed, and an owned higher epoch keeps its checkout."
+      ],
+      "tags": [
+        "fleet",
+        "runner",
+        "synchronization",
+        "recovery",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends existing Supervisor pending-work and older-epoch retirement patterns across polling, durable command outcomes and daemon shutdown rather than introducing a new architecture; credential lifetimes and process-identity safeguards still require strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/supervisor/repo-mutex.ts",
+        "apps/runner/src/supervisor/command-handler.ts",
+        "apps/runner/src/daemon/daemon.ts",
+        "apps/api/src/fleet/sync/fence.service.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/sync/sync-loop.ts",
+          "reason": "dispatch and track slow retirement without waiting in apply, and deliver its eventual ack."
+        },
+        {
+          "path": "apps/runner/src/supervisor/supervisor.ts",
+          "reason": "share in-flight epoch retirement across repeated cleanup requests and track shutdown."
+        },
+        {
+          "path": "apps/runner/src/daemon/daemon.ts",
+          "reason": "connect background unknown-job retirement and wait for pending journal users on shutdown."
+        },
+        {
+          "path": "apps/runner/src/supervisor/command-handler.ts",
+          "reason": "preserve journaled outcomes and replay while allowing deferred ABANDON completion."
+        },
+        {
+          "path": "apps/runner/src/supervisor/command-handler.spec.ts",
+          "reason": "assert one cleanup and a replayable outcome after retirement."
+        },
+        {
+          "path": "apps/runner/src/sync/sync-loop.spec.ts",
+          "reason": "exercise ordered assignments, deferred ack, repeated delivery and missing-job cleanup while polling continues."
+        },
+        {
+          "path": "apps/runner/test/unit/daemon.spec.ts",
+          "reason": "check shutdown joins pending work before closing journal resources."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e4fe34afd6d76499174b728cce8a368507cc268d"
+    },
+    {
+      "id": "US-002",
+      "title": "Use the configured forge for ruling retirement and ready selection",
+      "description": "**Goal** — Make latest RUN lookup, older ruling retirement and ready-comment selection agree on configured-forge PR identity.\n\n**Motivation** — A newer RUN under the same repository ID can report a URL on another forge with the same owner, repo and PR number.\n\n**Approach** — **Ruling identity.** Today `PrismaFleetPrRulingRepository.latestRunForPr` combines `sameRepoOrigin` with `prNumberFor`. Give `latestRunForPr`, `replaceOlderRuns` and `runsForPr` a shared PR-number resolver with those semantics. Compare normalized URL origins (including scheme and non-default port) and use the existing provider-specific path parser. An unparseable URL or configured host resolves to no PR. Retain the existing RUN, workflow, age/tie-break, pending-state, repository, ordering and paging predicates at their respective call sites. Ingest already owns the transaction for retirement.\n\n**Failure handling** — Ruling URL mismatch selects zero rows.\n\n**Scope** — In: modify `src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts`; extend existing ruling repository integration tests across GitHub/GitLab origins and supported URL variants, and extend the existing FIX-only ingest attachment fixture with a current-lease RUN artifact containing a valid workflow result. Retain the current ready-comment exact-body assertions. Out: runner retirement is US-001, capability delivery is US-003, and thread stream lifecycle is US-004. Broadening the ruling change into a project-wide rewrite of PR attribution or forge URL storage. Changes to API placement, cancellation, fencing, wire envelopes and database schema.\n\n**Interface** — No new TypeScript signatures are prescribed by the spec. Keep the existing `latestRunForPr`, `replaceOlderRuns` and `runsForPr` repository contracts and reuse the existing provider-specific `prNumberFor` parser; the shared resolver remains internal to the affected repository operations.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an earlier RUN's pending ruling, when a newer current-lease RUN under the same repo ID ingests a workflow bundle naming the same PR path and number on another origin, then ingest completes with the earlier ruling still pending; the artifact uses schemaVersion 1 with runId, verdict.outcome and boolean verdict.workflowPassed, and the status workflow URL or already mirrored resultPrUrl supplies the candidate URL.",
+        "AC-2 [integration] Given an earlier RUN's pending ruling, when a newer current-lease RUN under the same repo ID ingests the same schemaVersion 1 workflow bundle with the PR URL on the configured origin, then the older pending ruling becomes replaced while already settled rulings and another PR's pending rulings retain their states.",
+        "AC-3 [integration] Given two matching RUN tickets and a third RUN carrying a foreign origin with the identical path and PR number, when a ready FIX is ingested and retried, then each matching ticket receives the existing exact-body ready comment `PR #<prNumber> marked ready by FIX <fixId>` once and the foreign ticket receives zero such comments.",
+        "AC-4 [integration] When repository lookups use GitHub and GitLab fixtures, then supported trailing slash, query and fragment variants on the configured origin match, different-origin or unparseable URLs are skipped, and latest selection retains its existing newest-match ordering.",
+        "AC-5 [integration] Given a configured origin with a non-default port, when a candidate uses the same host/path with a different port, then latest lookup and ready selection exclude it and ingest of that candidate leaves the older pending ruling intact."
+      ],
+      "tags": [
+        "fleet",
+        "api",
+        "rulings",
+        "forge-identity",
+        "ingest"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A bounded repository-local resolver reuse plus two existing integration fixtures; transaction boundaries and public contracts remain unchanged, with no authentication or credential implementation changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+        "apps/api/src/fleet/sync/pr-attribution.service.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/ingest/parsers/workflow.parser.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+          "reason": "share configured-forge PR identity across latest lookup, retirement and ready selection."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts",
+          "reason": "compare origins, provider paths and supported URL variants across selection paths."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-pr-rulings-ingest.integration.spec.ts",
+          "reason": "extend the existing FIX-only attach fixture with a current-lease RUN artifact containing a valid workflow result; retain the current ready-comment exact-body assertions."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dbe0b2ddd548e196b6c51ff4786b6036194c88b2"
+    },
+    {
+      "id": "US-003",
+      "title": "Isolate capability validation from batch errors",
+      "description": "**Goal** — Recover capability delivery from unrelated batch validation failures without falsely confirming or dropping pending sync work.\n\n**Motivation** — A pending capability update can coincide with an invalid event.\n\n**Approach** — **Capability reporting.** Today a mixed-request 400 stores `capsRejected` immediately. Isolate the attempted capability hash using the same valid runner envelope and empty jobs, acks and credential requests. On success, apply the probe response through the ordinary response path, including commands, and mark exactly the accepted hash sent. Use the positive base-only control before suppressing a hash after an isolated 400. The deployed parser need not expose a capability-specific error code. An original, already isolated request can provide the isolated evidence. Process commands and archive notices from every successful probe, including a base-only control, using the exact fields it sent. Only confirm items actually included. Preserve the original batch’s isolation scale, failure/backoff accounting and pending acknowledgement details when an empty control succeeds. Retry the original pending work through existing batch isolation. A changed hash remains eligible. Maintain stop, network backoff and request-abort semantics, including when the probe carries newly delivered commands in its response.\n\n**Failure handling** — A failed capability probe leaves unconfirmed state retryable through the ordinary network/protocol handling.\n\n**Seam** — US-003 consumes US-001's deferred command acknowledgement handling through `SyncLoop.run`. An isolated capability probe can deliver commands even though its outgoing command-ack array is empty. US-003 AC-4 exercises this response path.\n\n**Scope** — In: modify `src/sync/sync-loop.ts` and its existing spec, revising the D25 mixed-400 expectation to require isolated evidence and testing both capability rejection and unrelated poison events. Preserve omitted ack details and events, prior batch scale and backoff, archive delivery, stop/abort semantics and US-001 deferred ack completion. Out: implementing epoch retirement and shutdown ownership belongs to US-001; ruling selection belongs to US-002; thread stream cancellation belongs to US-004. Changing nax status snapshot sizing or the API's event byte limit. Changes to API placement, cancellation, fencing, wire envelopes and database schema.\n\n**Interface** — No new TypeScript signatures are prescribed by the spec. Preserve the existing sync wire envelope, `CapabilityReport` hash identity and reporter callback contracts; use ordinary successful-response processing with the exact isolated request rather than confirming fields from the original batch.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Given the real sync loop with a valid pending report and an oversized journal event, when requests containing the bad event are rejected, the isolated capability report is accepted and the recovered event is accepted, then the report hash is marked sent once and the corrected event is acknowledged.",
+        "AC-2 [unit] When an isolated capability report receives a capability-validation 400 but the same envelope without capabilities succeeds, then the invalid hash stays suppressed while unrelated events are delivered and a changed valid hash is sent successfully; when the initial request is already capability-only, it supplies the isolated evidence and exactly one base-only control is sent.",
+        "AC-3 [unit] When isolation encounters a network failure or ambiguous rejection, then the hash remains neither marked sent nor permanently suppressed and a later successful request reports it; 401 and 426 retain the existing auth/protocol stop classification, and loop.stop aborts an in-flight probe without follow-up requests or a committed probe response.",
+        "AC-4 [integration] When an isolated capabilities request processed by SyncLoop.run receives ABANDON, then that command is handled once and its eventual ack is sent only after cleanup, with unsent job events and queued acknowledgements retained until actually included in successful requests.",
+        "AC-5 [unit] Given a mixed 400 of ambiguous cause at minimum batch scale with pending events and acknowledgement details, when only a successful base-only control returns a command and archive notice, then both are handled once without marking any capability sent, unsent acknowledgements retain their details, and the next ordinary batch resumes isolation at the prior scale."
+      ],
+      "tags": [
+        "fleet",
+        "runner",
+        "synchronization",
+        "capabilities",
+        "credentials"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Multi-stage isolation must preserve batch state, exact credential-request correlation, auth/protocol stops and deferred command acks; credential-sensitive response handling triggers strict three-session TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/sync/sync-loop.ts",
+        "apps/runner/src/sync/sync-loop.spec.ts",
+        "apps/runner/src/sync/batch.ts",
+        "apps/runner/src/capabilities/capability-probe.ts",
+        "apps/api/src/fleet/sync/sync-request.parser.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/sync/sync-loop.ts",
+          "reason": "isolate capability delivery on mixed 400 and apply probe results with the exact probe envelope."
+        },
+        {
+          "path": "apps/runner/src/sync/sync-loop.spec.ts",
+          "reason": "revise the D25 mixed-400 expectation to require isolated evidence and test both possible causes."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "196ddbdd63ca754a8179b70843991dcf1fbe12f7"
+    },
+    {
+      "id": "US-004",
+      "title": "Finish thread stream startup and cancellation in order",
+      "description": "**Goal** — Serialize SESSION stream readiness and termination for repository, project and workspace threads so cancellation seals the stream before completion and no heartbeat restarts.\n\n**Motivation** — A cancellation delivered while a repository thread opened its stream produced a CANCELLED row, a lone `session_started` line and a subsequent heartbeat snapshot.\n\n**Approach** — **Thread termination.** Both session startup paths transition RUNNING before awaiting `openStream`. Coordinate this interval with `requestCancel` and `finishRun`. On successful stream setup let one close owner seal and drain the stream, stop log shipping, mark the row done and release the session. Skip initial input, idle and heartbeat scheduling once close starts. Protect heartbeat scheduling and emission against already ended runs. Preserve bounded session close and shutdown behavior, including when stream setup fails or a halt occurs while it is pending.\n\n**Failure handling** — A stream-open failure while cancellation is pending uses the existing RUNNING → UPLOADING → FAILED startup failure path, once. Release the session, timers and any log registration, even for a partially initialized stream. A halt preserves the recoverable journal state and does not synthesize a terminal transition.\n\n**Scope** — In: modify `src/thread/thread-job-run.ts` in both repository and shared project/workspace startup branches; extend existing repository, project, workspace and halt-safety specs with RUNNING-window cancellation, fake-clock normal heartbeat controls, stream initialization failure and halt ordering. Out: stale-epoch retirement, command replay and daemon draining are US-001; configured-forge ruling identity is US-002; capability batch isolation is US-003. Changing the semantics of thread PUBLISH and DISCARD action jobs.\n\n**Interface** — No new TypeScript signatures are prescribed by the spec. Preserve `requestCancel`, `finishRun`, `halt` and existing bounded session-close behavior; continue using ThreadEventWriter lifecycle lines and the existing log shipper without changing wire envelopes or action-job contracts.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given a repository SESSION with an initial message, when cancellation is requested at its RUNNING journal notification while stream initialization is pending, then it ends CANCELLED with non-null doneAt and a stream containing exactly one `session_started` line followed by one `session_closed` line with reason `cancelled`, consuming zero inputs.",
+        "AC-2 [integration] When the RUNNING-window cancellation is repeated through the normal PROJECT and WORKSPACE startup paths and the fake clock advances past two heartbeat intervals and idle expiry after completion, then all three session kinds retain their respective completion-time journal event counts, final states and stream contents unchanged.",
+        "AC-3 [unit] When a session starts normally, then it accepts initial input through session.send and emits a heartbeatAt journal snapshot on the threadHeartbeatMs schedule, with no further heartbeat after ordinary closure and clock advancement.",
+        "AC-4 [unit] When a run is halted while stream setup is pending and startup subsequently settles, then its session closes once without subsequent timer-driven events, active log registration or terminal journal writes from the halted run.",
+        "AC-5 [unit] When stream initialization fails during pending cancellation, then the journal records UPLOADING followed by FAILED with a done time and no competing CANCELLED terminal transition, releasing the session and log registration without a recurring heartbeat or unhandled rejection."
+      ],
+      "tags": [
+        "fleet",
+        "runner",
+        "threads",
+        "sessions",
+        "cancellation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Concurrent session startup, cancellation, failure and halt need a single close owner across three thread kinds; session lifecycle and resource-release paths require the security override's strict TDD isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/src/thread/thread-event-writer.ts",
+        "apps/runner/test/unit/thread-job-run.spec.ts",
+        "apps/runner/test/unit/thread-job-run-project.spec.ts",
+        "apps/runner/test/unit/thread-job-run-halt-safety.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/thread/thread-job-run.ts",
+          "reason": "coordinate stream creation, cancellation, heartbeat and session finalization in both branches."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-job-run.spec.ts",
+          "reason": "inject cancellation at RUNNING before stream setup, verify event order and fake-clock behavior."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-job-run-project.spec.ts",
+          "reason": "cover cancellation during project stream startup."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-job-run-workspace.spec.ts",
+          "reason": "cover cancellation during workspace stream startup."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-job-run-halt-safety.spec.ts",
+          "reason": "check a halt during opening and normal close boundaries."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "81f32b81f08d05495eb98fffbb176122e7a7e819"
+    }
+  ],
+  "analysis": "Existing-system reliability repair for findings 2, 8, 9 and 10 in docs/20261120-review-37b396c49.md:15-31, with observed race details at docs/20261120-review-37b396c49.md:48-56. Graph navigation was unavailable in the exposed tools; findings below come from targeted source reads and text searches, not an executed reproduction. No implementation or test execution is part of this PRD-writing step. Read .nax/mono/apps/runner/context.md and .nax/mono/apps/api/context.md before app-local changes. The binding decomposition is exactly US-001 (runner retirement), US-002 (API ruling identity), US-003 (runner capability isolation, after US-001), and US-004 (runner thread termination). No new files are planned; extend existing source and specs.\n\nArchitecture and conventions: runner is Bun-only ESM with real SQLite journaling and injected executor, sync transport, time and credential seams. apps/runner/package.json:7-17 declares bun test --timeout 30000 src test/unit and separate integration/live scripts. The API uses NestJS/Fastify, Prisma 7 and Vitest; apps/api/package.json:12-21 excludes DB integration/e2e from normal tests and provides test:scoped and DB-mode test:integration. Do not introduce a transport outside src/sync, move business rules into the runner, change wire types, weaken fencing, or infer job verdicts from process exit. API package imports from fleet-protocol must remain type-only. This work changes no schema, controller, DTO or public contract, so no database migration, OpenAPI export or CLI generation is expected. Keep current dependency versions; apps/runner/package.json:21-22 currently pins nax-agent and nax-agent-acp to 0.92.0, although prose guidance mentions an older pin. No dependency upgrade is required.\n\nUS-001 current flow and change surface: apps/runner/src/sync/sync-loop.ts:30-53 defines the injected command and unknown-job callbacks. SyncLoop.apply at :152-183 confirms outgoing events/acks, applies credentials/archive notices, then awaits abandonUnknown and handleCommands. CommandHandler.handle at apps/runner/src/supervisor/command-handler.ts:34-38 awaits each handleOne in creation order; apply's ABANDON branch at :109-113 awaits supervisor.abandon before journaling success. Its catch at :90-95 currently offers a rejected runner-error ack without recording that rejection, so replay after epoch deletion can incorrectly become success. Existing prior-command handling at :66-86 replays durable results and has separate ASSIGN/READOPT recovery semantics that must survive this change. ASSIGN starts runs without blocking on older-epoch retirement at :141-174. Keep command initiation order, but decouple slow ABANDON completion and ack availability from the poll, deduplicate command IDs in flight, and never offer an outcome whose durable write failed. The callback seam may evolve internally, but update daemon wiring and test fixtures together; do not make all commands parallel or bypass CommandHandler for ABANDON.\n\nSupervisor owns active runs and pending start/older-retirement promises at apps/runner/src/supervisor/supervisor.ts:32-49 and :64-86. Its abandon at :136-156 has no shared in-flight epoch retirement; abandonAll at :169-171 enumerates epochs while awaiting each removal. Capture the missing-job epoch set when the response is received, not after a previous cleanup finishes. Coalesce command, unknown-job and older-epoch requests for the same job/epoch through one tracked retirement, without caching an unpersisted command result forever. Preserve rejection replay from the command journal even when the job row has disappeared. Supervisor.shutdown/idle at :256-263 currently halt runs and await a snapshot of pending promises; include background retirement and command-outcome writers in the shutdown ownership model so no journal user outlives close. Journal methods are already available at apps/runner/src/journal/journal.ts:196-208 (recordCommand/getCommand), :255 (epoch abandonment), and :66-67 (close); no new journal schema is required. Before a durable outcome, restart/redelivery reconciles remaining resources and is not an exactly-once guarantee for external cleanup.\n\nThe mutex is genuinely FIFO (apps/runner/src/supervisor/repo-mutex.ts:1-23), so delivering ASSIGN B before ABANDON A can place B ahead of A cleanup. JobRun.halt, abandon and abandonCleanup at apps/runner/src/supervisor/job-run.ts:213-268 already halt promptly, acquire the repository lock, re-read the epoch, enforce killIfOurs, release epoch credentials/approvals, retain a live higher epoch's checkout, and swallow/log existing best-effort cleanup failures. Preserve those safeguards and do not widen signaling authority. daemon.ts wires synchronous unknown-job cleanup at apps/runner/src/daemon/daemon.ts:282-309. Its stop at :331-355 currently stops polling, awaits running, halts runs, closes shipper/broker and waits supervisor.idle before journal.close; revise ownership/order so broker closure unblocks credential waits before joining retirement/outcome writers. crash at :358-368 must remain immediate, without a drain or child signals. The review's API placement/fence behavior is explanatory context, not an API change in this story.\n\nUS-001 tests and consumers: extend apps/runner/src/supervisor/command-handler.spec.ts (older-epoch/restart coverage at :98-250 and :324-415, CANCEL/ABANDON at :417 onward), apps/runner/src/sync/sync-loop.spec.ts (unknown-job hook at :536), and apps/runner/test/unit/daemon.spec.ts (graceful journal drain at :297-327, immediate crash at :330-349). Existing apps/runner/src/supervisor/supervisor.spec.ts imports Supervisor at :12; preserve its invariants. Drive the real loop, handler, supervisor, real SQLite and FIFO mutex together with an injected fake executor for the specified scheduling race, not a mocked mutex or handler. Use explicit gates to hold prepare, token acquisition, cleanup and outcome persistence. Assertions must be made outside swallowed callbacks. Count physical cleanup and inspect outgoing acks and journal records. Fault-inject both escaped supervisor errors and journal-write failures.\n\nUS-002 current identity split: apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:14-42 already normalizes provider references and URL origins; latestRunForPr at :99-130 combines prNumberFor with sameRepoOrigin, provider URL-suffix prefilters, createdAt/id descending ordering and bounded paging. replaceOlderRuns at :162-174 only calls the path parser on the newer RUN before updating pending older RUN rulings. runsForPr at :185-201 likewise checks paths alone, pages 100 rows at a time and returns ascending-id matches. Introduce one local configured-origin-plus-provider-path PR-number resolver reused by those three operations. Normalize using URL.origin, including scheme, case/default-port normalization and non-default port distinction; malformed candidate or configured host resolves to no PR. Keep every operation's existing RUN/workflow gate, repo scope, age/id tie-break, pending predicate, ordering and page bounds. Do not accidentally make latest lookup require workflow or change all historical target/attribution paths. prNumberFor at apps/api/src/fleet/sync/pr-attribution.service.ts:6-45 deliberately parses paths, handles URL suffix variants and decodes owner/repo names case-insensitively; GitLab supports nested owners and a configured host path prefix. Reuse it rather than replacing its provider-specific logic or changing project-wide attribution semantics.\n\nRetirement already runs transactionally: apps/api/src/fleet/ingest/bundle-ingest.service.ts:101-124 locks/reads the job, checks the claim epoch, parses and corrects the result, and invokes prRulings.replaceOlderRuns only for a current-lease RUN with parsed workflow and an effective resultPrUrl. FleetPrRulingsService forwards retirement at apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:112 and ready-comment fanout consumes runsForPr at :106-107, using exact body PR #<number> marked ready by FIX <id>. Keep this transaction and comment deduplication unchanged. The repository is registered by apps/api/src/fleet/rulings/fleet-rulings.module.ts:5; consumers include ruling preflight and repository unit specs, so do not change its public method contracts.\n\nUS-002 tests: apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts:55-116 already covers latest lookup URL variants and foreign origins; :135-158 covers GitLab selection and retirement. Extend the same fixtures across all three operations, including invalid configured hosts, supported GitHub/GitLab URLs, ordering and different non-default ports. apps/api/test/integration/fleet/fleet-pr-rulings-ingest.integration.spec.ts:40-60 currently creates RUN/FIX/ticket/ruling fixtures but attach only uploads bot-review.json for FIX. Extend attach to exercise real current-lease RUN workflow ingestion, not a direct repository call masquerading as ingest. parseWorkflowResult at apps/api/src/fleet/ingest/parsers/workflow.parser.ts:26-42 requires schemaVersion 1, a nonempty runId, a supported verdict.outcome and boolean verdict.workflowPassed; incomplete workflow JSON silently yields null and would never reach retirement. Supply the candidate URL through the status workflow or existing mirrored resultPrUrl. Retain existing exact-body ready comment, null author, idempotency, unchanged ticket state, stale-epoch and rollback checks at ingest spec :77-135; its existing foreign fixture at :87-98 uses another owner/path, so add the same-path/different-origin case. Use Vitest vi mocks, action-context helpers and createTestPrismaClient, not Jest or @prisma/client. DB suites require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and a test Postgres; run test:scoped for both integration paths on the host. Do not count skipped suites as verification or run two resets against one test DB.\n\nUS-003 current retry mechanics: SyncLoop.report at apps/runner/src/sync/sync-loop.ts:123-126 filters capsRejected; badBatch at :193-199 immediately sets that hash on any capability-bearing 400. This is incorrect for mixed batches. The same method at :200-241 already halves batch scale, retries without command acks at minimum size, sends an empty-jobs event-control probe, applies successful responses, replaces a poison event at the same sequence, and backs off. Preserve that isolation algorithm and contiguous event sequences. apply at :156-170 also deletes only request.commandAcks, strips ack detail when acksExcluded, resets failure accounting and doubles scale; successful empty capability/base controls must apply their response effects without pretending original pending work succeeded or resetting that work's scale, failure count or ack details. Isolated requests must clear jobs, commandAcks, tokenRequests and providerRequests while preserving the exact runner envelope and attempted report. Apply commands, unknown jobs, archive notices and credentials against the fields actually sent, and mark only the accepted attempted hash. A base-only success does not prove any omitted ack or job was delivered. Use positive capability-free control evidence before suppressing a hash after isolated 400; an initial capability-only request is already isolated. Ambiguous/network/413-style evidence must remain retryable under ordinary classification, not suppress the hash.\n\nBatch sizing lives at apps/runner/src/sync/batch.ts:4-26 and :67-94; command details are clamped at :49-55 and requests contain one entry per job/epoch selection at :58-65. The builder intentionally can include a single oversized event so the established recovery path handles it. API parser apps/api/src/fleet/sync/sync-request.parser.ts:43-45 rejects payloads above 16,384 bytes; capabilities are separate unknown data at :11 and :93. Neither event sizing nor API parser contracts change. CapabilityReporter.report/markSent at apps/runner/src/capabilities/capability-probe.ts:71-83 exposes unsent hashes and journals the accepted hash; use that callback with the captured attempted hash, even if refresh changes the current report. daemon.ts:282-310 is the production SyncLoop consumer; provider credential wiring tests at apps/runner/test/unit/provider-key-sync.spec.ts:15, provider-cred-socket.spec.ts:15 and daemon-thread-wiring.spec.ts:11 also depend on SyncLoopDeps. Existing sync specs include D58 at apps/runner/src/sync/sync-loop.spec.ts:284, obsolete D25 at :324, probe auth/network/stop and command failures at :346-488 and capability tests at :491 onward. Replace the D25 assumption with isolated evidence, exercise SyncLoop.run for deferred ABANDON responses rather than only syncOnce, and test stop during a pending probe including late successful transport resolution. US-003 depends on US-001's deferred acknowledgement seam; their shared response-handling code is the main sequencing risk.\n\nUS-004 current race: ThreadJobRun is a separate active run type owned by Supervisor (apps/runner/src/supervisor/supervisor.ts:28-49); it must not inherit nax executor cleanup, repo-wide locking or readoption. Repository startup at apps/runner/src/thread/thread-job-run.ts:380-399 publishes RUNNING, awaits openStream, creates livePublish, starts heartbeat and initial input. PROJECT and WORKSPACE share the no-checkout path at :407-459 with the same RUNNING/openStream/heartbeat ordering. Cancellation at :1042-1050 can call requestClose immediately during the RUNNING journal notification, before openStream has assigned writer. openStream at :699-727 has asynchronous mkdir/chmod/rm before writer construction, log registration and session_started, making the race deterministic to reproduce. requestClose/finishRun at :853-914 currently can complete against a null writer, after which startup creates a started-only stream and re-arms heartbeat. startHeartbeat/heartbeat at :818-845 do not reject ended/closing runs. Coordinate stream initialization and one close owner without making halt wait indefinitely; prevent new input, idle scheduling and heartbeat scheduling/emission after close begins or the run ends. A failed stream open must supersede a pending cancellation with exactly the existing legal startup-failure sequence, not compete with it.\n\nThread lifecycle invariants: start's finally at apps/runner/src/thread/thread-job-run.ts:254-267 stops log registration and releases provider keys. failSafe at :936-960 already turns RUNNING into UPLOADING then FAILED and closes the held session; retain that legal state path with doneAt on stream failure. halt at :1057-1072 aborts idle/heartbeat, starts session close, stops logs and releases waiters without terminal transitions. startSessionClose/awaitSessionClose at :1076-1081 and :1106-1119 enforce one close and bounded waits, with a session whose open resolves after halt closed without blocking startup. Preserve those guarantees during pending stream creation and normal close, and do not mutate PUBLISH/DISCARD action semantics at :286-299. ThreadEventWriter at apps/runner/src/thread/thread-event-writer.ts:211-229 provides started/inputConsumed/closed and at :287-292 flushes held deltas; close must use those existing stream lines in order and stop shipping after bounded drain. Action and live-publish modules import ThreadRunDeps/host/result types at apps/runner/src/thread/thread-action-run.ts:4 and thread-live-publish.ts:2; keep their contracts stable.\n\nUS-004 tests: extend apps/runner/test/unit/thread-job-run.spec.ts (startup/log/initial input contracts at :113-145 and :243-280), thread-job-run-project.spec.ts:79-117 and thread-job-run-workspace.spec.ts:83-109 for normal kind-specific startup. Existing thread-job-run-halt-safety.spec.ts:37-100 has real in-memory journal, injected sessions/log shipping, deferred open and manualClock; :116-147 protects hung session-close boundedness and no terminal writes after halt. That test holds session.open, not stream initialization, so add the distinct RUNNING-to-openStream-ready gate or synchronous journal notification injection. Use the manual clock to advance beyond two heartbeat intervals and idle expiry, assert unchanged event count and stream after terminal completion, and retain normal-session heartbeat/input control. Also retain related thread-job-run-failures, turns, commands, publish and provider-credential behavior; no mock of the whole ThreadJobRun should stand in for startup ordering.\n\nRisk and rollout: concurrency ownership is the primary risk: deferred commands must not lose durable outcomes, starve polling, leak callbacks after stop, close the journal before writers, or treat crash as graceful shutdown. URL hardening must not change supported path variants, provider selection, pagination or ingest atomicity. Probe reuse must not strip omitted acknowledgement detail, confirm unrelated events, prematurely restore scale/backoff, or commit a response after stop. Thread termination must not introduce a close/open deadlock, double terminal transition, leaked log registration or recurring timer. Maintain separate graceful stop and crash semantics and at-least-once external cleanup with durable outcome replay. No data backfill or retroactive repair of already replaced rulings is specified; deploy as backward-compatible internal changes against the unchanged server protocol. Verify DB and host-process/socket cases outside the sandbox; pure injected, filesystem and journal tests still run inside it. All four stories implement production behavior and extend existing tests; there are no analysis-only, documentation-only or test-only stories.\n\nRefine-pass audit ledger: all 23 numbered spec criteria remain in their original stories. US-001 AC-1: real-loop A/B FIFO-lock and token-deadline reproduction; AC-2: no early abandonment ack and next-delivery durable success for the original command ID/epoch; AC-3: pending/completed redelivery executes one cleanup and replays its stored outcome; AC-4: repeated missing-job responses do not block unrelated event delivery and capture only original epochs, preserving a later higher epoch; AC-5: restart before/after durable outcome reconciles or replays both success and escaped rejection, including lost ack and deleted row; AC-6: graceful stop closes broker before drain and settles retirement/outcome before journal close without advancing timeout; AC-7: failed outcome persistence withholds ack and recovered storage permits redelivery, preserving absent-epoch success only without a prior rejection; AC-8: explicit and unknown cleanup share retirement without killing mismatched identity or removing an owned higher epoch checkout. US-002 AC-1: valid schemaVersion 1 current-lease RUN workflow ingestion from another origin completes without retiring the earlier pending ruling, with runId, verdict.outcome, boolean workflowPassed and status/mirrored URL source preserved; AC-2: configured-origin replacement preserves settled and other-PR states; AC-3: ready FIX retry comments exactly once on each matching RUN ticket and never the same-path foreign-origin ticket, preserving the existing exact body; AC-4: GitHub/GitLab slash/query/fragment acceptance, origin/parse rejection and existing newest-match ordering; AC-5: non-default-port mismatch exclusion from latest/ready and no ingest retirement. US-003 AC-1: valid report survives oversized-event failure and corrected-event acknowledgement, marking the hash once; AC-2: isolated 400 plus positive base control suppresses only the invalid hash, delivers unrelated work and permits changed hashes, including one-control capability-only initial requests; AC-3: ambiguous/network failure stays retryable, 401/426 preserve auth/protocol classification, and stop aborts probes without follow-up or response commit; AC-4: SyncLoop.run applies probe-delivered ABANDON once with deferred ack and retains omitted events/acks; AC-5: minimum-scale base-control command/archive effects occur once without marking capabilities, stripping omitted ack details or changing the prior isolation scale. US-004 AC-1: repository RUNNING-window cancellation with initial message yields CANCELLED/doneAt and started-then-cancelled-close without input; AC-2: normal PROJECT/WORKSPACE paths and all three kinds remain unchanged after two heartbeat intervals and idle expiry; AC-3: normal heartbeat and initial input remain available until closure, after which heartbeat stops; AC-4: halt during stream setup closes once without later timers, active log registration or terminal write; AC-5: stream-open failure during cancellation yields UPLOADING then FAILED/doneAt without CANCELLED, leaked session/log registration, recurring heartbeat or unhandled rejection. These scenario-level assertions are observable through outgoing sync envelopes, real journal rows/events, executor/session counters, stream bytes, injected archive callbacks and clock-controlled timers. Negative paths already exist in every story (US-001 AC-5/7/8, US-002 AC-1/4/5, US-003 AC-1/2/3/5, US-004 AC-4/5); no additional invented acceptance criteria are needed. Regression anchors retained include original IDs/epochs, recorded rejection replay after deletion, higher-epoch preservation, already settled/other-PR states, existing ready-comment body/order/URL variants, unchanged omitted ack details, prior batch scale, existing stop classification and normal session heartbeat/input.\n\nAudit adjustments: contextFiles now prioritize the spec-listed job-run, FIFO mutex, command handler, daemon and server fence for US-001 (five of its six recommendations; placement is explanatory read-only context). Its modified sync-loop and supervisor remain required implementation reads described above. US-002 now includes all five spec-recommended source contexts, including the ready-comment service. US-003 already contains all four recommended contexts plus its existing spec. US-004 now includes all three recommended contexts, including ThreadEventWriter, plus repository/project fixtures; the existing workspace fixture remains explicitly in implementation scope above. All context paths exist and none is a planned output. Only US-003 depends on US-001, exactly as bound by the spec; all referenced story IDs exist. US-001 is classified complex rather than expert because the code already has pending-work and older-epoch retirement patterns to extend; its credential/process-identity boundary still requires three-session-tdd. Other routing remains medium/tdd-simple for the repository-local identity fix and complex/three-session-tdd for capability credential-response handling and session termination. All four feature exclusions remain verbatim at top level and are echoed at nearby story boundaries; no story-local deferral was hoisted. Source rechecks confirm ready comments consume runsForPr, retirement consumes current-lease RUN workflow ingest, and stream close/heartbeat coordination must change both session paths without changing action jobs.",
+  "outOfScope": [
+    "Changes to API placement, cancellation, fencing, wire envelopes and database schema.",
+    "Broadening the ruling change into a project-wide rewrite of PR attribution or forge URL storage.",
+    "Changing nax status snapshot sizing or the API's event byte limit.",
+    "Changing the semantics of thread PUBLISH and DISCARD action jobs."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}

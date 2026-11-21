@@ -20,6 +20,11 @@ export interface CommandHandlerDeps {
    * (`DaemonOptions` unset by `main.ts` and `commands/run.ts`) keeps every job on `https:`.
    */
   readonly allowLocalCloneUrls?: boolean;
+  /**
+   * US-001: an ack whose command is still retiring is offered here once its outcome is durable. The daemon hands it
+   * to the sync loop, which carries it on a later request. Absent: the ack is dropped (the server redelivers).
+   */
+  readonly onDeferredAck?: (ack: CommandAck) => void;
 }
 
 type Outcome = { result: 'ok' | 'rejected'; detail?: string };
@@ -29,12 +34,27 @@ const UNKNOWN_COMMAND_TYPE = 'unknown';
 
 /** Turns server commands into acks (design §1.3). Every applied command is recorded so a re-sent one is acked, not re-run. */
 export class CommandHandler {
+  /** US-001: the ABANDON retirements in flight, by command id; a repeated command joins the first one. */
+  private readonly retirements = new Map<string, Promise<void>>();
+
   constructor(private readonly deps: CommandHandlerDeps) {}
 
+  /**
+   * US-001: a command whose retirement is still running has no ack yet: the ack comes when its outcome is durable.
+   * The other commands answer as before.
+   */
   async handle(commands: readonly FleetCommandOut[]): Promise<CommandAck[]> {
     const acks: CommandAck[] = [];
-    for (const command of commands) acks.push(await this.handleOne(command));
+    for (const command of commands) {
+      const ack = await this.handleOne(command);
+      if (ack) acks.push(ack);
+    }
     return acks;
+  }
+
+  /** US-001: the retirements still running. The daemon joins them before it closes the journal. */
+  async idle(): Promise<void> {
+    await Promise.allSettled([...this.retirements.values()]);
   }
 
   private ack(command: FleetCommandOut, outcome: Outcome): CommandAck {
@@ -63,7 +83,7 @@ export class CommandHandler {
     });
   }
 
-  private async handleOne(command: FleetCommandOut): Promise<CommandAck> {
+  private async handleOne(command: FleetCommandOut): Promise<CommandAck | null> {
     const prior = this.deps.journal.getCommand(command.commandId);
     if (prior) {
       if (prior.type === 'ASSIGN' && prior.result === 'ok') this.resumeStranded(prior.jobId, prior.leaseEpoch);
@@ -85,17 +105,75 @@ export class CommandHandler {
       }
       return this.ack(command, { result: prior.result, ...(prior.detail ? { detail: prior.detail } : {}) });
     }
-    let outcome: Outcome;
+    // US-001: the command is already retiring. Its ack comes when the retirement's outcome is durable.
+    if (this.retirements.has(command.commandId)) return null;
+    let outcome: Outcome | null;
     try {
       outcome = await this.apply(command);
     } catch (error) {
       this.deps.log.error('command failed', { commandId: command.commandId, type: command.type, error: errorMessage(error) });
       return this.ack(command, { result: 'rejected', detail: 'runner error' });
     }
+    if (outcome === null) return null;
     return this.ack(command, outcome);
   }
 
-  private async apply(command: FleetCommandOut): Promise<Outcome> {
+  /**
+   * US-001: the ABANDON's retirement. The target is halted at once (the supervisor starts the retirement
+   * synchronously), the cleanup waits for the repo mutex off the polling path, and the outcome is persisted before
+   * the ack is offered. A repeated command id joins this retirement: one cleanup, one ack.
+   */
+  private beginRetirement(command: FleetCommandOut): void {
+    if (this.retirements.has(command.commandId)) return;
+    const promise: Promise<void> = this.runRetirement(command).finally(() => {
+      this.retirements.delete(command.commandId);
+    });
+    this.retirements.set(command.commandId, promise);
+  }
+
+  private async runRetirement(command: FleetCommandOut): Promise<void> {
+    let outcome: Outcome;
+    try {
+      await this.deps.supervisor.retire(command.jobId, command.leaseEpoch);
+      outcome = { result: 'ok' };
+    } catch (error) {
+      this.deps.log.error('abandon failed', { commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, error: errorMessage(error) });
+      outcome = { result: 'rejected', detail: 'runner error' };
+    }
+    let persisted: Outcome;
+    try {
+      persisted = this.recordOutcome(command, outcome);
+    } catch (error) {
+      // US-001: without a durable outcome there is no ack. The in-flight entry is cleared and the server redelivers,
+      // so the command runs again instead of being lost.
+      this.deps.log.error('abandon outcome could not be persisted', { commandId: command.commandId, error: errorMessage(error) });
+      return;
+    }
+    this.offerAck(command, persisted);
+  }
+
+  /** The deferred ack never rejects the retirement: a sink that fails is reported, not thrown. */
+  private offerAck(command: FleetCommandOut, outcome: Outcome): void {
+    try {
+      this.deps.onDeferredAck?.(this.ack(command, outcome));
+    } catch (error) {
+      this.deps.log.error('abandon ack could not be offered', { commandId: command.commandId, error: errorMessage(error) });
+    }
+  }
+
+  /**
+   * US-001: the ABANDON's durable outcome. A recorded rejection is never turned into a success by a later delivery,
+   * so the journal's own record decides the ack.
+   */
+  private recordOutcome(command: FleetCommandOut, outcome: Outcome): Outcome {
+    const prior = this.deps.journal.getCommand(command.commandId);
+    if (prior) return { result: prior.result, ...(prior.detail ? { detail: prior.detail } : {}) };
+    this.record(command, outcome);
+    const stored = this.deps.journal.getCommand(command.commandId);
+    return stored ? { result: stored.result, ...(stored.detail ? { detail: stored.detail } : {}) } : outcome;
+  }
+
+  private async apply(command: FleetCommandOut): Promise<Outcome | null> {
     const { supervisor } = this.deps;
     switch (command.type) {
       case 'ASSIGN': return this.assign(command);
@@ -105,9 +183,9 @@ export class CommandHandler {
         return outcome;
       }
       case 'ABANDON': {
-        await supervisor.abandon(command.jobId, command.leaseEpoch);
-        this.record(command, { result: 'ok' });
-        return { result: 'ok' };
+        // US-001: the retirement runs outside the poll, so a job that waits for a token is served while it waits.
+        this.beginRetirement(command);
+        return null;
       }
       case 'READOPT': {
         const outcome = await supervisor.readopt(command.jobId, command.leaseEpoch);

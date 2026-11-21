@@ -27,6 +27,22 @@ export interface CapabilityReport {
   readonly hash: string;
 }
 
+/** US-003: what one probe request answered. A refusal is the answer the capability isolation needs. */
+type ProbeAnswer =
+  | { readonly kind: 'ok'; readonly response: SyncResponse }
+  | { readonly kind: 'rejected' }
+  | { readonly kind: 'woken' }
+  | { readonly kind: 'stop'; readonly reason: StopReason }
+  | { readonly kind: 'failed'; readonly error: unknown };
+
+/** US-003: a probe that did not answer: a stop, a wake or the ordinary backoff. */
+type ProbeFailure = Exclude<ProbeAnswer, { readonly kind: 'ok' } | { readonly kind: 'rejected' }>;
+
+/** US-003: the outcome of the capability isolation. `ambiguous` leaves the batch to its own isolation. */
+type CapabilityIsolation =
+  | { readonly kind: 'resolved'; readonly outcome: SyncOutcome }
+  | { readonly kind: 'ambiguous' };
+
 export interface SyncLoopDeps {
   readonly client: { sync(request: SyncRequest, signal?: AbortSignal): Promise<SyncResponse> };
   readonly journal: Pick<Journal, 'jobsWithPending' | 'pendingEvents' | 'ackThrough' | 'replaceEvent' | 'onWrite'>;
@@ -36,7 +52,11 @@ export interface SyncLoopDeps {
   readonly capabilityReport: () => CapabilityReport | null;
   readonly onCapabilitiesSent: (hash: string) => void;
   readonly handleCommands: (commands: readonly FleetCommandOut[]) => Promise<CommandAck[]>;
-  readonly abandonUnknown: (jobIds: readonly string[]) => Promise<void>;
+  /**
+   * US-001: the jobs the server does not know. Their epochs are retired in the background, so the poll is not held
+   * by a cleanup that waits for the repo mutex.
+   */
+  readonly abandonUnknown: (jobIds: readonly string[]) => void;
   /** Design §3.1: which jobs need a git token now (TokenCache.requests). */
   readonly tokenRequests: () => readonly TokenRequest[];
   /** The server's answer to this request's token requests (TokenCache.apply). */
@@ -60,6 +80,8 @@ export class SyncLoop {
   private scale: BatchScale = FULL_SCALE;
   private failures = 0;
   private capsRejected: string | null = null;
+  /** US-003: the hash this loop already confirmed. It is not offered again, even if the reporter still returns it. */
+  private capsSent: string | null = null;
   private inflight: AbortController | null = null;
   private readonly stopController = new AbortController();
   private inflightIdle = false;
@@ -97,6 +119,17 @@ export class SyncLoop {
     return pruned;
   }
 
+  /**
+   * US-001: an ack whose command finished after its sync — an ABANDON whose retirement became durable while the
+   * poll went on. It rides the next request, and the poll is woken so it does not wait out a long poll for an ack
+   * the server is waiting for.
+   */
+  queueAck(ack: CommandAck): void {
+    this.pendingAcks.set(ack.commandId, clampAck(ack));
+    this.pendingAcksAt.set(ack.commandId, this.deps.nowMs());
+    this.wake();
+  }
+
   stop(): void {
     this.stopped = true;
     this.unsubscribe();
@@ -121,7 +154,10 @@ export class SyncLoop {
 
   private report(): CapabilityReport | null {
     const report = this.deps.capabilityReport();
-    return report && report.hash !== this.capsRejected ? report : null;
+    if (!report) return null;
+    if (report.hash === this.capsRejected) return null;   // the server refused this hash
+    if (report.hash === this.capsSent) return null;       // US-003: this hash is already confirmed
+    return report;
   }
 
   async syncOnce(): Promise<SyncOutcome> {
@@ -147,7 +183,11 @@ export class SyncLoop {
     }
   }
 
-  private async apply(request: SyncRequest, response: SyncResponse, report: CapabilityReport | null): Promise<SyncOutcome> {
+  /**
+   * The ordinary response path. `probe` is true for an isolated capability request (US-003): its answer says nothing
+   * about the refused batch, so the batch scale, the failure counter and the pending acks keep their state.
+   */
+  private async apply(request: SyncRequest, response: SyncResponse, report: CapabilityReport | null, probe = false): Promise<SyncOutcome> {
     this.inflightIdle = false; // writes made while commands are handled below must not be aborted, only marked dirty
     for (const ack of response.jobAcks ?? []) {
       const reported = request.jobs.find((job) => job.jobId === ack.jobId);
@@ -157,16 +197,21 @@ export class SyncLoop {
       this.pendingAcks.delete(ack.commandId);
       this.pendingAcksAt.delete(ack.commandId);   // MEM-1: don't leave a timestamp for a confirmed ack
     }
-    if (this.acksExcluded) this.stripPendingAckDetails();
-    if (report && request.capabilities) this.deps.onCapabilitiesSent(report.hash);
-    this.failures = 0;
-    this.scale = doubleScale(this.scale);
+    if (!probe && this.acksExcluded) this.stripPendingAckDetails();
+    if (report && request.capabilities) {
+      this.deps.onCapabilitiesSent(report.hash);
+      this.capsSent = report.hash;   // US-003: the hash is confirmed; it is not offered again
+    }
+    if (!probe) {
+      this.failures = 0;
+      this.scale = doubleScale(this.scale);
+    }
     this.deps.onTokens(request.tokenRequests, response.gitTokens ?? [], response.gitTokenErrors ?? []);
     this.deps.onProviderKeys?.(request.providerRequests ?? [], response.providerKeys ?? [], response.providerKeyErrors ?? []);
     // Fleet S5a §3: the prune pass keeps the latest list; a response without the field keeps the previous one.
     if (response.archivedThreadIds !== undefined) this.deps.onArchivedThreads?.(response.archivedThreadIds);
     const unknown = response.unknownJobIds ?? [];
-    if (unknown.length > 0) await this.deps.abandonUnknown(unknown);
+    if (unknown.length > 0) this.deps.abandonUnknown(unknown);
     const commands = response.commands ?? [];
     if (commands.length > 0) {
       const stamp = this.deps.nowMs();
@@ -190,9 +235,10 @@ export class SyncLoop {
 
   private async badBatch(request: SyncRequest, controller: AbortController, report: CapabilityReport | null, error: ServerError): Promise<SyncOutcome> {
     if (report && request.capabilities && error.status === 400) {
-      this.capsRejected = report.hash;
-      this.deps.log.error('server rejected the capabilities report; fix runner.json capabilities', { status: error.status });
-      return { kind: 'again' };
+      // US-003: a refused batch does not prove the capabilities are bad. They are tried on their own first.
+      const isolation = await this.isolateCapabilities(request, controller, report);
+      if (isolation.kind === 'resolved') return isolation.outcome;
+      // The cause is still ambiguous: the capabilities are not proven bad, so the batch keeps its own isolation.
     }
     const next = halveScale(this.scale);
     if (next) {
@@ -232,6 +278,106 @@ export class SyncLoop {
     this.deps.log.error(message, { jobId: job.jobId, seq: event.seq, type: event.type });
     this.scale = FULL_SCALE;
     return this.retry(error);
+  }
+
+  /**
+   * US-003: the attempted capability hash is isolated. The capabilities are sent on their own first; the hash is
+   * marked sent when that request succeeds. Only when that request returns 400 AND the same envelope without the
+   * capabilities succeeds is the hash suppressed: the base-only control is the positive proof that the capabilities
+   * are the cause. An original request that already carried nothing but the capabilities is its own evidence, so it
+   * needs no second attempt.
+   */
+  private async isolateCapabilities(request: SyncRequest, controller: AbortController, report: CapabilityReport): Promise<CapabilityIsolation> {
+    if (!this.isCapabilityOnly(request)) {
+      const probe = this.capabilityOnlyRequest(request, report.capabilities);
+      const answer = await this.probeRequest(probe, controller);
+      if (answer.kind !== 'ok' && answer.kind !== 'rejected') return { kind: 'resolved', outcome: this.probeOutcome(answer) };
+      if (answer.kind === 'ok') {
+        const applied = await this.applyProbe(probe, answer.response, report, controller);
+        if (applied.kind !== 'ok') return { kind: 'resolved', outcome: applied.outcome };
+        this.deps.log.warn('the capabilities were accepted on their own; the refused batch had another cause', { hash: report.hash });
+        return { kind: 'resolved', outcome: { kind: 'again' } };
+      }
+    }
+    // The capabilities are the only thing left the server can refuse: one base-only control decides.
+    const control = this.capabilityOnlyRequest(request, undefined);
+    const answer = await this.probeRequest(control, controller);
+    if (answer.kind !== 'ok' && answer.kind !== 'rejected') return { kind: 'resolved', outcome: this.probeOutcome(answer) };
+    if (answer.kind === 'rejected') return { kind: 'ambiguous' };
+    const applied = await this.applyProbe(control, answer.response, report, controller);
+    if (applied.kind !== 'ok') return { kind: 'resolved', outcome: applied.outcome };
+    this.capsRejected = report.hash;
+    this.deps.log.error('server rejected the capabilities report; fix runner.json capabilities', { status: 400 });
+    return { kind: 'resolved', outcome: { kind: 'again' } };
+  }
+
+  /** True when the request carried nothing but the envelope: its own refusal is the isolated evidence. */
+  private isCapabilityOnly(request: SyncRequest): boolean {
+    return request.jobs.length === 0 && request.commandAcks.length === 0 && request.tokenRequests.length === 0
+      && (request.providerRequests ?? []).length === 0;
+  }
+
+  /**
+   * The capabilities on their own: the same envelope, without jobs, acks or credential requests. Without the
+   * capabilities it is the base-only control.
+   */
+  private capabilityOnlyRequest(request: SyncRequest, capabilities?: RunnerCapabilities): SyncRequest {
+    const probe: SyncRequest = {
+      ...request,
+      jobs: [],
+      commandAcks: [],
+      tokenRequests: [],
+      providerRequests: [],
+    };
+    if (capabilities) probe.capabilities = capabilities;
+    else delete probe.capabilities;
+    return probe;
+  }
+
+  /**
+   * One probe request. Only a 400 is validation rejection evidence; a 401 or 426 stops the loop as before.
+   * Other failures, including an ambiguous size refusal (413), retry with the ordinary backoff.
+   */
+  private async probeRequest(request: SyncRequest, controller: AbortController): Promise<ProbeAnswer> {
+    this.inflightIdle = false;   // the probe's answer may carry commands: a journal write must not abort it
+    let response: SyncResponse;
+    try {
+      response = await this.deps.client.sync(request, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) return { kind: 'woken' };
+      if (error instanceof ServerError) {
+        if (error.status === 401) return { kind: 'stop', reason: { kind: 'auth', message: error.message } };
+        if (error.status === 426) return { kind: 'stop', reason: { kind: 'protocol', message: error.message } };
+        if (error.status === 400) return { kind: 'rejected' };
+      }
+      return { kind: 'failed', error };
+    }
+    if (controller.signal.aborted) return { kind: 'woken' };
+    return { kind: 'ok', response };
+  }
+
+  /** The outcome of a probe that did not answer: a stop, a wake or the ordinary backoff. */
+  private probeOutcome(answer: ProbeFailure): SyncOutcome {
+    if (answer.kind === 'woken') return { kind: 'woken' };
+    if (answer.kind === 'stop') return { kind: 'stop', reason: answer.reason };
+    return this.retry(answer.error);
+  }
+
+  /** The probe's answer goes through the ordinary response path, with the fields the probe itself sent. */
+  private async applyProbe(
+    request: SyncRequest,
+    response: SyncResponse,
+    report: CapabilityReport,
+    controller: AbortController,
+  ): Promise<{ kind: 'ok' } | { kind: 'failed'; outcome: SyncOutcome }> {
+    try {
+      await this.apply(request, response, report, true);
+    } catch (error) {
+      if (controller.signal.aborted) return { kind: 'failed', outcome: { kind: 'woken' } };
+      return { kind: 'failed', outcome: this.retry(error) };
+    }
+    if (controller.signal.aborted) return { kind: 'failed', outcome: { kind: 'woken' } };
+    return { kind: 'ok' };
   }
 
   /** The acks-free retry worked, so the acks were the problem: resend them without their free-text detail (D58). */

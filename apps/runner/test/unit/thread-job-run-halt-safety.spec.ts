@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
@@ -66,10 +66,16 @@ function setup(options: {
   const openGate = deferred();
   const openStarted = deferred();
   const opened = deferred<{ ok: true; session: AgentSession; resumed: false }>();
+  // The registrations that are still shipping: a run that leaves one behind ships a stream it no longer owns.
+  let active = 0;
+  const logCalls: string[] = [];
   const logs = {
-    register() {}, wake() {},
+    logCalls,
+    activeRegistrations: (): number => active,
+    register() { logCalls.push('register'); active += 1; },
+    wake() {},
     async drain() { return 'drained' as const; },
-    stopJob() {},
+    stopJob(jobId: string) { logCalls.push('stopJob'); active = Math.max(0, active - 1); },
   };
   const run = new ThreadJobRun({
     journal, log: createMemoryLogger(), now: () => new Date(clock.nowMs()), sleep: clock.sleep,
@@ -96,7 +102,7 @@ function setup(options: {
     },
     tuning,
   }, jobId, leaseEpoch);
-  return { journal, jobDir, run, calls, openGate, openStarted: openStarted.promise, opened, session };
+  return { journal, jobDir, run, calls, clock, logs, openGate, openStarted: openStarted.promise, opened, session };
 }
 
 function stateEvents(journal: Journal): Array<{ to: string; reason?: string }> {
@@ -143,6 +149,62 @@ describe('ThreadJobRun halt review hardening (US-005)', () => {
     expect((await streamLines(context)).some((line) => line.type === 'session_closed')).toBe(false);
     expect(stateEvents(context.journal).filter((event) => event.to !== 'RUNNING')).toEqual([]);
     expect(context.journal.getJob(jobId, leaseEpoch)?.doneAt).toBeNull();
+    context.journal.close();
+  });
+});
+
+describe('ThreadJobRun stream startup boundaries (US-004)', () => {
+  test('US-004 AC-4: a halt while the stream is being created closes the session once and writes nothing after it', async () => {
+    const context = setup();
+    await mkdir(context.jobDir, { recursive: true });
+    let delivered = false;
+    // The halt lands at the RUNNING notification, while the stream is still being created.
+    context.journal.onWrite(() => {
+      if (delivered || context.journal.getJob(jobId, leaseEpoch)?.state !== 'RUNNING') return;
+      delivered = true;
+      context.run.halt();
+    });
+    await context.run.start('prepare');
+    // The session is closed once, and the run writes no terminal transition.
+    expect(context.calls.filter((call) => call === 'close').length).toBe(1);
+    expect(stateEvents(context.journal).filter((event) => event.to !== 'RUNNING')).toEqual([]);
+    expect(context.journal.getJob(jobId, leaseEpoch)?.doneAt).toBeNull();
+    // No log registration is left active: the halted run registers no stream at all.
+    expect(context.logs.logCalls.filter((call) => call === 'register')).toEqual([]);
+    expect(context.logs.activeRegistrations()).toBe(0);
+    // No timer-driven event follows the halt.
+    const stamped = context.journal.pendingEvents(jobId, leaseEpoch, 100).length;
+    context.clock.advance(tuning.threadHeartbeatMs * 2 + tuning.threadIdleMs);
+    await Bun.sleep(50);
+    expect(context.journal.pendingEvents(jobId, leaseEpoch, 100).length).toBe(stamped);
+    context.journal.close();
+  });
+
+  test('US-004 AC-5: a stream that never opens fails the run once, with no CANCELLED of its own', async () => {
+    const context = setup();
+    // The job directory cannot be created, so the stream setup fails.
+    await mkdir(join(context.jobDir, '..'), { recursive: true });
+    await writeFile(context.jobDir, 'not a directory');
+    let delivered = false;
+    // The cancel is pending while the stream setup fails.
+    context.journal.onWrite(() => {
+      if (delivered || context.journal.getJob(jobId, leaseEpoch)?.state !== 'RUNNING') return;
+      delivered = true;
+      context.run.requestCancel();
+    });
+    await context.run.start('prepare');
+    expect(stateEvents(context.journal).map((event) => event.to)).toEqual(['RUNNING', 'UPLOADING', 'FAILED']);
+    expect(stateEvents(context.journal).filter((event) => event.to === 'CANCELLED')).toEqual([]);
+    expect(context.journal.getJob(jobId, leaseEpoch)?.doneAt).not.toBeNull();
+    // The session is released and no log registration is left active.
+    expect(context.calls.filter((call) => call === 'close').length).toBe(1);
+    expect(context.logs.activeRegistrations()).toBe(0);
+    expect(context.logs.logCalls).toContain('stopJob');
+    // No recurring heartbeat and no unhandled rejection.
+    const stamped = context.journal.pendingEvents(jobId, leaseEpoch, 100).length;
+    context.clock.advance(tuning.threadHeartbeatMs * 2 + tuning.threadIdleMs);
+    await Bun.sleep(50);
+    expect(context.journal.pendingEvents(jobId, leaseEpoch, 100).length).toBe(stamped);
     context.journal.close();
   });
 });

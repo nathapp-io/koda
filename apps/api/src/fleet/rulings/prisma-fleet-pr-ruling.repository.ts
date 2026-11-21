@@ -44,6 +44,10 @@ const sameRepoOrigin = (repo: PrNumberRepo, url: string): boolean => {
   try { return new URL(url).origin === expected; } catch { return false; }
 };
 
+/** Resolve a PR only when both the configured forge origin and provider-specific path agree. */
+const configuredPrNumber = (repo: PrNumberRepo, url: string): number | null =>
+  sameRepoOrigin(repo, url) ? prNumberFor(repo, url) : null;
+
 @Injectable()
 export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<FleetPrRuling, RulingRow, string> implements IFleetPrRulingRepository {
   constructor(@Inject(TRANSACTION_MANAGER) tx: ITransactionManager, private readonly prisma: PrismaService<PrismaClient>) { super(tx); }
@@ -121,8 +125,7 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: pageSize, skip: page * pageSize,
         select: { id: true, resultPrUrl: true },
       });
-      const match = jobs.find((job) => job.resultPrUrl && prNumberFor(ref, job.resultPrUrl) === prNumber
-        && sameRepoOrigin(ref, job.resultPrUrl));
+      const match = jobs.find((job) => job.resultPrUrl && configuredPrNumber(ref, job.resultPrUrl) === prNumber);
       if (match) return match.id;
       if (jobs.length < pageSize) return null;
     }
@@ -163,7 +166,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
   async replaceOlderRuns(jobId: string): Promise<void> {
     const job = await this.prisma.client.fleetJob.findUnique({ where: { id: jobId }, include: { repo: true } });
     if (!job || job.command !== 'RUN' || !job.workflow || !job.resultPrUrl) return;
-    const prNumber = prNumberFor(prNumberRepo(job.repo), job.resultPrUrl);
+    const ref = prNumberRepo(job.repo);
+    const prNumber = configuredPrNumber(ref, job.resultPrUrl);
     if (prNumber === null) return;
     await this.prisma.client.fleetPrRuling.updateMany({
       where: { repoId: job.repoId, prNumber, state: 'pending', job: { command: 'RUN', OR: [
@@ -192,7 +196,7 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
         where: { repoId, command: 'RUN', resultPrUrl: { not: null } },
         select: { id: true, resultPrUrl: true }, orderBy: { id: 'asc' }, take: pageSize, skip: page * pageSize,
       });
-      for (const row of rows) if (row.resultPrUrl && prNumberFor(ref, row.resultPrUrl) === prNumber) result.push(row.id);
+      for (const row of rows) if (row.resultPrUrl && configuredPrNumber(ref, row.resultPrUrl) === prNumber) result.push(row.id);
       if (rows.length < pageSize) return result;
     }
     throw new Error('Fleet ruling ready RUN lookup exceeded page limit');

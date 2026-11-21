@@ -13,6 +13,7 @@ import { tarGz } from '../../helpers/tar-gz';
 import { BundleService } from '../../../src/fleet/artifacts/bundle.service';
 import { LogFallbackService } from '../../../src/fleet/logs/log-fallback.service';
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
+import { FleetPrRulingsService } from '../../../src/fleet/rulings/fleet-pr-rulings.service';
 import { BUNDLE_INGEST_REPOSITORY, type IBundleIngestRepository } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { IngestRequeueService } from '../../../src/fleet/ingest/ingest-requeue.service';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
@@ -59,6 +60,28 @@ const now = new Date('2026-11-15T12:00:00Z');
     } finally { kick.mockRestore(); }
     await db.fleetJob.update({ where: { id }, data: { state: original.state } });
   }
+  async function attachRunWorkflow(id: string, resultPrUrl?: string) {
+    const run = await db.fleetJob.findUniqueOrThrow({ where: { id } });
+    const repo = await db.fleetRepo.findUniqueOrThrow({ where: { id: run.repoId } });
+    const url = resultPrUrl ?? run.resultPrUrl ?? `https://github.com/${repo.owner}/${repo.name}/pull/12`;
+    const body = await tarGz([
+      { name: 'workflow/result.json', body: JSON.stringify({ schemaVersion: 1, runId: `run-${id}`, verdict: { outcome: 'ready', workflowPassed: true } }) },
+      { name: 'nax-out/status.json', body: JSON.stringify({ runId: `run-${id}`, prUrl: url }) },
+    ]);
+    const originalState = run.state;
+    await db.fleetJob.update({ where: { id }, data: { state: 'COMPLETED', runnerId, resultPrUrl: url } });
+    await db.fleetJob.update({ where: { id }, data: { state: 'UPLOADING' } });
+    const kick = vi.spyOn(app.get(BundleIngestService), 'kick').mockImplementation(() => undefined);
+    try {
+      await withTestActor({ type: 'RUNNER', id: runnerId }, () => app.get(BundleService).upload({ runnerId, jobId: id, leaseEpochRaw: String(run.leaseEpoch), sha256Header: createHash('sha256').update(body).digest('hex'), contentType: 'application/gzip', contentLength: String(body.length), body: Readable.from([body]) }));
+      await app.get(LogFallbackService).idle();
+    } finally { kick.mockRestore(); }
+    // Ingest claims only terminal jobs; simulate the normal runner transition after bundle upload.
+    await db.fleetJob.update({ where: { id }, data: { state: 'COMPLETED' } });
+    await ingest.drain(now);
+    await db.fleetJob.update({ where: { id }, data: { state: originalState } });
+  }
+
   const applied = { applied: [{ item: 'D-1', disposition: 'confirmed' }], skipped: [] };
   const comments = (ticketId: string) => db.comment.findMany({ where: { ticketId }, orderBy: { createdAt: 'asc' } });
   async function rerun(id: string) {
@@ -78,6 +101,49 @@ const now = new Date('2026-11-15T12:00:00Z');
     expect(await comments(ticket.id)).toEqual([]);
     expect(await db.fleetPrRuling.findUnique({ where: { id: ruling.id } })).toMatchObject({ state: 'pending', appliedJobId: null });
   });
+  it('AC-1: workflow ingest on a foreign origin keeps the earlier pending ruling', async () => {
+    const earlier = await fixture();
+    const newer = await fixture();
+    await attachRunWorkflow(newer.run.id, 'https://foreign.example/acme/app/pull/12');
+    expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: earlier.ruling.id } })).state).toBe('pending');
+  });
+
+  it('AC-2: configured-origin workflow ingest replaces only older pending rulings for that PR', async () => {
+    const earlier = await fixture();
+    const settled = await fixture();
+    const otherPr = await fixture();
+    await db.fleetPrRuling.update({ where: { id: settled.ruling.id }, data: { state: 'applied' } });
+    await db.fleetPrRuling.update({ where: { id: otherPr.ruling.id }, data: { prNumber: 13 } });
+    const newer = await fixture();
+    await db.fleetJob.update({ where: { id: earlier.run.id }, data: { createdAt: new Date('2026-01-01T00:00:00Z') } });
+    await db.fleetJob.update({ where: { id: newer.run.id }, data: {
+      createdAt: new Date('2027-01-02T00:00:00Z'),
+      workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'advisor' }] },
+    } });
+    const retirement = vi.spyOn(app.get(FleetPrRulingsService), 'replaceOlderRuns');
+    await attachRunWorkflow(newer.run.id, earlier.run.resultPrUrl ?? undefined);
+    expect(retirement).toHaveBeenCalledWith(expect.objectContaining({ id: newer.run.id }));
+    expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: earlier.ruling.id } })).state).toBe('replaced');
+    expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: settled.ruling.id } })).state).toBe('applied');
+    expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: otherPr.ruling.id } })).state).toBe('pending');
+  });
+
+  it('AC-5: different-port workflow ingest leaves the earlier pending ruling intact', async () => {
+    const earlier = await fixture();
+    const repo = await db.fleetRepo.findUniqueOrThrow({ where: { id: base.repoId } });
+    await db.fleetRepo.update({ where: { id: repo.id }, data: { host: 'https://github.com:8443' } });
+    try {
+      const configuredUrl = `https://github.com:8443/${repo.owner}/${repo.name}/pull/12`;
+      await db.fleetJob.update({ where: { id: earlier.run.id }, data: { resultPrUrl: configuredUrl } });
+      const candidate = await fixture();
+      await db.fleetJob.update({ where: { id: candidate.run.id }, data: { workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'advisor' }] } } });
+      await attachRunWorkflow(candidate.run.id, `https://github.com:9443/${repo.owner}/${repo.name}/pull/12`);
+      expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: earlier.ruling.id } })).state).toBe('pending');
+    } finally {
+      await db.fleetRepo.update({ where: { id: repo.id }, data: { host: repo.host } });
+    }
+  });
+
   it('AC-13/14 ready comments are exact-body deduplicated and never transition tickets', async () => {
     const { fix, ticket } = await fixture('COMPLETED', true); await attach(fix.id, undefined); await ingest.drain(now); await rerun(fix.id);
     expect(await comments(ticket.id)).toEqual([expect.objectContaining({ body: `PR #12 marked ready by FIX ${fix.id}`, type: 'GENERAL', authorUserId: null, authorAgentId: null })]);
@@ -87,8 +153,8 @@ const now = new Date('2026-11-15T12:00:00Z');
     const a = await fixture('COMPLETED', true); const b = await fixture(); const other = await fixture(); const foreign = await fixture();
     const repo = await db.fleetRepo.findUniqueOrThrow({ where: { id: base.repoId } });
     await db.fleetJob.update({ where: { id: other.run.id }, data: { resultPrUrl: `https://github.com/${repo.owner}/${repo.name}/pull/13` } });
-    await db.fleetJob.update({ where: { id: foreign.run.id }, data: { resultPrUrl: 'https://github.com/other/repo/pull/12' } });
-    await attach(a.fix.id, undefined); await ingest.drain(now);
+    await db.fleetJob.update({ where: { id: foreign.run.id }, data: { resultPrUrl: `https://foreign.example/${repo.owner}/${repo.name}/pull/12` } });
+    await attach(a.fix.id, undefined); await ingest.drain(now); await rerun(a.fix.id);
     const body = `PR #12 marked ready by FIX ${a.fix.id}`;
     expect(await db.comment.count({ where: { ticketId: a.ticket.id, body } })).toBe(1);
     expect(await db.comment.count({ where: { ticketId: b.ticket.id, body } })).toBe(1);

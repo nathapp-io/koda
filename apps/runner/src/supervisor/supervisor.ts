@@ -32,6 +32,8 @@ type ActiveRun = JobRun | ThreadJobRun;
 export class Supervisor {
   private readonly runs = new Map<string, ActiveRun>();
   private readonly pending = new Set<Promise<void>>();
+  /** US-001: the retirement of one (job, epoch); every caller joins the same one. */
+  private readonly retirements = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: SupervisorDeps) {}
 
@@ -59,6 +61,37 @@ export class Supervisor {
   }
 
   /**
+   * US-001: the retirement of one (job, epoch), shared by every caller. An explicit ABANDON and an unknown-job cleanup
+   * of the same epoch run the cleanup once, and a repeated command joins the first retirement instead of starting a
+   * second one. The target is halted at once (the abandon below starts synchronously); the cleanup itself waits for
+   * the repo mutex, off the polling path. The promise settles when the cleanup is done and is part of `idle()`.
+   */
+  retire(jobId: string, leaseEpoch: number): Promise<void> {
+    const key = this.key(jobId, leaseEpoch);
+    const existing = this.retirements.get(key);
+    if (existing) return existing;
+    const promise: Promise<void> = this.abandon(jobId, leaseEpoch).finally(() => {
+      this.retirements.delete(key);
+      this.pending.delete(promise);
+    });
+    this.retirements.set(key, promise);
+    this.pending.add(promise);
+    return promise;
+  }
+
+  /**
+   * US-001: the epochs of a job the server does not know, captured now and retired in the background. A lease that
+   * arrives after this snapshot is not part of the sweep, so a later epoch cannot be pulled into an earlier one.
+   */
+  retireUnknown(jobId: string): void {
+    for (const row of this.deps.journal.jobsById(jobId)) {
+      void this.retire(jobId, row.leaseEpoch).catch((error: unknown) => {
+        this.deps.log.warn('unknown job abandon failed', { jobId, leaseEpoch: row.leaseEpoch, error: errorMessage(error) });
+      });
+    }
+  }
+
+  /**
    * K11/D64: the older epochs of this job, retired off the caller's path. A row that is done is dropped here and now —
    * its run already called `executor.cleanup` (which closed the approval relay and released the job's credentials) and
    * the new epoch's prepare wipes the previous attempt's files (D53). Any other row goes through `abandon`, which still
@@ -76,7 +109,7 @@ export class Supervisor {
     const retiring = (async (): Promise<void> => {
       for (const epoch of unsettled) {
         try {
-          await this.abandon(jobId, epoch);
+          await this.retire(jobId, epoch);
         } catch (error) {
           this.deps.log.warn('older epoch abandon failed', { jobId, leaseEpoch: epoch, error: errorMessage(error) });
         }
@@ -162,10 +195,6 @@ export class Supervisor {
     } catch (error) {
       this.deps.log.warn('credential release failed', { jobId: row.jobId, error: errorMessage(error) });
     }
-  }
-
-  async abandonAll(jobId: string): Promise<void> {
-    for (const row of this.deps.journal.jobsById(jobId)) await this.abandon(jobId, row.leaseEpoch);
   }
 
   private fresh(status: StatusView): boolean {

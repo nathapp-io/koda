@@ -12,9 +12,13 @@ import { CommandHandler } from './command-handler';
 import { RepoMutex } from './repo-mutex';
 import { Supervisor } from './supervisor';
 
-function build() {
+/**
+ * US-001: `over.journal` reuses an existing journal, so a test can build a second handler and supervisor over the
+ * same rows — the runner's restart. `acks` collects the acks whose command retired after its sync.
+ */
+function build(over: { journal?: Journal } = {}) {
   const time = fakeTime();
-  const journal = Journal.open(':memory:', time.now);
+  const journal = over.journal ?? Journal.open(':memory:', time.now);
   const ex = new FakeExecutor();
   const log = createMemoryLogger();
   // K11: exposed so a test can hold a repo lock (another job's long RUN) and read the warnings.
@@ -25,8 +29,9 @@ function build() {
     logs: NO_LOG_SHIPPING,
   });
   const approvals = { answer: mock(async (): Promise<{ result: 'ok' | 'rejected'; detail?: string }> => ({ result: 'ok' })) };
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: '/work/space', log, now: time.now, approvals });
-  return { time, journal, ex, supervisor, handler, approvals, mutex, log };
+  const acks: CommandAck[] = [];
+  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: '/work/space', log, now: time.now, approvals, onDeferredAck: (ack) => { acks.push(ack); } });
+  return { time, journal, ex, supervisor, handler, approvals, mutex, log, acks };
 }
 const assignCmd = (id = 'c1', jobId = 'j1', epoch = 1): FleetCommandOut => ({ commandId: id, type: 'ASSIGN', jobId, leaseEpoch: epoch, payload: assignFor('RUN', { jobId }) });
 const other = (type: FleetCommandOut['type'], id: string, epoch = 1): FleetCommandOut => ({ commandId: id, type, jobId: 'j1', leaseEpoch: epoch, payload: {} });
@@ -432,8 +437,11 @@ describe('CANCEL, ABANDON, READOPT and unknown types', () => {
     b.ex.dieAfterTicks(1);
     await b.handler.handle([assignCmd('c1', 'j1', 1)]);
     await b.supervisor.idle();
-    const acks = await b.handler.handle([other('ABANDON', 'a1', 1), { ...other('ABANDON', 'a2', 7), jobId: 'ghost' }]);
-    expect(acks.map((a) => a.result)).toEqual(['ok', 'ok']);
+    // US-001: the ABANDON's ack is deferred until its retirement is durable, so the poll is not held by the cleanup.
+    expect(await b.handler.handle([other('ABANDON', 'a1', 1), { ...other('ABANDON', 'a2', 7), jobId: 'ghost' }])).toEqual([]);
+    await b.supervisor.idle();
+    await b.handler.idle();
+    expect(b.acks.map((a) => a.result)).toEqual(['ok', 'ok']);
     expect(b.journal.getJob('j1', 1)).toBeNull();
   });
   test('READOPT is delegated and its ack replays', async () => {
@@ -477,5 +485,122 @@ describe('APPROVAL_ANSWER (spec §4.4)', () => {
     await handler.handle([answer]);
     expect(await handler.handle([answer])).toEqual([{ commandId: 'c9', leaseEpoch: 1, result: 'ok' }]);
     expect(approvals.answer).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * US-001: an ABANDON retires its epoch outside the poll. The poll must stay free (a job waiting for a token is
+ * served while the retirement waits), the cleanup runs once, and the ack is offered only once the outcome is durable.
+ */
+describe('an ABANDON retires outside the poll (US-001)', () => {
+  const abandonCmd = (id = 'a1', jobId = 'j1', epoch = 1): FleetCommandOut => ({ commandId: id, type: 'ABANDON', jobId, leaseEpoch: epoch, payload: { reason: 'stale_lease' } });
+  /** The epoch as a stale lease: a run this runner held and the server has fenced. */
+  const seedStale = (b: ReturnType<typeof build>, epoch = 1): void => {
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: epoch, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.updateJob('j1', epoch, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+  };
+
+  test('AC-3: a repeated ABANDON joins the first retirement and the completed delivery replays the stored outcome', async () => {
+    const b = build();
+    seedStale(b);
+    const release = await b.mutex.acquire('acme/app');        // another job's long RUN holds the repo lock
+    try {
+      expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });   // no ack while the cleanup waits
+      expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });   // a repeated command joins it
+      expect(b.ex.calls.filter((c) => c === 'cleanup:j1')).toEqual([]);                                   // and no second cleanup started
+    } finally {
+      release();
+    }
+    await b.supervisor.idle();
+    await b.handler.idle();
+    expect(b.ex.calls.filter((c) => c === 'cleanup:j1')).toHaveLength(1);                                  // one cleanup
+    expect(b.acks).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'ok' }]);
+    expect(await b.handler.handle([abandonCmd()])).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'ok' }]);   // the stored outcome
+    expect(b.ex.calls.filter((c) => c === 'cleanup:j1')).toHaveLength(1);                                  // and never again
+  });
+
+  test('AC-5: a restart before the outcome is recorded finishes the outstanding cleanup on the redelivery', async () => {
+    const b = build();
+    seedStale(b);
+    b.supervisor.abandon = async () => { await new Promise<void>(() => undefined); };   // the daemon dies inside the retirement
+    expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+    expect(b.journal.getCommand('a1')).toBeNull();                                    // no outcome was recorded
+
+    const restarted = build({ journal: b.journal });                                  // the restart: a new handler over the same rows
+    expect(await settlesWithin(restarted.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+    await restarted.supervisor.idle();
+    await restarted.handler.idle();
+    expect(restarted.ex.calls).toContain('cleanup:j1');                               // the outstanding cleanup finished
+    expect(restarted.journal.getCommand('a1')).toMatchObject({ result: 'ok', type: 'ABANDON' });
+    expect(restarted.acks).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'ok' }]);
+  });
+
+  test('AC-5: after the outcome is recorded a restart replays it and never repeats the execution', async () => {
+    const b = build();
+    seedStale(b);
+    expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+    await b.supervisor.idle();
+    await b.handler.idle();
+    expect(b.journal.getCommand('a1')).toMatchObject({ result: 'ok' });
+
+    const restarted = build({ journal: b.journal });                                  // the ack was lost; the server redelivers
+    expect(await restarted.handler.handle([abandonCmd()])).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'ok' }]);
+    expect(restarted.ex.calls).toEqual([]);                                            // no repeated execution
+  });
+
+  test('AC-5: an error escaping supervisor.abandon is a recorded rejection, and a deleted epoch never turns it into a success', async () => {
+    const b = build();
+    seedStale(b);
+    b.supervisor.abandon = async () => { throw new Error('boom'); };
+    expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+    await b.handler.idle();
+    expect(b.journal.getCommand('a1')).toMatchObject({ result: 'rejected', detail: 'runner error' });
+    expect(b.acks).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+
+    b.journal.abandon('j1', 1);                                                       // the epoch is gone
+    const restarted = build({ journal: b.journal });
+    expect(await restarted.handler.handle([abandonCmd()])).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'rejected', detail: 'runner error' }]);
+  });
+
+  test('AC-7: a failed outcome write queues no ack, and the redelivery records the outcome once the storage recovers', async () => {
+    const b = build();
+    seedStale(b);
+    const record = b.journal.recordCommand.bind(b.journal);
+    let broken = true;
+    b.journal.recordCommand = (row) => { if (broken) throw new Error('disk full'); return record(row); };
+    expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+    await b.supervisor.idle();
+    await b.handler.idle();
+    expect(b.acks).toEqual([]);                                                       // no ack without a durable outcome
+    expect(b.journal.getCommand('a1')).toBeNull();
+    expect(b.log.lines.some((line) => line.level === 'error' && line.message === 'abandon outcome could not be persisted')).toBe(true);
+
+    broken = false;
+    expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+    await b.handler.idle();
+    expect(b.acks).toEqual([{ commandId: 'a1', leaseEpoch: 1, result: 'ok' }]);        // the epoch is gone: an idempotent success
+    expect(b.journal.getCommand('a1')).toMatchObject({ result: 'ok' });
+  });
+
+  test('AC-8: an explicit ABANDON and an unknown-job cleanup share one retirement', async () => {
+    const b = build();
+    seedStale(b);
+    b.ex.alive = true;
+    b.ex.procMatches = false;                                                         // the journaled process is not ours any more
+    const release = await b.mutex.acquire('acme/app');
+    try {
+      expect(await settlesWithin(b.handler.handle([abandonCmd()]))).toEqual({ done: true, value: [] });
+      b.supervisor.retireUnknown('j1');                                               // the server reports the job as unknown
+      b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 2, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    } finally {
+      release();
+    }
+    await b.supervisor.idle();
+    await b.handler.idle();
+    expect(b.ex.calls.filter((c) => c === 'releaseCredentials:j1')).toHaveLength(1);   // one shared retirement
+    expect(b.ex.killed).toEqual([]);                                                  // a mismatching identity is never killed
+    expect(b.ex.calls).not.toContain('cleanup:j1');                                   // the owned higher epoch keeps its checkout
+    expect(b.journal.getJob('j1', 1)).toBeNull();
+    expect(b.journal.getJob('j1', 2)).not.toBeNull();                                  // the higher epoch survives
   });
 });

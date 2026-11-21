@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
@@ -7,6 +8,7 @@ import type { Git } from '../../src/executor/git';
 import { Journal } from '../../src/journal/journal';
 import { createMemoryLogger } from '../../src/logger';
 import { assignFor } from '../helpers/assign';
+import { manualClock } from '../helpers/manual-clock';
 import { waitFor } from '../helpers/wait';
 
 // Keep the RED state an assertion failure while the implementation module is not present yet.
@@ -46,6 +48,8 @@ function setup(overrides: {
   thread?: Partial<ThreadAssign>;
   /** review-1118 US-001: the daemon's test-only clone-URL policy, as a host dep. */
   allowLocalCloneUrls?: boolean;
+  /** review-1120 US-004: the fake clock the heartbeat and the idle timer run on. Without it they never fire. */
+  clock?: ReturnType<typeof manualClock>;
 } = {}) {
   const journal = Journal.open(':memory:');
   const assign = assignFor('THREAD', {
@@ -88,8 +92,10 @@ function setup(overrides: {
     wake() {}, async drain() { return 'drained' as const; }, stopJob() {},
   };
   const deps = {
-    journal, log: createMemoryLogger(), now: () => new Date('2026-01-01T00:00:00.000Z'),
-    sleep: async () => undefined, mutex: { acquire: async () => () => undefined }, logs,
+    journal, log: createMemoryLogger(),
+    now: () => new Date(overrides.clock ? overrides.clock.nowMs() : Date.parse('2026-01-01T00:00:00.000Z')),
+    sleep: overrides.clock ? overrides.clock.sleep : (async () => undefined),
+    mutex: { acquire: async () => () => undefined }, logs,
     host, tuning,
   };
   const makeRun = () => {
@@ -285,6 +291,81 @@ describe('ThreadJobRun preparation (US-003)', () => {
     const firstSessionEvent = lines.findIndex((line) => !['session_started', 'input_consumed'].includes(line.type));
     expect(consumed).toBeGreaterThanOrEqual(0);
     expect(firstSessionEvent).toBeGreaterThan(consumed);
+    context.journal.close();
+  });
+});
+
+describe('ThreadJobRun stream startup and cancellation (US-004)', () => {
+  const jobDir = join(workspaceRoot, '.jobs', jobId);
+  const streamPath = join(jobDir, 'thread-events.jsonl');
+
+  async function streamLines(): Promise<Array<{ type: string; reason?: string }>> {
+    return (await readFile(streamPath, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as { type: string; reason?: string });
+  }
+
+  test('US-004 AC-1: a cancel at the RUNNING notification seals the stream with one started and one closed line', async () => {
+    const clock = manualClock(Date.parse('2026-01-01T00:00:00.000Z'));
+    let sent: string | undefined;
+    const session: AgentSession = { ...noOpSession, async *send(message: string) { sent = message; yield { type: 'turn_end', status: 'completed' } as never; } };
+    const context = setup({ clock, openResult: { ok: true, session, resumed: false } });
+    await mkdir(jobDir, { recursive: true });
+    const run = context.makeRun();
+    // The cancel is delivered at the RUNNING journal notification, while the stream is still being created.
+    let streamPending = false;
+    let delivered = false;
+    context.journal.onWrite(() => {
+      if (delivered || context.journal.getJob(jobId, leaseEpoch)?.state !== 'RUNNING') return;
+      delivered = true;
+      streamPending = !existsSync(streamPath);
+      run.requestCancel();
+    });
+    await run.start('prepare');
+    expect(streamPending).toBe(true);
+    const lines = await streamLines();
+    expect(lines.map((line) => line.type)).toEqual(['session_started', 'session_closed']);
+    expect(lines[1]?.reason).toBe('cancelled');
+    // The initial message was never consumed: the close landed before the first turn.
+    expect(sent).toBeUndefined();
+    expect(lines.some((line) => line.type === 'input_consumed')).toBe(false);
+    expect(context.journal.getJob(jobId, leaseEpoch)?.state).toBe('CANCELLED');
+    expect(context.journal.getJob(jobId, leaseEpoch)?.doneAt).not.toBeNull();
+    expect(stateEvents(context.journal).map((event) => event.to)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    // Two heartbeat intervals and the idle expiry pass after the run ended: the event count, the final state and
+    // the stream are unchanged, exactly as the PROJECT and WORKSPACE runs keep theirs.
+    const stamped = context.journal.pendingEvents(jobId, leaseEpoch, 100).length;
+    clock.advance(tuning.threadHeartbeatMs * 2 + tuning.threadIdleMs);
+    await Bun.sleep(50);
+    expect(context.journal.pendingEvents(jobId, leaseEpoch, 100).length).toBe(stamped);
+    expect(context.journal.getJob(jobId, leaseEpoch)?.state).toBe('CANCELLED');
+    expect(stateEvents(context.journal).map((event) => event.to)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    expect(await streamLines()).toEqual(lines);
+    context.journal.close();
+  });
+
+  test('US-004 AC-3: a normal session takes its initial input and stamps a heartbeat on schedule', async () => {
+    const clock = manualClock(Date.parse('2026-01-01T00:00:00.000Z'));
+    let sent: string | undefined;
+    const session: AgentSession = { ...noOpSession, async *send(message: string) { sent = message; yield { type: 'turn_end', status: 'completed' } as never; } };
+    const context = setup({ clock, openResult: { ok: true, session, resumed: false } });
+    await mkdir(jobDir, { recursive: true });
+    const run = context.makeRun();
+    const starting = run.start('prepare');
+    await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
+    // The initial message reaches the session.
+    await waitFor(() => sent === 'hi');
+    // The heartbeat stamps the journal on its own schedule.
+    clock.advance(tuning.threadHeartbeatMs);
+    await waitFor(() => context.journal.pendingEvents(jobId, leaseEpoch, 100)
+      .some((event) => event.type === 'snapshot' && typeof (event.payload as { heartbeatAt?: unknown }).heartbeatAt === 'string'));
+    // The ordinary close ends the run.
+    expect(run.command('THREAD_CLOSE', {}).detail).not.toBe('session_not_ready');
+    await starting;
+    const stamped = context.journal.pendingEvents(jobId, leaseEpoch, 100).length;
+    // Two heartbeat intervals and the idle expiry pass after the run ended: nothing more is written.
+    clock.advance(tuning.threadHeartbeatMs * 2 + tuning.threadIdleMs);
+    await Bun.sleep(50);
+    expect(context.journal.pendingEvents(jobId, leaseEpoch, 100).length).toBe(stamped);
     context.journal.close();
   });
 });
