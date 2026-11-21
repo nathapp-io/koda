@@ -3,7 +3,7 @@
   "feature": "e2e-1121-ticket-page",
   "branchName": "feat/e2e-1121-ticket-page",
   "createdAt": "2026-11-21T13:22:53.364Z",
-  "updatedAt": "2026-11-21T13:56:18.971Z",
+  "updatedAt": "2026-11-21T14:02:55.462Z",
   "userStories": [
     {
       "id": "US-001",
@@ -241,14 +241,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One existing properties component adopts the supplied confirm API and adds two display conditions; authorization flags and API enforcement are unchanged, so ordinary component TDD plus the existing permission regressions is sufficient."
+        "reasoning": "One existing properties component adopts the supplied confirm API and adds two display conditions; authorization flags and API enforcement are unchanged, so ordinary component TDD plus the existing permission regressions is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/TicketProperties.vue",
@@ -274,7 +277,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d76da57acab7fc38733589248481144c8aebca93"
     },
     {
       "id": "US-005",
