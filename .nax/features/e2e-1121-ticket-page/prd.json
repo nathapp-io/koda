@@ -3,7 +3,7 @@
   "feature": "e2e-1121-ticket-page",
   "branchName": "feat/e2e-1121-ticket-page",
   "createdAt": "2026-11-21T13:22:53.364Z",
-  "updatedAt": "2026-11-21T14:02:55.462Z",
+  "updatedAt": "2026-11-21T14:13:08.490Z",
   "userStories": [
     {
       "id": "US-001",
@@ -305,14 +305,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A bounded URL-parser approximation and computed inline form feedback use standard patterns; this client UX check neither changes safeHref's security boundary nor replaces server validation, so standard helper/component TDD is sufficient."
+        "reasoning": "A bounded URL-parser approximation and computed inline form feedback use standard patterns; this client UX check neither changes safeHref's security boundary nor replaces server validation, so standard helper/component TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/safe-url.ts",
@@ -327,7 +330,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b2bc9fbd81f88061c3bc7cd91154db0ba6fe80bf"
     },
     {
       "id": "US-006",
