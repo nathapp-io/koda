@@ -3,7 +3,7 @@
   "feature": "e2e-1121-not-found-nav",
   "branchName": "feat/e2e-1121-not-found-nav",
   "createdAt": "2026-11-21T16:51:25.362Z",
-  "updatedAt": "2026-11-21T17:17:25.193Z",
+  "updatedAt": "2026-11-21T17:21:32.528Z",
   "userStories": [
     {
       "id": "US-001",
@@ -155,14 +155,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard helper-backed middleware and additive harness changes, but it reads authenticated session state and controls protected navigation while distinguishing authorization failures; the security override requires strict isolation."
+        "reasoning": "Standard helper-backed middleware and additive harness changes, but it reads authenticated session state and controls protected navigation while distinguishing authorization failures; the security override requires strict isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/middleware/auth.global.ts",
@@ -188,7 +191,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7a4dc4fda43aa99c6c0aa87efad68b47b63bcaf2"
     },
     {
       "id": "US-004",
