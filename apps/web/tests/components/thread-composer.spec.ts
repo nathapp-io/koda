@@ -171,6 +171,24 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     app.unmount()
   })
 
+  test('B1 regression: a draft edited while validation is pending still sends the submitted text', async () => {
+    const send = jest.fn(async () => ({ ok: true }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
+
+    typeText(app, 'first message')
+    pressEnter(app)
+    // Edited with no await in between, so the schema validation started by Enter is still pending:
+    // the submission the user already requested must not be cancelled by this edit.
+    typeText(app, 'next draft')
+    await settle()
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledWith('first message')
+    // A success for the older text must not clear the newer draft the user is typing.
+    expect(textarea(app)?.props['model-value']).toBe('next draft')
+    app.unmount()
+  })
+
   test('AC-3: a pending send blocks Enter and click until it settles', async () => {
     let resolveSend: ((result: { ok: boolean }) => void) | undefined
     const send = jest.fn(() => new Promise<{ ok: boolean }>((resolve) => { resolveSend = resolve }))

@@ -54,17 +54,25 @@ function handleKeydown(event: KeyboardEvent): void {
   void sendDraft()
 }
 
-/** Sends the trimmed draft when it passes the schema (non-empty, ≤32768 UTF-8 bytes). */
+/**
+ * Sends the trimmed draft when it passes the schema (non-empty, ≤32768 UTF-8 bytes).
+ *
+ * The submission is captured synchronously, before the async validation: an edit made while the
+ * schema validates or while the POST is in flight must not cancel the send the user already asked
+ * for. The equality check afterwards only guards the *reset*, so a success for the older text can
+ * never discard a newer draft.
+ */
 const sending = ref(false)
 
 async function sendDraft(): Promise<void> {
   if (!props.composerState.canSend || sending.value) return
   sending.value = true
   const submittedDraft = String(draft.value ?? '')
+  const text = submittedDraft.trim()
   try {
     const { valid } = await validate()
-    if (!valid || String(draft.value ?? '') !== submittedDraft) return
-    const result = await props.send(submittedDraft.trim())
+    if (!valid) return
+    const result = await props.send(text)
     if (result.ok && String(draft.value ?? '') === submittedDraft) resetField({ value: '' })
   } catch {
     // The page owns error presentation; keep the draft and release the in-flight guard.
