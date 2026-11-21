@@ -22,7 +22,7 @@ jest.mock('../generated', () => ({
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
-  clearApiKey: jest.fn(),
+  clearUsedCredential: jest.fn(() => 'none'),
 }));
 
 jest.mock('../utils/output', () => ({
@@ -33,16 +33,16 @@ jest.mock('../utils/output', () => ({
 import { Command } from 'commander';
 import { authCommand } from './auth';
 import { authControllerMe, authControllerRegister, authControllerLogout } from '../generated';
-import { resolveContext, clearApiKey } from '../config';
+import { resolveContext, clearUsedCredential } from '../config';
 import { table } from '../utils/output';
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockMe = authControllerMe as jest.Mock;
 const mockRegister = authControllerRegister as jest.Mock;
 const mockLogout = authControllerLogout as jest.Mock;
-const mockClearApiKey = clearApiKey as jest.Mock;
+const mockClearUsedCredential = clearUsedCredential as jest.Mock;
 
-const CTX = { apiKey: 'sk-test', apiUrl: 'http://localhost:3100/api', projectSlug: 'my-proj' };
+const CTX = { apiKey: 'sk-test', apiUrl: 'http://localhost:3100/api', projectSlug: 'my-proj', credential: { source: 'environment', key: 'sk-test' } };
 
 describe('authCommand', () => {
   let program: Command;
@@ -131,14 +131,32 @@ describe('authCommand', () => {
   });
 
   describe('logout', () => {
-    it('revokes tokens and clears local credentials', async () => {
+    it('sends logout and conditionally clears the used local credential', async () => {
       mockLogout.mockResolvedValue({ ret: 0, data: {} });
 
       await program.parseAsync(['node', 'koda', 'auth', 'logout']);
 
       expect(mockLogout).toHaveBeenCalled();
-      expect(mockClearApiKey).toHaveBeenCalled();
+      expect(mockClearUsedCredential).toHaveBeenCalledWith(CTX);
       expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('describes the accepted request and local action without claiming universal revocation', async () => {
+      mockLogout.mockResolvedValue({ ret: 0, data: {} });
+      mockClearUsedCredential.mockReturnValue({ profileName: 'staging' });
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout']);
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Logout request accepted'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('profile "staging"'));
+      expect(logSpy.mock.calls.flat().join(' ')).not.toMatch(/revoke all|outstanding tokens|sk-test/i);
+    });
+
+    it('does not promise universal revocation in Commander help', () => {
+      const auth = program.commands.find((command) => command.name() === 'auth')!;
+      const logout = auth.commands.find((command) => command.name() === 'logout')!;
+      expect(logout.description()).toContain('logout request');
+      expect(logout.description()).not.toMatch(/all outstanding|revoke/i);
     });
 
     it('outputs JSON when --json is set', async () => {
@@ -154,7 +172,7 @@ describe('authCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'auth', 'logout']);
 
-      expect(mockClearApiKey).not.toHaveBeenCalled();
+      expect(mockClearUsedCredential).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(2);
     });
   });

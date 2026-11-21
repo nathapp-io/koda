@@ -56,10 +56,51 @@ export interface ProjectConfig {
   [key: string]: unknown;
 }
 
+export type CredentialSource = 'flag' | 'environment' | 'profile' | 'global' | 'none';
+
+export interface CredentialProvenance {
+  source: CredentialSource;
+  key: string;
+  profileName?: string;
+  owningUrl?: string;
+}
+
 export interface ResolvedContext {
   projectSlug: string | undefined;
   apiKey: string;
   apiUrl: string;
+  credential: CredentialProvenance;
+}
+
+export type LogoutCleanup = 'global' | { profileName: string } | 'none';
+
+function normalizedApiBase(url: string): string {
+  const parsed = new URL(url);
+  const pathname = parsed.pathname.replace(/\/+$/, '').replace(/\/api$/, '').replace(/\/+$/, '');
+  return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}`;
+}
+
+export function clearUsedCredential(ctx: ResolvedContext): LogoutCleanup {
+  const provenance = ctx.credential;
+  if (provenance.source === 'global' && provenance.owningUrl &&
+      provenance.key === getConfig().apiKey &&
+      normalizedApiBase(ctx.apiUrl) === normalizedApiBase(provenance.owningUrl)) {
+    const current = getConfig();
+    if (current.apiKey !== provenance.key || normalizedApiBase(current.apiUrl || DEFAULT_API_URL) !== normalizedApiBase(provenance.owningUrl)) return 'none';
+    store.set('apiKey', '');
+    secureConfigFile();
+    return 'global';
+  }
+  if (provenance.source === 'profile' && provenance.profileName && provenance.owningUrl &&
+      normalizedApiBase(ctx.apiUrl) === normalizedApiBase(provenance.owningUrl)) {
+    const current = getConfig();
+    const profile = current.profiles[provenance.profileName];
+    if (profile?.apiKey !== provenance.key || normalizedApiBase(profile.apiUrl) !== normalizedApiBase(provenance.owningUrl)) return 'none';
+    store.set('profiles', { ...current.profiles, [provenance.profileName]: { ...profile, apiKey: '' } });
+    secureConfigFile();
+    return { profileName: provenance.profileName };
+  }
+  return 'none';
 }
 
 export interface ResolveContextFlags {
@@ -169,9 +210,19 @@ export async function resolveContext(
     globalConfig.apiKey ??
     '';
 
+  const credential: CredentialProvenance = flags.apiKey !== undefined
+    ? { source: 'flag', key: apiKey }
+    : process.env.KODA_API_KEY !== undefined
+      ? { source: 'environment', key: apiKey }
+      : profile?.apiKey !== undefined
+        ? { source: 'profile', key: apiKey, profileName: profileName!, owningUrl: profile?.apiUrl || undefined }
+        : globalConfig.apiKey !== undefined && globalConfig.apiKey !== ''
+          ? { source: 'global', key: apiKey, owningUrl: globalConfig.apiUrl || DEFAULT_API_URL }
+          : { source: 'none', key: apiKey };
+
   const projectSlug = flags.projectSlug ?? process.env.KODA_PROJECT_SLUG ?? projectConfig?.projectSlug;
 
-  return { projectSlug, apiKey, apiUrl };
+  return { projectSlug, apiKey, apiUrl, credential };
 }
 
 export function maskApiKey(apiKey: string): string {

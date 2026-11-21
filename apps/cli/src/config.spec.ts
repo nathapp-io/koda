@@ -31,6 +31,7 @@ import {
   maskApiKey,
   findProjectConfig,
   resolveContext,
+  clearUsedCredential,
   setProfile,
   getProfiles,
   removeProfile,
@@ -409,6 +410,52 @@ describe('config', () => {
       removeProfile('staging');
       const storedProfiles = mockStore.get('profiles') as Record<string, Profile>;
       expect(storedProfiles).toHaveProperty('prod');
+    });
+  });
+
+  describe('credential provenance and logout cleanup', () => {
+    it('clears only the selected matching profile key and keeps the endpoint and peers', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.profiles = {
+        selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example/api' },
+        other: { apiKey: 'other-key-12345', apiUrl: 'https://c.example' },
+      };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(clearUsedCredential(ctx)).toEqual({ profileName: 'selected' });
+      expect(mockData.profiles).toEqual({
+        selected: { apiKey: '', apiUrl: 'https://b.example/api' },
+        other: { apiKey: 'other-key-12345', apiUrl: 'https://c.example' },
+      });
+      expect((await resolveContext({}, { findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig })).apiKey).toBe('');
+    });
+
+    it('clears global key for equivalent /api and bare endpoint forms only', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://a.example/api/';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      expect(clearUsedCredential({ ...ctx, apiUrl: 'https://a.example/' })).toBe('global');
+      expect(mockData.apiKey).toBe('');
+      expect(mockData.apiUrl).toBe('https://a.example/api/');
+    });
+
+    it('does not clear a replaced credential while logout is pending', async () => {
+      mockData.apiKey = 'original-key-12345';
+      mockData.apiUrl = 'https://a.example';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      mockData.apiKey = 'replacement-key-12345';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(mockData.apiKey).toBe('replacement-key-12345');
+    });
+
+    it('records flag provenance even when the key equals the stored global key', async () => {
+      mockData.apiKey = 'same-saved-key-123';
+      mockData.apiUrl = 'https://a.example/api';
+      const result = await resolveContext({ apiKey: 'same-saved-key-123' }, {
+        findProjectConfig: jest.fn(async () => null), getConfig,
+      });
+      expect(result.credential).toEqual({ source: 'flag', key: 'same-saved-key-123' });
     });
   });
 
