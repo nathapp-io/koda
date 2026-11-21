@@ -1182,6 +1182,8 @@
         "contextReset": "Context reset",
         "streaming": "Streaming…",
         "tokens": "tokens",
+        "unmetered": "Not metered",
+        "unmeteredHint": "This agent does not report cost, so the cost cap does not apply.",
         "status": {
           "errored": "Errored",
           "cancelled": "Cancelled",

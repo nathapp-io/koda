@@ -126,6 +126,19 @@ describe('US-004 AC5-AC10: ThreadListTable row rendering', () => {
     expect(app.text()).toContain('u1')
   })
 
+  test('US-003 AC-8: unmetered ACP rows show the label while native rows keep costText', () => {
+    const app = mountTable([
+      listItem({ id: 'acp', backend: { kind: 'acp', agent: 'codex' }, costUsd: '0', maxCostUsd: '0.5',
+        tokens: { input: 800, output: 76, cacheRead: 0, cacheWrite: 0 } }),
+      listItem({ id: 'native', title: 'Native thread', costUsd: '1.25', maxCostUsd: '5' }),
+    ])
+    const rows = app.find('tr').filter(row => app.find('td', row).length > 0)
+    expect(rows).toHaveLength(2)
+    expect(app.textOf(app.find('td', rows[0])[6] as FakeNode)).toContain('fleet.threads.detail.unmetered')
+    expect(app.textOf(app.find('td', rows[1])[6] as FakeNode)).toContain('$1.25 / $5')
+    app.unmount()
+  })
+
   test('AC8: with threads [t] the cost text is $0 / $5', () => {
     const app = mountTable([listItem()])
 

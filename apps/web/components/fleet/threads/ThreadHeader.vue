@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { tokenText } from '~/lib/fleet-analytics-format'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
 import type { ThreadDetailDto } from '~/lib/thread-types'
-import { costText, sessionLabel } from '~/lib/thread-view'
+import { costText, isUnmeteredThread, sessionLabel } from '~/lib/thread-view'
 
 /**
  * Fleet S5a §4.62 (US-006): the thread's live header — identity, runner with an online dot from
@@ -43,7 +43,8 @@ const featureLabel = computed(() => {
         <span class="text-xs">{{ t(runner.online ? 'fleet.common.online' : 'fleet.common.offline') }}</span>
       </span>
       <span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ t(`fleet.threads.session.${sessionLabel(props.thread)}`) }}</span>
-      <span class="font-mono text-xs">{{ costText(props.thread) }}</span>
+      <span v-if="isUnmeteredThread(props.thread)" class="font-mono text-xs" :title="t('fleet.threads.detail.unmeteredHint')">{{ t('fleet.threads.detail.unmetered') }}</span>
+      <span v-else class="font-mono text-xs">{{ costText(props.thread) }}</span>
       <span v-if="totalTokens !== null" class="font-mono text-xs">{{ tokenText(totalTokens) }} {{ t('fleet.threads.detail.tokens') }}</span>
       <span
         v-for="(name, index) in skillNames"

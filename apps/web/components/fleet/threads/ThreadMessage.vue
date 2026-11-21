@@ -24,10 +24,10 @@ const { t } = useI18n()
     <div class="font-medium">{{ t('fleet.threads.message.system') }}</div>
     <div class="mt-1 whitespace-pre-wrap break-words">{{ props.message.content }}</div>
   </div>
-  <div v-else class="rounded-md border border-border bg-card p-3 text-sm" data-testid="thread-message">
+  <div v-else class="min-w-0 max-w-full rounded-md border border-border bg-card p-3 text-sm" data-testid="thread-message">
     <div
       v-if="props.message.role === 'assistant' && props.message.content"
-      class="whitespace-pre-wrap break-words"
+      class="overflow-x-auto whitespace-pre-wrap break-words"
       v-html="renderThreadMarkdown(props.message.content, props.slug)"
     />
     <div v-else class="whitespace-pre-wrap break-words">{{ props.message.content }}</div>

@@ -1182,6 +1182,8 @@
         "contextReset": "上下文已重置",
         "streaming": "流式生成中…",
         "tokens": "个 token",
+        "unmetered": "不计费",
+        "unmeteredHint": "此智能体不报告成本，因此成本上限不适用。",
         "status": {
           "errored": "已出错",
           "cancelled": "已取消",

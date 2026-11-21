@@ -113,6 +113,24 @@ describe('US-006 AC-11: ThreadHeader scope label', () => {
     app.unmount()
   })
 
+  test('US-003 AC-6: an unmetered ACP thread shows the label and explanatory title instead of cost', () => {
+    const app = mountHeader(threadDetail({
+      backend: { kind: 'acp', agent: 'codex' }, costUsd: '0', maxCostUsd: '0.5',
+      tokens: { input: 800, output: 76, cacheRead: 0, cacheWrite: 0 },
+    }))
+    const label = app.find('[title="fleet.threads.detail.unmeteredHint"]')[0]
+    expect(app.text()).toContain('fleet.threads.detail.unmetered')
+    expect(label).toBeDefined()
+    expect(app.text()).not.toContain('$0 / $0.5')
+    app.unmount()
+  })
+
+  test('US-003 AC-7: a metered native thread keeps its cost and cap text', () => {
+    const app = mountHeader(threadDetail({ costUsd: '1.25', maxCostUsd: '5' }))
+    expect(app.text()).toContain('$1.25 / $5')
+    app.unmount()
+  })
+
   test('AC-11 (edge): a WORKSPACE thread header still shows its runner and cost line', () => {
     const app = mountHeader(
       threadDetail({

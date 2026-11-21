@@ -1,9 +1,12 @@
 import { describe, expect, test } from '@jest/globals'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   applyDelta,
   composerState,
   costText,
   isTurnRunning,
+  isUnmeteredThread,
   mergeMessages,
   newClientMessageId,
   refetchAfterSeq,
@@ -183,6 +186,41 @@ describe('US-002 thread-view', () => {
     expect(a).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
     expect(b).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
     expect(a).not.toBe(b)
+  })
+
+  test('US-003 AC-3: an ACP thread with zero cost and positive usage is unmetered', () => {
+    expect(isUnmeteredThread({
+      backend: { kind: 'acp', agent: 'codex' },
+      costUsd: '0',
+      tokens: { input: 800, output: 76, cacheRead: 0, cacheWrite: 0 },
+    })).toBe(true)
+  })
+
+  test('US-003 AC-4: metered, missing, zero-use and malformed-cost ACP threads are not unmetered', () => {
+    const acp = { backend: { kind: 'acp' as const, agent: 'codex' as const }, tokens: { input: 800, output: 76, cacheRead: 0, cacheWrite: 0 } }
+    expect(isUnmeteredThread({ ...acp, costUsd: '0.12' })).toBe(false)
+    expect(isUnmeteredThread({ ...acp, costUsd: '0', tokens: null })).toBe(false)
+    expect(isUnmeteredThread({ ...acp, costUsd: '0', tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })).toBe(false)
+    expect(isUnmeteredThread({ ...acp, costUsd: 'abc' })).toBe(false)
+  })
+
+  test('US-003 AC-5: a native thread is never unmetered', () => {
+    expect(isUnmeteredThread({
+      backend: { kind: 'native' }, costUsd: '0',
+      tokens: { input: 800, output: 76, cacheRead: 0, cacheWrite: 0 },
+    })).toBe(false)
+  })
+
+  test('US-003 AC-9: both locale bundles contain the unmetered label and hint', () => {
+    for (const locale of ['en', 'zh']) {
+      const bundle = JSON.parse(readFileSync(resolve(__dirname, `../../i18n/locales/${locale}.json`), 'utf8')) as {
+        fleet?: { threads?: { detail?: { unmetered?: unknown; unmeteredHint?: unknown } } }
+      }
+      expect(typeof bundle.fleet?.threads?.detail?.unmetered).toBe('string')
+      expect(bundle.fleet?.threads?.detail?.unmetered).not.toBe('')
+      expect(typeof bundle.fleet?.threads?.detail?.unmeteredHint).toBe('string')
+      expect(bundle.fleet?.threads?.detail?.unmeteredHint).not.toBe('')
+    }
   })
 
   test('US-002: costText shows the thread money exactly as received through usd()', () => {

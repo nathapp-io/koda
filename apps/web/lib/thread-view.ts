@@ -115,6 +115,14 @@ export function newClientMessageId(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`
 }
 
+/** An ACP thread with reported usage but no reported cost is unmetered, not free. */
+export function isUnmeteredThread(thread: Pick<ThreadDto, 'backend' | 'costUsd' | 'tokens'>): boolean {
+  return thread.backend.kind === 'acp'
+    && Number(thread.costUsd) === 0
+    && thread.tokens !== null
+    && thread.tokens.input + thread.tokens.output > 0
+}
+
 /** Thread money exactly as received through usd(): `'1.25'`/`'5'` stay `'$1.25'`/`'$5'` (A7). */
 export function costText(thread: Pick<ThreadDto, 'costUsd' | 'maxCostUsd'>): string {
   return `${usd(thread.costUsd)} / ${usd(thread.maxCostUsd)}`
