@@ -90,6 +90,69 @@ async function loadHandler(): Promise<Handler> {
 }
 
 describe('SSR session refresh middleware', () => {
+  const realEligibility = jest.requireActual('../../server/utils/session-refresh') as typeof import('../../server/utils/session-refresh')
+  const now = 1_700_000_000_000
+  const jwt = (exp: number) => `header.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.signature`
+
+  function useRealEligibility() {
+    g.shouldRefreshSession = realEligibility.shouldRefreshSession
+    g.withAuthCookies = realEligibility.withAuthCookies
+    jest.spyOn(Date, 'now').mockReturnValue(now)
+  }
+
+  function request(cookie: string, url = '/projects') {
+    const req = event()
+    req.node.req.headers.cookie = cookie
+    req.node.req.url = url
+    return req
+  }
+
+  test('AC-4 refreshes an expired legacy access JWT and replaces cookies before SSR', async () => {
+    useRealEligibility()
+    const req = request(`koda_token=${jwt(now / 1000 - 60)}; koda_refresh=${jwt(now / 1000 + 1000)}; koda_locale=zh`)
+    await (await loadHandler())(req)
+    expect(g.forwardToApi).toHaveBeenCalledTimes(1)
+    expect(req.node.req.headers.cookie).toBe('koda_token=a2; koda_refresh=r2; koda_locale=zh')
+    expect(emittedCookies(req)).toEqual(expect.arrayContaining([expect.stringMatching(/^koda_token=a2;/), expect.stringMatching(/^koda_refresh=r2;/)]))
+    jest.restoreAllMocks()
+  })
+
+  test('AC-5 keeps a fresh access JWT and refreshes refresh-only HTML, but excludes API requests', async () => {
+    useRealEligibility()
+    const handler = await loadHandler()
+    await handler(request(`koda_token=${jwt(now / 1000 + 60)}; koda_refresh=r1`))
+    expect(g.forwardToApi).not.toHaveBeenCalled()
+    await handler(request('koda_refresh=r1'))
+    expect(g.forwardToApi).toHaveBeenCalledTimes(1)
+    await handler(request('koda_refresh=r1', '/api/projects'))
+    expect(g.forwardToApi).toHaveBeenCalledTimes(1)
+    jest.restoreAllMocks()
+  })
+
+  test('AC-6 retains opaque-cookie exclusion and refreshes exactly at expiry', async () => {
+    useRealEligibility()
+    const handler = await loadHandler()
+    await handler(request('koda_token=opaque; koda_refresh=r1'))
+    expect(g.forwardToApi).not.toHaveBeenCalled()
+    await handler(request(`koda_token=${jwt(now / 1000)}; koda_refresh=r1`))
+    expect(g.forwardToApi).toHaveBeenCalledTimes(1)
+    jest.restoreAllMocks()
+  })
+
+  test.each([
+    ['503', async () => ({ status: 503, body: {} })],
+    ['transport failure', async () => { throw new Error('offline') }],
+  ])('AC-6 preserves incoming cookies on upstream %s', async (_label, upstream) => {
+    useRealEligibility()
+    g.forwardToApi = jest.fn(upstream)
+    const cookie = `koda_token=${jwt(now / 1000 - 1)}; koda_refresh=r1; koda_locale=zh`
+    const req = request(cookie)
+    await expect((await loadHandler())(req)).resolves.toBeUndefined()
+    expect(req.node.req.headers.cookie).toBe(cookie)
+    expect(g.clearAuthCookies).not.toHaveBeenCalled()
+    jest.restoreAllMocks()
+  })
+
   test('AC-1 does not call upstream when ineligible', async () => {
     expect(existsSync(middlewarePath)).toBe(true)
     g.shouldRefreshSession = jest.fn(() => false)

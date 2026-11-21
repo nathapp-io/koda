@@ -1,5 +1,9 @@
 import { describe, expect, test } from '@jest/globals'
+import { ACCESS_COOKIE } from '~/server/utils/api'
+
 import { shouldRefreshSession, withAuthCookies } from '~/server/utils/session-refresh'
+
+const jwt = (exp: unknown) => `header.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.signature`
 
 function event(method: string, url: string, accept: string, cookie?: string) {
   return {
@@ -19,6 +23,18 @@ function event(method: string, url: string, accept: string, cookie?: string) {
 describe('shouldRefreshSession', () => {
   test('refreshes an HTML GET when only the refresh cookie exists (AC-1)', () => {
     expect(shouldRefreshSession(event('GET', '/projects', 'text/html', 'koda_refresh=r1'))).toBe(true)
+  })
+
+  test('AC-4 refreshes when access JWT is expired, but not when it remains valid', () => {
+    const now = 1_700_000_000_000
+    jest.spyOn(Date, 'now').mockReturnValue(now)
+    expect(shouldRefreshSession(event('GET', '/projects', 'text/html', `koda_refresh=r1; ${ACCESS_COOKIE}=${jwt(now / 1000 - 1)}`))).toBe(true)
+    expect(shouldRefreshSession(event('GET', '/projects', 'text/html', `koda_refresh=r1; ${ACCESS_COOKIE}=${jwt(now / 1000 + 1)}`))).toBe(false)
+    jest.restoreAllMocks()
+  })
+
+  test('AC-6 keeps opaque access cookies ineligible', () => {
+    expect(shouldRefreshSession(event('GET', '/projects', 'text/html', 'koda_refresh=r1; koda_token=opaque'))).toBe(false)
   })
 
   test.each([

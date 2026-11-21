@@ -24,6 +24,26 @@ type AuthEvent = Parameters<typeof getCookie>[0]
 const ACCESS_COOKIE = 'koda_token'
 const REFRESH_COOKIE = 'koda_refresh'
 
+/** Read a JWT NumericDate expiry for cookie scheduling only; never use it as an identity check. */
+export function readJwtExpiry(token: string | undefined): number | undefined {
+  if (!token) return undefined
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return undefined
+    const decoded: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    if (!decoded || typeof decoded !== 'object' || !('exp' in decoded)) return undefined
+    const expiry = (decoded as { exp?: unknown }).exp
+    return typeof expiry === 'number' && Number.isFinite(expiry) ? expiry : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function cookieMaxAge(token: string, fallback: number): number {
+  const expiry = readJwtExpiry(token)
+  return expiry === undefined ? fallback : Math.max(0, Math.floor(expiry - Date.now() / 1000))
+}
+
 function unwrapAuth(envelope: AuthEnvelope | undefined): UnwrappedAuth {
   if (!envelope) return {}
   if (typeof envelope.ret === 'number' && envelope.ret !== 0) {
@@ -46,7 +66,7 @@ export function setAuthCookies(
       sameSite: 'lax',
       secure: true,
       path: '/',
-      maxAge: 60 * 15, // 15-minute access-token window
+      maxAge: cookieMaxAge(data.accessToken, 60 * 15),
     })
   }
   if (data.refreshToken) {
@@ -55,7 +75,7 @@ export function setAuthCookies(
       sameSite: 'strict',
       secure: true,
       path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 7-day refresh window
+      maxAge: cookieMaxAge(data.refreshToken, 60 * 60 * 24 * 7),
     })
   }
 }
