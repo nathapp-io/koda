@@ -31,6 +31,7 @@ import {
   maskApiKey,
   findProjectConfig,
   resolveContext,
+  clearUsedCredential,
   setProfile,
   getProfiles,
   removeProfile,
@@ -412,6 +413,143 @@ describe('config', () => {
     });
   });
 
+  describe('credential provenance and logout cleanup', () => {
+    it('clears only the selected matching profile key and keeps the endpoint and peers', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.profiles = {
+        selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example/api' },
+        other: { apiKey: 'other-key-12345', apiUrl: 'https://c.example' },
+      };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(clearUsedCredential(ctx)).toEqual({ profileName: 'selected' });
+      expect(mockData.profiles).toEqual({
+        selected: { apiKey: '', apiUrl: 'https://b.example/api' },
+        other: { apiKey: 'other-key-12345', apiUrl: 'https://c.example' },
+      });
+      expect((await resolveContext({}, { findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig })).apiKey).toBe('');
+    });
+
+    it('clears global key for equivalent /api and bare endpoint forms only', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://a.example/api/';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      expect(clearUsedCredential({ ...ctx, apiUrl: 'https://a.example/' })).toBe('global');
+      expect(mockData.apiKey).toBe('');
+      expect(mockData.apiUrl).toBe('https://a.example/api/');
+    });
+
+    it.each([
+      ['host', 'https://other.example'],
+      ['nondefault port', 'https://a.example:8443'],
+      ['base path', 'https://a.example/v2'],
+    ])('does not clear a selected profile when endpoint %s differs', async (_case, usedUrl) => {
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://a.example' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(clearUsedCredential({ ...ctx, apiUrl: usedUrl })).toBe('none');
+      expect((mockData.profiles as Record<string, Profile>).selected).toEqual({
+        apiKey: 'profile-key-12345', apiUrl: 'https://a.example',
+      });
+    });
+
+    it('preserves a selected profile with an empty owning URL despite a global endpoint fallback', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://global.example';
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: '' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(ctx.apiUrl).toBe('https://global.example');
+      expect(clearUsedCredential(ctx)).toBe('none');
+      const storedProfiles = mockData.profiles as Record<string, Profile>;
+      expect(storedProfiles.selected).toEqual({ apiKey: 'profile-key-12345', apiUrl: '' });
+      expect(mockData.apiKey).toBe('global-key-12345');
+    });
+
+    it('preserves a selected profile whose stored URL is unusable', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://global.example';
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'not-a-url' } };
+      process.env.KODA_API_URL = 'https://deployment-b.example';
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      expect(ctx.apiUrl).toBe('https://deployment-b.example');
+      expect(ctx.credential).toEqual({
+        source: 'profile', key: 'profile-key-12345', profileName: 'selected', owningUrl: 'not-a-url',
+      });
+      // An unusable owning URL proves no ownership: cleanup must not throw `Invalid URL`.
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect((mockData.profiles as Record<string, Profile>).selected).toEqual({
+        apiKey: 'profile-key-12345', apiUrl: 'not-a-url',
+      });
+      expect(mockData.apiKey).toBe('global-key-12345');
+    });
+
+    it('does not claim ownership when the used endpoint is unusable', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://a.example';
+      process.env.KODA_API_URL = 'not-a-url';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      expect(ctx.apiUrl).toBe('not-a-url');
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(mockData.apiKey).toBe('global-key-12345');
+    });
+
+    it('preserves a stored endpoint replaced with an unusable URL while logout is pending', async () => {
+      mockData.apiKey = 'global-key-12345';
+      mockData.apiUrl = 'https://a.example';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      mockData.apiUrl = 'not-a-url';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(mockData.apiKey).toBe('global-key-12345');
+      expect(mockData.apiUrl).toBe('not-a-url');
+    });
+
+    it('preserves a selected profile whose owning URL changes while logout is pending', async () => {
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      const storedProfiles = mockData.profiles as Record<string, Profile>;
+      storedProfiles.selected.apiUrl = 'https://replacement.example';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(storedProfiles.selected).toEqual({ apiKey: 'profile-key-12345', apiUrl: 'https://replacement.example' });
+    });
+
+    it('preserves a profile URL replaced with an empty value while logout is pending', async () => {
+      mockData.profiles = { selected: { apiKey: 'profile-key-12345', apiUrl: 'https://b.example' } };
+      const ctx = await resolveContext({}, {
+        findProjectConfig: jest.fn(async () => ({ profile: 'selected' })), getConfig,
+      });
+      const storedProfiles = mockData.profiles as Record<string, Profile>;
+      storedProfiles.selected.apiUrl = '';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(storedProfiles.selected).toEqual({ apiKey: 'profile-key-12345', apiUrl: '' });
+    });
+
+    it('does not clear a replaced credential while logout is pending', async () => {
+      mockData.apiKey = 'original-key-12345';
+      mockData.apiUrl = 'https://a.example';
+      const ctx = await resolveContext({}, { findProjectConfig: jest.fn(async () => null), getConfig });
+      mockData.apiKey = 'replacement-key-12345';
+      expect(clearUsedCredential(ctx)).toBe('none');
+      expect(mockData.apiKey).toBe('replacement-key-12345');
+    });
+
+    it('records flag provenance even when the key equals the stored global key', async () => {
+      mockData.apiKey = 'same-saved-key-123';
+      mockData.apiUrl = 'https://a.example/api';
+      const result = await resolveContext({ apiKey: 'same-saved-key-123' }, {
+        findProjectConfig: jest.fn(async () => null), getConfig,
+      });
+      expect(result.credential).toEqual({ source: 'flag', key: 'same-saved-key-123' });
+    });
+  });
+
   describe('resolveContext', () => {
     function makeProjectConfigDep(config: ProjectConfig | null): ResolveContextDeps['findProjectConfig'] {
       return jest.fn(async () => config);
@@ -432,6 +570,25 @@ describe('config', () => {
       };
       const result = await resolveContext({ projectSlug: 'override' }, deps);
       expect(result.projectSlug).toBe('override');
+    });
+
+    it('carries ticket defaults from project config into the resolved context', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({
+          projectSlug: 'my-project', defaults: { type: 'TASK', priority: 'HIGH' },
+        }),
+        getConfig: makeGlobalConfig({ apiKey: 'stored-key-12345' }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.defaults).toEqual({ type: 'TASK', priority: 'HIGH' });
+    });
+
+    it('keeps defaults absent for older project configs', async () => {
+      const result = await resolveContext({}, {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project' }),
+        getConfig: makeGlobalConfig({}),
+      });
+      expect(result.defaults).toBeUndefined();
     });
 
     it('AC2: projectSlug comes from .koda/config.json when no flag provided', async () => {

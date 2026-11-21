@@ -180,6 +180,103 @@ describe('ticketCommand', () => {
   });
 
   describe('ticket create', () => {
+    it('uses project defaults for title-only creation through the real resolver', async () => {
+      const { resolveContext: realResolveContext } = jest.requireActual('../config') as typeof import('../config');
+      (resolveContext as jest.Mock).mockImplementation((flags: { projectSlug?: string }) =>
+        realResolveContext(flags, {
+          findProjectConfig: jest.fn(async () => ({
+            projectSlug: 'my-project', defaults: { type: 'TASK', priority: 'HIGH' },
+          })),
+          getConfig: jest.fn(() => ({ apiKey: 'stored-key-12345', apiUrl: 'http://localhost:3100', profiles: {} })),
+        }),
+      );
+      (ticketsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ref: 'KODA-1' } });
+      const createCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync(['node', 'test', '--title', 'Defaulted ticket']);
+
+      expect(ticketsControllerCreate).toHaveBeenCalledTimes(1);
+      expect(ticketsControllerCreate).toHaveBeenCalledWith(expect.objectContaining({
+        path: { slug: 'my-project' },
+        body: expect.objectContaining({ title: 'Defaulted ticket', type: 'TASK', priority: 'HIGH' }),
+      }));
+    });
+
+    it.each([
+      ['type flag overrides its default independently', ['--type', 'BUG'], { type: 'BUG', priority: 'HIGH' }],
+      ['priority flag overrides its default independently', ['--priority', 'LOW'], { type: 'TASK', priority: 'LOW' }],
+    ])('%s', async (_name, flags, expected) => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'my-project', apiKey: 'stored-key-12345', apiUrl: 'http://localhost:3100',
+        defaults: { type: 'TASK', priority: 'HIGH' },
+      });
+      (ticketsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ref: 'KODA-2' } });
+      const createCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'create');
+      await createCmd?.parseAsync(['node', 'test', '--title', 'Override ticket', ...flags]);
+      expect(ticketsControllerCreate).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining(expected),
+      }));
+    });
+
+    it('older project config omits priority when no priority flag is provided', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({ projectSlug: 'my-project', apiKey: 'stored-key-12345', apiUrl: 'http://localhost:3100', defaults: undefined });
+      (ticketsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ref: 'KODA-3' } });
+      const createCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'create');
+      await createCmd?.parseAsync(['node', 'test', '--title', 'Legacy config', '--type', 'BUG']);
+      const request = (ticketsControllerCreate as jest.Mock).mock.calls[0][0];
+      expect(JSON.stringify(request.body)).not.toContain('priority');
+    });
+
+    it.each([
+      ['missing type', ['--title', 'No type'], undefined],
+      ['missing title', ['--type', 'BUG'], undefined],
+      ['unsupported default type', ['--title', 'Bad type'], { type: 'ALIEN', priority: 'HIGH' }],
+      ['unsupported default priority', ['--title', 'Bad priority'], { type: 'TASK', priority: 'URGENT' }],
+      ['empty-string default priority', ['--title', 'Empty priority'], { type: 'TASK', priority: '' }],
+      ['false default priority', ['--title', 'False priority'], { type: 'TASK', priority: false as unknown as string }],
+      ['empty explicit priority does not fall back', ['--title', 'Empty explicit', '--type', 'TASK', '--priority', ''], { type: 'TASK', priority: 'HIGH' }],
+      ['invalid default type overridden by flag', ['--title', 'Override', '--type', 'BUG'], { type: 'ALIEN', priority: 'HIGH' }, true],
+      ['invalid default priority overridden by flag', ['--title', 'Override', '--priority', 'LOW'], { type: 'TASK', priority: 'URGENT' }, true],
+      ['invalid explicit type does not fall back', ['--title', 'Invalid explicit', '--type', 'ALIEN'], { type: 'TASK', priority: 'HIGH' }],
+      ['invalid explicit priority does not fall back', ['--title', 'Invalid explicit', '--type', 'TASK', '--priority', 'URGENT'], { type: 'TASK', priority: 'HIGH' }],
+    ])('validates effective inputs: %s', async (_name, flags, defaults, succeeds = false) => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'my-project', apiKey: 'stored-key-12345', apiUrl: 'http://localhost:3100', defaults,
+      });
+      (ticketsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ref: 'KODA-4' } });
+      const createCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'create');
+      await createCmd?.parseAsync(['node', 'test', ...flags]);
+      if (succeeds) {
+        expect(ticketsControllerCreate).toHaveBeenCalledTimes(1);
+        expect(ticketsControllerCreate).toHaveBeenCalledWith(expect.objectContaining({
+          body: expect.objectContaining({
+            ...(flags.includes('BUG') ? { type: 'BUG' } : {}),
+            ...(flags.includes('LOW') ? { priority: 'LOW' } : {}),
+          }),
+        }));
+      } else {
+        expect(processExitSpy).toHaveBeenCalledWith(3);
+        expect(ticketsControllerCreate).not.toHaveBeenCalled();
+      }
+    });
+
+    it('names an empty supplied priority in the exit 3 validation message', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'my-project', apiKey: 'stored-key-12345', apiUrl: 'http://localhost:3100',
+        defaults: { type: 'TASK', priority: '' },
+      });
+      (ticketsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { ref: 'KODA-5' } });
+      const createCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync(['node', 'test', '--title', 'Blank priority']);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid priority "". Valid values: LOW, MEDIUM, HIGH, CRITICAL'),
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+      expect(ticketsControllerCreate).not.toHaveBeenCalled();
+    });
+
     it('creates ticket with required options', async () => {
       const mockTicket = {
         id: 'ticket-1',

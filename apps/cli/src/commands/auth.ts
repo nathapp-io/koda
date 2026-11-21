@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { resolveContext, clearApiKey } from '../config';
+import { resolveContext, clearUsedCredential } from '../config';
 import {
   authControllerMe,
   authControllerRegister,
@@ -76,22 +76,24 @@ export function authCommand(program: Command): void {
 
   auth
     .command('logout')
-    .description('Revoke all outstanding access and refresh tokens for the current user')
+    .description('Send a logout request for the current credential')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        await withContext({}, { requireProject: false });
+        const ctx = await withContext({}, { requireProject: false });
 
         await authControllerLogout();
-        clearApiKey();
+        const cleared = clearUsedCredential(ctx);
 
         if (options.json) {
           console.log(JSON.stringify({ success: true }, null, 2));
         } else {
-          console.log(
-            'Logged out. Server-side tokens revoked and the cached API key cleared from global config ' +
-              '(profile-, project-, or env-provided keys are not affected).',
-          );
+          const action = cleared === 'global'
+            ? 'Cleared the saved global key.'
+            : typeof cleared === 'object'
+              ? `Cleared the saved key for profile "${cleared.profileName}".`
+              : 'No saved credential was cleared.';
+          console.log(`Logout request accepted. ${action}`);
         }
         process.exit(0);
       } catch (err: unknown) {

@@ -72,6 +72,16 @@ type TicketLink = {
 const FAILED_STATES = new Set(['FAILED', 'ESCALATED', 'CRASHED']);
 
 /**
+ * Render a supplied-but-invalid ticket field for a validation message. An empty
+ * string or a non-string JSON value (`false`, `0`) would otherwise print as
+ * nothing, so show its JSON form and let the message name what was rejected.
+ */
+function describeSuppliedValue(value: unknown): string {
+  if (typeof value === 'string' && value !== '') return value;
+  return JSON.stringify(value) ?? String(value);
+}
+
+/**
  * Fleet C9 §5: the ticket's fleet jobs. A courtesy section: any failure (an older API without the
  * endpoint, a network error) shows the ticket without it rather than failing `ticket show`.
  */
@@ -113,26 +123,35 @@ export function ticketCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        if (!options.type || !options.title) {
-          handleApiError(new Error('Missing required options: --type and --title are required'), { validationError: true });
+        const effectiveType = options.type ?? ctx.defaults?.type;
+        // `unknown` on purpose: a project default is untrusted JSON, so a supplied
+        // value is validated even when it is falsy (`''`, `false`, `0`). Only an
+        // absent value (undefined/null) leaves the priority unspecified.
+        const effectivePriority: unknown = options.priority ?? ctx.defaults?.priority;
+        if (!options.title) {
+          return handleApiError(new Error('Missing required option: --title is required'), { validationError: true });
+        }
+        if (!effectiveType) {
+          return handleApiError(new Error('Missing required option: --type is required'), { validationError: true });
         }
 
         const validTypes = ['BUG', 'ENHANCEMENT', 'TASK', 'QUESTION'];
-        if (!validTypes.includes(options.type)) {
-          handleApiError(new Error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`), { validationError: true });
+        if (!validTypes.includes(effectiveType)) {
+          return handleApiError(new Error(`Invalid type ${effectiveType}. Valid values: ${validTypes.join(', ')}`), { validationError: true });
         }
 
         const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-        if (options.priority && !validPriorities.includes(options.priority)) {
-          handleApiError(new Error(`Invalid priority ${options.priority}. Valid values: ${validPriorities.join(', ')}`), { validationError: true });
+        const prioritySupplied = effectivePriority !== undefined && effectivePriority !== null;
+        if (prioritySupplied && !validPriorities.includes(effectivePriority as string)) {
+          return handleApiError(new Error(`Invalid priority ${describeSuppliedValue(effectivePriority)}. Valid values: ${validPriorities.join(', ')}`), { validationError: true });
         }
 
         const response = await ticketsControllerCreate({
           body: {
-            type: options.type as 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION',
+            type: effectiveType as 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION',
             title: options.title,
             description: options.desc,
-            priority: options.priority,
+            priority: effectivePriority as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | undefined,
           },
           path: { slug: ctx.projectSlug },
         });

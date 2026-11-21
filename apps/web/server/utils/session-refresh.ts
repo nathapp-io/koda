@@ -1,4 +1,4 @@
-import { ACCESS_COOKIE, REFRESH_COOKIE } from './api'
+import { ACCESS_COOKIE, readJwtExpiry, REFRESH_COOKIE } from './api'
 
 interface SessionRefreshRequest {
   node: {
@@ -36,7 +36,13 @@ export function shouldRefreshSession(event: SessionRefreshRequest): boolean {
   if (!accept.toLowerCase().includes('text/html')) return false
 
   const cookies = cookieValues(req.headers.cookie)
-  return !cookies.has(ACCESS_COOKIE) && cookies.has(REFRESH_COOKIE)
+  if (!cookies.has(REFRESH_COOKIE)) return false
+
+  const accessToken = cookies.get(ACCESS_COOKIE)
+  if (accessToken === undefined) return true
+
+  const expiry = readJwtExpiry(accessToken)
+  return expiry !== undefined && expiry <= Date.now() / 1000
 }
 
 /** Replace auth cookies in a request header while keeping every other cookie value. */
