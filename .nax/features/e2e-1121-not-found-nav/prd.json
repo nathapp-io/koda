@@ -3,7 +3,7 @@
   "feature": "e2e-1121-not-found-nav",
   "branchName": "feat/e2e-1121-not-found-nav",
   "createdAt": "2026-11-21T16:51:25.362Z",
-  "updatedAt": "2026-11-21T17:35:36.134Z",
+  "updatedAt": "2026-11-21T17:41:24.098Z",
   "userStories": [
     {
       "id": "US-001",
@@ -350,14 +350,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A pure bounded parser and computed command extend an existing palette without a new integration or changes to authorization gates."
+        "reasoning": "A pure bounded parser and computed command extend an existing palette without a new integration or changes to authorization gates.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/CommandPalette.vue",
@@ -378,7 +381,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3ea7e630336eff78e3cead34b86b1570dfacc38e"
     },
     {
       "id": "US-007",
