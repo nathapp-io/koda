@@ -137,6 +137,7 @@ const VUE_HELPERS = ['ref', 'computed', 'reactive', 'watch', 'onMounted', 'onBef
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'clearError', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta', 'useRegistrationStatus',
+  'defineNuxtRouteMiddleware', 'abortNavigation', 'createError',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectMembers',
   // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).
@@ -166,6 +167,7 @@ const NUXT_AUTO_IMPORTS = [
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
 const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = {
   definePageMeta: () => undefined,
+  useHead: () => undefined,
   // Thread pages auto-import useThread/useThreads (US-004): tests override them through globals.
   useThread: undefined,
   useThreads: undefined,

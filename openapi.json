@@ -3698,6 +3698,16 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive substring of the ticket title",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3705,7 +3715,7 @@
             "description": "Page of tickets: { total, current, size, hasNext, hasPrev, records }"
           },
           "400": {
-            "description": "Invalid filter or paging parameter"
+            "description": "Invalid filter, search or paging parameter"
           },
           "403": {
             "description": "ticket.read is missing"

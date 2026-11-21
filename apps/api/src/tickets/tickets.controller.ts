@@ -196,7 +196,7 @@ export class TicketsController {
   @Requires('ticket.read')
   @ApiOperation({ summary: 'List tickets for a project (paginated)' })
   @ApiResponse({ status: 200, description: 'Page of tickets: { total, current, size, hasNext, hasPrev, records }' })
-  @ApiResponse({ status: 400, description: 'Invalid filter or paging parameter' })
+  @ApiResponse({ status: 400, description: 'Invalid filter, search or paging parameter' })
   @ApiResponse({ status: 403, description: 'ticket.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async findAll(
@@ -204,8 +204,10 @@ export class TicketsController {
     @Query() rawQuery: ListTicketsQuery,
     @Principal() principal?: KodaPrincipal,
   ) {
-    const { current, size, ...filters } = parseQuery(ListTicketsQuery, rawQuery);
-    const page = await this.ticketsService.findAll(slug, resolveSelfAssignee(filters, principal), { current, size });
+    const { current, size, search, ...filters } = parseQuery(ListTicketsQuery, rawQuery);
+    const titleContains = search?.trim();
+    const listFilters = titleContains ? { ...filters, titleContains } : filters;
+    const page = await this.ticketsService.findAll(slug, resolveSelfAssignee(listFilters, principal), { current, size });
     return JsonResponse.Ok(toPageResult(page));
   }
 

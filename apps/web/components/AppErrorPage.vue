@@ -1,6 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 const props = defineProps<{ error: { statusCode: number; data?: { redirect?: string } | null } }>()
 const { t } = useI18n()
+const heading = computed(() => {
+  if (props.error.statusCode === 503) return t('errorPage.unavailable.title')
+  if (props.error.statusCode === 404) return t('errorPage.notFound.title')
+  return t('errorPage.generic.title', { statusCode: props.error.statusCode })
+})
+useHead(() => ({ title: `${heading.value} · Koda` }))
 
 /**
  * Review-1118 US-005 post-review: the retry must ask the API again. A protected route's outage page comes from Nuxt's
@@ -53,6 +61,13 @@ function goHome() {
         <p class="text-muted-foreground">{{ t('errorPage.unavailable.body') }}</p>
         <button data-testid="error-page-retry" class="rounded-md bg-primary px-4 py-2 text-primary-foreground" @click="retry">
           {{ t('errorPage.retry') }}
+        </button>
+      </template>
+      <template v-else-if="error.statusCode === 404">
+        <h1 data-testid="error-page-not-found-title" class="text-3xl font-semibold">{{ t('errorPage.notFound.title') }}</h1>
+        <p data-testid="error-page-not-found-body" class="text-muted-foreground">{{ t('errorPage.notFound.body') }}</p>
+        <button data-testid="error-page-home" class="rounded-md bg-primary px-4 py-2 text-primary-foreground" @click="goHome">
+          {{ t('errorPage.home') }}
         </button>
       </template>
       <template v-else>

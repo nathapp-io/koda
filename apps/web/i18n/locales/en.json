@@ -126,10 +126,13 @@
   "palette": {
     "trigger": "Search or jump to…",
     "title": "Command palette",
-    "description": "Search pages and projects, then press Enter to open.",
-    "placeholder": "Type a page or project name…",
+    "description": "Search pages, projects and tickets, then press Enter to open.",
+    "placeholder": "Type a page, project or ticket…",
+    "openTicket": "Open ticket {ref}",
     "empty": "No matches.",
     "project": "Project",
+    "ticket": "Ticket",
+    "searching": "Searching tickets…",
     "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {
@@ -367,6 +370,11 @@
     }
   },
   "tickets": {
+    "notFound": {
+      "title": "Ticket not found",
+      "body": "{ref} does not exist in this project, or it was deleted.",
+      "back": "Back to board"
+    },
     "filter": { "search": "Filter by ref or title…", "priority": "Priority", "clear": "Clear filters", "showing": "Showing {n} of {total}" },
     "newTicket": "New Ticket",
     "loadMore": "Load more",
@@ -3081,6 +3089,10 @@
     }
   },
   "errorPage": {
+    "notFound": {
+      "title": "Page not found",
+      "body": "This page or project does not exist, or it was removed."
+    },
     "unavailable": {
       "title": "Koda is unavailable",
       "body": "We could not verify your session. Please try again."

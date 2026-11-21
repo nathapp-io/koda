@@ -8,6 +8,7 @@ import TicketWatchButton from '~/components/TicketWatchButton.vue'
 import { isLinkableTicket, ticketDispatchQuery } from '~/lib/fleet-ticket-links'
 import { createDebouncer } from '~/lib/debounce'
 import { apiPath } from '~/lib/api-path'
+import { isNotFoundError } from '~/lib/not-found'
 
 definePageMeta({ layout: 'default' })
 
@@ -64,7 +65,15 @@ const toast = useAppToast()
 
 const { data: ticketData, pending, error, refresh } = useAsyncData(
   `ticket-${slug}-${ref}`,
-  () => $api.get(apiPath`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
+  async () => {
+    try {
+      return await $api.get(apiPath`/projects/${slug}/tickets/${ref}`) as Ticket
+    }
+    catch (err: unknown) {
+      if (isNotFoundError(err)) return null
+      throw err
+    }
+  },
 )
 
 const { data: ticketLinksData } = useAsyncData(
@@ -84,6 +93,13 @@ const { data: allLabelsData } = useAsyncData(
 )
 
 const ticket = computed(() => ticketData.value ?? null)
+const ticketNotFound = computed(() => !pending.value && !error.value && ticketData.value === null)
+const pageTitle = computed(() => {
+  if (ticket.value) return `${ticket.value.ref} ${ticket.value.title} · Koda`
+  if (ticketNotFound.value) return `${t('tickets.notFound.title')} · Koda`
+  return `${ref} · Koda`
+})
+useHead(() => ({ title: pageTitle.value }))
 
 // Track 1 Slice 5: live updates for the open ticket. Never refresh(): it flips
 // `pending`, which swaps the page for LoadingState and unmounts an open edit form.
@@ -262,6 +278,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
   <div>
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
+    <NotFoundState
+      v-else-if="ticketNotFound"
+      :title="t('tickets.notFound.title')"
+      :body="t('tickets.notFound.body', { ref })"
+      :back-to="`/${slug}`"
+      :back-label="t('tickets.notFound.back')"
+    />
     <div v-else-if="ticket" class="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr] lg:items-start">
       <div class="min-w-0 space-y-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
         <div

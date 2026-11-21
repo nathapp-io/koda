@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globa
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
+import { useI18n as realUseI18n } from 'vue-i18n'
+import { mountSetup } from '../helpers/mount-sfc'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useApi.ts')
@@ -230,11 +232,14 @@ describe('H9: useApi merges (not replaces) caller headers at request time', () =
       public: { apiBaseUrl: '/api' },
       apiInternalUrl: 'http://localhost:3100',
     })
-    g.useI18n = () => ({ locale: ref('en') })
+    // Outside a component setup the locale comes from the Nuxt app's i18n composer, which is the
+    // only source a route middleware has (see resolveApiLocale).
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
   })
 
   afterEach(() => {
     g.__JEST_IS_SERVER__ = false
+    delete g.useNuxtApp
   })
 
   test('client-side request passes caller headers alongside locale headers', async () => {
@@ -276,7 +281,8 @@ describe('H9: useApi routes server-side calls through useRequestFetch', () => {
       public: { apiBaseUrl: '/api' },
       apiInternalUrl: 'http://localhost:3100',
     })
-    g.useI18n = () => ({ locale: ref('en') })
+    // No component instance here: the app composer is where the locale comes from.
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
     // SSR reads the client IP resolved by server/middleware/client-ip.ts.
     g.useRequestEvent = () => ({ context: { clientIp: '203.0.113.20' } })
   })
@@ -285,6 +291,7 @@ describe('H9: useApi routes server-side calls through useRequestFetch', () => {
     g.__JEST_IS_SERVER__ = false
     g.useRequestFetch = undefined
     delete g.useRequestEvent
+    delete g.useNuxtApp
   })
 
   test('source conditionally selects useRequestFetch on the server', () => {
@@ -594,5 +601,71 @@ describe('M22: retry wiring source assertions', () => {
   test('the refresh call is made through useAuth (shared state, no duplicate refresh logic)', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toMatch(/useAuth\(\)/)
+  })
+})
+
+/**
+ * B1: `useI18n()` refuses to run outside a component setup, which is where a route middleware calls
+ * `useApi()` (`middleware/project.global.ts`). The locale therefore resolves in two steps — the
+ * component's composer when there is one, the Nuxt app's `$i18n` composer otherwise — and a request
+ * issued before the i18n plugin has run names no locale at all.
+ */
+describe('B1: the API locale resolves with and without a component instance', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    delete g.useNuxtApp
+    delete g.useRuntimeConfig
+    delete g.$fetch
+    delete g.useI18n
+  })
+
+  test('outside a component setup it reads the Nuxt app composer, so the real useI18n is never called', async () => {
+    // The real vue-i18n composable, which throws SyntaxError when there is no instance to reach.
+    g.useI18n = realUseI18n
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('zh') } })
+
+    const mod = await import(`${composablePath}`)
+
+    expect(mod.resolveApiLocale()?.value).toBe('zh')
+  })
+
+  test('inside a component setup it keeps the reactive composer useI18n() returns', async () => {
+    const locale = ref('zh')
+    g.useI18n = () => ({ locale })
+    // A different locale on the app composer proves which one won.
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
+
+    const mod = await import(`${composablePath}`)
+    let resolved: { value: string } | undefined
+    const host = mountSetup(() => { resolved = mod.resolveApiLocale() })
+
+    expect(resolved?.value).toBe('zh')
+    // A real ref, not a snapshot: switching the language mid-session changes the header.
+    locale.value = 'en'
+    expect(resolved?.value).toBe('en')
+    host.unmount()
+  })
+
+  test('before the i18n plugin has run it resolves no locale, and the request names none', async () => {
+    // The first navigation runs inside the pages router plugin, before `$i18n` exists; guessing a
+    // language would override the browser's own Accept-Language, which survives without a header.
+    g.useI18n = realUseI18n
+    g.useNuxtApp = () => ({})
+
+    const mod = await import(`${composablePath}`)
+    expect(mod.resolveApiLocale()).toBeUndefined()
+
+    const fetchMock = makeFetchMock()
+    g.$fetch = fetchMock
+    await mod.useApi().$api.get('/projects')
+    const [, options] = fetchMock.mock.calls[0]
+    expect((options?.headers ?? {}) as Record<string, string>).toEqual({})
   })
 })
