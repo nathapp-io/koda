@@ -532,6 +532,25 @@ describe('config', () => {
       expect(result.projectSlug).toBe('override');
     });
 
+    it('carries ticket defaults from project config into the resolved context', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({
+          projectSlug: 'my-project', defaults: { type: 'TASK', priority: 'HIGH' },
+        }),
+        getConfig: makeGlobalConfig({ apiKey: 'stored-key-12345' }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.defaults).toEqual({ type: 'TASK', priority: 'HIGH' });
+    });
+
+    it('keeps defaults absent for older project configs', async () => {
+      const result = await resolveContext({}, {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project' }),
+        getConfig: makeGlobalConfig({}),
+      });
+      expect(result.defaults).toBeUndefined();
+    });
+
     it('AC2: projectSlug comes from .koda/config.json when no flag provided', async () => {
       const deps: ResolveContextDeps = {
         findProjectConfig: makeProjectConfigDep({ projectSlug: 'from-project-config' }),

@@ -50,6 +50,10 @@ export interface Config {
 
 export interface ProjectConfig {
   projectSlug?: string;
+  defaults?: {
+    type?: string;
+    priority?: string;
+  };
   apiUrl?: string;
   apiKey?: string;
   profile?: string;
@@ -70,6 +74,7 @@ export interface ResolvedContext {
   apiKey: string;
   apiUrl: string;
   credential: CredentialProvenance;
+  defaults?: ProjectConfig['defaults'];
 }
 
 export type LogoutCleanup = 'global' | { profileName: string } | 'none';
@@ -222,7 +227,7 @@ export async function resolveContext(
 
   const projectSlug = flags.projectSlug ?? process.env.KODA_PROJECT_SLUG ?? projectConfig?.projectSlug;
 
-  return { projectSlug, apiKey, apiUrl, credential };
+  return { projectSlug, apiKey, apiUrl, credential, defaults: projectConfig?.defaults };
 }
 
 export function maskApiKey(apiKey: string): string {
