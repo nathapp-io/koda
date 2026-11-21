@@ -76,6 +76,8 @@ const now = new Date('2026-11-15T12:00:00Z');
       await withTestActor({ type: 'RUNNER', id: runnerId }, () => app.get(BundleService).upload({ runnerId, jobId: id, leaseEpochRaw: String(run.leaseEpoch), sha256Header: createHash('sha256').update(body).digest('hex'), contentType: 'application/gzip', contentLength: String(body.length), body: Readable.from([body]) }));
       await app.get(LogFallbackService).idle();
     } finally { kick.mockRestore(); }
+    // Ingest claims only terminal jobs; simulate the normal runner transition after bundle upload.
+    await db.fleetJob.update({ where: { id }, data: { state: 'COMPLETED' } });
     await ingest.drain(now);
     await db.fleetJob.update({ where: { id }, data: { state: originalState } });
   }
