@@ -220,6 +220,19 @@ export class ThreadJobRun {
   private sessionClose: Promise<void> | null = null;
   /** B3b-R3: set synchronously when a close or a fail is requested; a later reason is ignored. */
   private closing = false;
+  /** The close's reason and whether it failed the session. The first close wins; a later one is ignored. */
+  private closeReason: ThreadCloseReason | typeof SESSION_ERROR = 'closed';
+  private closeFailed = false;
+  /** The one close owner: it starts once, and it waits for the startup window before it seals the stream. */
+  private closeStarted = false;
+  /**
+   * The RUNNING-to-stream-ready window. It opens before the row goes RUNNING and closes when the stream is ready
+   * (or when its setup failed), so a close that lands inside it waits for the stream instead of sealing none.
+   */
+  private startup: Promise<void> | null = null;
+  private settleStartup: (() => void) | null = null;
+  /** The window's failure: a stream that never came up owns the row, and the run fails with it. */
+  private startupFailure: string | null = null;
   /**
    * US-011: the row whose provider keys this run serves. Kept here because `abandon` deletes the journal row before the
    * run ends, and the final release still needs the job it releases.
@@ -381,8 +394,12 @@ export class ThreadJobRun {
     // turn (or, with no initial message, the idle timer) begins.
     this.session = opened.session;
     this.maxCostUsd = Number(row.assign.maxCostUsd);
+    // The window opens before the row goes RUNNING: a cancel that lands at the RUNNING notification finds it open
+    // and waits for the stream, instead of sealing one that does not exist yet.
+    this.openStartupWindow();
     this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
-    await this.openStream(thread, opened.resumed, prepared.stale === true);
+    await this.createStream(thread, opened.resumed, prepared.stale === true);
+    if (this.afterStartup() === 'stop') { await this.waitForEnd(); return; }
     this.livePublish = new ThreadLivePublish({
       publish: this.deps.host.publish ?? publishThreadDocs,
       input: { git: this.deps.host.git, mutex: publishInputMutex(this.deps.mutex), repoKey: row.repoKey, worktree: prepared.worktree,
@@ -451,8 +468,12 @@ export class ThreadJobRun {
     }
     this.session = opened.session;
     this.maxCostUsd = Number(row.assign.maxCostUsd);
+    // The window opens before the row goes RUNNING: a cancel that lands at the RUNNING notification finds it open
+    // and waits for the stream, instead of sealing one that does not exist yet.
+    this.openStartupWindow();
     this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
-    await this.openStream(thread, opened.resumed, false);
+    await this.createStream(thread, opened.resumed, false);
+    if (this.afterStartup() === 'stop') { await this.waitForEnd(); return; }
     this.startHeartbeat();
     this.startInitialTurn(thread);
     await this.waitForEnd();
@@ -693,6 +714,55 @@ export class ThreadJobRun {
   }
 
   /**
+   * The window opens before the row goes RUNNING: a cancel that lands at the RUNNING notification finds it open
+   * and waits for the stream, instead of sealing one that does not exist yet.
+   */
+  private openStartupWindow(): void {
+    this.startup = new Promise<void>((resolve) => { this.settleStartup = resolve; });
+  }
+
+  /** The window closes: the stream is ready, or its failure is recorded. */
+  private closeStartupWindow(): void {
+    const settle = this.settleStartup;
+    this.settleStartup = null;
+    settle?.();
+  }
+
+  /** The window settles before the close seals the stream. It never rejects: a failure is recorded, not thrown. */
+  private async awaitStartup(): Promise<void> {
+    await this.startup;
+  }
+
+  /**
+   * The stream, inside the window a close waits for. Its failure is recorded rather than thrown: the close owner
+   * reads it and fails the run the way any startup failure does, exactly once.
+   */
+  private async createStream(thread: ThreadAssign, resumed: boolean, stale: boolean): Promise<void> {
+    try {
+      await this.openStream(thread, resumed, stale);
+    } catch (error) {
+      this.startupFailure = errorMessage(error);
+      this.deps.log.error('thread stream could not be opened', { jobId: this.jobId, error: this.startupFailure });
+    } finally {
+      this.closeStartupWindow();
+    }
+  }
+
+  /**
+   * What the run does once the stream is ready. A close that landed inside the window owns the row from there; a
+   * startup failure fails it; a cancel that arrived without a close ends it. `stop` means the run has nothing left
+   * to start: no initial input, no idle timer and no heartbeat. The decision is synchronous, so nothing can slip
+   * between it and the turn it guards.
+   */
+  private afterStartup(): 'continue' | 'stop' {
+    if (this.halted) return 'stop';
+    if (this.closing) return 'stop';
+    if (this.startupFailure !== null) { this.requestFailure(); return 'stop'; }
+    if (this.cancelRequested()) { this.requestClose('cancelled'); return 'stop'; }
+    return 'continue';
+  }
+
+  /**
    * Step 7: the stream file is recreated — it is keyed by job id only, so a requeued epoch must never re-ship
    * the lines of the epoch it replaces — then registered with the shipper and announced to the server.
    */
@@ -702,6 +772,9 @@ export class ThreadJobRun {
     await mkdir(jobDir, { recursive: true, mode: 0o700 });
     await chmod(jobDir, 0o700);   // D93: a requeued epoch reuses the directory, which keeps its old mode
     await rm(threadPath, { force: true });
+    // A halt that landed while the directory was prepared stops the run here: it registers nothing and announces
+    // nothing, so a halted run leaves no stream behind and no log registration to ship.
+    if (this.halted) return;
     const writer = new ThreadEventWriter({
       filePath: threadPath,
       jobId: this.jobId,
@@ -817,6 +890,8 @@ export class ThreadJobRun {
   /** A RUNNING run stamps `heartbeatAt` every `threadHeartbeatMs`, until the close stops it. */
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    // A run that has already ended (a close that landed while the stream was coming up) never starts one.
+    if (this.ended || this.closing || this.halted) return;
     const abort = new AbortController();
     this.heartbeatAbort = abort;
     void this.heartbeat(abort.signal);
@@ -835,6 +910,8 @@ export class ThreadJobRun {
       // heartbeat, and re-arming it would spin.
       if (signal.aborted || this.deps.now().getTime() < dueAtMs) return;
       if (this.halted) return;
+      // A run that has ended stamps nothing more: its close already sealed the row.
+      if (this.ended) return;
       try {
         this.events.snapshot({ heartbeatAt: this.deps.now().toISOString() });
       } catch (error) {
@@ -854,13 +931,40 @@ export class ThreadJobRun {
   private requestClose(reason: ThreadCloseReason): void {
     if (this.closing || this.halted) return;
     this.closing = true;
-    void this.finishRun(reason, false);
+    this.closeReason = reason;
+    this.closeFailed = false;
+    this.startClose();
   }
 
   private async failSession(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    await this.finishRun(SESSION_ERROR, true);
+    this.closeReason = SESSION_ERROR;
+    this.closeFailed = true;
+    this.startClose();
+  }
+
+  /**
+   * A startup failure owns the row: the run fails the way a failure after RUNNING does, and it is written once.
+   * A close that is already running keeps its own reason: the failure is read by the close owner, which replaces
+   * that reason with the failure.
+   */
+  private requestFailure(): void {
+    if (this.closing || this.halted) return;
+    this.closing = true;
+    this.closeReason = SESSION_ERROR;
+    this.closeFailed = true;
+    this.startClose();
+  }
+
+  /**
+   * The one close owner. It waits for the RUNNING-to-stream-ready window, so a close that landed inside it seals
+   * the stream that the window produced instead of one that does not exist yet.
+   */
+  private startClose(): void {
+    if (this.closeStarted) return;
+    this.closeStarted = true;
+    void this.finishRun(this.closeReason, this.closeFailed);
   }
 
   /**
@@ -870,6 +974,17 @@ export class ThreadJobRun {
    */
   private async finishRun(reason: ThreadCloseReason | typeof SESSION_ERROR, failed: boolean): Promise<void> {
     try {
+      // The RUNNING-to-stream-ready window owns the stream while it is open: the close waits for it, so a cancel
+      // that lands there seals a stream that exists rather than none.
+      await this.awaitStartup();
+      // A stream that never came up owns the row: the run fails, and a cancel that was pending does not get a
+      // terminal transition of its own.
+      const startupFailure = this.startupFailure;
+      if (startupFailure !== null) {
+        this.events.lifecycle('error', `runner error: ${startupFailure}`);
+        reason = SESSION_ERROR;
+        failed = true;
+      }
       this.stopIdle();
       // A halt that lands before the close does: the row is left as it stands and nothing more is written.
       if (this.halted) return;

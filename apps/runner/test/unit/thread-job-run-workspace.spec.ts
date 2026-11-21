@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
 import type { AgentSession } from '@nathapp/nax-agent';
@@ -9,6 +9,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { ThreadJobRun } from '../../src/thread/thread-job-run';
 import { threadScratchDir } from '../../src/thread/thread-paths';
 import { assignFor } from '../helpers/assign';
+import { manualClock } from '../helpers/manual-clock';
 import { waitFor } from '../helpers/wait';
 
 /**
@@ -62,8 +63,14 @@ function setup() {
     async ensureSkills() { calls.push('ensureSkills'); return { ok: true as const }; },
   };
   const logs = { register() { state.streamRegistered = true; }, wake() {}, async drain() { return 'drained' as const; }, stopJob() {} };
-  const deps = { journal, log: createMemoryLogger(), now: () => new Date('2026-01-01T00:00:00.000Z'), sleep: async () => undefined, mutex: { acquire: async () => () => undefined }, logs, host, tuning };
-  return { journal, calls, state, run: new ThreadJobRun(deps, jobId, leaseEpoch) };
+  const clock = manualClock(Date.parse('2026-01-01T00:00:00.000Z'));
+  const deps = { journal, log: createMemoryLogger(), now: () => new Date(clock.nowMs()), sleep: clock.sleep, mutex: { acquire: async () => () => undefined }, logs, host, tuning };
+  return { journal, calls, state, clock, run: new ThreadJobRun(deps, jobId, leaseEpoch) };
+}
+
+function stateEvents(journal: Journal): string[] {
+  return journal.pendingEvents(jobId, leaseEpoch, 100).filter((event) => event.type === 'state')
+    .map((event) => (event.payload as { to: string }).to);
 }
 
 async function running() {
@@ -110,5 +117,33 @@ describe('ThreadJobRun WORKSPACE session (US-007)', () => {
     const ctx = await running();
     expect(ctx.run.command('THREAD_PUBLISH', {})).toEqual({ result: 'rejected', detail: 'not_repo_thread' });
     await ctx.finish();
+  });
+});
+
+describe('ThreadJobRun WORKSPACE stream startup and cancellation (US-004)', () => {
+  test('US-004 AC-2: a cancel at the RUNNING notification seals the workspace stream and leaves no later event', async () => {
+    const context = setup();
+    const jobDir = join(workspaceRoot, '.jobs', jobId);
+    await mkdir(jobDir, { recursive: true });
+    let delivered = false;
+    context.journal.onWrite(() => {
+      if (delivered || context.journal.getJob(jobId, leaseEpoch)?.state !== 'RUNNING') return;
+      delivered = true;
+      context.run.requestCancel();
+    });
+    await context.run.start('prepare');
+    const lines = (await readFile(join(jobDir, 'thread-events.jsonl'), 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as { type: string; reason?: string });
+    expect(lines.map((line) => line.type)).toEqual(['session_started', 'session_closed']);
+    expect(lines[1]?.reason).toBe('cancelled');
+    expect(stateEvents(context.journal)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    expect(context.journal.getJob(jobId, leaseEpoch)?.doneAt).not.toBeNull();
+    const stamped = context.journal.pendingEvents(jobId, leaseEpoch, 100).length;
+    // Two heartbeat intervals and the idle expiry pass after the run ended: nothing more is written.
+    context.clock.advance(tuning.threadHeartbeatMs * 2 + tuning.threadIdleMs);
+    await Bun.sleep(50);
+    expect(context.journal.pendingEvents(jobId, leaseEpoch, 100).length).toBe(stamped);
+    expect(stateEvents(context.journal)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    context.journal.close();
   });
 });
