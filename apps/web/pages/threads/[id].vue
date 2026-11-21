@@ -74,7 +74,11 @@ async function runAction(action: () => Promise<ThreadActionResult>): Promise<voi
   if (!result.ok) toast.error(extractApiError(result.error))
 }
 
-const onSend = (text: string): Promise<void> => runAction(() => controller.send(text))
+const onSend = async (text: string): Promise<ThreadActionResult> => {
+  const result = await controller.send(text)
+  if (!result.ok) toast.error(extractApiError(result.error))
+  return result
+}
 const onStop = (): Promise<void> => runAction(() => controller.stopTurn())
 const onEndSession = (): Promise<void> => runAction(() => controller.endSession())
 const onAnswer = (requestId: string, text: string): Promise<void> => runAction(() => controller.answer(requestId, text))
@@ -118,7 +122,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
       <FleetThreadsThreadComposer
         :composer-state="composerState(controller.thread.value, controller.messages.value, { isCreator })"
         :turn-running="isTurnRunning(controller.messages.value)"
-        @send="onSend"
+        :send="onSend"
         @stop="onStop"
       />
     </template>

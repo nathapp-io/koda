@@ -128,7 +128,10 @@ function marker(name: string, props: string[] = []): Component {
     setup(markerProps: Record<string, unknown>) {
       return () => h('div', {
         'data-testid': name,
-        ...Object.fromEntries(props.map(prop => [`data-prop-${prop}`, JSON.stringify(markerProps[prop] ?? null)])),
+        ...Object.fromEntries(props.map((prop) => {
+          const value = markerProps[prop]
+          return [`data-prop-${prop}`, typeof value === 'function' ? 'function' : JSON.stringify(value ?? null)]
+        })),
       })
     },
   })
@@ -144,8 +147,8 @@ const MARKERS: Record<string, Component> = {
   FleetThreadsThreadKodaToolsNotice: marker('page-thread-koda-tools-notice'),
   ThreadTimeline: marker('page-thread-timeline', ['slug']),
   FleetThreadsThreadTimeline: marker('page-thread-timeline', ['slug']),
-  ThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning']),
-  FleetThreadsThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning']),
+  ThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning', 'send']),
+  FleetThreadsThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning', 'send']),
   ThreadActionBar: marker('page-thread-action-bar'),
   FleetThreadsThreadActionBar: marker('page-thread-action-bar'),
   ThreadStaleBanner: marker('page-thread-stale-banner'),
@@ -266,6 +269,7 @@ function mountPage(over: {
   const post = jest.fn(async (path: string, body?: unknown) => {
     posts.push({ path, body })
     if (path === '/threads/t1/messages' && over.sendError !== undefined) throw over.sendError
+    if (path === '/threads/t1/messages') return { message: message({ content: String((body as { text?: unknown } | undefined)?.text ?? '') }) }
     return {}
   })
   const patch = jest.fn(async () => ({}))
@@ -501,6 +505,7 @@ describe('US-006 AC-7..AC-9: pages/threads/[id].vue — send and archive', () =>
     await m.settle()
 
     expect(m.posts).toEqual([{ path: '/threads/t1/messages', body: { text: 'hello', clientMessageId: expect.any(String) } }])
+    expect(byTestId(m.app, 'thread-composer-input')?.props['model-value']).toBe('')
     m.app.unmount()
   })
 

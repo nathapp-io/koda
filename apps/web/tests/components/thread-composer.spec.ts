@@ -10,12 +10,13 @@ import type { ComposerReason } from '~/lib/thread-types'
  * composer and the viewer's read-only note.
  *
  * Component contract (web context §4.62): props `composerState: { canSend, reason }`
- * (`reason` is a `ComposerReason`: a `ThreadSendRefusal` or `readOnly`) and
- * `turnRunning: boolean`; emits `send(text)` and `stop`. Enter sends the trimmed draft,
- * Shift+Enter inserts a newline (never sends), whitespace sends nothing, a refused
- * composerState renders the `fleet.threads.refusal.<reason>` text, a readOnly state
- * renders `fleet.threads.composer.readOnly` instead of a textarea, and a running turn
- * renders a Stop control that emits `stop`.
+ * (`reason` is a `ComposerReason`: a `ThreadSendRefusal` or `readOnly`),
+ * `turnRunning: boolean` and a `send(text)` promise callback; emits `stop` only. Enter
+ * sends the trimmed draft and clears it on success, Shift+Enter inserts a newline (never
+ * sends), whitespace sends nothing, a refused composerState renders the
+ * `fleet.threads.refusal.<reason>` text, a readOnly state renders
+ * `fleet.threads.composer.readOnly` instead of a textarea, and a running turn renders a
+ * Stop control that emits `stop`.
  *
  * The textarea is driven the same way the MarkdownEditor spec drives its textarea stub:
  * the value is typed through the input/update handler the composer binds, then Enter is
@@ -31,11 +32,11 @@ interface ComposerState {
 
 const composerFile = webFile('components', 'fleet', 'threads', 'ThreadComposer.vue')
 
-const mountComposer = (composerState: ComposerState, turnRunning = false): Mounted =>
+const mountComposer = (composerState: ComposerState, send: (text: string) => Promise<{ ok: boolean }> = async () => ({ ok: true }), turnRunning = false, toastError = jest.fn()): Mounted =>
   mountSfc(composerFile, {
-    props: { composerState, turnRunning },
+    props: { composerState, send, turnRunning },
     components: uiStubs,
-    globals: { useI18n: () => i18nStub() },
+    globals: { useI18n: () => i18nStub(), useAppToast: () => ({ error: toastError }) },
   })
 
 const settle = async (): Promise<void> => {
@@ -88,25 +89,42 @@ function actionButton(app: Mounted, key: string): FakeNode | undefined {
 }
 
 describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
-  test('AC1: pressing Enter in a textarea holding hello emits send with hello', async () => {
-    const app = mountComposer({ canSend: true, reason: null })
+  test('AC-1: successful send clears the draft and does not render an error', async () => {
+    const send = jest.fn(async () => ({ ok: true }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
 
     typeText(app, 'hello')
     pressEnter(app)
     await settle()
 
-    expect(app.emitted('send')).toEqual([['hello']])
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledWith('hello')
+    expect(textarea(app)?.props['model-value']).toBe('')
+    expect(app.one('[data-testid="thread-composer-error"]')).toBeUndefined()
+    app.unmount()
+  })
+
+  test('AC-2: refused send preserves draft and re-enables the button', async () => {
+    const send = jest.fn(async () => ({ ok: false, error: new Error('refused') }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
+    typeText(app, 'hello')
+    pressEnter(app)
+    await settle()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(textarea(app)?.props['model-value']).toBe('hello')
+    expect(app.one('[data-testid="thread-send"]')?.props.disabled).toBe(false)
     app.unmount()
   })
 
   test('AC2: pressing Shift+Enter inserts a newline and emits no send', async () => {
-    const app = mountComposer({ canSend: true, reason: null })
+    const send = jest.fn(async () => ({ ok: true }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
 
     typeText(app, 'hello')
     pressEnter(app, true)
     await settle()
 
-    expect(app.emitted('send')).toEqual([])
+    expect(send).not.toHaveBeenCalled()
     // The draft holds the newline (US-007: "Shift+Enter inserts a newline"), so a later
     // Enter sends the multi-line text rather than nothing. The stub forwards the
     // `model-value` attr kebab-cased (the fake renderer's patchProp key).
@@ -114,30 +132,68 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     typeText(app, 'hello\nworld')
     pressEnter(app)
     await settle()
-    expect(app.emitted('send')).toEqual([['hello\nworld']])
+    expect(send).toHaveBeenCalledWith('hello\nworld')
     app.unmount()
   })
 
-  test('AC3: pressing Enter in a whitespace-only textarea emits no send', async () => {
-    const app = mountComposer({ canSend: true, reason: null })
+  test('AC-6: whitespace and over-length drafts never send; over-length shows an error', async () => {
+    const send = jest.fn(async () => ({ ok: true }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
 
     typeText(app, '   ')
     pressEnter(app)
     await settle()
 
-    expect(app.emitted('send')).toEqual([])
+    expect(send).not.toHaveBeenCalled()
+    typeText(app, 'é'.repeat(16_385))
+    pressEnter(app)
+    await settle()
+    expect(send).not.toHaveBeenCalled()
+    expect(app.text()).toContain('fleet.threads.message.tooLong')
     app.unmount()
   })
 
-  test('US-007: a draft over 32768 UTF-8 bytes emits no send and shows the tooLong error', async () => {
-    const app = mountComposer({ canSend: true, reason: null })
-
-    typeText(app, 'é'.repeat(16_385)) // 32_770 bytes — past the API's messageMaxBytes limit
+  test('AC-3: a pending send blocks Enter and click until it settles', async () => {
+    let resolveSend: ((result: { ok: boolean }) => void) | undefined
+    const send = jest.fn(() => new Promise<{ ok: boolean }>((resolve) => { resolveSend = resolve }))
+    const app = mountComposer({ canSend: true, reason: null }, send)
+    typeText(app, 'hello')
     pressEnter(app)
     await settle()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(app.one('[data-testid="thread-send"]')?.props.disabled).toBe(true)
+    pressEnter(app)
+    const button = app.one('[data-testid="thread-send"]')
+    if (typeof button?.props.onClick === 'function') (button.props.onClick as () => void)()
+    await settle()
+    expect(send).toHaveBeenCalledTimes(1)
+    resolveSend?.({ ok: true })
+    await settle()
+    app.unmount()
+  })
 
-    expect(app.emitted('send')).toEqual([])
-    expect(app.text()).toContain('fleet.threads.message.tooLong')
+  test('AC-4 and AC-10: rejection preserves the draft, enables send and does not toast', async () => {
+    const send = jest.fn(async () => { throw new Error('rejected') })
+    const toastError = jest.fn()
+    const app = mountComposer({ canSend: true, reason: null }, send, false, toastError)
+    typeText(app, 'hello')
+    pressEnter(app)
+    await settle()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(textarea(app)?.props['model-value']).toBe('hello')
+    expect(app.one('[data-testid="thread-send"]')?.props.disabled).toBe(false)
+    expect(toastError).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  test('AC-5: send enabled state follows non-whitespace content', async () => {
+    const app = mountComposer({ canSend: true, reason: null })
+    typeText(app, 'hello')
+    await settle()
+    expect(app.one('[data-testid="thread-send"]')?.props.disabled).toBe(false)
+    typeText(app, '   ')
+    await settle()
+    expect(app.one('[data-testid="thread-send"]')?.props.disabled).toBe(true)
     app.unmount()
   })
 
@@ -157,7 +213,7 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
   })
 
   test('AC7: with turnRunning true, clicking Stop emits stop', async () => {
-    const app = mountComposer({ canSend: true, reason: null }, true)
+    const app = mountComposer({ canSend: true, reason: null }, async () => ({ ok: true }), true)
 
     const stop = actionButton(app, 'fleet.threads.composer.stop')
     expect(stop).toBeDefined()

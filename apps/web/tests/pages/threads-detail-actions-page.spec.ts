@@ -1,8 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { defineComponent, h, ref } from 'vue'
-import type { VNodeChild } from 'vue'
-import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { loadSfc, mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { i18nStub, toastRecorder, uiStubs, type ToastRecorder } from '../helpers/fleet-harness'
 import { ApiError, extractApiError } from '../../composables/useApi'
@@ -68,23 +67,8 @@ const inertThreadStub = defineComponent({
  * `send` with the typed text (Shift+Enter never sends, whitespace never sends) and a Stop
  * control while `turnRunning`.
  */
-const ComposerStub = defineComponent({
-  name: 'ThreadComposerStub',
-  props: ['composerState', 'turnRunning'],
-  emits: ['send', 'stop'],
-  setup(_props, { attrs, emit }) {
-    let draft = ''
-    const children: VNodeChild[] = [
-      h('textarea', {
-        'data-testid': 'composer-input',
-        onInput: (event: { target: { value: string } }) => { draft = event.target.value },
-        onKeydown: (event: { key: string; shiftKey?: boolean }) => {
-          if (event.key === 'Enter' && !event.shiftKey && draft.trim().length > 0) emit('send', draft)
-        },
-      }),
-    ]
-    return () => h('div', { ...attrs, 'data-testid': 'thread-composer' }, children)
-  },
+const Composer = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), {
+  useI18n: () => i18nStub(),
 })
 
 /** A ThreadControls double: buttons that emit the three actions. */
@@ -143,8 +127,8 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
       FleetThreadsThreadQuestionCard: inertThreadStub,
       ThreadToolChip: inertThreadStub,
       FleetThreadsThreadToolChip: inertThreadStub,
-      ThreadComposer: ComposerStub,
-      FleetThreadsThreadComposer: ComposerStub,
+      ThreadComposer: Composer,
+      FleetThreadsThreadComposer: Composer,
       ThreadControls: ControlsStub,
       FleetThreadsThreadControls: ControlsStub,
       ThreadActionBar: ActionBarStub,
@@ -207,13 +191,13 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
 function typeAndEnter(app: { one: (s: string) => FakeNode | undefined }, text: string): boolean {
   const component = app.one('[data-testid="thread-composer"]')
   if (component === undefined) return false
-  const input = app.one('[data-testid="composer-input"]')
+  const input = app.one('[data-testid="thread-composer-input"]')
   if (input === undefined) return false
-  const onInput = input.props.onInput
+  const onUpdate = input.props['onUpdate:modelValue']
   const onKeydown = input.props.onKeydown
-  if (typeof onInput !== 'function' || typeof onKeydown !== 'function') return false
-  ;(onInput as (event: { target: { value: string } }) => void)({ target: { value: text } })
-  ;(onKeydown as (event: { key: string }) => void)({ key: 'Enter' })
+  if (typeof onUpdate !== 'function' || typeof onKeydown !== 'function') return false
+  ;(onUpdate as (value: string) => void)(text)
+  ;(onKeydown as (event: { key: string; shiftKey?: boolean; preventDefault: () => void }) => void)({ key: 'Enter', preventDefault: () => undefined })
   return true
 }
 
@@ -242,7 +226,9 @@ describe('US-007 AC5, AC12, AC15: pages/[project]/threads/[id].vue', () => {
     expect(typeAndEnter(m.app, 'hello')).toBe(true)
     await m.settle()
 
+    expect(m.send).toHaveBeenCalledTimes(1)
     expect(m.send).toHaveBeenCalledWith('hello')
+    expect(m.app.one('[data-testid="thread-composer-input"]')?.props['model-value']).toBe('')
     m.app.unmount()
   })
 
@@ -256,6 +242,7 @@ describe('US-007 AC5, AC12, AC15: pages/[project]/threads/[id].vue', () => {
     await m.settle()
 
     expect(m.toasts.errors).toEqual([extractApiError(error)])
+    expect(m.app.one('[data-testid="thread-composer-input"]')?.props['model-value']).toBe('hello')
     m.app.unmount()
   })
 
