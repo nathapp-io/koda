@@ -51,6 +51,12 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
     resultPrUrl: `https://gitlab.com/acme/gitlab-app/-/merge_requests/${mr}`, workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
   } });
 
+  /** A RUN job of the GitLab repo whose stored result URL is exactly the given one. */
+  const gitlabUrlJob = (feature: string, resultPrUrl: string) => db.fleetJob.create({ data: {
+    projectId, repoId: gitlabRepoId, command: 'RUN', feature, ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: principal.id,
+    resultPrUrl, workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+  } });
+
   it('AC-1: latestRunForPr finds a GitHub PR URL with a trailing slash', async () => {
     const job = await newUrlJob('variant-trailing-slash', 'https://github.com/acme/app/pull/51/');
     await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 51)).resolves.toBe(job.id);
@@ -109,6 +115,55 @@ import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma
       resultPrUrl: 'https://gitlab.example.com/acme/gitlab-app/-/merge_requests/60/', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
     } });
     await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(gitlabRepoId, 60)).resolves.toBeNull();
+  });
+
+  /**
+   * The ready selection (`runsForPr`) reads every RUN of the repo, so it applies the same
+   * configured-forge identity as the latest lookup: a supported variant on the configured GitLab
+   * host matches, and the same path on another host does not.
+   */
+  it('AC-4: runsForPr selects a GitLab MR URL variant on the configured host', async () => {
+    const job = await gitlabUrlJob('gitlab-variant-ready', 'https://gitlab.com/acme/gitlab-app/-/merge_requests/15/?tab=notes');
+    await expect(app.get(PrismaFleetPrRulingRepository).runsForPr(gitlabRepoId, 15)).resolves.toEqual([job.id]);
+  });
+
+  it('AC-4: runsForPr skips a merge-request URL from another GitLab host', async () => {
+    await gitlabUrlJob('gitlab-foreign-ready', 'https://gitlab.example.com/acme/gitlab-app/-/merge_requests/16/');
+    await expect(app.get(PrismaFleetPrRulingRepository).runsForPr(gitlabRepoId, 16)).resolves.toEqual([]);
+  });
+
+  /**
+   * A stored URL that is not a URL names no PR: neither lookup may read a PR number out of it.
+   * The schemeless URL still carries the `/pull/62` suffix the latest lookup pre-filters on, so
+   * it reaches the origin check before it is skipped.
+   */
+  it('AC-4: latestRunForPr and runsForPr skip an unparseable stored URL', async () => {
+    await newUrlJob('variant-unparseable', 'github.com/acme/app/pull/62');
+    await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 62)).resolves.toBeNull();
+    await expect(app.get(PrismaFleetPrRulingRepository).runsForPr(repoId, 62)).resolves.toEqual([]);
+  });
+
+  /**
+   * A repo row whose configured host is not a URL vouches for no URL at all: without a configured
+   * origin every stored URL would be a candidate for the latest, ready and retirement lookups.
+   */
+  it('AC-4: an unparseable configured host resolves to no PR', async () => {
+    const older = await newUrlJob('host-unparseable-older', 'https://github.com/acme/app/pull/63');
+    const newer = await newUrlJob('host-unparseable-newer', 'https://github.com/acme/app/pull/63/');
+    await db.fleetJob.update({ where: { id: newer.id }, data: { createdAt: new Date(older.createdAt.getTime() + 1000) } });
+    const pending = await db.fleetPrRuling.create({ data: {
+      projectId, repoId, prNumber: 63, jobId: older.id, itemId: 'D-1', itemKind: 'review', text: 'verified',
+      disposition: 'verified', actorType: 'AGENT', actorId: principal.id, state: 'pending',
+    } });
+    await db.fleetRepo.update({ where: { id: repoId }, data: { host: 'github.com' } });
+    try {
+      await expect(app.get(PrismaFleetPrRulingRepository).latestRunForPr(repoId, 63)).resolves.toBeNull();
+      await expect(app.get(PrismaFleetPrRulingRepository).runsForPr(repoId, 63)).resolves.toEqual([]);
+      await app.get(PrismaFleetPrRulingRepository).replaceOlderRuns(newer.id);
+      expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: pending.id } })).state).toBe('pending');
+    } finally {
+      await db.fleetRepo.update({ where: { id: repoId }, data: { host: 'https://github.com' } });
+    }
   });
 
   it('AC-5: applies configured origin including port to latest, ready, and retirement lookups', async () => {
