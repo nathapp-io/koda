@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Search, Ticket, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare, ScrollText, Inbox } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { parseTicketRefQuery } from '~/lib/palette-tickets'
+import { createDebouncer } from '~/lib/debounce'
+import { apiPath } from '~/lib/api-path'
+import { PALETTE_TICKET_SEARCH_DEBOUNCE_MS, PALETTE_TICKET_SEARCH_MIN, PALETTE_TICKET_SEARCH_SIZE, parseTicketRefQuery } from '~/lib/palette-tickets'
 
 interface Project { id: string | number; name: string; slug: string; key: string }
 interface Command { id: string; label: string; hint?: string; icon: Component; run: () => void }
@@ -27,10 +29,45 @@ const mayDecideApprovals = computed(() => globalPermissions.value.mayDecide())
 const query = ref('')
 const active = ref(0)
 const projects = ref<Project[]>([])
+const ticketResults = ref<Command[]>([])
+const searching = ref(false)
+let requestSeq = 0
+let ticketSearchQuery = ''
 const inputRef = ref<{ $el?: HTMLInputElement } | HTMLInputElement | null>(null)
 
 const close = () => emit('update:open', false)
 const go = (to: string) => () => { close(); void navigateTo(to) }
+
+interface TicketRecord { id: string | number; ref: string; title: string }
+
+async function runTicketSearch() {
+  const seq = ++requestSeq
+  const q = ticketSearchQuery
+  const slug = props.projectSlug
+  if (!slug) return
+
+  let found: Command[] = []
+  try {
+    const response = await $api.get<{ records: TicketRecord[] }>(apiPath`/projects/${slug}/tickets`, {
+      query: { search: q, size: PALETTE_TICKET_SEARCH_SIZE },
+    })
+    found = response.records.map((ticket) => ({
+      id: `ticket-${ticket.id}`,
+      label: `${ticket.ref} ${ticket.title}`,
+      hint: t('palette.ticket'),
+      icon: Ticket,
+      run: go(`/${slug}/tickets/${ticket.ref}`),
+    }))
+  } catch {
+    // A failed optional palette search should not interrupt the other commands.
+  }
+  if (seq === requestSeq) {
+    ticketResults.value = found
+    searching.value = false
+  }
+}
+
+const ticketSearchDebouncer = createDebouncer(() => { void runTicketSearch() }, PALETTE_TICKET_SEARCH_DEBOUNCE_MS)
 
 const commands = computed<Command[]>(() => {
   const list: Command[] = [
@@ -103,13 +140,31 @@ const results = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return commands.value
   const matches = commands.value.filter((c) => `${c.label} ${c.hint ?? ''}`.toLowerCase().includes(q))
-  return refCommand.value ? [refCommand.value, ...matches] : matches
+  return [...(refCommand.value ? [refCommand.value] : []), ...matches, ...ticketResults.value]
 })
 
-watch(query, () => { active.value = 0 })
+watch(query, (value) => {
+  active.value = 0
+  ticketSearchDebouncer.cancel()
+  requestSeq += 1
+  ticketResults.value = []
+  searching.value = false
+
+  const trimmed = value.trim()
+  if (!props.projectSlug || trimmed.length < PALETTE_TICKET_SEARCH_MIN || parseTicketRefQuery(value)) return
+  ticketSearchQuery = trimmed
+  searching.value = true
+  ticketSearchDebouncer.trigger()
+})
 
 watch(() => props.open, async (isOpen) => {
-  if (!isOpen) return
+  if (!isOpen) {
+    ticketSearchDebouncer.cancel()
+    requestSeq += 1
+    ticketResults.value = []
+    searching.value = false
+    return
+  }
   query.value = ''
   active.value = 0
   try {
@@ -172,7 +227,10 @@ function onKeydown(e: KeyboardEvent) {
           <span class="flex-1 truncate">{{ cmd.label }}</span>
           <span v-if="cmd.hint" class="truncate text-xs text-muted-foreground">{{ cmd.hint }}</span>
         </li>
-        <li v-if="results.length === 0" class="px-3 py-6 text-center text-sm text-muted-foreground">
+        <li v-if="searching" data-testid="palette-searching" class="px-3 py-6 text-center text-sm text-muted-foreground">
+          {{ t('palette.searching') }}
+        </li>
+        <li v-else-if="results.length === 0" class="px-3 py-6 text-center text-sm text-muted-foreground">
           {{ t('palette.empty') }}
         </li>
       </ul>

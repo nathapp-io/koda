@@ -131,6 +131,8 @@
     "openTicket": "Open ticket {ref}",
     "empty": "No matches.",
     "project": "Project",
+    "ticket": "Ticket",
+    "searching": "Searching tickets…",
     "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {

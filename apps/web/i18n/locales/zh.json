@@ -131,6 +131,8 @@
     "openTicket": "打开工单 {ref}",
     "empty": "没有匹配项。",
     "project": "项目",
+    "ticket": "工单",
+    "searching": "正在搜索工单…",
     "toggleTheme": "切换浅色/深色主题"
   },
   "admin": {
