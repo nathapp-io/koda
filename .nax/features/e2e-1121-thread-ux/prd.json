@@ -3,7 +3,7 @@
   "feature": "e2e-1121-thread-ux",
   "branchName": "feat/e2e-1121-thread-ux",
   "createdAt": "2026-11-21T10:36:18.440Z",
-  "updatedAt": "2026-11-21T11:01:13.339Z",
+  "updatedAt": "2026-11-21T11:10:52.760Z",
   "userStories": [
     {
       "id": "US-001",
@@ -108,14 +108,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard existing-component and template changes, but creator/manager control visibility and preapproval permission gates require the strict security-sensitive testing override."
+        "reasoning": "Standard existing-component and template changes, but creator/manager control visibility and preapproval permission gates require the strict security-sensitive testing override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-view.ts",
@@ -182,7 +185,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c8fe662a050b71d3c59a1cb4ac394d9ecdfc4a65"
     },
     {
       "id": "US-003",
