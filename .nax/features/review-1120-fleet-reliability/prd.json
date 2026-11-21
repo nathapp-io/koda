@@ -3,7 +3,7 @@
   "feature": "review-1120-fleet-reliability",
   "branchName": "feat/review-1120-fleet-reliability",
   "createdAt": "2026-11-21T02:39:04.885Z",
-  "updatedAt": "2026-11-21T03:20:32.139Z",
+  "updatedAt": "2026-11-21T03:43:05.094Z",
   "userStories": [
     {
       "id": "US-001",
@@ -103,14 +103,17 @@
         "ingest"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A bounded repository-local resolver reuse plus two existing integration fixtures; transaction boundaries and public contracts remain unchanged, with no authentication or credential implementation changes."
+        "reasoning": "A bounded repository-local resolver reuse plus two existing integration fixtures; transaction boundaries and public contracts remain unchanged, with no authentication or credential implementation changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
@@ -137,7 +140,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dbe0b2ddd548e196b6c51ff4786b6036194c88b2"
     },
     {
       "id": "US-003",
