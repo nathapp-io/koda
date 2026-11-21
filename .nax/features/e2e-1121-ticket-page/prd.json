@@ -3,7 +3,7 @@
   "feature": "e2e-1121-ticket-page",
   "branchName": "feat/e2e-1121-ticket-page",
   "createdAt": "2026-11-21T13:22:53.364Z",
-  "updatedAt": "2026-11-21T14:13:08.490Z",
+  "updatedAt": "2026-11-21T14:20:16.604Z",
   "userStories": [
     {
       "id": "US-001",
@@ -355,14 +355,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard localized DOM accessibility additions in two existing forms, reusing established attribute forwarding without changing workflow or authorization."
+        "reasoning": "Standard localized DOM accessibility additions in two existing forms, reusing established attribute forwarding without changing workflow or authorization.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/TicketActionPanel.vue",
@@ -377,7 +380,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "08207fee9f0db8f7f2b7a985e82214d17845c2c8"
     },
     {
       "id": "US-007",
