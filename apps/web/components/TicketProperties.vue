@@ -391,7 +391,7 @@ async function removeLink(linkId: string) {
         </div>
         <p v-if="canLabel && allLabels.length === 0" class="border-t pt-2.5 text-xs text-muted-foreground" data-testid="ticket-labels-none">
           {{ t('tickets.labels.noneInProject') }}
-          <NuxtLink :to="`/${projectSlug}/labels`" class="text-accent-foreground underline-offset-2 hover:underline">
+          <NuxtLink :to="`/${projectSlug}/labels`" class="text-accent-foreground underline underline-offset-2">
             {{ t('tickets.labels.manage') }}
           </NuxtLink>
         </p>
