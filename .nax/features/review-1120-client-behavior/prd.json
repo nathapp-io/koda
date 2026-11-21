@@ -3,7 +3,7 @@
   "feature": "review-1120-client-behavior",
   "branchName": "feat/review-1120-client-behavior",
   "createdAt": "2026-11-21T05:43:08.881Z",
-  "updatedAt": "2026-11-21T05:58:42.846Z",
+  "updatedAt": "2026-11-21T06:10:16.256Z",
   "userStories": [
     {
       "id": "US-001",
@@ -110,14 +110,17 @@
         "logout"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Provenance, normalized endpoint comparison and synchronous post-request rechecks are bounded changes to the existing config and logout modules, with no locking or new integration; credential mutation requires the security strategy."
+        "reasoning": "Provenance, normalized endpoint comparison and synchronous post-request rechecks are bounded changes to the existing config and logout modules, with no locking or new integration; credential mutation requires the security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/config.ts",
@@ -148,7 +151,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "85d259f0cb0ba482d16e33995cdcde9be536f5fc"
     },
     {
       "id": "US-003",
