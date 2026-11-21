@@ -30,6 +30,13 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
+jest.mock('../utils/secret-input', () => ({
+  resolveSecret: jest.fn(async (value: string | boolean | undefined) =>
+    typeof value === 'string' ? value : undefined,
+  ),
+  LOGIN_API_KEY_SECRET: {},
+}));
+
 
 // Mock config module
 jest.mock('../config', () => ({
@@ -49,7 +56,7 @@ jest.mock('../config', () => ({
   })),
 }));
 
-import { loginCommand, loginError, loginCommandFailure } from './login';
+import { loginAction, loginCommand, loginError } from './login';
 import { agentsControllerFindMe } from '../generated';
 import { getStatusAndMessage } from '../utils/error';
 import { setConfig } from '../config';
@@ -275,20 +282,17 @@ describe('loginError — distinguishes auth failures from network and 5xx', () =
     mockData.apiUrl = 'https://saved.example';
     (agentsControllerFindMe as jest.Mock).mockRejectedValue({ ret: 40000, message: 'Unauthorized' });
 
-    const caught = await loginCommand('replacement-key', 'http://example.com', {}).catch((error: unknown) => error);
-    expect(caught).toMatchObject({ message: 'Invalid API key', status: 401 });
-
-    expect(mockData).toMatchObject({ apiKey: 'previous-key', apiUrl: 'https://saved.example' });
-    expect(setConfig).not.toHaveBeenCalled();
-
     const exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {
       throw new Error('process.exit called');
     }) as never);
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      expect(() => loginCommandFailure(caught)).toThrow('process.exit called');
+      await expect(loginAction({ apiKey: 'replacement-key', apiUrl: 'http://example.com' }))
+        .rejects.toThrow('process.exit called');
       expect(exitSpy).toHaveBeenCalledWith(2);
       expect(errorSpy).toHaveBeenCalledWith('Error: Invalid API key');
+      expect(mockData).toMatchObject({ apiKey: 'previous-key', apiUrl: 'https://saved.example' });
+      expect(setConfig).not.toHaveBeenCalled();
     } finally {
       exitSpy.mockRestore();
       errorSpy.mockRestore();

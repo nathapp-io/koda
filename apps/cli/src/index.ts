@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { loginCommand, loginCommandFailure } from './commands/login';
+import { loginAction } from './commands/login';
 import { initCommand } from './commands/init';
 import { configShow, configSet, configProfileListAction, configProfileAddAction, configProfileRemoveAction } from './commands/config';
 import { getProfiles, setProfile, removeProfile } from './config';
@@ -30,7 +30,7 @@ import { fleetCommand } from './commands/fleet';
 import { approvalCommand } from './commands/approval';
 import { setJsonMode } from './utils/json-mode';
 import { installSignalHandlers } from './utils/signals';
-import { resolveSecret, API_KEY_SECRET, LOGIN_API_KEY_SECRET } from './utils/secret-input';
+import { resolveSecret, API_KEY_SECRET } from './utils/secret-input';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -85,19 +85,7 @@ program
   .description('Save API credentials locally')
   .option('--api-key [key]', 'API key (- reads stdin; omit the value to be prompted; or set KODA_API_KEY)')
   .option('--api-url <url>', 'API URL (default: http://localhost:3100)')
-  .action(async (options) => {
-    try {
-      const apiKey = await resolveSecret(options.apiKey, LOGIN_API_KEY_SECRET);
-      if (!apiKey) {
-        throw new Error('API key is required: use --api-key - (stdin), --api-key (prompt), or KODA_API_KEY');
-      }
-      const result = await loginCommand(apiKey, options.apiUrl, {});
-      console.log(result.message);
-      process.exit(0);
-    } catch (error) {
-      loginCommandFailure(error);
-    }
-  });
+  .action(loginAction);
 
 // Init command
 program

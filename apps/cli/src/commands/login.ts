@@ -2,6 +2,7 @@ import { setConfig } from '../config';
 import { configureApiClient } from '../utils/api-client';
 import { agentsControllerFindMe } from '../generated';
 import { getStatusAndMessage } from '../utils/error';
+import { resolveSecret, LOGIN_API_KEY_SECRET } from '../utils/secret-input';
 
 export interface LoginResult {
   success: boolean;
@@ -37,10 +38,24 @@ export async function loginCommand(
   };
 }
 
-export function loginCommandFailure(error: unknown): never {
+function loginCommandFailure(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`Error: ${message}`);
   process.exit(2);
+}
+
+export async function loginAction(options: { apiKey?: string | boolean; apiUrl?: string }): Promise<void> {
+  try {
+    const apiKey = await resolveSecret(options.apiKey, LOGIN_API_KEY_SECRET);
+    if (!apiKey) {
+      throw new Error('API key is required: use --api-key - (stdin), --api-key (prompt), or KODA_API_KEY');
+    }
+    const result = await loginCommand(apiKey, options.apiUrl, {});
+    console.log(result.message);
+    process.exit(0);
+  } catch (error) {
+    loginCommandFailure(error);
+  }
 }
 
 /** Classify login failures while preserving the established connectivity diagnostic. */
