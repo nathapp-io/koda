@@ -1,6 +1,7 @@
 import { setConfig } from '../config';
 import { configureApiClient } from '../utils/api-client';
 import { agentsControllerFindMe } from '../generated';
+import { getStatusAndMessage } from '../utils/error';
 
 export interface LoginResult {
   success: boolean;
@@ -45,31 +46,24 @@ export async function loginCommand(
  * actual cause.
  */
 export function loginError(err: unknown): Error & { status?: number; transient?: boolean } {
-  // The generated client throws the parsed error body for HTTP failures
-  // (e.g. Nest's { statusCode, message }) and plain Errors without a status
-  // for network failures. `.status` is bridged for errors that carry it
-  // directly.
-  const status =
-    (err as { statusCode?: number } | null)?.statusCode ??
-    (err as { status?: number } | null)?.status;
+  const { status, message } = getStatusAndMessage(err);
   if (status === 401 || status === 403) {
     return Object.assign(new Error('Invalid API key'), { status });
   }
 
   if (status !== undefined) {
-    const rawMessage = (err as { message?: unknown } | null)?.message;
-    const bodyMessage =
-      typeof rawMessage === 'string'
-        ? rawMessage
-        : Array.isArray(rawMessage)
-          ? rawMessage.map(String).join('; ')
-          : undefined;
-    return Object.assign(new Error(bodyMessage ?? 'API error'), { status });
+    return Object.assign(new Error(message), { status });
   }
 
-  // Network-layer failure (DNS, ECONNREFUSED, timeout, …) — these don't
-  // carry a status, but reporting them as "Invalid API key" would mislead
-  // the user when really their network or the API itself is down.
+  // An unmapped nonzero `ret` is still a delivered API rejection, rather
+  // than a transport failure. Preserve its message without a retry hint.
+  const ret = (err as { ret?: unknown } | null)?.ret;
+  if (typeof ret === 'number' && ret !== 0) {
+    return new Error(message);
+  }
+
+  // Network-layer failures (DNS, ECONNREFUSED, timeout, …) have no API
+  // status or nonzero application code and retain the connectivity diagnostic.
   const networkMessage =
     err instanceof Error ? err.message : String(err) || 'Unknown network error';
   return Object.assign(new Error(`Could not reach API: ${networkMessage}`), {

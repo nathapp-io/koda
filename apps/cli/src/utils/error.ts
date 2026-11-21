@@ -49,7 +49,7 @@ const API_RET_STATUS: ReadonlyMap<number, number> = new Map([
   [-2, 400],
 ]);
 
-function getStatusAndMessage(err: unknown): { status: number | undefined; message: string } {
+export function getStatusAndMessage(err: unknown): { status: number | undefined; message: string } {
   if (typeof err === 'string') {
     return { status: undefined, message: err || 'Unknown error' };
   }
