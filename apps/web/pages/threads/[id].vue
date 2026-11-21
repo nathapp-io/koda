@@ -97,6 +97,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
         :can-manage="false"
         :session-label="sessionLabel(controller.thread.value)"
         :archived="controller.thread.value.archivedAt !== null"
+        :max-cost-usd="controller.thread.value.maxCostUsd"
         @end-session="onEndSession"
         @raise-cap="onRaiseCap"
         @archive="onArchive"

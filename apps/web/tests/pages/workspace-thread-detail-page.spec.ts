@@ -141,8 +141,8 @@ function marker(name: string, props: string[] = []): Component {
 const MARKERS: Record<string, Component> = {
   ThreadHeader: marker('page-thread-header'),
   FleetThreadsThreadHeader: marker('page-thread-header'),
-  ThreadControls: marker('page-thread-controls', ['isCreator']),
-  FleetThreadsThreadControls: marker('page-thread-controls', ['isCreator']),
+  ThreadControls: marker('page-thread-controls', ['isCreator', 'maxCostUsd']),
+  FleetThreadsThreadControls: marker('page-thread-controls', ['isCreator', 'maxCostUsd']),
   ThreadKodaToolsNotice: marker('page-thread-koda-tools-notice'),
   FleetThreadsThreadKodaToolsNotice: marker('page-thread-koda-tools-notice'),
   ThreadTimeline: marker('page-thread-timeline', ['slug']),
@@ -402,6 +402,15 @@ describe('US-004 queued-turn notice and refresh', () => {
     expect(m.get.mock.calls.filter(call => call[0] === '/threads/t1')).toHaveLength(2)
     m.app.unmount()
     jest.useRealTimers()
+  })
+})
+
+describe('US-002: workspace thread cap wiring', () => {
+  test('AC-7: passes workspace maxCostUsd to ThreadControls', async () => {
+    const m = mountPage({ thread: workspaceThread({ maxCostUsd: '0.5' }) })
+    await m.settle()
+    expect(markerProp(m.app, 'page-thread-controls', 'maxCostUsd')).toBe('0.5')
+    m.app.unmount()
   })
 })
 

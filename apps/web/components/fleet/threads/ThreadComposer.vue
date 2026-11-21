@@ -83,6 +83,9 @@ function stop(): void {
     <p v-if="props.composerState.reason === 'readOnly'" class="text-sm text-muted-foreground">
       {{ t('fleet.threads.composer.readOnly') }}
     </p>
+    <p v-else-if="props.composerState.reason === 'archived'" class="text-sm text-muted-foreground" role="status">
+      {{ t('fleet.threads.refusal.archived') }}
+    </p>
     <template v-else>
       <p v-if="props.composerState.reason !== null" class="text-sm text-muted-foreground" role="status">
         {{ t(`fleet.threads.refusal.${props.composerState.reason}`) }}

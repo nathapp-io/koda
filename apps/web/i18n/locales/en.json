@@ -1006,7 +1006,8 @@
         "set": "Set",
         "clear": "Clear",
         "none": "No pre-approval is set.",
-        "validation": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places."
+        "validation": "Enter a cost cap greater than 0 and at most 1000, with up to 4 decimal places.",
+        "hint": "Flows the agent starts from this thread run without asking you while their cost stays under this cap. This is separate from the thread's own cost cap."
       },
       "stop": {
         "button": "Stop flow",

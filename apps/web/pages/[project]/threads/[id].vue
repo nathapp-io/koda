@@ -117,14 +117,12 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
   <div class="space-y-5">
     <template v-if="controller.thread.value">
       <FleetThreadsThreadHeader :thread="controller.thread.value" :runners="options.runners.value" />
-      <FleetThreadsThreadFlowsPanel :slug="slug" :thread-id="threadId" />
-      <FleetThreadsThreadStartFlow :slug="slug" :thread="controller.thread.value" />
-      <FleetThreadsThreadPreApprovalCard :slug="slug" :thread="controller.thread.value" @changed="controller.reloadThread()" />
       <FleetThreadsThreadControls
         :is-creator="isCreator"
         :can-manage="canManage"
         :session-label="sessionLabel(controller.thread.value)"
         :archived="controller.thread.value.archivedAt !== null"
+        :max-cost-usd="controller.thread.value.maxCostUsd"
         @end-session="onEndSession"
         @raise-cap="onRaiseCap"
         @archive="onArchive"
@@ -179,6 +177,9 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         :send="onSend"
         @stop="onStop"
       />
+      <FleetThreadsThreadFlowsPanel :slug="slug" :thread-id="threadId" />
+      <FleetThreadsThreadStartFlow :slug="slug" :thread="controller.thread.value" />
+      <FleetThreadsThreadPreApprovalCard :slug="slug" :thread="controller.thread.value" @changed="controller.reloadThread()" />
     </template>
   </div>
 </template>

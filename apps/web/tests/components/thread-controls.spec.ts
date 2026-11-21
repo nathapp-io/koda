@@ -28,6 +28,7 @@ interface ControlsProps {
   canManage?: boolean
   sessionLabel?: SessionLabel
   archived?: boolean
+  maxCostUsd?: string
 }
 
 const mountControls = (over: ControlsProps = {}): Mounted =>
@@ -37,6 +38,7 @@ const mountControls = (over: ControlsProps = {}): Mounted =>
       canManage: over.canManage ?? false,
       sessionLabel: over.sessionLabel ?? 'live',
       archived: over.archived ?? false,
+      maxCostUsd: over.maxCostUsd ?? '5',
     },
     components: uiStubs,
     globals: { useI18n: () => i18nStub() },
@@ -105,6 +107,63 @@ describe('US-007 AC8-AC11: ThreadControls', () => {
     expect(actionButton(app, ARCHIVE)).toBeDefined()
     expect(actionButton(app, END)).toBeUndefined()
     expect(actionButton(app, RAISE)).toBeUndefined()
+    app.unmount()
+  })
+
+  test('AC-1: Raise cap is hidden when archived and visible when active', () => {
+    const archived = mountControls({ isCreator: true, archived: true, maxCostUsd: '0.5' })
+    expect(actionButton(archived, RAISE)).toBeUndefined()
+    archived.unmount()
+    const active = mountControls({ isCreator: true, archived: false, maxCostUsd: '0.5' })
+    expect(actionButton(active, RAISE)).toBeDefined()
+    active.unmount()
+  })
+
+  test('AC-2 and AC-10: prefills current cap without emitting until confirmation', async () => {
+    const app = mountControls({ isCreator: true, maxCostUsd: '0.5' })
+    const raise = actionButton(app, RAISE)
+    expect(raise).toBeDefined()
+    if (raise === undefined) {
+      app.unmount()
+      return
+    }
+    click(raise)
+    await settle()
+    const input = textField(app)
+    expect(input?.props['model-value']).toBe('0.5')
+    expect(app.emitted('raiseCap')).toEqual([])
+    const confirm = actionButton(app, 'fleet.threads.controls.confirm')
+    expect(confirm).toBeDefined()
+    if (confirm === undefined) {
+      app.unmount()
+      return
+    }
+    click(confirm)
+    await settle()
+    expect(app.emitted('raiseCap')).toEqual([[0.5]])
+    app.unmount()
+  })
+
+  test('AC-3: invalid prefilled cap keeps dialog open and emits nothing', async () => {
+    const app = mountControls({ isCreator: true, maxCostUsd: '0.00001' })
+    const raise = actionButton(app, RAISE)
+    expect(raise).toBeDefined()
+    if (raise === undefined) {
+      app.unmount()
+      return
+    }
+    click(raise)
+    await settle()
+    const confirm = actionButton(app, 'fleet.threads.controls.confirm')
+    expect(confirm).toBeDefined()
+    if (confirm === undefined) {
+      app.unmount()
+      return
+    }
+    click(confirm)
+    await settle()
+    expect(app.emitted('raiseCap')).toEqual([])
+    expect(textField(app)).toBeDefined()
     app.unmount()
   })
 

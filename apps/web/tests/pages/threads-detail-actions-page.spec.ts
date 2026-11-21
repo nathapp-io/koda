@@ -83,7 +83,7 @@ const ActionBarStub = defineComponent({
 
 const ControlsStub = defineComponent({
   name: 'ThreadControlsStub',
-  props: ['isCreator', 'canManage', 'sessionLabel', 'archived'],
+  props: ['isCreator', 'canManage', 'sessionLabel', 'archived', 'maxCostUsd'],
   emits: ['endSession', 'raiseCap', 'archive'],
   setup(_props, { attrs, emit }) {
     return () => h('div', { ...attrs, 'data-testid': 'thread-controls' }, [

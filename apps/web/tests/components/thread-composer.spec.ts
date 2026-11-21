@@ -215,10 +215,18 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     app.unmount()
   })
 
-  test('AC4: composerState refusing with reason closing shows the fleet.threads.refusal.closing text', () => {
-    const app = mountComposer({ canSend: false, reason: 'closing' })
+  test('AC-4: archived refusal shows only the archived text without input or Send', () => {
+    const app = mountComposer({ canSend: false, reason: 'archived' })
+    expect(app.text()).toContain('fleet.threads.refusal.archived')
+    expect(textarea(app)).toBeUndefined()
+    expect(app.one('[data-testid="thread-send"]')).toBeUndefined()
+    app.unmount()
+  })
 
+  test('AC-5: closing refusal shows its text and a disabled input', () => {
+    const app = mountComposer({ canSend: false, reason: 'closing' })
     expect(app.text()).toContain('fleet.threads.refusal.closing')
+    expect(textarea(app)?.props.disabled).toBe(true)
     app.unmount()
   })
 
