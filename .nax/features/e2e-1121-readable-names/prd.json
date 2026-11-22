@@ -3,7 +3,7 @@
   "feature": "e2e-1121-readable-names",
   "branchName": "feat/e2e-1121-readable-names",
   "createdAt": "2026-11-22T09:16:55.665Z",
-  "updatedAt": "2026-11-22T10:04:21.906Z",
+  "updatedAt": "2026-11-22T10:20:34.237Z",
   "userStories": [
     {
       "id": "US-001",
@@ -438,14 +438,17 @@
         "US-003",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard additive Vue rendering/type/i18n work on two existing surfaces; API fields and the shared fallback key are upstream, with explicit test-pin and SSR compatibility requirements."
+        "reasoning": "Standard additive Vue rendering/type/i18n work on two existing surfaces; API fields and the shared fallback key are upstream, with explicit test-pin and SSR compatibility requirements.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/home/HomeActivityList.vue",
@@ -490,7 +493,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a86564c643af2a10c8d48c776650a479b8bb95a4"
     },
     {
       "id": "US-008",
