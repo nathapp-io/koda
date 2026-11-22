@@ -24,7 +24,7 @@ const { t } = useI18n()
             v-if="event.ticketRef && event.projectSlug"
             :to="`/${event.projectSlug}/tickets/${event.ticketRef}`"
             data-testid="home-activity-ticket"
-            class="truncate text-primary hover:underline"
+            class="truncate text-link hover:underline"
           >{{ event.ticketTitle ? `${event.ticketRef} ${event.ticketTitle}` : event.ticketRef }}</NuxtLink>
           <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{{ event.projectSlug }}</span>
           <FleetAge class="shrink-0 text-xs text-muted-foreground" :iso="event.createdAt" :now="now" mode="ago" />

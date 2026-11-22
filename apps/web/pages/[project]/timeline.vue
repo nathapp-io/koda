@@ -127,7 +127,7 @@ function formatDate(dateStr: string) {
                 v-if="event.ticketRef"
                 :to="`/${slug}/tickets/${event.ticketRef}`"
                 data-testid="timeline-ticket"
-                class="text-primary hover:underline"
+                class="text-link hover:underline"
               >{{ event.ticketTitle ? `${event.ticketRef} ${event.ticketTitle}` : event.ticketRef }}</NuxtLink>
             </td>
             <td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(event.createdAt) }}</td>
