@@ -44,6 +44,16 @@ describe('RunnerSummaryDto.from', () => {
     expect(dto.threadBackends).toEqual({ native: ['m1'], acp: ['cursor'], acpOffers });
   });
 
+  it('US-001 AC-12: preserves checkedAt and lastError from stored offers', () => {
+    const acpOffers = [{
+      agent: 'codex', launchable: true, loggedIn: null, models: [], efforts: [],
+      checkedAt: '2026-11-22T02:00:00.000Z',
+      lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z' },
+    }];
+    const dto = RunnerSummaryDto.from(record({ threadBackends: { native: [], acp: [], acpOffers } }, { protocolVersion: 4 }), { now, offlineSec: 90 });
+    expect(dto.threadBackends.acpOffers).toEqual(acpOffers);
+  });
+
   it('AC-7: drops a malformed acpOffers list but keeps the native and acp lists beside it', () => {
     for (const acpOffers of [
       [{ agent: 'cursor', launchable: true, loggedIn: true, models: ['bad model!'], efforts: [] }],

@@ -22908,6 +22908,31 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "checkedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "lastError": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "timeout",
+                            "unavailable",
+                            "error"
+                          ]
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "at"
+                      ]
                     }
                   }
                 }

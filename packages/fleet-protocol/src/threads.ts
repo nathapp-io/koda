@@ -39,12 +39,21 @@ export interface ThreadBackends {
  * thread-agents-modes §1: what a runner found for one ACP agent. `loggedIn` is `null` when the agent was not probed
  * or the probe failed, which is why an offer can exist for an agent that is not in `acp`.
  */
+export const ACP_PROBE_ERROR_CODES = ['timeout', 'unavailable', 'error'] as const;
+export type AcpProbeErrorCode = (typeof ACP_PROBE_ERROR_CODES)[number];
+/** The latest failed probe of an agent: why, and when. No agent text crosses the wire. */
+export interface AcpProbeError { code: AcpProbeErrorCode; at: string }
+/** A probe time: UTC ISO-8601 with at most millisecond precision, as `Date.prototype.toISOString` writes it. */
+export const ACP_PROBE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
 export interface ThreadAcpOffer {
   agent: ThreadAgent;
   launchable: boolean;
   loggedIn: boolean | null;
   models: string[];
   efforts: string[];
+  checkedAt?: string;
+  lastError?: AcpProbeError;
 }
 
 /**

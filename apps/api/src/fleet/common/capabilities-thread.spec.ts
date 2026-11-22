@@ -1,5 +1,5 @@
 import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
-import { CapabilityValidationError, parseCapabilitiesCore } from './capabilities-core';
+import { CapabilityValidationError, parseAcpOffers, parseCapabilitiesCore } from './capabilities-core';
 
 const valid = {
   nax: { version: '0.83.0', protocols: ['native', 'acp'] },
@@ -97,6 +97,56 @@ const parsedWith = (acpOffers: unknown, over: Record<string, unknown> = {}) =>
   parseCapabilitiesCore({ ...valid, threadBackends: { native: ['m1'], acp: ['cursor'], acpOffers, ...over } }).threadBackends;
 
 describe('parseCapabilitiesCore ACP agents on threadBackends (thread-agents-modes US-001)', () => {
+  it('US-001 AC-1: accepts checkedAt on an offer', () => {
+    expect(parseAcpOffers([offer({ checkedAt: '2026-11-22T02:00:00.000Z' })])?.[0].checkedAt).toBe('2026-11-22T02:00:00.000Z');
+  });
+
+  it('US-001 AC-2: accepts a timeout lastError on an offer', () => {
+    const lastError = { code: 'timeout', at: '2026-11-22T02:00:00.000Z' } as const;
+    expect(parseAcpOffers([offer({ loggedIn: null, lastError })])?.[0].lastError).toEqual(lastError);
+  });
+
+  it.each(['unavailable', 'error'] as const)('US-001 AC-3: accepts lastError code %s', (code) => {
+    expect(parseAcpOffers([offer({ lastError: { code, at: '2026-11-22T02:00:00.000Z' } })])?.[0].lastError?.code).toBe(code);
+  });
+
+  it('US-001 AC-4: rejects an unknown lastError code', () => {
+    expect(parseAcpOffers([offer({ lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z' } })])).not.toBeNull();
+    expect(parseAcpOffers([offer({ lastError: { code: 'oops', at: '2026-11-22T02:00:00.000Z' } })])).toBeNull();
+  });
+
+  it('US-001 AC-5: rejects additional lastError fields', () => {
+    expect(parseAcpOffers([offer({ lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z' } })])).not.toBeNull();
+    expect(parseAcpOffers([offer({ lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z', detail: 'x' } })])).toBeNull();
+  });
+
+  it.each([
+    ['invalid text', 'not-a-date'],
+    ['numeric timestamp', 1732240800000],
+    ['excess timestamp precision', '2026-11-22T02:00:00.0000000000Z'],
+  ])('US-001 AC-6/7/8: rejects checkedAt with %s', (_label, checkedAt) => {
+    expect(parseAcpOffers([offer({ checkedAt: '2026-11-22T02:00:00.000Z' })])).not.toBeNull();
+    expect(parseAcpOffers([offer({ checkedAt })])).toBeNull();
+  });
+
+  it('US-001 AC-9: rejects an impossible lastError timestamp', () => {
+    expect(parseAcpOffers([offer({ lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z' } })])).not.toBeNull();
+    expect(parseAcpOffers([offer({ lastError: { code: 'timeout', at: '2026-13-45T99:00:00.000Z' } })])).toBeNull();
+  });
+
+  it('US-001 AC-10: omits optional offer fields when absent', () => {
+    const result = parsedWith([offer()])?.acpOffers?.[0];
+    expect(result).toBeDefined();
+    expect(result).not.toHaveProperty('checkedAt');
+    expect(result).not.toHaveProperty('lastError');
+  });
+
+  it('US-001 AC-11: drops a malformed offer list without dropping acp agents', () => {
+    expect(parseCapabilitiesCore({ ...valid, threadBackends: { native: [], acp: ['codex'], acpOffers: [offer({ agent: 'codex', checkedAt: '2026-11-22T02:00:00.000Z' })] } }).threadBackends?.acpOffers).toBeDefined();
+    const backends = parseCapabilitiesCore({ ...valid, threadBackends: { native: [], acp: ['codex'], acpOffers: [offer({ agent: 'codex', checkedAt: 'x' })] } }).threadBackends;
+    expect(backends?.acp).toEqual(['codex']);
+    expect(backends).not.toHaveProperty('acpOffers');
+  });
   it('AC-1: keeps acp: [cursor]', () => {
     const parsed = parseCapabilitiesCore({ ...valid, threadBackends: { native: [], acp: ['cursor'] } });
     expect(parsed.threadBackends).toEqual({ native: [], acp: ['cursor'] });
