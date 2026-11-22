@@ -48,6 +48,8 @@ export interface AcpProbeDeps {
   /** Where the probe's session runs; production makes and removes a private temp directory. */
   readonly makeWorkdir?: () => Promise<ProbeWorkdir>;
   readonly timers?: AcpProbeTimers;
+  /** Production: the current time; injectable so every offer in a test is deterministic. */
+  readonly now?: () => Date;
 }
 
 const SYSTEM_TIMERS: AcpProbeTimers = {
@@ -104,7 +106,11 @@ async function withinDeadline(settled: Promise<Settled>, timers: AcpProbeTimers)
  * after its deadline is still closed — the runner never leaves a probe session behind.
  */
 async function probeAgent(agent: ThreadAgent, deps: AcpProbeDeps): Promise<ThreadAcpOffer> {
-  const withoutOffers = (launchable: boolean, loggedIn: boolean | null): ThreadAcpOffer => ({ agent, launchable, loggedIn, models: [], efforts: [] });
+  const checkedAt = (deps.now ?? (() => new Date()))().toISOString();
+  const withoutOffers = (launchable: boolean, loggedIn: boolean | null, code?: 'timeout' | 'unavailable' | 'error'): ThreadAcpOffer => ({
+    agent, launchable, loggedIn, models: [], efforts: [], checkedAt,
+    ...(code === undefined ? {} : { lastError: { code, at: checkedAt } }),
+  });
   if (!isLaunchable(agent, deps.launchCandidate ?? ((a: ThreadAgent) => launchCandidateKind(a)))) return withoutOffers(false, null);
 
   let workdir: ProbeWorkdir | undefined;
@@ -126,18 +132,22 @@ async function probeAgent(agent: ThreadAgent, deps: AcpProbeDeps): Promise<Threa
     const outcome = await withinDeadline(settled, deps.timers ?? SYSTEM_TIMERS);
     if (outcome === null) {
       void settled.then((late) => (late.kind === 'session' ? late.session.close().catch(() => undefined) : undefined));
-      return withoutOffers(true, null);
+      return withoutOffers(true, null, 'timeout');
     }
-    if (outcome.kind === 'error') return withoutOffers(true, agentSessionCode(outcome.error) === AUTH_REQUIRED ? false : null);
+    if (outcome.kind === 'error') {
+      const code = agentSessionCode(outcome.error);
+      if (code === AUTH_REQUIRED) return withoutOffers(true, false);
+      return withoutOffers(true, null, code === 'AGENT_SESSION_BACKEND_UNAVAILABLE' ? 'unavailable' : 'error');
+    }
     const { capabilities } = outcome.session.backend;
     try {
-      return { agent, launchable: true, loggedIn: true, models: offeredModels(capabilities), efforts: offeredEfforts(capabilities) };
+      return { agent, launchable: true, loggedIn: true, models: offeredModels(capabilities), efforts: offeredEfforts(capabilities), checkedAt };
     } finally {
       await outcome.session.close().catch(() => undefined);
     }
   } catch {
     // A workdir, backend or session-construction failure is likewise unknown, never "not logged in".
-    return withoutOffers(true, null);
+    return withoutOffers(true, null, 'error');
   } finally {
     // The probe's directory goes as soon as it has its answer, even if an unresponsive open is still in flight: the
     // report cannot wait for it, and a session that settles later is closed by the timeout handler above.
