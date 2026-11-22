@@ -3,7 +3,7 @@
   "feature": "e2e-1121-acp-probe",
   "branchName": "feat/e2e-1121-acp-probe",
   "createdAt": "2026-11-22T03:15:28.895Z",
-  "updatedAt": "2026-11-22T03:45:14.152Z",
+  "updatedAt": "2026-11-22T03:57:07.398Z",
   "userStories": [
     {
       "id": "US-001",
@@ -220,14 +220,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New clocked per-agent state abstraction integrated with production wiring and warnings; retained login readiness and immediate auth invalidation require strict security TDD."
+        "reasoning": "New clocked per-agent state abstraction integrated with production wiring and warnings; retained login readiness and immediate auth invalidation require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/capabilities/acp-agent-probe.ts",
@@ -255,7 +258,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f4734b9069a2b7d96e6a6d9236c39a40c75f9657"
     },
     {
       "id": "US-005",
