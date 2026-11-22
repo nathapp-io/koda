@@ -5,7 +5,7 @@ import { useApi } from '../../composables/useApi'
 
 const g = globalThis as Record<string, unknown>
 afterEach(() => {
-  for (const key of ['useApi', 'useRuntimeConfig', 'useI18n', '$fetch']) delete g[key]
+  for (const key of ['useApi', 'useRuntimeConfig', 'useI18n', 'useNuxtApp', '$fetch']) delete g[key]
 })
 
 test('AC-1: list uses useApi GET and returns its unwrapped list, encoding path segments', async () => {
@@ -34,7 +34,8 @@ test('AC-1/AC-9: real useApi unwraps list and successful 202 approval envelope',
   const fetch = jest.fn(async (_url: string, options?: Record<string, unknown>) =>
     ({ ret: 0, data: options?.method === 'POST' ? summary : rows }))
   g.useRuntimeConfig = () => ({ apiInternalUrl: 'http://api.test', public: { apiBaseUrl: '/api' } })
-  g.useI18n = () => ({ locale: ref('en') })
+  // No component instance in this test: the Nuxt app's i18n composer is the locale source.
+  g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
   g.$fetch = fetch
   g.useApi = useApi
   const { useFleetRulings } = await import(join(__dirname, '../../composables/useFleetRulings.ts'))

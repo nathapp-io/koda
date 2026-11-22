@@ -29,10 +29,9 @@ import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
 
 /**
- * The list filters of `findAll`. `titleContains` is not on the REST `ListTicketsQuery` (S5b US-003): only the
- * agent-facing koda search passes it.
+ * The list filters of `findAll`. `titleContains` is used by the koda tool search and the REST `search` query.
  */
-export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'> & {
+export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size' | 'search'> & {
   assignedToAgentId?: string;
   titleContains?: string;
 };

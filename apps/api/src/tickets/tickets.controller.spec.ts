@@ -260,6 +260,32 @@ describe('TicketsController', () => {
       expect(mockTicketsService.findAll).toHaveBeenCalledWith('koda', expect.anything(), { current: 1, size: 20 });
     });
 
+    it('AC-7: trims search and maps it to titleContains without a search key', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+      await controller.findAll('koda', { search: ' login ' } as never);
+
+      expect(mockTicketsService.findAll).toHaveBeenCalledWith(
+        'koda',
+        expect.objectContaining({ titleContains: 'login' }),
+        { current: 1, size: 20 },
+      );
+      expect(mockTicketsService.findAll.mock.calls[0][1]).not.toHaveProperty('search');
+    });
+
+    it('AC-8: omits titleContains when search is absent', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+      await controller.findAll('koda', {} as never);
+
+      expect(mockTicketsService.findAll).toHaveBeenCalledWith(
+        'koda',
+        expect.not.objectContaining({ titleContains: expect.anything() }),
+        { current: 1, size: 20 },
+      );
+      expect(mockTicketsService.findAll.mock.calls[0][1]).not.toHaveProperty('titleContains');
+    });
+
     it('returns only the six page fields', async () => {
       mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, [{ ref: 'KODA-1' }]));
 

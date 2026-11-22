@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { KodaPageQuery } from '../../common/dto/koda-page.query';
 import { Priority, TicketStatus, TicketType } from '../../common/enums';
 
@@ -34,4 +34,10 @@ export class ListTicketsQuery extends KodaPageQuery {
   @Transform(toBoolean)
   @IsBoolean()
   unassigned?: boolean;
+
+  @ApiPropertyOptional({ maxLength: 100, description: 'Case-insensitive substring of the ticket title' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }
