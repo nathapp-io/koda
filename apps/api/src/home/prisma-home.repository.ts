@@ -3,6 +3,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
 import { accessibleProjectIds } from '../permissions/membership.queries';
 import { visibleRequestWhere } from '../approvals/approval-visibility';
+import { readPrincipalNames, readTicketLabels } from '../common/utils/event-labels';
 import { fleetTypeOfKey } from '../fleet/approvals/domain/approval.domain';
 import {
   ACTIVE_JOB_STATES, FAILED_JOB_STATES, OPEN_TICKET_STATUSES, type HomeActivityRow, type HomeApprovalRow, type HomeApprovalScope,
@@ -186,12 +187,30 @@ export class PrismaHomeRepository {
         orderBy: NEWEST_FIRST, take: takePerTable,
       }),
     ]);
+    const actorIds = [
+      ...ticketEvents.map((event) => event.actorId),
+      ...agentEvents.map((event) => event.actorId),
+      ...decisionEvents.map((event) => event.agentId),
+    ];
+    const ticketIds = ticketEvents.flatMap((event) => event.ticketId ? [event.ticketId] : []);
+    const [principalNames, ticketLabels] = await Promise.all([
+      readPrincipalNames(this.prisma.client, actorIds),
+      readTicketLabels(this.prisma.client, ticketIds),
+    ]);
+    const actorName = (id: string) => principalNames.get(id) ?? null;
+    const ticketLabel = (id: string | null) => (id ? ticketLabels.get(id) : undefined);
+
     return {
-      ticketEvents: ticketEvents.map((e) => ({ ...e, eventType: 'ticket_event' as const })),
-      agentEvents: agentEvents.map((e) => ({ ...e, eventType: 'agent_event' as const, ticketId: null })),
+      ticketEvents: ticketEvents.map((e) => {
+        const label = ticketLabel(e.ticketId);
+        return { ...e, eventType: 'ticket_event' as const, actorName: actorName(e.actorId), ticketRef: label?.ref ?? null, ticketTitle: label?.title ?? null };
+      }),
+      agentEvents: agentEvents.map((e) => ({
+        ...e, eventType: 'agent_event' as const, ticketId: null, actorName: actorName(e.actorId), ticketRef: null, ticketTitle: null,
+      })),
       decisionEvents: decisionEvents.map((e) => ({
         id: e.id, projectId: e.projectId, eventType: 'decision_event' as const, action: e.action,
-        actorId: e.agentId, ticketId: null, createdAt: e.createdAt,
+        actorId: e.agentId, ticketId: null, actorName: actorName(e.agentId), ticketRef: null, ticketTitle: null, createdAt: e.createdAt,
       })),
     };
   }

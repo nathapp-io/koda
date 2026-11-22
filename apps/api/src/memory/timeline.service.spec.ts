@@ -11,6 +11,7 @@ describe('TimelineService', () => {
     findTicketEvents: vi.fn(),
     findAgentEvents: vi.fn(),
     findDecisionEvents: vi.fn(),
+    findEventLabels: vi.fn().mockResolvedValue({ names: new Map(), tickets: new Map() }),
   };
 
   beforeEach(async () => {
@@ -97,6 +98,70 @@ describe('TimelineService', () => {
     });
   });
 
+  describe('page labels', () => {
+    const at = (day: number) => new Date(Date.UTC(2026, 0, day));
+
+    beforeEach(() => {
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([]);
+      mockTimelineRepo.findAgentEvents.mockResolvedValue([]);
+      mockTimelineRepo.findDecisionEvents.mockResolvedValue([]);
+      mockTimelineRepo.findEventLabels.mockResolvedValue({ names: new Map(), tickets: new Map() });
+    });
+
+    it('AC-1: reads labels exactly once for returned events, excluding lookahead', async () => {
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([
+        { id: 'e1', actorId: 'u1', action: 'x', ticketId: 't1', createdAt: at(3) },
+        { id: 'e2', actorId: 'u2', action: 'x', ticketId: 't2', createdAt: at(2) },
+        { id: 'e3', actorId: 'u3', action: 'x', ticketId: 't3', createdAt: at(1) },
+      ]);
+
+      await service.getProjectTimeline({ projectId: 'p1', limit: 2 });
+
+      expect(mockTimelineRepo.findEventLabels).toHaveBeenCalledTimes(1);
+      expect(mockTimelineRepo.findEventLabels).toHaveBeenCalledWith(['u1', 'u2'], ['t1', 't2']);
+    });
+
+    it('AC-2: maps actor and ticket labels onto returned ticket events', async () => {
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([
+        { id: 'e1', actorId: 'u1', action: 'x', ticketId: 't1', createdAt: at(1) },
+      ]);
+      mockTimelineRepo.findEventLabels.mockResolvedValue({
+        names: new Map([['u1', 'Alice']]), tickets: new Map([['t1', { ref: 'SB-3', title: 'Fix login' }]]),
+      });
+
+      const result = await service.getProjectTimeline({ projectId: 'p1', limit: 2 });
+
+      expect(result.events[0]).toMatchObject({ actorName: 'Alice', ticketRef: 'SB-3', ticketTitle: 'Fix login' });
+    });
+
+    it('AC-3: uses null labels for an agent event with an unknown actor', async () => {
+      mockTimelineRepo.findAgentEvents.mockResolvedValue([
+        { id: 'a1', actorId: 'gone', action: 'x', createdAt: at(1) },
+      ]);
+
+      const result = await service.getProjectTimeline({ projectId: 'p1' });
+
+      expect(result.events[0]).toMatchObject({ actorName: null, ticketRef: null, ticketTitle: null });
+    });
+
+    it('AC-4: uses null ticket labels when a ticket is missing', async () => {
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([
+        { id: 'e1', actorId: 'u1', action: 'x', ticketId: 'gone', createdAt: at(1) },
+      ]);
+
+      const result = await service.getProjectTimeline({ projectId: 'p1' });
+
+      expect(result.events[0]).toMatchObject({ ticketRef: null, ticketTitle: null });
+    });
+
+    it('AC-5: calls the label reader with empty arrays for an empty page', async () => {
+      const result = await service.getProjectTimeline({ projectId: 'p1' });
+
+      expect(result.events).toEqual([]);
+      expect(mockTimelineRepo.findEventLabels).toHaveBeenCalledExactlyOnceWith([], []);
+    });
+  });
+
   describe('keyset paging', () => {
     const t = (iso: string) => new Date(iso);
 
@@ -159,8 +224,8 @@ describe('TimelineService', () => {
 
       const result = await service.getTicketHistory('ticket-123');
 
-      expect(result.events).toBeDefined();
-      expect(Array.isArray(result.events)).toBe(true);
+      expect(result.events).toEqual([expect.objectContaining({ actorName: null, ticketRef: null, ticketTitle: null })]);
+      expect(mockTimelineRepo.findEventLabels).not.toHaveBeenCalled();
     });
 
     test('filters by ticketId', async () => {

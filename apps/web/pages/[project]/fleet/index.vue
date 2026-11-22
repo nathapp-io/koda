@@ -3,12 +3,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { codeLabel } from '~/lib/fleet-i18n'
-import { formatUsd, isConfigJob, reviewPrNumber } from '~/lib/fleet-jobs'
+import { formatUsd } from '~/lib/fleet-jobs'
+import { jobFeatureLabel, jobRequesterLabel } from '~/lib/fleet-job-labels'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import { runningFirstJobs } from '~/lib/fleet-jobs'
 import { useLocalDates } from '~/lib/local-dates'
 import { repoChoices } from '~/lib/fleet-repo-choices'
-import type { FleetJobDto } from '~/lib/fleet-types'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'
 
@@ -98,13 +98,6 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
 
 /** US-005: the repo filter's choices, so a name two repos share carries its host. */
 const repoFilterOptions = computed(() => repoChoices(options.repos.value))
-
-function featureLabel(job: FleetJobDto): string {
-  if (isConfigJob(job)) return t('fleet.jobs.configFeature')
-  if (job.command !== 'REVIEW' && job.command !== 'FIX') return job.feature
-  const prNumber = reviewPrNumber(job.feature)
-  return prNumber === null ? job.feature : `PR #${prNumber}`
-}
 </script>
 
 <template>
@@ -189,7 +182,7 @@ function featureLabel(job: FleetJobDto): string {
           <TableBody>
             <TableRow v-for="job in sortedJobs" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
               <TableCell>
-                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-link underline-offset-4 hover:underline">{{ featureLabel(job) }}</NuxtLink>
+                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-link underline-offset-4 hover:underline">{{ jobFeatureLabel(job, t) }}</NuxtLink>
               </TableCell>
               <TableCell class="whitespace-nowrap">{{ codeLabel(t, te, 'fleet.command', job.command) }}</TableCell>
               <TableCell>{{ options.repoName(job.repoId) }}</TableCell>
@@ -201,7 +194,7 @@ function featureLabel(job: FleetJobDto): string {
                 </div>
               </TableCell>
               <TableCell class="whitespace-nowrap text-right tabular-nums">{{ formatUsd(job.costSpentUsd) }}</TableCell>
-              <TableCell>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</TableCell>
+              <TableCell>{{ jobRequesterLabel(job, people.nameOf, t) }}</TableCell>
               <TableCell class="whitespace-nowrap text-muted-foreground">{{ dates.dateTime(job.queuedAt) }}</TableCell>
             </TableRow>
           </TableBody>

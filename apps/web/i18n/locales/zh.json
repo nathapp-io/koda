@@ -20,7 +20,8 @@
     "retry": "重试",
     "edit": "编辑",
     "save": "保存",
-    "delete": "删除"
+    "delete": "删除",
+    "formerMember": "已离开的成员"
   },
   "auth": {
     "forgot": {
@@ -528,6 +529,7 @@
       "eventType": "事件",
       "actorId": "操作者",
       "action": "动作",
+      "ticket": "工单",
       "created": "时间"
     }
   },
@@ -2145,6 +2147,7 @@
       "schedules": "定时计划",
       "approvals": "审批",
       "configFeature": "nax 配置",
+      "threadFeature": "线程",
       "approvalsSection": { "title": "审批", "empty": "尚无 Shell 命令询问。", "open": "打开" },
       "needsApproval": "待审批（{count}）",
       "empty": "还没有 fleet 任务",

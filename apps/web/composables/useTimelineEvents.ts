@@ -5,8 +5,11 @@ export interface TimelineEvent {
   id: string
   eventType: string
   actorId: string
+  actorName: string | null
   action: string
   ticketId?: string
+  ticketRef: string | null
+  ticketTitle: string | null
   createdAt: string
 }
 

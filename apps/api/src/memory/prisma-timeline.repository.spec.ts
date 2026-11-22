@@ -8,12 +8,18 @@ describe('PrismaTimelineRepository', () => {
   const mockTicketEvent = { findMany: vi.fn() };
   const mockAgentEvent = { findMany: vi.fn() };
   const mockDecisionEvent = { findMany: vi.fn() };
+  const mockUser = { findMany: vi.fn() };
+  const mockAgent = { findMany: vi.fn() };
+  const mockTicket = { findMany: vi.fn() };
 
   const mockPrismaService = {
     client: {
       ticketEvent: mockTicketEvent,
       agentEvent: mockAgentEvent,
       decisionEvent: mockDecisionEvent,
+      user: mockUser,
+      agent: mockAgent,
+      ticket: mockTicket,
     },
   };
 
@@ -28,6 +34,17 @@ describe('PrismaTimelineRepository', () => {
     repository = module.get<PrismaTimelineRepository>(PrismaTimelineRepository);
 
     vi.clearAllMocks();
+  });
+
+  it('AC-6: reads actor names and ticket labels through the shared event readers', async () => {
+    mockUser.findMany.mockResolvedValue([{ id: 'u1', name: 'Alice', email: 'a@x.io' }]);
+    mockAgent.findMany.mockResolvedValue([]);
+    mockTicket.findMany.mockResolvedValue([{ id: 't1', number: 3, title: 'Fix login', project: { key: 'SB' } }]);
+
+    const labels = await repository.findEventLabels(['u1'], ['t1']);
+
+    expect(labels.names.get('u1')).toBe('Alice');
+    expect(labels.tickets.get('t1')).toEqual({ ref: 'SB-3', title: 'Fix login' });
   });
 
   describe('findTicketEvents', () => {

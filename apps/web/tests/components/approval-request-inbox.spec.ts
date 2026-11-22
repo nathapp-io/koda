@@ -166,11 +166,25 @@ describe('ApprovalRequestInbox — tabs and rows', () => {
     m.app.unmount()
   })
 
-  test('AC-4 (edge): a key the locale does not know reads as itself', async () => {
+  test('AC-3: an unlabelled permission key is humanized with the raw key in its title', async () => {
+    const get = jest.fn(async () => pageOf([row('r1', { permissionKey: 'fleet.flow.start' })]))
+    const m = mountInbox({ get })
+    await m.settle()
+    const label = m.app.find('[title="fleet.flow.start"]', m.rowEl('r1'))[0]
+    expect(label).toBeDefined()
+    expect(m.app.textOf(label)).toBe('Fleet flow start')
+    expect(label.props.title).toBe('fleet.flow.start')
+    m.app.unmount()
+  })
+
+  test('AC-4 (edge): a key the locale does not know is humanized with raw-key tooltip', async () => {
     const get = jest.fn(async () => pageOf([row('r1', { permissionKey: 'brand.new.key' })]))
     const m = mountInbox({ get })
     await m.settle()
-    expect(m.app.textOf(m.rowEl('r1'))).toContain('brand.new.key')
+    const label = m.app.find('[title="brand.new.key"]', m.rowEl('r1'))[0]
+    expect(label).toBeDefined()
+    expect(m.app.textOf(label)).toBe('Brand new key')
+    expect(label.props.title).toBe('brand.new.key')
     m.app.unmount()
   })
 

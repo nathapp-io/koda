@@ -21225,6 +21225,16 @@
           "requestedById": {
             "type": "string"
           },
+          "requesterName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Display name of the requester; null when the user or agent no longer exists"
+          },
+          "threadTitle": {
+            "type": "string",
+            "nullable": true,
+            "description": "Title of the thread the job was dispatched from; null when the job has no thread or the thread was deleted"
+          },
           "queuedAt": {
             "type": "string"
           },
@@ -27288,6 +27298,21 @@
             "type": "string",
             "nullable": true
           },
+          "actorName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Display name of the actor; null when the user or agent no longer exists"
+          },
+          "ticketRef": {
+            "type": "string",
+            "nullable": true,
+            "description": "Project key + number of the ticket the event is about"
+          },
+          "ticketTitle": {
+            "type": "string",
+            "nullable": true,
+            "description": "Title of that ticket"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -27300,6 +27325,9 @@
           "action",
           "actorId",
           "ticketId",
+          "actorName",
+          "ticketRef",
+          "ticketTitle",
           "createdAt"
         ]
       },

@@ -23,12 +23,37 @@ describe('notificationText (S4a §5: web renders from kind + params)', () => {
     ['job_pr_opened', { repo: 'acme/app', feature: 'f', prUrl: 'https://x' }, 'Fleet job on acme/app opened a PR'],
     ['approval_requested', { repo: 'acme/app', kind: 'bash' }, 'Approval needed: bash on acme/app'],
     // P3b US-005: the engine's own approval notice words the request's permission key.
-    ['approval_request', { key: 'label.create' }, 'Approval needed: label.create'],
+    ['approval_request', { key: 'label.create' }, 'Approval needed: Label create'],
     ['budget_hard_stop', { scope: 'acme/app', spentUsd: '12.00', amountUsd: '10.00' }, 'Budget acme/app stopped at 12.00 of 10.00 USD'],
     ['runner_offline', { runner: 'wk-mac' }, 'Runner wk-mac is offline'],
     ['credential_expiring', { runner: 'wk-mac', provider: 'openai-codex', expiresAt: '2026-10-11' }, 'openai-codex credential on wk-mac expires 2026-10-11'],
   ])('%s', (kind, params, expected) => {
     expect(notificationText({ ...base, kind, params }, enI18n())).toBe(expected)
+  })
+
+  test('US-008 AC-4: an unlabelled approval key is humanized in notification copy', () => {
+    expect(notificationText({
+      ...base,
+      kind: 'approval_request',
+      params: { key: 'fleet.flow.start' },
+      title: 'Approval needed: fleet.flow.start',
+    }, enI18n())).toBe('Approval needed: Fleet flow start')
+  })
+
+  test('US-008 AC-5: a translated approval key keeps its locale label', () => {
+    expect(notificationText({
+      ...base,
+      kind: 'approval_request',
+      params: { key: 'fleet.budget.override' },
+    }, enI18n())).toBe('Approval needed: Fleet budget override')
+  })
+
+  test('US-008 AC-6: unrelated ticket notification params retain their locale rendering', () => {
+    expect(notificationText({
+      ...base,
+      kind: 'ticket_assigned',
+      params: { actorName: 'Alice', ref: 'SB-1', ticketTitle: 'Fix' },
+    }, enI18n())).toBe('Alice assigned you SB-1: Fix')
   })
 
   test('AC-6: action_requested with params returns the locale text, not the API title', () => {

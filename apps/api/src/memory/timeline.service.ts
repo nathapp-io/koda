@@ -27,6 +27,9 @@ export interface TimelineEvent {
   action: string;
   ticketId?: string;
   createdAt: Date;
+  actorName: string | null;
+  ticketRef: string | null;
+  ticketTitle: string | null;
 }
 
 export interface TimelineResponse {
@@ -93,6 +96,9 @@ export class TimelineService {
         action: e.action,
         ticketId: e.ticketId ?? undefined,
         createdAt: e.createdAt,
+        actorName: null,
+        ticketRef: null,
+        ticketTitle: null,
       })));
     }
 
@@ -104,6 +110,9 @@ export class TimelineService {
         actorId: e.actorId,
         action: e.action,
         createdAt: e.createdAt,
+        actorName: null,
+        ticketRef: null,
+        ticketTitle: null,
       })));
     }
 
@@ -115,11 +124,27 @@ export class TimelineService {
         actorId: e.agentId,
         action: e.action,
         createdAt: e.createdAt,
+        actorName: null,
+        ticketRef: null,
+        ticketTitle: null,
       })));
     }
 
     results.sort(compareEventsDesc);
-    const events = results.slice(0, limit);
+    const pageEvents = results.slice(0, limit);
+    const labels = await this.timelineRepo.findEventLabels(
+      pageEvents.map((event) => event.actorId),
+      pageEvents.flatMap((event) => event.ticketId ? [event.ticketId] : []),
+    );
+    const events = pageEvents.map((event) => {
+      const ticket = event.ticketId ? labels.tickets.get(event.ticketId) : undefined;
+      return {
+        ...event,
+        actorName: labels.names.get(event.actorId) ?? null,
+        ticketRef: ticket?.ref ?? null,
+        ticketTitle: ticket?.title ?? null,
+      };
+    });
     const last = events[events.length - 1];
 
     return {
@@ -139,6 +164,9 @@ export class TimelineService {
         action: e.action,
         ticketId: e.ticketId ?? undefined,
         createdAt: e.createdAt,
+        actorName: null,
+        ticketRef: null,
+        ticketTitle: null,
       })),
       ticketId,
     };

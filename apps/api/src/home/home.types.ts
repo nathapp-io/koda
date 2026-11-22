@@ -86,6 +86,9 @@ export interface HomeActivityRow {
   action: string;
   actorId: string;
   ticketId: string | null;
+  actorName: string | null;
+  ticketRef: string | null;
+  ticketTitle: string | null;
   createdAt: Date;
 }
 
@@ -141,6 +144,9 @@ export interface HomeActivityView {
   action: string;
   actorId: string;
   ticketId: string | null;
+  actorName: string | null;
+  ticketRef: string | null;
+  ticketTitle: string | null;
   createdAt: Date;
 }
 
@@ -267,6 +273,9 @@ export function buildHomeView(input: HomeSnapshotInput): HomeView {
       action: e.action,
       actorId: e.actorId,
       ticketId: e.ticketId,
+      actorName: e.actorName,
+      ticketRef: e.ticketRef,
+      ticketTitle: e.ticketTitle,
       createdAt: e.createdAt,
     }));
 

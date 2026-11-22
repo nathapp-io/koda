@@ -3,6 +3,7 @@ import { extractApiError } from '~/composables/useApi'
 import { humanizeCode } from '~/lib/humanize-code'
 import { FILTER_CONTROL_CLASS } from '~/lib/form-control'
 import { useLocalDates } from '~/lib/local-dates'
+import type { TimelineEvent } from '~/composables/useTimelineEvents'
 
 definePageMeta({ layout: 'default' })
 
@@ -20,8 +21,8 @@ function eventTypeLabel(eventType: string): string {
   return te(key) ? t(key) : humanizeCode(eventType)
 }
 
-function actorName(actorId: string): string {
-  return memberNames.nameOf(actorId) ?? agentNames.nameOf(actorId) ?? actorId
+function actorName(event: TimelineEvent): string {
+  return event.actorName ?? memberNames.nameOf(event.actorId) ?? agentNames.nameOf(event.actorId) ?? t('common.formerMember')
 }
 const toast = useAppToast()
 
@@ -112,14 +113,23 @@ function formatDate(dateStr: string) {
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('timeline.columns.eventType') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('timeline.columns.actorId') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('timeline.columns.action') }}</th>
+            <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('timeline.columns.ticket') }}</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('timeline.columns.created') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
           <tr v-for="event in events" :key="event.id" class="hover:bg-muted/30">
             <td class="px-4 py-3 font-mono text-xs">{{ eventTypeLabel(event.eventType) }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ actorName(event.actorId) }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ actorName(event) }}</td>
             <td class="px-4 py-3" :title="event.action">{{ humanizeCode(event.action) }}</td>
+            <td class="px-4 py-3">
+              <NuxtLink
+                v-if="event.ticketRef"
+                :to="`/${slug}/tickets/${event.ticketRef}`"
+                data-testid="timeline-ticket"
+                class="text-link hover:underline"
+              >{{ event.ticketTitle ? `${event.ticketRef} ${event.ticketTitle}` : event.ticketRef }}</NuxtLink>
+            </td>
             <td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(event.createdAt) }}</td>
           </tr>
         </tbody>

@@ -102,7 +102,7 @@ describe('HomeNeedsYou', () => {
       fixture({ approvals: [approvalRow()] }),
       { useI18n: () => ({ t: enI18n().t, te: () => false }) },
     )
-    expect(app.text()).toContain('label.create')
+    expect(app.text()).toContain('Label create')
     app.unmount()
   })
 

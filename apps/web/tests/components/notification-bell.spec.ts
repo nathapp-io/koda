@@ -195,7 +195,7 @@ describe('NotificationBell (S4a §5)', () => {
     await m.settle()
     const items = m.byId('notification-item')
     expect(items).toHaveLength(1)
-    expect(m.app.textOf(items[0])).toBe('Approval needed: label.create')
+    expect(m.app.textOf(items[0])).toBe('Approval needed: Label create')
     m.app.unmount()
   })
 })

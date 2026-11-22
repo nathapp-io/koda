@@ -30,7 +30,7 @@ interface HomeSnapshot {
     jobsTotal: number;
   };
   projects: Array<{ slug: string; openTickets: number; attentionJobs: number }>;
-  activity: Array<{ eventType: string; projectSlug: string; action: string }>;
+  activity: Array<{ eventType: string; projectSlug: string; action: string; actorName: string | null; ticketRef: string | null; ticketTitle: string | null }>;
 }
 
 describeIntegration('home dashboard API (PG)', () => {
@@ -246,6 +246,52 @@ describeIntegration('home dashboard API (PG)', () => {
     expect(v.projects).toEqual([]);
     expect(v.needsYou).toMatchObject({ tickets: [], ticketsTotal: 0, approvals: [], approvalsTotal: 0, jobs: [], jobsTotal: 0 });
     expect(v.activity).toEqual([]);
+  });
+
+  const activityTicket = async (actorId: string) => {
+    const created = await ticket(webId, { status: 'CLOSED', title: `readable activity ${ticketNo + 1}` });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: webId }, select: { key: true } });
+    const event = await prisma.ticketEvent.create({
+      data: { projectId: webId, ticketId: created.id, action: 'TICKET_CREATED', actorType: 'user', actorId, source: 'api' },
+      select: { id: true },
+    });
+    return { created, eventId: event.id, ref: `${project.key}-${created.number}` };
+  };
+
+  const cleanupActivityTicket = async (eventId: string, ticketId: string) => {
+    await prisma.ticketEvent.delete({ where: { id: eventId } });
+    await prisma.ticket.delete({ where: { id: ticketId } });
+  };
+
+  it('AC-9: home activity includes ticket and actor labels', async () => {
+    const created = await activityTicket(world.ids.dev);
+    try {
+      const row = (await home('dev')).activity.find((activity) => activity.ticketTitle === created.created.title);
+      expect(row).toMatchObject({ ticketRef: created.ref, ticketTitle: created.created.title, actorName: 'dev' });
+    } finally {
+      await cleanupActivityTicket(created.eventId, created.created.id);
+    }
+  });
+
+  it('AC-10: home activity retains ticket labels after soft deletion', async () => {
+    const created = await activityTicket(world.ids.dev);
+    try {
+      await prisma.ticket.update({ where: { id: created.created.id }, data: { deletedAt: new Date() } });
+      const row = (await home('dev')).activity.find((activity) => activity.ticketTitle === created.created.title);
+      expect(row).toMatchObject({ ticketRef: created.ref, ticketTitle: created.created.title });
+    } finally {
+      await cleanupActivityTicket(created.eventId, created.created.id);
+    }
+  });
+
+  it('AC-11: home activity uses a null actor label for an unknown principal', async () => {
+    const created = await activityTicket(`unknown-${randomUUID()}`);
+    try {
+      const row = (await home('dev')).activity.find((activity) => activity.ticketTitle === created.created.title);
+      expect(row).toMatchObject({ ticketRef: created.ref, ticketTitle: created.created.title, actorName: null });
+    } finally {
+      await cleanupActivityTicket(created.eventId, created.created.id);
+    }
   });
 
   it('403s an agent key', async () => {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
+import { readPrincipalNames, readTicketLabels, TicketLabel } from '../common/utils/event-labels';
 import { keysetWhere, TimelineKey } from './timeline-cursor';
 
 export interface KeysetPage {
@@ -35,6 +36,17 @@ export interface DecisionEventRow {
 @Injectable()
 export class PrismaTimelineRepository {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+
+  async findEventLabels(
+    actorIds: readonly string[],
+    ticketIds: readonly string[],
+  ): Promise<{ names: Map<string, string>; tickets: Map<string, TicketLabel> }> {
+    const [names, tickets] = await Promise.all([
+      readPrincipalNames(this.prisma.client, actorIds),
+      readTicketLabels(this.prisma.client, ticketIds),
+    ]);
+    return { names, tickets };
+  }
 
   async findTicketEvents(where: Record<string, unknown>, page?: KeysetPage): Promise<TicketEventRow[]> {
     return this.prisma.client.ticketEvent.findMany({

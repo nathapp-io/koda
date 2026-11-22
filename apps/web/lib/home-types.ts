@@ -60,7 +60,10 @@ export interface HomeActivity {
   projectSlug: string
   action: string
   actorId: string
+  actorName: string | null
   ticketId: string | null
+  ticketRef: string | null
+  ticketTitle: string | null
   createdAt: string
 }
 

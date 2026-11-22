@@ -221,7 +221,7 @@ export type MisfitReason =
   | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'agents_run' | 'trust_domain'
 
 /** Fleet job kinds, including config jobs and PR reviews. */
-export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'AGENT'
+export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'AGENT' | 'THREAD'
 
 export interface AgentJobInputDto {
   name: string
@@ -376,6 +376,8 @@ export interface FleetJobDto {
   state: FleetJobState
   stateReason: string | null
   requestedById: string
+  requesterName: string | null
+  threadTitle: string | null
   queuedAt: string
   assignedAt: string | null
   startedAt: string | null
