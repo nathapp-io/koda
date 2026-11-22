@@ -3,7 +3,7 @@
   "feature": "e2e-1121-confirm-dialogs",
   "branchName": "feat/e2e-1121-confirm-dialogs",
   "createdAt": "2026-11-22T06:21:02.543Z",
-  "updatedAt": "2026-11-22T06:44:58.828Z",
+  "updatedAt": "2026-11-22T06:54:18.292Z",
   "userStories": [
     {
       "id": "US-001",
@@ -168,14 +168,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three conventional page migrations reuse existing infrastructure and upstream copy. Credentials and runner key revocation require strict security isolation; migrate existing declined/accepted tests and assert exact options/copy."
+        "reasoning": "Three conventional page migrations reuse existing infrastructure and upstream copy. Credentials and runner key revocation require strict security isolation; migrate existing declined/accepted tests and assert exact options/copy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useConfirm.ts",
@@ -203,7 +206,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2cef6ef12808c30988d00704c0ef7d5d0e0a0ca8"
     },
     {
       "id": "US-004",
