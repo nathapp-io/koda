@@ -3,7 +3,7 @@
   "feature": "e2e-1121-readable-names",
   "branchName": "feat/e2e-1121-readable-names",
   "createdAt": "2026-11-22T09:16:55.665Z",
-  "updatedAt": "2026-11-22T09:58:17.048Z",
+  "updatedAt": "2026-11-22T10:04:21.906Z",
   "userStories": [
     {
       "id": "US-001",
@@ -374,14 +374,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Two established pages replace duplicated presentation logic with upstream helpers; existing mounts and source-pin changes are localized, with permission controls explicitly unchanged."
+        "reasoning": "Two established pages replace duplicated presentation logic with upstream helpers; existing mounts and source-pin changes are localized, with permission controls explicitly unchanged.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/index.vue",
@@ -404,7 +407,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b6fccb734ddf52ddc3578022514df2489d4343ee"
     },
     {
       "id": "US-007",
