@@ -82,6 +82,10 @@ export class FleetJobDto {
   @ApiProperty({ enum: STATES }) declare state: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare stateReason: string | null;
   @ApiProperty() declare requestedById: string;
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Display name of the requester; null when the user or agent no longer exists' })
+  declare requesterName: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Title of the thread the job was dispatched from; null when the job has no thread or the thread was deleted' })
+  declare threadTitle: string | null;
   @ApiProperty() declare queuedAt: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare assignedAt: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare startedAt: string | null;
@@ -133,7 +137,7 @@ export class FleetJobDto {
       planFrom: r.planFrom, profiles: r.profiles, maxCostUsd: r.maxCostUsd, bashMode: r.bashMode,
       approvalTimeoutSec: r.approvalTimeoutSec, pendingApprovals,
       selectorLabels: r.selectorLabels, pinnedRunnerId: r.pinnedRunnerId, runnerId: r.runnerId, leaseEpoch: r.leaseEpoch,
-      state: r.state, stateReason: r.stateReason, requestedById: r.requestedById, queuedAt: r.queuedAt.toISOString(),
+      state: r.state, stateReason: r.stateReason, requestedById: r.requestedById, requesterName: null, threadTitle: null, queuedAt: r.queuedAt.toISOString(),
       assignedAt: iso(r.assignedAt), startedAt: iso(r.startedAt), finishedAt: iso(r.finishedAt),
       cancelRequestedAt: iso(r.cancelRequestedAt), naxRunId: r.naxRunId, naxLogRunId: r.naxLogRunId,
       naxCostRunId: r.naxCostRunId, progress: r.progress ?? null, currentStoryId: r.currentStoryId,

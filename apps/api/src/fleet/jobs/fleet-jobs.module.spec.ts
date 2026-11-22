@@ -2,6 +2,8 @@ import { Test } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { FLEET_JOB_REPOSITORY } from './domain/fleet-job.domain';
 import { FleetJobsModule } from './fleet-jobs.module';
+import { FleetJobsService } from './fleet-jobs.service';
+import { PrismaFleetJobLabelsRepository } from './prisma-fleet-job-labels.repository';
 
 /**
  * 2a ENH-1: module-registration / DI compilation guard. Lives here so any future
@@ -15,6 +17,17 @@ import { FleetJobsModule } from './fleet-jobs.module';
  * `LiveModule → OutboxModule` cannot resolve `TRANSACTION_MANAGER`.
  */
 describe('FleetJobsModule', () => {
+  it('AC-10: injects the registered labels repository into the service', async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetJobsModule] }).compile();
+    try {
+      const labels = moduleRef.get(PrismaFleetJobLabelsRepository);
+      expect(labels).toBeDefined();
+      expect(moduleRef.get(FleetJobsService).labels).toBe(labels);
+    } finally {
+      await moduleRef.close();
+    }
+  });
+
   it('compiles and resolves the job repository token', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetJobsModule] }).compile();
     try {

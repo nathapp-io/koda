@@ -1,6 +1,6 @@
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { ReviewDecisionsService } from '../../memory/review-decisions.service';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -38,6 +38,7 @@ import { FleetJobEventDto } from './dto/fleet-job-event.dto';
 import { FleetJobTicketDto } from '../tickets/dto/ticket-fleet-job.dto';
 import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.service';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
+import { PrismaFleetJobLabelsRepository } from './prisma-fleet-job-labels.repository';
 
 /** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
 export interface BudgetCancelResult {
@@ -82,6 +83,7 @@ export class FleetJobsService {
     private readonly audit: AuditRecorder,
     private readonly reviewDecisions: ReviewDecisionsService,
     private readonly prRulings: FleetPrRulingsService,
+    @Optional() private readonly labels?: PrismaFleetJobLabelsRepository,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
@@ -202,7 +204,15 @@ export class FleetJobsService {
     const pageResult = await this.repo.findPage(filters, page);
     // Plan D272: one grouped count per page, never one per row.
     const pending = await this.approvals.countPendingByJob(pageResult.records.map((r) => r.id));
-    return remapPage(pageResult, (r) => FleetJobDto.summary(r, pending.get(r.id) ?? 0));
+    const dtos = remapPage(pageResult, (r) => FleetJobDto.summary(r, pending.get(r.id) ?? 0));
+    if (!this.labels) return dtos;
+    const labels = await this.labels.read(pageResult.records.map(({ requestedById, threadId }) => ({ requestedById, threadId })));
+    dtos.records.forEach((dto, index) => {
+      const threadId = pageResult.records[index].threadId;
+      dto.requesterName = labels.names.get(dto.requestedById) ?? null;
+      dto.threadTitle = threadId ? (labels.threads.get(threadId) ?? null) : null;
+    });
+    return dtos;
   }
 
   /**
@@ -511,7 +521,12 @@ export class FleetJobsService {
 
   async get(projectId: string, id: string): Promise<FleetJobDto> {
     const job = await this.findInProject(projectId, id);
-    return this.withDetail(job);
+    const dto = await this.withDetail(job);
+    if (!this.labels) return dto;
+    const labels = await this.labels.read([{ requestedById: job.requestedById, threadId: job.threadId }]);
+    dto.requesterName = labels.names.get(job.requestedById) ?? null;
+    dto.threadTitle = job.threadId ? (labels.threads.get(job.threadId) ?? null) : null;
+    return dto;
   }
 
   async events(projectId: string, id: string, page: IPageOption): Promise<IPageResult<FleetJobEventDto>> {

@@ -21225,6 +21225,16 @@
           "requestedById": {
             "type": "string"
           },
+          "requesterName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Display name of the requester; null when the user or agent no longer exists"
+          },
+          "threadTitle": {
+            "type": "string",
+            "nullable": true,
+            "description": "Title of the thread the job was dispatched from; null when the job has no thread or the thread was deleted"
+          },
           "queuedAt": {
             "type": "string"
           },

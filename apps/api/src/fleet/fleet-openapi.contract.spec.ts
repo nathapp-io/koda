@@ -79,6 +79,12 @@ describe('fleet OpenAPI contract', () => {
     expect(agent?.required).toEqual(expect.arrayContaining(['name', 'task']));
   });
 
+  it('US-004 AC-11: exposes requester and thread labels on FleetJobDto', () => {
+    expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toEqual(
+      expect.arrayContaining(['requesterName', 'threadTitle']),
+    );
+  });
+
   it('exposes the job post-run stages (S2b (j) D433, D435; US-003 workflowStep)', () => {
     expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toContain('postRun');
     expect(Object.keys(spec.components.schemas['FleetJobPostRunDto']?.properties ?? {}).sort())

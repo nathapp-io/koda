@@ -25,6 +25,7 @@ import { ProviderCredentialsModule } from '../provider-credentials/provider-cred
 import { RunnerNotifier } from './runner-notifier';
 import { ProjectDeletionJobsListener } from './project-deletion-jobs.listener';
 import { ThreadJobEffects } from '../threads/thread-job-effects';
+import { PrismaFleetJobLabelsRepository } from './prisma-fleet-job-labels.repository';
 
 /**
  * Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller.
@@ -39,6 +40,7 @@ import { ThreadJobEffects } from '../threads/thread-job-effects';
   providers: [
     FleetJobRouteCommands,
     PrismaFleetJobRepository,
+    PrismaFleetJobLabelsRepository,
     { provide: FLEET_JOB_REPOSITORY, useExisting: PrismaFleetJobRepository },
     FleetJobLivePublisher,
     FleetJobOutcomeRecorder,
