@@ -63,7 +63,7 @@ describe('buildHomeView', () => {
       activity: {
         ticketEvents: Array.from({ length: 12 }, (_, i) => ({
           id: `te${i}`, projectId: 'p1', eventType: 'ticket_event' as const, action: 'CREATED',
-          actorId: 'u1', ticketId: 't1', createdAt: daysAgo(i / 24),
+          actorId: 'u1', ticketId: 't1', actorName: null, ticketRef: null, ticketTitle: null, createdAt: daysAgo(i / 24),
         })),
         agentEvents: [],
         decisionEvents: [],
@@ -118,9 +118,9 @@ describe('buildHomeView', () => {
   it('merges the three event tables newest first and resolves the project slug', () => {
     const v = buildHomeView(input({
       activity: {
-        ticketEvents: [{ id: 'te1', projectId: 'p1', eventType: 'ticket_event', action: 'STATUS_CHANGE', actorId: 'u1', ticketId: 't1', createdAt: daysAgo(2) }],
-        agentEvents: [{ id: 'ae1', projectId: 'p1', eventType: 'agent_event', action: 'CODE_INDEXED', actorId: 'ag1', ticketId: null, createdAt: daysAgo(0.1) }],
-        decisionEvents: [{ id: 'de1', projectId: 'p1', eventType: 'decision_event', action: 'decided', actorId: 'ag1', ticketId: null, createdAt: daysAgo(1) }],
+        ticketEvents: [{ id: 'te1', projectId: 'p1', eventType: 'ticket_event', action: 'STATUS_CHANGE', actorId: 'u1', ticketId: 't1', actorName: null, ticketRef: null, ticketTitle: null, createdAt: daysAgo(2) }],
+        agentEvents: [{ id: 'ae1', projectId: 'p1', eventType: 'agent_event', action: 'CODE_INDEXED', actorId: 'ag1', ticketId: null, actorName: null, ticketRef: null, ticketTitle: null, createdAt: daysAgo(0.1) }],
+        decisionEvents: [{ id: 'de1', projectId: 'p1', eventType: 'decision_event', action: 'decided', actorId: 'ag1', ticketId: null, actorName: null, ticketRef: null, ticketTitle: null, createdAt: daysAgo(1) }],
       },
     }));
     expect(v.activity.map((e) => [e.id, e.projectSlug, e.eventType])).toEqual([
@@ -128,6 +128,22 @@ describe('buildHomeView', () => {
       ['de1', 'web', 'decision_event'],
       ['te1', 'web', 'ticket_event'],
     ]);
+  });
+
+  it('AC-7: copies actor and ticket labels into the activity view', () => {
+    const v = buildHomeView(input({ activity: { ticketEvents: [{
+      id: 'te-label', projectId: 'p1', eventType: 'ticket_event', action: 'CREATED', actorId: 'u1', ticketId: 't1',
+      actorName: 'Alice', ticketRef: 'WEB-12', ticketTitle: 'Fix login', createdAt: NOW,
+    }], agentEvents: [], decisionEvents: [] } }));
+    expect(v.activity[0]).toMatchObject({ actorName: 'Alice', ticketRef: 'WEB-12', ticketTitle: 'Fix login' });
+  });
+
+  it('AC-8: preserves null actor and ticket labels in the activity view', () => {
+    const v = buildHomeView(input({ activity: { ticketEvents: [{
+      id: 'te-null', projectId: 'p1', eventType: 'ticket_event', action: 'CREATED', actorId: 'gone', ticketId: 'gone',
+      actorName: null, ticketRef: null, ticketTitle: null, createdAt: NOW,
+    }], agentEvents: [], decisionEvents: [] } }));
+    expect(v.activity[0]).toMatchObject({ actorName: null, ticketRef: null, ticketTitle: null });
   });
 
   it('stamps generatedAt with the server clock used for the attention window', () => {

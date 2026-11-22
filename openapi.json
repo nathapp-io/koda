@@ -27288,6 +27288,21 @@
             "type": "string",
             "nullable": true
           },
+          "actorName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Display name of the actor; null when the user or agent no longer exists"
+          },
+          "ticketRef": {
+            "type": "string",
+            "nullable": true,
+            "description": "Project key + number of the ticket the event is about"
+          },
+          "ticketTitle": {
+            "type": "string",
+            "nullable": true,
+            "description": "Title of that ticket"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -27300,6 +27315,9 @@
           "action",
           "actorId",
           "ticketId",
+          "actorName",
+          "ticketRef",
+          "ticketTitle",
           "createdAt"
         ]
       },

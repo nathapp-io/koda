@@ -64,6 +64,9 @@ export class HomeActivityDto implements HomeActivityView {
   @ApiProperty({ description: 'Raw action code (e.g. CREATED, STATUS_CHANGE); the client words it' }) action: string;
   @ApiProperty({ description: 'User or agent id of the actor' }) actorId: string;
   @ApiProperty(NULLABLE_STRING) ticketId: string | null;
+  @ApiProperty({ ...NULLABLE_STRING, description: 'Display name of the actor; null when the user or agent no longer exists' }) actorName: string | null;
+  @ApiProperty({ ...NULLABLE_STRING, description: 'Project key + number of the ticket the event is about' }) ticketRef: string | null;
+  @ApiProperty({ ...NULLABLE_STRING, description: 'Title of that ticket' }) ticketTitle: string | null;
   @ApiProperty(DATE) createdAt: Date;
 }
 
