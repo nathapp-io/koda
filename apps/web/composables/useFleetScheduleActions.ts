@@ -10,6 +10,7 @@ import type { ScheduleDto } from '~/lib/fleet-types'
 export function useFleetScheduleActions(api: Pick<FleetSchedulesApi, 'enable' | 'disable' | 'remove'>, onStale: () => void) {
   const { t } = useI18n()
   const toast = useAppToast()
+  const { confirm } = useConfirm()
   const busy = ref(false)
 
   async function run<T>(action: () => Promise<T>, successKey: string): Promise<T | null> {
@@ -34,7 +35,13 @@ export function useFleetScheduleActions(api: Pick<FleetSchedulesApi, 'enable' | 
 
   /** True when the schedule is gone. */
   async function remove(s: ScheduleDto): Promise<boolean> {
-    if (!window.confirm(t('fleet.schedules.deleteConfirm', { name: s.name }))) return false
+    const confirmed = await confirm({
+      title: t('fleet.schedules.deleteConfirm', { name: s.name }),
+      body: t('fleet.schedules.deleteConfirmBody'),
+      confirmLabel: t('fleet.schedules.actions.delete'),
+      destructive: true,
+    })
+    if (!confirmed) return false
     const done = await run(async () => {
       await api.remove(s.id)
       return true

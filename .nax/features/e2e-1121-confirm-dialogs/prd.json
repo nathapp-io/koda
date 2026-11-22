@@ -1,0 +1,420 @@
+{
+  "project": "koda",
+  "feature": "e2e-1121-confirm-dialogs",
+  "branchName": "feat/e2e-1121-confirm-dialogs",
+  "createdAt": "2026-11-22T06:21:02.543Z",
+  "updatedAt": "2026-11-22T07:20:27.381Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project settings and members confirmations",
+      "description": "**Goal** — Migrate sites 1 to 5 with exact bilingual confirmation copy.\n**Motivation** — After #500, ticket and comment delete use the styled dialog, while 18 other destructive or bulk actions still use the native one. The same app asks the same kind of question two different ways.\n**Approach** — The reference migration is `CommentThread.vue` `deleteComment`: `const confirmed = await confirm({ title, body, confirmLabel, destructive: true }); if (!confirmed) return`.\nEvery other site keeps its function shape and replaces `if (!window.confirm(text)) return` with `if (!(await confirm({ ... }))) return`, making the handler `async` where it is not already.\nEach site keeps its existing i18n key as the dialog **title**. Where the existing value holds a second sentence, the title loses it and that sentence moves to a new `<key>Body` key. Where the existing value is a bare question, the body is new text. The confirm button reuses the i18n key of the button that opened the dialog. Only `fleet.config.page.leaveConfirmLabel` is new. Titles marked \"unchanged\" keep their current en and zh values.\n\n| # | Site (file, function) | Title key (en / zh) | Body key (en / zh) | `confirmLabel` key | `destructive` |\n|---|---|---|---|---|---|\n| 1 | `components/SettingsVcsCard.vue` `rotateSecret` | `vcs.secret.rotateConfirm` = \"Rotate the webhook secret?\" / \"确定轮换 Webhook 密钥？\" | `vcs.secret.rotateConfirmBody` = \"Deliveries signed with the old secret will be rejected.\" / \"使用旧密钥签名的投递将被拒绝。\" | `vcs.secret.rotate` | true |\n| 2 | `components/SettingsProviderKeysCard.vue` delete | `fleet.providerKeys.deleteConfirm` (unchanged, `{provider}`) | `fleet.providerKeys.deleteConfirmBody` = \"The stored key is removed and cannot be recovered.\" / \"已保存的密钥将被移除，且无法恢复。\" | `fleet.providerKeys.delete` | true |\n| 3 | `components/ProjectInvitesPanel.vue` cancel invite | `projects.invites.cancelConfirm` (unchanged, `{email}`) | `projects.invites.cancelConfirmBody` = \"The invite link stops working.\" / \"该邀请链接将失效。\" | `projects.invites.cancel` | true |\n| 4 | `components/ProjectMembersPanel.vue` `onRemoveRow` | `projects.members.removeConfirm` (unchanged, `{name}`) | `projects.members.removeConfirmBody` = \"All of their roles in this project are removed.\" / \"其在此项目中的所有角色将被移除。\" | `projects.members.remove` | true |\n| 5 | `components/SettingsDangerZoneCard.vue` delete project | `projects.settings.deleteConfirm` = \"Delete this project?\" / \"确认删除此项目？\" | `projects.settings.deleteConfirmBody` = \"This action cannot be undone.\" / \"此操作不可撤销。\" | `projects.settings.delete` | true |\n\nEach story adds the en and zh values for its own rows to `i18n/locales/en.json` and `i18n/locales/zh.json`. Rows 2 and 12 share a body key, and so do rows 8 and 13. The story that owns the first row of a pair adds the key. Row 1 deliberately drops the zh \"吗\" so that the title is a short question, like the other titles.\nUse auto-imported useConfirm and the existing global host. Migrate SettingsProviderKeysCard.spec.ts AC-6/M2, ProjectInvitesPanel.spec.ts AC6, and settings-danger-zone-card.spec.ts AC-7/AC-8 to globals.useConfirm with resolving mocks; assert full options/interpolated titles. Keep origin stubs and existing post-consent behavior. Create the three expected specs. Cancel/Escape/close returns false before any API, toast or state change; confirmed errors keep existing handling. Supersession remains verified by the existing unchanged shared spec, with no new test.\n**Scope** — In: five components, their copy and specified Jest work. Out: admin fleet usage is US-003; governance/approval copy is US-002; project pages are US-004; schedules/budgets are US-005; lint is US-006. `useConfirm`, `ConfirmDialogHost` and their tests do not change. No new option (for example an input field or a third button) is added. `CommentThread.vue` and `TicketProperties.vue` were migrated by #500 and are not touched. A second confirm request closing the first one with `false` is existing `useConfirm` behaviour; no story adds a test for it. No new failure-path or E2E tests.\n**Interface** — `useConfirm(): { confirm(options: ConfirmOptions): Promise<boolean>; settle(ok: boolean): void; current: ComputedRef<ConfirmOptions | null> }`\n`interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; destructive?: boolean }`",
+      "acceptanceCriteria": [
+        "[unit] Clicking rotate in SettingsVcsCard calls confirm once with { title: t('vcs.secret.rotateConfirm'), body: t('vcs.secret.rotateConfirmBody'), confirmLabel: t('vcs.secret.rotate'), destructive: true }.",
+        "[unit] In SettingsVcsCard, when confirm resolves false, no POST /projects/:slug/vcs/webhook-secret/rotate request is sent after the promise settles.",
+        "[unit] Deleting a key in SettingsProviderKeysCard calls confirm once with { title: t('fleet.providerKeys.deleteConfirm', { provider }), body: t('fleet.providerKeys.deleteConfirmBody'), confirmLabel: t('fleet.providerKeys.delete'), destructive: true }, where provider is the row's providerId.",
+        "[unit] In SettingsProviderKeysCard, when confirm resolves false, no delete request is sent after the promise settles.",
+        "[unit] Cancelling the invite for pending@x.io in ProjectInvitesPanel calls confirm once with { title: t('projects.invites.cancelConfirm', { email: 'pending@x.io' }), body: t('projects.invites.cancelConfirmBody'), confirmLabel: t('projects.invites.cancel'), destructive: true }.",
+        "[unit] In ProjectInvitesPanel, when confirm resolves false, the invite cancel API is not called after the promise settles.",
+        "[unit] Removing a member row in ProjectMembersPanel calls confirm once with { title: t('projects.members.removeConfirm', { name }), body: t('projects.members.removeConfirmBody'), confirmLabel: t('projects.members.remove'), destructive: true }, where name is the row's display name.",
+        "[unit] In ProjectMembersPanel, when confirm resolves false, no binding is removed after the promise settles.",
+        "[unit] Deleting the project in SettingsDangerZoneCard calls confirm once with { title: t('projects.settings.deleteConfirm'), body: t('projects.settings.deleteConfirmBody'), confirmLabel: t('projects.settings.delete'), destructive: true }.",
+        "[unit] In SettingsDangerZoneCard, when confirm resolves false, no project delete request is sent after the promise settles.",
+        "[unit] The en and zh locale files hold the exact Design table values embedded in this story for the row 1 to 5 keys: vcs.secret.rotateConfirm, projects.settings.deleteConfirm, vcs.secret.rotateConfirmBody, fleet.providerKeys.deleteConfirmBody, projects.invites.cancelConfirmBody, projects.members.removeConfirmBody and projects.settings.deleteConfirmBody."
+      ],
+      "tags": [
+        "web",
+        "confirm-dialogs",
+        "settings",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard existing-pattern component migrations; key rotation, credential deletion and role removal require strict security test isolation. Write mounted/options/cancellation and literal locale tests first, migrating existing mocks without changing shared tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useConfirm.ts",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/tests/components/comment-thread-author.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/i18n/locale-parity.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/settings-vcs-card-rotate-confirm.spec.ts",
+        "apps/web/tests/components/project-members-remove-confirm.spec.ts",
+        "apps/web/tests/i18n/confirm-copy-settings.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/SettingsProviderKeysCard.spec.ts",
+          "reason": "tests \"AC-6\" and \"M2\" stub `window.confirm` and read its string argument. They switch to a `useConfirm` global whose `confirm` mock resolves `false`/`true`. \"M2\" asserts that the `title` option interpolates `{provider}`."
+        },
+        {
+          "path": "apps/web/tests/components/ProjectInvitesPanel.spec.ts",
+          "reason": "test \"AC6\" drives `window.confirm` and checks that its message names the invite email. It switches to a `useConfirm` global and asserts that the `title` option contains `pending@x.io`. Cancel is called only when `confirm` resolves `true`."
+        },
+        {
+          "path": "apps/web/tests/components/settings-danger-zone-card.spec.ts",
+          "reason": "\"AC-7\" asserts `window.confirm` was called with `'projects.settings.deleteConfirm'`, and \"AC-8\" declines through `window.confirm`. Both switch to a `useConfirm` global. AC-7 asserts the `confirm` options object, and AC-8 resolves `false` with no delete."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d8870e2ab17ed320603da534c0f7dd0a1477d43c"
+    },
+    {
+      "id": "US-002",
+      "title": "Admin governance page confirmations",
+      "description": "**Goal** — Migrate sites 6 to 9 and add their bilingual body copy, owning the shared approval-policy body.\n**Motivation** — F6: the browser can suppress `window.confirm`, its OS-styled box ignores the app theme and dark mode, and the one sentence it shows mixes the question with its consequence.\n**Approach** — Every other site keeps its function shape and replaces `if (!window.confirm(text)) return` with `if (!(await confirm({ ... }))) return`, making the handler `async` where it is not already. `pages/admin/skills.vue` `onRemove` is a non-async function returning `Promise<void>` (`return Promise.resolve()` on a declined native confirm). It may become `async` and return early on `false`, as long as it still returns a `Promise<void>` that its caller awaits.\nTitles marked \"unchanged\" keep their current en and zh values.\n\n| # | Site (file, function) | Title key (en / zh) | Body key (en / zh) | `confirmLabel` key | `destructive` |\n|---|---|---|---|---|---|\n| 6 | `pages/admin/fleet/analytics.vue` `bulk('rerunOutdated')` | `fleet.analytics.ingest.confirmRerunOutdated` (unchanged) | `fleet.analytics.ingest.confirmRerunOutdatedBody` = \"Each bundle is read again with the current parser. This can take a while.\" / \"每个运行包都会用当前解析器重新读取，可能需要一些时间。\" | `fleet.analytics.ingest.rerunOutdated` | false |\n| 7 | `pages/admin/roles.vue` delete role | `admin.roles.deleteConfirm` (unchanged, `{name}`) | `admin.roles.deleteConfirmBody` = \"This action cannot be undone.\" / \"此操作不可撤销。\" | `admin.roles.delete` | true |\n| 8 | `pages/admin/approval-policies.vue` delete policy | `approvals.policies.list.deleteConfirm` (unchanged, `{pattern}`) | `approvals.policies.list.deleteConfirmBody` = \"Actions it covers no longer ask for approval under this policy.\" / \"其覆盖的操作将不再按此策略请求审批。\" | `approvals.policies.list.delete` | true |\n| 9 | `pages/admin/skills.vue` remove source | `skills.confirm.remove` (unchanged, `{url}`) | `skills.confirm.removeBody` = \"Its skills are removed from the catalog.\" / \"其技能将从目录中移除。\" | `skills.actions.remove` | true |\n\nEach story adds the en and zh values for its own rows to `i18n/locales/en.json` and `i18n/locales/zh.json`. Rows 2 and 12 share a body key, and so do rows 8 and 13. The story that owns the first row of a pair adds the key.\nUse auto-imported useConfirm and the existing global host. Only rerunOutdated prompts; backfill never does. Migrate tests/pages/admin-fleet-analytics.spec.ts mountAdmin(get, confirmAnswer), admin-roles.spec.ts mountPage, admin-approval-policies.spec.ts mountPage and admin-skills.spec.ts mountSkills({ confirm }) to globals.useConfirm resolving their existing booleans. Preserve returned recording mocks, permission gates and accepted/error paths. Assert full options including role name, permissionPattern and source.gitUrl; create the exact bilingual copy spec. Cancellation returns before APIs, toasts or state changes. Existing confirmed-failure/supersession handling is unchanged and requires no new tests.\n**Scope** — In: four admin pages, their tests and four body keys. Out: project approval usage is US-004; settings is US-001; admin fleet is US-003; budgets/schedules are US-005; lint is US-006. `useConfirm`, `ConfirmDialogHost` and their tests do not change. No new option (for example an input field or a third button) is added. The error toast and refresh path after a confirmed API call fails is unchanged at every site; no story adds tests for it beyond what each site's existing spec already has. No new E2E tests.\n**Interface** — `useConfirm(): { confirm(options: ConfirmOptions): Promise<boolean>; settle(ok: boolean): void; current: ComputedRef<ConfirmOptions | null> }`\n`interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; destructive?: boolean }`",
+      "acceptanceCriteria": [
+        "[unit] Clicking the re-run-outdated bulk action on pages/admin/fleet/analytics.vue calls confirm once with { title: t('fleet.analytics.ingest.confirmRerunOutdated'), body: t('fleet.analytics.ingest.confirmRerunOutdatedBody'), confirmLabel: t('fleet.analytics.ingest.rerunOutdated'), destructive: false }.",
+        "[unit] On the admin analytics page, when confirm resolves false, rerunOutdated is not called after the promise settles.",
+        "[unit] On the admin analytics page, the backfill bulk action calls backfill without calling confirm.",
+        "[unit] Deleting a role on pages/admin/roles.vue calls confirm once with { title: t('admin.roles.deleteConfirm', { name }), body: t('admin.roles.deleteConfirmBody'), confirmLabel: t('admin.roles.delete'), destructive: true }.",
+        "[unit] On the admin roles page, when confirm resolves false, no DELETE /roles/:id is sent after the promise settles.",
+        "[unit] Deleting a policy on pages/admin/approval-policies.vue calls confirm once with { title: t('approvals.policies.list.deleteConfirm', { pattern }), body: t('approvals.policies.list.deleteConfirmBody'), confirmLabel: t('approvals.policies.list.delete'), destructive: true }.",
+        "[unit] On the admin approval policies page, when confirm resolves false, no DELETE /approval-policies/:id is sent after the promise settles.",
+        "[unit] Removing a skill source on pages/admin/skills.vue calls confirm once with { title: t('skills.confirm.remove', { url }), body: t('skills.confirm.removeBody'), confirmLabel: t('skills.actions.remove'), destructive: true }, where url is the source's gitUrl.",
+        "[unit] On the admin skills page, when confirm resolves false, the catalog remove is not called after the promise settles.",
+        "[unit] The en and zh locale files hold the exact Design table values embedded in this story for the row 6 to 9 keys: fleet.analytics.ingest.confirmRerunOutdatedBody, admin.roles.deleteConfirmBody, approvals.policies.list.deleteConfirmBody and skills.confirm.removeBody."
+      ],
+      "tags": [
+        "web",
+        "confirm-dialogs",
+        "admin",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard page migration with a Promise<void> handler adaptation and an unprompted analytics branch. Role/approval governance requires strict security testing. Migrate existing behavioral mocks and add failing full-options/cancellation/copy assertions first.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useConfirm.ts",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/i18n/confirm-copy-admin-governance.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/admin-fleet-analytics.spec.ts",
+          "reason": "`mountAdmin(get, confirmAnswer)` answers through `window.confirm`. It switches to a `useConfirm` global resolving `confirmAnswer`."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-roles.spec.ts",
+          "reason": "`mountPage` builds a `confirm` mock on `window`. It moves that mock to a `useConfirm` global (resolving the same boolean), so tests reading `confirm` keep working."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-approval-policies.spec.ts",
+          "reason": "`mountPage` builds a `confirm` mock on `window`. It moves that mock to a `useConfirm` global resolving the same boolean."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-skills.spec.ts",
+          "reason": "`mountSkills({ confirm })` answers through `window.confirm`. It switches to a `useConfirm` global; the cancelled-Remove test resolves `false`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8d07217205e0b16ee906140d2d3f25c963934f86"
+    },
+    {
+      "id": "US-003",
+      "title": "Admin fleet page confirmations",
+      "description": "**Goal** — Migrate sites 10 to 12, adding repo/runner copy and reusing US-001's provider body.\n**Motivation** — After #500, ticket and comment delete use the styled dialog, while 18 other destructive or bulk actions still use the native one. The same app asks the same kind of question two different ways.\n**Approach** — Every other site keeps its function shape and replaces `if (!window.confirm(text)) return` with `if (!(await confirm({ ... }))) return`, making the handler `async` where it is not already.\nEach site keeps its existing i18n key as the dialog **title**. Where the existing value holds a second sentence, the title loses it and that sentence moves to a new `<key>Body` key. Where the existing value is a bare question, the body is new text. The confirm button reuses the i18n key of the button that opened the dialog.\n\n| # | Site (file, function) | Title key (en / zh) | Body key (en / zh) | `confirmLabel` key | `destructive` |\n|---|---|---|---|---|---|\n| 10 | `pages/admin/fleet/repos.vue` delete repo | `fleet.repos.deleteConfirm` = \"Unregister {repo}?\" / \"取消注册 {repo}？\" | `fleet.repos.deleteConfirmBody` = \"A repo with unfinished jobs cannot be removed.\" / \"有未完成任务的仓库无法移除。\" | `fleet.repos.actions.delete` | true |\n| 11 | `pages/admin/fleet/runners.vue` delete runner | `fleet.runners.deleteConfirm` = \"Delete runner {name}?\" / \"删除执行机 {name}？\" | `fleet.runners.deleteConfirmBody` = \"Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.\" / \"其密钥将被吊销。有未完成任务或被固定任务的执行机无法删除。\" | `fleet.runners.actions.delete` | true |\n| 12 | `pages/admin/fleet/provider-keys.vue` delete credential | `fleet.providerKeys.deleteConfirm` (unchanged, `{provider}`) | `fleet.providerKeys.deleteConfirmBody` (row 2) | `fleet.providerKeys.actions.delete` | true |\n\nReuse the US-001 body unchanged: `fleet.providerKeys.deleteConfirmBody` = \"The stored key is removed and cannot be recovered.\" / \"已保存的密钥将被移除，且无法恢复。\". Titles marked \"unchanged\" keep their current en and zh values. Use auto-imported useConfirm and the global host. Migrate tests/pages/admin-fleet-repos.spec.ts mountRepos({ confirm }), admin-fleet-runners.spec.ts mountRunners(over, confirmResult), and admin-fleet-provider-keys.spec.ts mountPage({ confirm }) to globals.useConfirm resolving existing answers. Preserve window.location.origin in runners. Provider AC-8 exercises false then true with exactly one accepted DELETE. Assert full options/interpolation; create the row 10-11 exact-copy spec and edit only their locale values. Cancellation is inert before API/toast/state changes; existing saving guards, approval notices and confirmed-error paths remain unchanged.\n**Scope** — In: three fleet admin pages, related tests and repo/runner copy. Out: settings/provider body creation is US-001; governance is US-002; project pages are US-004; budgets/schedules are US-005; lint is US-006. `useConfirm`, `ConfirmDialogHost` and their tests do not change. No new option (for example an input field or a third button) is added. The error toast and refresh path after a confirmed API call fails is unchanged at every site; no story adds tests for it beyond what each site's existing spec already has. Backend restriction changes and new E2E tests remain out.\n**Interface** — `useConfirm(): { confirm(options: ConfirmOptions): Promise<boolean>; settle(ok: boolean): void; current: ComputedRef<ConfirmOptions | null> }`\n`interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; destructive?: boolean }`",
+      "acceptanceCriteria": [
+        "[unit] Deleting a repo on pages/admin/fleet/repos.vue calls confirm once with { title: t('fleet.repos.deleteConfirm', { repo }), body: t('fleet.repos.deleteConfirmBody'), confirmLabel: t('fleet.repos.actions.delete'), destructive: true }.",
+        "[unit] On the admin fleet repos page, when confirm resolves false, the repo is not deleted after the promise settles.",
+        "[unit] Deleting a runner on pages/admin/fleet/runners.vue calls confirm once with { title: t('fleet.runners.deleteConfirm', { name }), body: t('fleet.runners.deleteConfirmBody'), confirmLabel: t('fleet.runners.actions.delete'), destructive: true }.",
+        "[unit] On the admin fleet runners page, when confirm resolves false, the runner is not deleted after the promise settles.",
+        "[unit] Deleting a credential on pages/admin/fleet/provider-keys.vue calls confirm once with { title: t('fleet.providerKeys.deleteConfirm', { provider }), body: t('fleet.providerKeys.deleteConfirmBody'), confirmLabel: t('fleet.providerKeys.actions.delete'), destructive: true }.",
+        "[unit] On the admin provider keys page, when confirm resolves false, no DELETE is sent after the promise settles.",
+        "[unit] On the admin provider keys page, when confirm resolves true, exactly one DELETE is sent.",
+        "[unit] The en and zh locale files hold the exact Design table values embedded in this story for the row 10 and 11 keys: fleet.repos.deleteConfirm, fleet.runners.deleteConfirm, fleet.repos.deleteConfirmBody and fleet.runners.deleteConfirmBody."
+      ],
+      "tags": [
+        "web",
+        "confirm-dialogs",
+        "fleet",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three conventional page migrations reuse existing infrastructure and upstream copy. Credentials and runner key revocation require strict security isolation; migrate existing declined/accepted tests and assert exact options/copy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useConfirm.ts",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/i18n/confirm-copy-admin-fleet.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/admin-fleet-repos.spec.ts",
+          "reason": "`mountRepos({ confirm })` answers through `window.confirm`. It switches to a `useConfirm` global; the cancelled-confirm test resolves `false`."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-fleet-runners.spec.ts",
+          "reason": "`mountRunners(over, confirmResult)` answers through `window.confirm`, and `window.location.origin` stays on the stub. The confirm answer moves to a `useConfirm` global."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-fleet-provider-keys.spec.ts",
+          "reason": "`mountPage({ confirm })` answers through `window.confirm`. It switches to a `useConfirm` global; \"AC-8\" resolves `false` and then `true`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2cef6ef12808c30988d00704c0ef7d5d0e0a0ca8"
+    },
+    {
+      "id": "US-004",
+      "title": "Project page confirmations and the nax-file leave guard",
+      "description": "**Goal** — Migrate sites 13 to 16 and await styled consent in the unsaved-edit route guard.\n**Motivation** — F6: the browser can suppress `window.confirm`, its OS-styled box ignores the app theme and dark mode, and the one sentence it shows mixes the question with its consequence.\n**Approach** — `pages/[project]/fleet/repos/[id]/config.vue` leave guard.\nBaseline: `onBeforeRouteLeave(() => { if (submitted.value || edits.value.length === 0) return true; return window.confirm(t('fleet.config.page.leaveConfirm')) })`.\nTarget: an `async` guard that returns `true` for a clean or submitted draft without asking, and otherwise returns the boolean that `confirm(...)` resolves to. Vue Router accepts a `Promise<boolean>` from a leave guard.\nThe baseline only locates the code. It is never the interface to implement. Every other site keeps its function shape and replaces `if (!window.confirm(text)) return` with `if (!(await confirm({ ... }))) return`, making the handler `async` where it is not already.\n\n| # | Site (file, function) | Title key (en / zh) | Body key (en / zh) | `confirmLabel` key | `destructive` |\n|---|---|---|---|---|---|\n| 13 | `pages/[project]/approval-policies.vue` delete policy | `approvals.policies.list.deleteConfirm` (unchanged, `{pattern}`) | `approvals.policies.list.deleteConfirmBody` (row 8) | `approvals.policies.list.delete` | true |\n| 14 | `pages/[project]/flows/[id].vue` `stopFlow` | `fleet.flows.stop.confirm` (unchanged) | `fleet.flows.stop.confirmBody` = \"The flow does not continue to its next step.\" / \"该流程将不再继续下一步。\" | `fleet.flows.stop.button` | true |\n| 15 | `pages/[project]/kb.vue` delete document source | `kb.documents.deleteConfirm` (unchanged) | `kb.documents.deleteConfirmBody` = \"Its indexed content is removed from search.\" / \"其已索引内容将从搜索中移除。\" | `common.delete` | true |\n| 16 | `pages/[project]/fleet/repos/[id]/config.vue` leave guard | `fleet.config.page.leaveConfirm` = \"Leave with unsaved changes?\" / \"离开并丢弃未保存的改动？\" | `fleet.config.page.leaveConfirmBody` = \"Your edits to nax files are lost.\" / \"你对 nax 文件的改动将丢失。\" | `fleet.config.page.leaveConfirmLabel` (new) = \"Leave\" / \"离开\" | true |\n\nReuse US-002's body unchanged: `approvals.policies.list.deleteConfirmBody` = \"Actions it covers no longer ask for approval under this policy.\" / \"其覆盖的操作将不再按此策略请求审批。\". Titles marked \"unchanged\" keep their current en and zh values. Add only row 14-16 copy to both locales. Use auto-imported useConfirm/global host unchanged. Migrate tests/pages/project-approval-policies.spec.ts and fleet-flow-stop.spec.ts to globals.useConfirm; replace declined flow mockReturnValue(false) with mockResolvedValue(false). Capture the registered guard in fleet-repo-config-page.spec.ts and test actual clean, edited, declined/accepted and successful submitted-with-edits states. Add the KB behavior and project copy specs. The delete button (`kb.vue`, `common.delete` label) has no `data-testid`, so the spec finds it by its label or `variant`. Preserve flow permission/live/busy guards, finally reload, KB 403 handling and all error paths. Cancel returns before APIs/toasts/state changes.\n**Scope** — In: four project pages, async guard, related tests and row 14-16 copy. Out: admin approval/body ownership is US-002; settings is US-001; admin fleet is US-003; budgets/schedules are US-005; lint is US-006. Closing or reloading the browser tab with unsaved nax-file edits is not guarded (there is no `beforeunload` handler today, and none is added). `useConfirm`, `ConfirmDialogHost` and their tests do not change. No new option (for example an input field or a third button) is added. The error toast and refresh path after a confirmed API call fails is unchanged at every site; no story adds tests for it beyond what each site's existing spec already has. No new E2E tests.\n**Interface** — `useConfirm(): { confirm(options: ConfirmOptions): Promise<boolean>; settle(ok: boolean): void; current: ComputedRef<ConfirmOptions | null> }`\n`interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; destructive?: boolean }`\nThe leave guard returns `Promise<boolean>`.",
+      "acceptanceCriteria": [
+        "[unit] Deleting a policy on pages/[project]/approval-policies.vue calls confirm once with { title: t('approvals.policies.list.deleteConfirm', { pattern }), body: t('approvals.policies.list.deleteConfirmBody'), confirmLabel: t('approvals.policies.list.delete'), destructive: true }.",
+        "[unit] On the project approval policies page, when confirm resolves false, no project policy DELETE is sent after the promise settles.",
+        "[unit] Stopping a live flow on pages/[project]/flows/[id].vue calls confirm once with { title: t('fleet.flows.stop.confirm'), body: t('fleet.flows.stop.confirmBody'), confirmLabel: t('fleet.flows.stop.button'), destructive: true }.",
+        "[unit] On the flow page, when confirm resolves false, flows.stop is not called after the promise settles.",
+        "[unit] Deleting a document source on pages/[project]/kb.vue calls confirm once with { title: t('kb.documents.deleteConfirm'), body: t('kb.documents.deleteConfirmBody'), confirmLabel: t('common.delete'), destructive: true }.",
+        "[unit] On the KB page, when confirm resolves false, no document delete request is sent after the promise settles.",
+        "[unit] On pages/[project]/fleet/repos/[id]/config.vue with no edits, the leave guard returns true without calling confirm.",
+        "[unit] On the config page with one unsaved edit, the leave guard calls confirm once with { title: t('fleet.config.page.leaveConfirm'), body: t('fleet.config.page.leaveConfirmBody'), confirmLabel: t('fleet.config.page.leaveConfirmLabel'), destructive: true }.",
+        "[unit] On the config page with one unsaved edit, the leave guard resolves false when confirm resolves false.",
+        "[unit] On the config page with one unsaved edit, the leave guard resolves true when confirm resolves true.",
+        "[unit] On the config page after a submit (submitted is true) with edits present, the leave guard returns true without calling confirm.",
+        "[unit] The en and zh locale files hold the exact Design table values embedded in this story for the row 14 to 16 keys: fleet.config.page.leaveConfirm, fleet.flows.stop.confirmBody, kb.documents.deleteConfirmBody, fleet.config.page.leaveConfirmBody and fleet.config.page.leaveConfirmLabel."
+      ],
+      "tags": [
+        "web",
+        "confirm-dialogs",
+        "routing",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard page migrations and async Vue Router guard, with governance invoking the security override. Write failing mounted options/cancellation/copy assertions and capture the real guard to exercise clean, dirty and submitted state.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useConfirm.ts",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/tests/pages/fleet-repo-config-page.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/kb-document-delete-confirm.spec.ts",
+        "apps/web/tests/i18n/confirm-copy-project.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/project-approval-policies.spec.ts",
+          "reason": "`mountPage` builds a `confirm` mock on `window`. It moves that mock to a `useConfirm` global resolving the same boolean."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-flow-stop.spec.ts",
+          "reason": "`confirm` is a `window.confirm` mock and \"AC-4\" declines with `mockReturnValue(false)`. It becomes a `useConfirm` global whose mock resolves the boolean (`mockResolvedValue(false)`)."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-repo-config-page.spec.ts",
+          "reason": "the `onBeforeRouteLeave: () => undefined` global discards the guard. It captures the registered guard so the new leave-guard tests can call it, and adds a `useConfirm` global."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f14aea45cd1733d5a68fe4818ae6b6b9034aa4ef"
+    },
+    {
+      "id": "US-005",
+      "title": "Schedule and budget delete confirmations",
+      "description": "**Goal** — Migrate sites 17 and 18, adapt both budget callers, add copy and update the existing browser delete step.\n**Motivation** — After #500, ticket and comment delete use the styled dialog, while 18 other destructive or bulk actions still use the native one. The same app asks the same kind of question two different ways.\n**Approach** — Changed symbols. The baseline only locates the code. It is never the interface to implement.\n- `composables/useFleetBudgetPage.ts` `remove`.\n  Baseline: `remove(policy: BudgetPolicyDto, confirmText: string): Promise<void>`, which calls `window.confirm(confirmText)`.\n  Target: `remove(policy: BudgetPolicyDto, prompt: { title: string; body: string }): Promise<void>`, which awaits `confirm({ title: prompt.title, body: prompt.body, confirmLabel: t('fleet.budgets.actions.delete'), destructive: true })`.\n- `pages/admin/fleet/budgets.vue` and `pages/[project]/fleet/budgets.vue` `confirmText`.\n  Baseline: `confirmText(p): string` returns `t('fleet.budgets.deleteConfirm', { scope })`.\n  Target: `confirmPrompt(p): { title: string; body: string }` returns `{ title: t('fleet.budgets.deleteConfirm', { scope }), body: t('fleet.budgets.deleteConfirmBody') }`, and the `@remove` handler passes it to `remove`.\nSchedule remove retains Promise<boolean> and returns false on cancellation before its existing run wrapper.\n\n| # | Site (file, function) | Title key (en / zh) | Body key (en / zh) | `confirmLabel` key | `destructive` |\n|---|---|---|---|---|---|\n| 17 | `composables/useFleetScheduleActions.ts` `remove` | `fleet.schedules.deleteConfirm` = \"Delete schedule {name}?\" / \"删除定时计划 {name}？\" | `fleet.schedules.deleteConfirmBody` = \"The jobs it dispatched are kept.\" / \"它派发过的任务会保留。\" | `fleet.schedules.actions.delete` | true |\n| 18 | `composables/useFleetBudgetPage.ts` `remove` (via both budgets pages) | `fleet.budgets.deleteConfirm` = \"Delete the budget policy for {scope}?\" / \"删除 {scope} 的预算策略？\" | `fleet.budgets.deleteConfirmBody` = \"A paused scope resumes immediately.\" / \"已暂停的范围将立即恢复。\" | `fleet.budgets.actions.delete` | true |\n\nAdd exact values to both locales; preserve scopeText/nameOf. The BudgetTable `remove` event is emitted by the existing FleetBudgetTable component rendered by each page; do not create another table or helper. Use auto-imported useConfirm inside each composable, with the global host unchanged. In tests/composables/useFleetScheduleActions.spec.ts and useFleetBudgetPage.spec.ts replace g.window confirm with g.useConfirm and delete useConfirm in afterEach. Assert split options and replace 'sure?' budget arguments with { title: 'sure?', body: 'b' }. Keep ApiError identity and existing accepted/error tests. Migrate mountBudgets(api, confirmResult) in tests/pages/admin-fleet-budgets.spec.ts and inject a recording mock in fleet-budgets-project-page.spec.ts; add real table remove-event prompt assertions for each. Create the exact-copy spec. In tests/e2e/fleet-budgets.e2e.spec.ts the delete step registers `page.once('dialog', dialog => dialog.accept())`, which a styled dialog never fires. It instead clicks `[data-testid=\"confirm-dialog-confirm\"]` after the delete button, and the row count assertion stays. Cancel returns before API/toast/state changes. Preserve confirmed-error paths and existing failure assertions while adapting only their prompt arguments and mocks; do not add a failure-path test.\n**Scope** — In: two composables, two budget pages, four existing unit/page specs, one new copy spec and existing budgets E2E delete step. Out: settings is US-001; governance is US-002; admin fleet is US-003; project prompts/guard are US-004; lint is US-006. Preserve isForbidden and schedule callers. `useConfirm`, `ConfirmDialogHost` and their tests do not change. No new option (for example an input field or a third button) is added. The error toast and refresh path after a confirmed API call fails is unchanged at every site; no story adds tests for it beyond what each site's existing spec already has. No end-to-end test is added. Only `tests/e2e/fleet-budgets.e2e.spec.ts`, which accepts a native dialog today, changes, to click the styled confirm button. No new supersession tests.\n**Interface** — `useConfirm(): { confirm(options: ConfirmOptions): Promise<boolean>; settle(ok: boolean): void; current: ComputedRef<ConfirmOptions | null> }`\n`interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; destructive?: boolean }`\n`remove(policy: BudgetPolicyDto, prompt: { title: string; body: string }): Promise<void>`\n`confirmPrompt(p): { title: string; body: string }`",
+      "acceptanceCriteria": [
+        "[unit] useFleetScheduleActions(api, onStale).remove({ id: 's1', name: 'nightly' }) calls confirm once with { title: t('fleet.schedules.deleteConfirm', { name: 'nightly' }), body: t('fleet.schedules.deleteConfirmBody'), confirmLabel: t('fleet.schedules.actions.delete'), destructive: true }.",
+        "[unit] When confirm resolves false, useFleetScheduleActions(...).remove returns false and api.remove is not called after the promise settles.",
+        "[unit] useFleetBudgetPage(base).remove(policy, { title: 'T', body: 'B' }) calls confirm once with { title: 'T', body: 'B', confirmLabel: t('fleet.budgets.actions.delete'), destructive: true }.",
+        "[unit] When confirm resolves false, useFleetBudgetPage(base).remove(policy, { title: 'T', body: 'B' }) does not call the budgets API remove after the promise settles.",
+        "[unit] On pages/admin/fleet/budgets.vue, a BudgetTable remove event for a policy calls confirm with title equal to t('fleet.budgets.deleteConfirm', { scope }) for that policy's scope text and body equal to t('fleet.budgets.deleteConfirmBody').",
+        "[unit] On pages/[project]/fleet/budgets.vue, a BudgetTable remove event for a policy calls confirm with title equal to t('fleet.budgets.deleteConfirm', { scope }) for that policy's scope text and body equal to t('fleet.budgets.deleteConfirmBody').",
+        "[unit] The en and zh locale files hold the exact Design table values embedded in this story for the row 17 and 18 keys: fleet.schedules.deleteConfirm, fleet.budgets.deleteConfirm, fleet.schedules.deleteConfirmBody and fleet.budgets.deleteConfirmBody."
+      ],
+      "tags": [
+        "web",
+        "confirm-dialogs",
+        "fleet",
+        "budgets",
+        "schedules",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard composable/page migration with both callers and the interface change in one story; no new abstraction or authorization logic. Write failing forwarding/cancellation/scope-copy assertions, migrate globals and retain existing failure/browser journeys.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useConfirm.ts",
+        "apps/web/composables/useFleetBudgetPage.ts",
+        "apps/web/composables/useFleetScheduleActions.ts",
+        "apps/web/tests/helpers/fleet-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/i18n/confirm-copy-schedules-budgets.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/composables/useFleetScheduleActions.spec.ts",
+          "reason": "`setup` stubs `g.window = { confirm }`, and the delete test asserts `window.confirm` was called with `'Delete schedule nightly? The jobs it dispatched are kept.'`. It switches to a `g.useConfirm` global and asserts the `confirm` options object with the split title and body. `afterEach` deletes `useConfirm` as well."
+        },
+        {
+          "path": "apps/web/tests/composables/useFleetBudgetPage.spec.ts",
+          "reason": "`setup` stubs `g.window = { confirm }`, and the `remove` tests pass the string `'sure?'`. It switches to a `g.useConfirm` global, the tests pass `{ title: 'sure?', body: 'b' }`, and `afterEach` deletes `useConfirm`."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-fleet-budgets.spec.ts",
+          "reason": "`mountBudgets(api, confirmResult)` answers through `window.confirm`, and \"a declined confirm deletes nothing\" relies on it. The answer moves to a `useConfirm` global, and the file gains the admin page `remove` prompt test."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-budgets-project-page.spec.ts",
+          "reason": "it stubs `window.confirm` and never asserts the prompt. It gains a `useConfirm` global whose `confirm` mock records options, plus the project page `remove` prompt test."
+        },
+        {
+          "path": "apps/web/tests/e2e/fleet-budgets.e2e.spec.ts",
+          "reason": "the delete step registers `page.once('dialog', dialog => dialog.accept())`, which a styled dialog never fires. It instead clicks `[data-testid=\"confirm-dialog-confirm\"]` after the delete button, and the row count assertion stays."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7a6ec611ed6e9470b4b7f1e6bf73106510d73b5c"
+    },
+    {
+      "id": "US-006",
+      "title": "Lint ban on native confirm",
+      "description": "**Goal** — Reject native confirms in web source after all migrations.\n**Motivation** — Nothing stops new code from adding another `window.confirm`.\n**Approach** — `apps/web/.eslintrc.cjs` gains two top-level rules:\n- `no-restricted-properties` with the entries `{ object: 'window', property: 'confirm' }` and `{ object: 'globalThis', property: 'confirm' }`, each with the message 'Use useConfirm() (styled dialog) instead of the native confirm.'\n- `no-restricted-globals` with `{ name: 'confirm', message: 'Use useConfirm() (styled dialog) instead of the global confirm().' }`.\nThe existing `*.spec.ts` override turns both rules off, because specs build fake `window` objects. A local `confirm` (destructured from `useConfirm()`, or a local function as in `ThreadStaleBanner.vue`) is not a global, so `no-restricted-globals` does not flag it. The shared preset sets `env.browser: true`, so `confirm` is a known global and the rule applies. `bun run lint` (`--max-warnings=0`) then fails on any new native confirm in `apps/web` source.\n**No-test:** an ESLint configuration change, enforced by the existing `bun run lint` gate. No runtime code loads it.\nSet both top-level severities to error and both rules off in the existing spec override; preserve Vue parsing. Review the configuration and native-confirm rejection criteria, and verify with the existing apps/web lint gate; create/modify no tests.\n**Scope** — In: apps/web/.eslintrc.cjs only. Out: source migrations/copy are US-001 through US-005. Do not change shared presets, package scripts or existing styled dialogs. Updating `.nax/mono/apps/web/context.md` with a \"no window.confirm; use useConfirm\" note is a manual edit after merge, not story work (`.nax/` is read-only to the run).\n**Interface** — ESLint entries: `{ object: 'window', property: 'confirm' }`, `{ object: 'globalThis', property: 'confirm' }`, `{ name: 'confirm', message: 'Use useConfirm() (styled dialog) instead of the global confirm().' }`. No runtime TypeScript change.",
+      "acceptanceCriteria": [
+        "[review] apps/web/.eslintrc.cjs top-level rules sets no-restricted-properties to error, with the entries { object: 'window', property: 'confirm' } and { object: 'globalThis', property: 'confirm' }, each with a message that names useConfirm().",
+        "[review] apps/web/.eslintrc.cjs top-level rules sets no-restricted-globals to error, with the entry { name: 'confirm' } and a message that names useConfirm().",
+        "[review] The existing files: ['*.spec.ts'] override in apps/web/.eslintrc.cjs sets both no-restricted-properties and no-restricted-globals to off."
+      ],
+      "tags": [
+        "web",
+        "confirm-dialogs",
+        "eslint",
+        "config"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "Single-file standard lint configuration and existing override; no runtime behavior changes.",
+        "noTestJustification": "ESLint configuration only, explicitly designated no-test. No runtime code loads it; configuration/rejection review criteria and the existing apps/web bun run lint gate enforce the ban without new tests.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/.eslintrc.cjs",
+        "apps/web/package.json"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "suggestedCriteria": [
+        "[review] When web source outside the *.spec.ts override calls window.confirm(), globalThis.confirm() or an unbound global confirm(), the applicable ESLint restriction reports an error naming useConfirm()."
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "54caa954ede779fdf5a0057a17e7ca61dcb705b9"
+    }
+  ],
+  "analysis": "Existing-code enhancement confined to apps/web. This is Nuxt 4/Vue SSR, not the detected-context table's Next.js (apps/web/package.json:5, :36). Jest handles components/pages/composables and Playwright handles browser journeys (apps/web/package.json:13-16). MCP navigation was unavailable; direct reads and targeted searches were used. App guidance was read from .nax/mono/apps/web/context.md. No API, persistence, OpenAPI, client generation or other workspace changes are needed. No layout, navigation, token or ticket-board redesign is needed.\n\nShared implementation is read-only: ConfirmOptions already supports the four required fields (apps/web/composables/useConfirm.ts:3); confirm returns Promise<boolean>, supersedes a pending request with false and exposes settle/current (same file:6-22). Use it inside client interactions, not during setup/SSR. The host is mounted once outside NuxtLayout (apps/web/app.vue:11), settles false on close, and renders body/action label/destructive styling (apps/web/components/ConfirmDialogHost.vue:7-23). CommentThread.deleteComment is the await/early-return reference (apps/web/components/CommentThread.vue:134-141), not a migration target. No new host, option or abstraction is needed.\n\nSearch confirmed all 18 production window.confirm sites. US-001 modifies components/SettingsVcsCard.vue:125, SettingsProviderKeysCard.vue:121, ProjectInvitesPanel.vue:114, ProjectMembersPanel.vue:226 and SettingsDangerZoneCard.vue:20 under apps/web. Await before existing busy flags, notices, requests, toasts and navigation. Preserve provider pending approvals and member binding-removal sequencing/error reload (apps/web/components/ProjectMembersPanel.vue:217-255); do not alter onRemoveChip. Migrate native assertions in tests/components/SettingsProviderKeysCard.spec.ts:160-182, ProjectInvitesPanel.spec.ts:253-270 and settings-danger-zone-card.spec.ts:41-52. VCS currently has source/key checks, not a behavioral rotate mount (apps/web/tests/pages/settings-vcs-webhook-secret.spec.ts:17-49), so add the specified VCS/member specs. US-001 owns shared provider body copy.\n\nUS-002 modifies pages/admin/fleet/analytics.vue:117, roles.vue:55, approval-policies.vue:84 and skills.vue:60 under apps/web. Only rerunOutdated prompts; backfill stays unprompted and busyAll begins after consent (apps/web/pages/admin/fleet/analytics.vue:116-128). Roles/policies retain their list on failure and reload after success. Skills onRemove currently returns Promise<void>; make it async without losing the awaited guarded action, busy cleanup or source.gitUrl (apps/web/pages/admin/skills.vue:43-66). Migrate tests/pages/admin-fleet-analytics.spec.ts:42-47, admin-roles.spec.ts:25-29, admin-approval-policies.spec.ts:86-90 and admin-skills.spec.ts:54-62. US-002 owns shared approval body copy.\n\nUS-003 modifies pages/admin/fleet/repos.vue:79, runners.vue:64 and provider-keys.vue:156 under apps/web. Preserve repoName(repo), runner.name and credential.providerId. Admin credential confirmLabel is fleet.providerKeys.actions.delete, unlike the settings card label. Keep notice/saving/pending-approval behavior (apps/web/pages/admin/fleet/provider-keys.vue:154-174). Migrate tests/pages/admin-fleet-repos.spec.ts:58-87, admin-fleet-runners.spec.ts:60-75 and admin-fleet-provider-keys.spec.ts:64-77, retaining window.location.origin in the runners harness. Depend on US-001 for the provider body; own only repo/runner copy.\n\nUS-004 modifies pages/[project]/approval-policies.vue:72, flows/[id].vue:76, kb.vue:101 and fleet/repos/[id]/config.vue:111 under apps/web. Preserve flow permission/live/busy gates and finally reload (flow page:73-98), and KB's special 403/error handling and success refresh (KB page:100-114). Config's guard at :109-112 must return Promise<boolean>; clean/submitted drafts allow leaving without a prompt. submitted becomes true before navigateTo while edits remain (:147-155). Capture the guard currently discarded at apps/web/tests/pages/fleet-repo-config-page.spec.ts:62; use its existing edit/submit journey (:69-91) to test real state transitions. Migrate project-approval-policies.spec.ts:43-47 and fleet-flow-stop.spec.ts:31-32/:92-96 to promise-resolving mocks. Add the specified KB spec, finding delete by label/variant. Depend on US-002 for approval body. No beforeunload handler.\n\nUS-005 modifies both composables and both budget callers together. Schedule remove retains Promise<boolean>, false on cancellation/failure and existing run/busy/error/onStale behavior (apps/web/composables/useFleetScheduleActions.ts:10-45); unchanged consumers are pages/[project]/fleet/schedules/index.vue:79 and schedules/[id].vue:106. Budget remove's string becomes { title, body }, preserving success and error-triggered void refresh (apps/web/composables/useFleetBudgetPage.ts:70-79). Adapt both callers' scopeText/nameOf prompts and remove events: apps/web/pages/admin/fleet/budgets.vue:30-32/:79 and apps/web/pages/[project]/fleet/budgets.vue:41-43/:101. Other useFleetBudgetPage imports use isForbidden, including approval pages, analytics, schedules list, dashboard/credential composables and approval components; preserve that export and avoid module-level useConfirm calls. Migrate global setup/cleanup in tests/composables/useFleetScheduleActions.spec.ts:10-26 and useFleetBudgetPage.spec.ts:21-36. Keep ApiError identity; budget spec:32 warns against resetting modules. Add remove-event scope/body assertions to tests/pages/admin-fleet-budgets.spec.ts and fleet-budgets-project-page.spec.ts. Only existing Playwright delete interaction changes: replace native-dialog acceptance at apps/web/tests/e2e/fleet-budgets.e2e.spec.ts:136 with styled confirmation after delete, retaining :138 row count and hydration waits. No networkidle waits/new journeys.\n\nHarness already lists useConfirm and defaults to async true (apps/web/tests/helpers/mount-sfc.ts:150, :176). Override globals.useConfirm with a recording promise mock as in apps/web/tests/components/comment-thread-author.spec.ts:20-31/:80-115. Recursive local imports receive the globals, enabling page tests of real composables. fleet-harness preserves event handlers and supplies enI18n (apps/web/tests/helpers/fleet-harness.ts:58-107, :207). Await settlement before no-call checks; otherwise old synchronous mocks/default true can mask cancellation failures. Unconditional window stubs with no declined/asserted native path need no edit. Locale changes must be narrow; files are shared by all runtime stories. Split combined originals at en/zh lines :316, :883, :1585, :1755, :1771, :2039; rewrite leave title at :2713. Preserve every unchanged title and unrelated locale value. Exact bilingual value comparisons, not existence checks, belong in the five new copy specs. US-001/US-002 own the two shared body keys. Eight new specs total; no new production module.\n\nUS-006 modifies only apps/web/.eslintrc.cjs:1-31, adding top-level rules and disabling them in the existing spec override while retaining Vue parsing. Browser globals are already enabled (packages/eslint-config/vue.js:6-10), so local confirm bindings remain allowed. Existing lint already uses --max-warnings=0 (apps/web/package.json:9); no package script/shared-preset/test changes. Execute after every migration.\n\nFailure-table mapping: cancel/Escape/close resolves false and must leave handlers inert; per-site cancellation ACs cover this. Shared supersession and confirmed-failure handling are explicit feature-level exclusions from new implementation/test work. Keep useConfirm.spec.ts:22-29 unchanged and retain existing useFleetBudgetPage.spec.ts:143-160 error assertions while adapting only prompt arguments/mocks. The audit removed the two extra acceptance criteria that converted these exclusions into story requirements; the original cancellation criteria remain the runtime negative-path/regression anchors. Risks: forgetting await; changing state before consent; wrong interpolation/labels; prompting backfill; losing skills Promise<void>; returning no guard boolean; adapting only one budget caller; deleting origin stubs; broad locale rewrites. Preserve server-owned rules, UI permission gates and approval responses. Dependencies are binding: US-001/002/005 start independently; US-003 follows 001; US-004 follows 002; US-006 follows all five. Runtime migrations are medium complexity; key/credential/role/governance stories use strict three-session-tdd, US-005 uses tdd-simple, and lint is no-test. Quality gates are verification, not ACs. Guidance/acceptance material under .nax and generated AGENTS.md remain untouched by implementation.\n\nRefine-pass AC preservation audit: all 51 numbered spec ACs remain in their original stories and order. US-001: 1 rotate options; 2 declined rotate sends no POST; 3 provider options, where provider is row.providerId; 4 declined key delete sends nothing; 5 invite options name pending@x.io; 6 declined invite cancel calls nothing; 7 member options, where name is the row display name; 8 declined member removal deletes no binding; 9 project delete options; 10 declined project delete sends nothing; 11 exact seven listed en/zh copy values. US-002: 1 rerunOutdated options with destructive false; 2 declined rerun calls nothing; 3 backfill without confirm; 4 role options; 5 declined role DELETE sends nothing; 6 admin policy options; 7 declined admin policy DELETE sends nothing; 8 skill options, where url is source.gitUrl; 9 declined catalog remove calls nothing; 10 exact four listed en/zh body values. US-003: 1 repo options; 2 declined repo is not deleted; 3 runner options; 4 declined runner is not deleted; 5 admin credential options; 6 declined credential sends no DELETE; 7 accepted credential sends exactly one DELETE; 8 exact four listed en/zh repo/runner values. US-004: 1 project policy options; 2 declined project policy sends no DELETE; 3 live-flow stop options; 4 declined flow calls no stop; 5 document delete options; 6 declined document sends no delete; 7 clean guard allows leaving without confirm; 8 one unsaved edit prompts with all four fields; 9 dirty guard resolves false on false; 10 dirty guard resolves true on true; 11 submitted true with edits still present allows leaving without confirm; 12 exact five listed en/zh project values. US-005: 1 nightly schedule options; 2 declined schedule returns false without api.remove; 3 budget prompt T/B forwarded with delete label and destructive true; 4 declined budget calls no remove; 5 admin table remove uses that policy's scope text and body; 6 project table remove uses that policy's scope text and body; 7 exact four listed en/zh schedule/budget values. US-006: 1 error-level restricted window/globalThis properties with useConfirm messages; 2 error-level restricted global confirm with useConfirm message; 3 existing *.spec.ts override turns both off. All original interpolation, scope-text and submitted-with-edits qualifiers survive. No deprecated grep/file/verbatim tags occur. Locale ACs are observable exact file-content comparisons; option/no-call ACs use recorded promise mocks; guards use awaited booleans; lint ACs use configuration review. The added US-006 rejection criterion makes its negative path explicit without creating tests or treating a quality gate as an AC. Runtime negative and compatibility anchors are US-001 2/4/6/8/10, US-002 2/3/5/7/9, US-003 2/4/6/7, US-004 2/4/6/7/9/10/11, and US-005 2/4/5/6.\n\nRefine-pass scope/context audit: all 11 feature exclusions remain verbatim: shared code/tests/options; existing supersession; unchanged API-failure handling; ThreadStaleBanner; already migrated ticket/comment components; browser close/reload; other styled dialogs; unrelated locale changes; no new E2E except adapting budgets; manual post-merge context note; unconditional native stubs. Do not turn exclusions into new implementation ACs. No story-local exclusion has been hoisted. Context lists exactly match the spec's recommended sets (5, 3, 3, 4, 4 and 2 files); no newly created spec is a context file. Expected files and dependencies match the binding stories and shared-copy ownership; all referenced story IDs exist. In US-005 the spec's BudgetTable means the FleetBudgetTable component actually rendered by both pages, not a proposed new helper. The existing budget E2E stays in scope while new E2Es stay out. Routing retains medium/default migrations, applying heavier strategy only where the original security override requires it, and config-only no-test for lint. The audit also repaired literal line breaks inside the JSON analysis string; descriptions and analysis must remain escaped JSON strings.",
+  "outOfScope": [
+    "`useConfirm`, `ConfirmDialogHost` and their tests do not change. No new option (for example an input field or a third button) is added.",
+    "A second confirm request closing the first one with `false` is existing `useConfirm` behaviour; no story adds a test for it.",
+    "The error toast and refresh path after a confirmed API call fails is unchanged at every site; no story adds tests for it beyond what each site's existing spec already has.",
+    "`components/fleet/threads/ThreadStaleBanner.vue` already uses its own styled dialog and is not touched.",
+    "`CommentThread.vue` and `TicketProperties.vue` were migrated by #500 and are not touched.",
+    "Closing or reloading the browser tab with unsaved nax-file edits is not guarded (there is no `beforeunload` handler today, and none is added).",
+    "Dialogs that are already styled components (`DeleteAgentDialog`, `RotateKeyDialog`, memory retire, thread archive and similar) are not changed.",
+    "No i18n value changes beyond those in the Design copy table: the title trims, the row 1 zh and row 16 title rewrites, and the new body and label keys.",
+    "No end-to-end test is added. Only `tests/e2e/fleet-budgets.e2e.spec.ts`, which accepts a native dialog today, changes, to click the styled confirm button.",
+    "Updating `.nax/mono/apps/web/context.md` with a \"no window.confirm; use useConfirm\" note is a manual edit after merge, not story work (`.nax/` is read-only to the run).",
+    "Specs that only stub `window = { confirm: () => true }` and never assert on it or on a declined path need no change, because the harness `useConfirm` default already resolves `true`. Examples are `tests/pages/fleet-schedules-list-page.spec.ts`, `tests/pages/fleet-schedule-approval-gates.spec.ts`, `tests/pages/fleet-job-budget-gates.spec.ts` and `tests/components/project-invites-role-keys.spec.ts`."
+  ],
+  "routingProfile": "native-codex-dsm"
+}

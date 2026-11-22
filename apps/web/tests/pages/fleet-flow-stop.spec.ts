@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
+import * as Vue from 'vue'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
@@ -28,13 +29,13 @@ async function mountPage(options: {
   const success = jest.fn()
   const error = jest.fn()
   const toast = { success, error }
-  const confirm = jest.fn(() => true)
-  ;(globalThis as { window?: { confirm: jest.Mock } }).window = { confirm }
+  const confirm = jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
   const mounted = mountSfc(webFile('pages', '[project]', 'flows', '[id].vue'), {
     globals: {
       useRoute: () => ({ params: { project: 'web', id: 'flow-1' } }),
       useI18n: () => ({ t: (key: string) => key }),
       useAppToast: () => toast,
+      useConfirm: () => ({ confirm }),
       useFleetFlows: () => ({ get, overview: overviewGet, stop }),
       useProjectMemberNames: () => ({ members: [], load: jest.fn<() => Promise<void>>().mockResolvedValue(undefined), nameOf: () => null }),
       useProjectPermissions: () => ({ permissions: { value: { has: (key: string) => key === 'fleet.flow.stop' && (options.allowed ?? true) } } }),
@@ -63,9 +64,10 @@ async function clickStop(mounted: Awaited<ReturnType<typeof mountPage>>['mounted
   const button = mounted.find('button').find(node => mounted.textOf(node) === 'fleet.flows.stop.button')
   if (!button) throw new Error('Stop button not found')
   ;(button.props.onClick as (() => void) | undefined)?.()
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  for (let i = 0; i < 6; i += 1) {
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    await Vue.nextTick()
+  }
 }
 
 describe('fleet flow Stop action (US-008)', () => {
@@ -89,9 +91,22 @@ describe('fleet flow Stop action (US-008)', () => {
     page.mounted.unmount()
   })
 
+  test('AC-3 stop requests styled destructive confirmation with complete copy', async () => {
+    const page = await mountPage()
+    await clickStop(page.mounted)
+    expect(page.confirm).toHaveBeenCalledTimes(1)
+    expect(page.confirm).toHaveBeenCalledWith({
+      title: 'fleet.flows.stop.confirm',
+      body: 'fleet.flows.stop.confirmBody',
+      confirmLabel: 'fleet.flows.stop.button',
+      destructive: true,
+    })
+    page.mounted.unmount()
+  })
+
   test('AC-4 declining confirmation does not call stop', async () => {
     const page = await mountPage()
-    page.confirm.mockReturnValue(false)
+    page.confirm.mockResolvedValue(false)
     await clickStop(page.mounted)
     expect(page.confirm).toHaveBeenCalled()
     expect(page.stop).not.toHaveBeenCalled()

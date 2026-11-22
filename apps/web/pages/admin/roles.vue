@@ -8,6 +8,7 @@ definePageMeta({ layout: 'default' })
 
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const { roles, pending, load, remove } = useRoles()
 const { permissions } = useGlobalPermissions()
 
@@ -52,7 +53,12 @@ function canDelete(role: Role): boolean {
 }
 
 async function onDelete(role: Role): Promise<void> {
-  if (!window.confirm(t('admin.roles.deleteConfirm', { name: role.name }))) return
+  if (!(await confirm({
+    title: t('admin.roles.deleteConfirm', { name: role.name }),
+    body: t('admin.roles.deleteConfirmBody'),
+    confirmLabel: t('admin.roles.delete'),
+    destructive: true,
+  }))) return
   try {
     await remove(role.id)
     toast.success(t('admin.roles.toast.deleted'))

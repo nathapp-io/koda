@@ -43,8 +43,7 @@ interface MountedPage { app: Mounted; api: FakeApi; toast: { error: jest.Mock; s
 async function mountPage(options: { keys?: string[]; api?: Partial<FakeApi>; confirm?: boolean } = {}): Promise<MountedPage> {
   const api = fakeApi(options.api)
   const toast = { error: jest.fn(), success: jest.fn() }
-  const confirm = jest.fn(() => options.confirm ?? true)
-  ;(globalThis as Record<string, unknown>).window = { confirm }
+  const confirm = jest.fn(async () => options.confirm ?? true)
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
   const held = permissionSet(options.keys ?? ['approval.policy.read', 'approval.policy.manage', 'member.read'])
   const app = mountSfc(pagePath, {
@@ -55,6 +54,7 @@ async function mountPage(options: { keys?: string[]; api?: Partial<FakeApi>; con
       useRoute: () => ({ params: { project: 'sandbox' } }),
       useProjectPermissions: () => ({ permissions: computed(() => held) }),
       useProjectRoles,
+      useConfirm: () => ({ confirm }),
     },
   })
   await settle()
@@ -117,7 +117,20 @@ describe('project approval policies', () => {
     expect(body).not.toHaveProperty('appliesTo')
   })
 
-  test('AC-7: confirming delete uses project policy route', async () => {
+  test('AC-1: policy delete requests styled destructive confirmation with interpolated title', async () => {
+    const m = await mountPage()
+    call(byId(m.app, 'policy-delete', rowFor(m.app, 'pol1')), 'onClick'); await settle()
+    expect(m.confirm).toHaveBeenCalledTimes(1)
+    expect(m.confirm).toHaveBeenCalledWith({ title: copy('approvals.policies.list.deleteConfirm').replace('{pattern}', 'label.create'), body: copy('approvals.policies.list.deleteConfirmBody'), confirmLabel: copy('approvals.policies.list.delete'), destructive: true })
+  })
+
+  test('AC-2: declined policy confirmation sends no delete', async () => {
+    const m = await mountPage({ confirm: false })
+    call(byId(m.app, 'policy-delete', rowFor(m.app, 'pol1')), 'onClick'); await settle()
+    expect(m.api.delete).not.toHaveBeenCalled()
+  })
+
+  test('confirmed delete uses project policy route', async () => {
     const m = await mountPage()
     call(byId(m.app, 'policy-delete', rowFor(m.app, 'pol1')), 'onClick'); await settle()
     expect(m.api.delete).toHaveBeenCalledWith('/projects/sandbox/approval-policies/pol1')

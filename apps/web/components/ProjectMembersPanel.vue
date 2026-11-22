@@ -29,6 +29,7 @@ interface AgentChoice {
 const props = defineProps<{ slug: string; projectId: string }>()
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const toast = useAppToast()
 const { $api } = useApi()
 const { user } = useAuth()
@@ -223,7 +224,12 @@ async function onRemoveRow(row: ProjectPrincipalRow): Promise<void> {
   const ids = row.bindings.map((binding) => binding.id)
   if (ids.length === 0 || busyRow.value !== null) return
   const key = rowKey(row)
-  if (!window.confirm(t('projects.members.removeConfirm', { name: displayName(row) }))) return
+  if (!(await confirm({
+    title: t('projects.members.removeConfirm', { name: displayName(row) }),
+    body: t('projects.members.removeConfirmBody'),
+    confirmLabel: t('projects.members.remove'),
+    destructive: true,
+  }))) return
   busyRow.value = key
   let failure: unknown = null
   try {

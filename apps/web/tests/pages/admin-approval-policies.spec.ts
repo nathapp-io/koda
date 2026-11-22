@@ -86,8 +86,7 @@ interface Mount { app: Mounted; api: FakeApi; toast: { error: jest.Mock; success
 async function mountPage(options: { keys?: string[]; api?: Partial<FakeApi>; confirm?: boolean } = {}): Promise<Mount> {
   const api = fakeApi(options.api)
   const toast = { error: jest.fn(), success: jest.fn() }
-  const confirm = jest.fn(() => options.confirm ?? true)
-  ;(globalThis as Record<string, unknown>).window = { confirm }
+  const confirm = jest.fn(async () => options.confirm ?? true)
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
   const held = permissionSet(options.keys ?? ['approval.policy.manage', 'role.read'])
   const app = mountSfc(pagePath, {
@@ -99,6 +98,7 @@ async function mountPage(options: { keys?: string[]; api?: Partial<FakeApi>; con
     globals: {
       useI18n: () => enI18n(),
       useAppToast: () => toast,
+      useConfirm: () => ({ confirm }),
       useGlobalPermissions: () => ({ permissions: computed(() => held) }),
       useRoles,
     },
@@ -404,6 +404,11 @@ describe('AC-14: delete asks first', () => {
     await settle()
 
     expect(m.confirm).toHaveBeenCalledTimes(1)
+    expect(m.confirm).toHaveBeenCalledWith({
+      title: 'Delete the policy for label.create?',
+      body: 'Actions it covers no longer ask for approval under this policy.',
+      confirmLabel: 'Delete', destructive: true,
+    })
     expect(m.api.delete).toHaveBeenCalledTimes(1)
     expect(m.api.delete).toHaveBeenCalledWith('/approval-policies/pol1')
     expect(m.toast.success).toHaveBeenCalledTimes(1)

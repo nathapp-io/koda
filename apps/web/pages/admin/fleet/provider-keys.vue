@@ -19,6 +19,7 @@ definePageMeta({ layout: 'default' })
  */
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const { credentials, pending, current, total, hasNext, hasPrev, load, create, rotate, setDisabled, remove } = useProviderCredentials()
 
 const { permissions } = useGlobalPermissions()
@@ -153,7 +154,7 @@ async function onToggle(credential: ProviderCredentialRow): Promise<void> {
 
 async function onDelete(credential: ProviderCredentialRow): Promise<void> {
   if (isSaving(credential.id)) return
-  if (!window.confirm(t('fleet.providerKeys.deleteConfirm', { provider: credential.providerId }))) return
+  if (!(await confirm({ title: t('fleet.providerKeys.deleteConfirm', { provider: credential.providerId }), body: t('fleet.providerKeys.deleteConfirmBody'), confirmLabel: t('fleet.providerKeys.actions.delete'), destructive: true }))) return
   notice.value = ''
   setSaving(credential.id, true)
   try {

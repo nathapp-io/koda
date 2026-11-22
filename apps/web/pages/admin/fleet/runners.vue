@@ -11,6 +11,7 @@ const POLL_MS = 15_000
 
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const { runners, hasMore, pending, load, apply, update, remove } = useFleetRunners()
 
 const adminOnly = ref(false)
@@ -61,7 +62,7 @@ function openEdit(runner: FleetRunner): void {
 }
 
 async function confirmDelete(runner: FleetRunner): Promise<void> {
-  if (!window.confirm(t('fleet.runners.deleteConfirm', { name: runner.name }))) return
+  if (!(await confirm({ title: t('fleet.runners.deleteConfirm', { name: runner.name }), body: t('fleet.runners.deleteConfirmBody'), confirmLabel: t('fleet.runners.actions.delete'), destructive: true }))) return
   try {
     await remove(runner.id)
     toast.success(t('fleet.runners.toast.deleted'))

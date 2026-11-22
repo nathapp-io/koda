@@ -29,7 +29,10 @@ const rows = computed(() => policies.value.filter((p) => isManagedOn('admin', p)
 const runnerOptions = computed(() => runnersApi.runners.value.map((r) => ({ value: r.id, label: r.name })))
 const runnerName = (id: string): string => runnersApi.runners.value.find((r) => r.id === id)?.name ?? id
 const nameOf = (p: BudgetPolicyDto): string | null => scopeName(p, { project: null, repo: (id) => id, runner: runnerName })
-const confirmText = (p: BudgetPolicyDto): string => t('fleet.budgets.deleteConfirm', { scope: scopeText(t, p, nameOf(p)) })
+const confirmPrompt = (p: BudgetPolicyDto): { title: string; body: string } => ({
+  title: t('fleet.budgets.deleteConfirm', { scope: scopeText(t, p, nameOf(p)) }),
+  body: t('fleet.budgets.deleteConfirmBody'),
+})
 
 async function poll(): Promise<void> {
   await refresh()
@@ -75,7 +78,7 @@ onBeforeUnmount(polling.stop)
         :scope-name="nameOf"
         @edit="openEdit"
         @resume="openResume"
-        @remove="(p) => remove(p, confirmText(p))"
+        @remove="(p) => remove(p, confirmPrompt(p))"
       />
     </template>
 

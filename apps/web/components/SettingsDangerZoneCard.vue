@@ -13,11 +13,17 @@ interface ProjectDetails {
 const props = defineProps<{ project: ProjectDetails }>()
 const { $api } = useApi()
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const toast = useAppToast()
 const deletingProject = ref(false)
 
 async function deleteProject() {
-  if (!window.confirm(t('projects.settings.deleteConfirm'))) return
+  if (!(await confirm({
+    title: t('projects.settings.deleteConfirm'),
+    body: t('projects.settings.deleteConfirmBody'),
+    confirmLabel: t('projects.settings.delete'),
+    destructive: true,
+  }))) return
   deletingProject.value = true
   try {
     await $api.delete(apiPath`/projects/${props.project.slug}`)

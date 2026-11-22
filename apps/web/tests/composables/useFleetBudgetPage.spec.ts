@@ -16,23 +16,25 @@ const row = (id: string, over: Partial<BudgetPolicyDto> = {}): BudgetPolicyDto =
 interface Setup {
   toasts: ReturnType<typeof toastRecorder>
   api: Record<string, jest.Mock>
+  confirm: jest.Mock
 }
 
 function setup(api: Record<string, jest.Mock>, confirmResult = true): Setup {
   const toasts = toastRecorder()
+  const confirm = jest.fn(async () => confirmResult)
   const g = globalThis as Record<string, unknown>
   g.useApi = () => ({ $api: api })
   g.useI18n = () => enI18n()
   g.useAppToast = () => toasts
-  g.window = { confirm: () => confirmResult }
-  return { toasts, api }
+  g.useConfirm = () => ({ confirm })
+  return { toasts, api, confirm }
 }
 
 describe('useFleetBudgetPage', () => {
   // No jest.resetModules(): a reset would hand the composable a second copy of ApiError and break `instanceof`.
   afterEach(() => {
     const g = globalThis as Record<string, unknown>
-    for (const key of ['useApi', 'useI18n', 'useAppToast', 'window']) delete g[key]
+    for (const key of ['useApi', 'useI18n', 'useAppToast', 'useConfirm']) delete g[key]
   })
 
   test('isForbidden recognises the envelope 40003 and a plain 403', async () => {
@@ -121,7 +123,7 @@ describe('useFleetBudgetPage', () => {
     const page = useFleetBudgetPage({ kind: 'admin' })
     await page.refresh()
 
-    await page.remove(row('a'), 'sure?')
+    await page.remove(row('a'), { title: 'T', body: 'B' })
 
     expect(del).not.toHaveBeenCalled()
     expect(page.policies.value).toHaveLength(1)
@@ -129,13 +131,15 @@ describe('useFleetBudgetPage', () => {
 
   test('remove deletes, toasts and drops the row', async () => {
     const del = jest.fn(async () => undefined)
-    const { toasts } = setup({ get: jest.fn(async () => [row('a')]), delete: del })
+    const { toasts, confirm } = setup({ get: jest.fn(async () => [row('a')]), delete: del })
     const { useFleetBudgetPage } = await import(pagePath)
     const page = useFleetBudgetPage({ kind: 'admin' })
     await page.refresh()
 
-    await page.remove(row('a'), 'sure?')
+    await page.remove(row('a'), { title: 'T', body: 'B' })
 
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({ title: 'T', body: 'B', confirmLabel: 'Delete', destructive: true })
     expect(del).toHaveBeenCalledWith('/fleet/budgets/a')
     expect(page.policies.value).toEqual([])
     expect(toasts.successes).toEqual(['Budget policy deleted'])
@@ -151,7 +155,7 @@ describe('useFleetBudgetPage', () => {
     const page = useFleetBudgetPage({ kind: 'admin' })
     await page.refresh()
 
-    await page.remove(row('a'), 'sure?')
+    await page.remove(row('a'), { title: 'sure?', body: 'b' })
     await Promise.resolve() // remove() already started the reload (void refresh()); let it settle
 
     expect(toasts.errors).toEqual(['Budget policy not found'])

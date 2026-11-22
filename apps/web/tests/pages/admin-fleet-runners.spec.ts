@@ -40,6 +40,7 @@ function makeApi(over: Partial<Api> = {}): Api {
 interface MountedPage {
   app: Mounted
   api: Api
+  confirm: jest.Mock
   toasts: ToastCall[]
   stop: jest.Mock
   /** Settles the page's own initial load plus the DOM updates it triggers. */
@@ -72,7 +73,8 @@ function mountRunners(over: Partial<Api> = {}, confirmResult = true): MountedPag
     isActive: () => true,
   }
   let task: () => Promise<void> = async () => undefined
-  globalThis.window = { location: { origin: 'https://koda.example.com' }, confirm: () => confirmResult } as never
+  globalThis.window = { location: { origin: 'https://koda.example.com' } } as never
+  const confirm = jest.fn(async () => confirmResult)
   // The page's composable is the real one, imported through jest rather than the mount harness, so
   // its own `useApi` auto-import resolves against globalThis (the pattern composable specs use).
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
@@ -87,6 +89,7 @@ function mountRunners(over: Partial<Api> = {}, confirmResult = true): MountedPag
       onMounted: Vue.onMounted,
       onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
+      useConfirm: () => ({ confirm }),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useVisiblePolling: (pageTask: () => Promise<void>) => {
@@ -110,7 +113,7 @@ function mountRunners(over: Partial<Api> = {}, confirmResult = true): MountedPag
     if (!match) throw new Error(`no button "${label}" in: ${app.text()}`)
     return { text: label, onClick: () => (match.props.onClick as () => void | Promise<void>)() }
   }
-  return { app, api, toasts, stop, settle, button, unmount: app.unmount }
+  return { app, api, confirm, toasts, stop, settle, button, unmount: app.unmount }
 }
 
 describe('Fleet admin Runners page (behaviour)', () => {
@@ -237,6 +240,15 @@ describe('Fleet admin Runners page (behaviour)', () => {
 
     expect(toasts.errors).toEqual(['runner is busy'])
     expect(app.text()).toContain('Disable')
+    unmount()
+  })
+
+  test('AC-3: deleting a runner confirms once with interpolated destructive options', async () => {
+    const { confirm, settle, button, unmount } = mountRunners({ get: jest.fn(async () => pageOf([runner('alpha')])) })
+    await settle()
+    await button('Delete').onClick()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({ title: 'Delete runner alpha?', body: 'Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.', confirmLabel: 'Delete', destructive: true })
     unmount()
   })
 

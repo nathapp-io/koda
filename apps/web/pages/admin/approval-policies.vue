@@ -14,6 +14,7 @@ definePageMeta({ layout: 'default' })
 
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const { permissions } = useGlobalPermissions()
 
 /** Both the reads and the writes of the global routes need this one key (7a). */
@@ -81,7 +82,12 @@ function openEdit(policy: ApprovalPolicy): void {
 }
 
 async function onDelete(policy: ApprovalPolicy): Promise<void> {
-  if (!window.confirm(t('approvals.policies.list.deleteConfirm', { pattern: policy.permissionPattern }))) return
+  if (!(await confirm({
+    title: t('approvals.policies.list.deleteConfirm', { pattern: policy.permissionPattern }),
+    body: t('approvals.policies.list.deleteConfirmBody'),
+    confirmLabel: t('approvals.policies.list.delete'),
+    destructive: true,
+  }))) return
   try {
     await remove(policy.id)
     toast.success(t('approvals.policies.toast.deleted'))

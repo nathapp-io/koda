@@ -27,6 +27,7 @@ const { permissions } = useProjectPermissions(slug)
 const canAnswer = computed(() => permissions.value.has('fleet.flow.answer'))
 const canStop = computed(() => permissions.value.has('fleet.flow.stop'))
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const stopPending = ref(false)
 /** An answer that needs an approval keeps its link here, so the reload cannot take it away. */
 const answerPending = ref(false)
@@ -73,7 +74,12 @@ const canStopFlow = computed(() => canStop.value && flow.value !== null && isLiv
 async function stopFlow(): Promise<void> {
   const current = flow.value
   if (!current || !canStopFlow.value || stopBusy.value) return
-  if (!window.confirm(t('fleet.flows.stop.confirm'))) return
+  if (!(await confirm({
+    title: t('fleet.flows.stop.confirm'),
+    body: t('fleet.flows.stop.confirmBody'),
+    confirmLabel: t('fleet.flows.stop.button'),
+    destructive: true,
+  }))) return
 
   stopBusy.value = true
   stopPending.value = false

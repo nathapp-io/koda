@@ -9,21 +9,22 @@ const s = { id: 's1', name: 'nightly' } as ScheduleDto
 
 function setup(confirmResult = true) {
   const toasts = toastRecorder()
+  const confirm = jest.fn(async () => confirmResult)
   const g = globalThis as Record<string, unknown>
   g.useI18n = () => enI18n()
   g.useAppToast = () => toasts
-  g.window = { confirm: jest.fn(() => confirmResult) }
+  g.useConfirm = () => ({ confirm })
   const api = {
     enable: jest.fn(async () => ({ ...s, enabled: true })),
     disable: jest.fn(async () => ({ ...s, enabled: false })),
     remove: jest.fn(async () => undefined),
   }
   const onStale = jest.fn()
-  return { toasts, api, onStale }
+  return { toasts, api, onStale, confirm }
 }
 
 afterEach(() => {
-  for (const key of ['useI18n', 'useAppToast', 'window']) delete (globalThis as Record<string, unknown>)[key]
+  for (const key of ['useI18n', 'useAppToast', 'useConfirm']) delete (globalThis as Record<string, unknown>)[key]
 })
 
 describe('useFleetScheduleActions', () => {
@@ -49,10 +50,26 @@ describe('useFleetScheduleActions', () => {
     expect(actions.busy.value).toBe(false)
   })
 
-  test('delete asks first; a refusal of the dialog does nothing', async () => {
+  test('delete asks with split destructive prompt and removes on confirmation', async () => {
+    const { api, onStale, confirm } = setup(true)
+    const { useFleetScheduleActions } = await import(composablePath)
+    const actions = useFleetScheduleActions(api as never, onStale)
+    expect(await actions.remove(s)).toBe(true)
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({
+      title: 'Delete schedule nightly?',
+      body: 'The jobs it dispatched are kept.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    expect(api.remove).toHaveBeenCalledWith('s1')
+  })
+
+  test('a declined dialog returns false without removing', async () => {
     const { api, onStale } = setup(false)
     const { useFleetScheduleActions } = await import(composablePath)
     const actions = useFleetScheduleActions(api as never, onStale)
+
     expect(await actions.remove(s)).toBe(false)
     expect(api.remove).not.toHaveBeenCalled()
   })
@@ -63,9 +80,6 @@ describe('useFleetScheduleActions', () => {
     const actions = useFleetScheduleActions(api as never, onStale)
     expect(await actions.remove(s)).toBe(true)
     expect(toasts.successes).toEqual(['Schedule deleted'])
-    expect((globalThis as { window: { confirm: jest.Mock } }).window.confirm)
-      .toHaveBeenCalledWith('Delete schedule nightly? The jobs it dispatched are kept.')
-
     api.remove.mockImplementationOnce(async () => { throw new ApiError(404, 'Schedule not found') })
     expect(await actions.remove(s)).toBe(false)
     expect(toasts.errors).toEqual(['Schedule not found'])

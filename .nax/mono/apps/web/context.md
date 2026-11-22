@@ -74,6 +74,8 @@ Main folders:
 
 Run logs and other runner- or agent-written text render through `{{ }}` interpolation only, never `v-html`: a log line is untrusted text. The one exception is thread assistant message content (fleet S5a B4-D1): it renders through `renderThreadMarkdown` (`lib/thread-markdown.ts`), which runs `renderMarkdownOrEscape` and then removes every `img` element — so agent-steered text cannot make the browser fetch a URL. The second exception is ticket comment bodies (a comment can be agent-written, via MCP or fleet): `CommentThread.vue` renders them through `renderMarkdownWithoutImages` (`lib/markdown.ts`), which sanitizes, removes every `img` element, then sanitizes again (a regex strip over serialized HTML can re-open an attribute, so the second pass is required). Every other runner- or agent-written string in threads (user messages, `errorReason`, tool `name` / `input` / `preview`, question text, `session.reason`) stays interpolation-only.
 
+New-thread agent readiness (e2e-1121): both new-thread pages show one `AgentReadinessNotice` per not-ready ACP agent, with the probe's reason and time (`AgentChoice.probe`, from the runner offer's `lastError` / `checkedAt`). Its Re-check button (`useAgentRecheck`) posts `/fleet/runners/:id/reprobe` for each runner the probe names (approval-gated `fleet.runner.update`; 200 when done, 202 when it waits on approval), then re-reads the runner list every 10 s, up to 12 times, until `checkedAt` changes or the agent becomes available. A kept offer (still selectable while `lastError` is set) is the runner's last-good memory, not a stale cache bug.
+
 ## i18n Rules
 
 Web i18n uses locale JSON files under `apps/web/i18n/locales/`.
