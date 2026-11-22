@@ -1761,7 +1761,8 @@
         "deleted": "预算策略已删除",
         "resumed": "预算已恢复"
       },
-      "deleteConfirm": "删除 {scope} 的预算策略？已暂停的范围将立即恢复。",
+      "deleteConfirm": "删除 {scope} 的预算策略？",
+      "deleteConfirmBody": "已暂停的范围将立即恢复。",
       "banner": {
         "paused": "{scope}的 Fleet 预算已暂停：已支出 {spent} / {amount}。恢复前将拒绝新任务。",
         "warning": "{scope}的 Fleet 预算已达 {percent}%（{spent} / {amount}）。",
@@ -1777,7 +1778,8 @@
       "empty": "暂无定时计划",
       "forbidden": "你无权访问此项目。",
       "readOnly": "只有计划的创建者或项目管理员可以修改定时计划。",
-      "deleteConfirm": "删除定时计划 {name}？它派发过的任务会保留。",
+      "deleteConfirm": "删除定时计划 {name}？",
+      "deleteConfirmBody": "它派发过的任务会保留。",
       "inZone": "{time}（{zone}）",
       "cronIn": "{cron}，时区 {zone}",
       "table": {

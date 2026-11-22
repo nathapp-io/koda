@@ -133,8 +133,8 @@ test.describe('Fleet budgets (scripted runner)', () => {
     const created = rows.filter({ hasText: 'Whole fleet' }).filter({ hasText: 'Lifetime' });
     await expect(created).toHaveCount(1);
 
-    page.once('dialog', (dialog) => { void dialog.accept(); });
     await created.getByTestId('fleet-budget-delete').click();
+    await page.getByTestId('confirm-dialog-confirm').click();
     await expect(rows).toHaveCount(before);
   });
 });

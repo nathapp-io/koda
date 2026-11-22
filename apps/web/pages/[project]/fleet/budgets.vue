@@ -40,7 +40,10 @@ const fleetWide = computed(() => policies.value.filter((p) => p.scopeType === 'g
 const repoOptions = computed(() => repoChoices(options.repos.value))
 const nameOf = (p: BudgetPolicyDto): string | null =>
   scopeName(p, { project: slug, repo: options.repoName, runner: (id) => id })
-const confirmText = (p: BudgetPolicyDto): string => t('fleet.budgets.deleteConfirm', { scope: scopeText(t, p, nameOf(p)) })
+const confirmPrompt = (p: BudgetPolicyDto): { title: string; body: string } => ({
+  title: t('fleet.budgets.deleteConfirm', { scope: scopeText(t, p, nameOf(p)) }),
+  body: t('fleet.budgets.deleteConfirmBody'),
+})
 
 async function poll(): Promise<void> {
   await refresh()
@@ -97,7 +100,7 @@ useProjectEvents(slug, {
           :scope-name="nameOf"
           @edit="openEdit"
           @resume="openResume"
-          @remove="(p) => remove(p, confirmText(p))"
+          @remove="(p) => remove(p, confirmPrompt(p))"
         />
       </section>
 

@@ -1761,7 +1761,8 @@
         "deleted": "Budget policy deleted",
         "resumed": "Budget resumed"
       },
-      "deleteConfirm": "Delete the budget policy for {scope}? A paused scope resumes immediately.",
+      "deleteConfirm": "Delete the budget policy for {scope}?",
+      "deleteConfirmBody": "A paused scope resumes immediately.",
       "banner": {
         "paused": "Fleet budget paused for {scope}: {spent} of {amount} spent. New jobs are refused until it is resumed.",
         "warning": "Fleet budget for {scope} is at {percent}% ({spent} of {amount}).",
@@ -1777,7 +1778,8 @@
       "empty": "No schedules yet",
       "forbidden": "You do not have access to this project.",
       "readOnly": "Only the schedule owner or a project administrator can change a schedule.",
-      "deleteConfirm": "Delete schedule {name}? The jobs it dispatched are kept.",
+      "deleteConfirm": "Delete schedule {name}?",
+      "deleteConfirmBody": "The jobs it dispatched are kept.",
       "inZone": "{time} ({zone})",
       "cronIn": "{cron} in {zone}",
       "table": {

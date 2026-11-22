@@ -17,6 +17,7 @@ export function isForbidden(err: unknown): boolean {
 export function useFleetBudgetPage(base: BudgetBase) {
   const { t } = useI18n()
   const toast = useAppToast()
+  const { confirm } = useConfirm()
   const budgets = useFleetBudgets(base)
 
   const loaded = ref(false)
@@ -66,9 +67,15 @@ export function useFleetBudgetPage(base: BudgetBase) {
     resumeOpen.value = true
   }
 
-  /** D186: the confirm text says what deleting a paused policy does. A refusal reloads the list (D185). */
-  async function remove(policy: BudgetPolicyDto, confirmText: string): Promise<void> {
-    if (!window.confirm(confirmText)) return
+  /** D186: the confirm body says what deleting a paused policy does. A refusal reloads the list (D185). */
+  async function remove(policy: BudgetPolicyDto, prompt: { title: string; body: string }): Promise<void> {
+    const confirmed = await confirm({
+      title: prompt.title,
+      body: prompt.body,
+      confirmLabel: t('fleet.budgets.actions.delete'),
+      destructive: true,
+    })
+    if (!confirmed) return
     try {
       await budgets.remove(policy.id)
       toast.success(t('fleet.budgets.toast.deleted'))

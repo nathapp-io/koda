@@ -45,7 +45,8 @@ function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMB
   const toasts = toastRecorder()
   let task: () => Promise<void> = async () => undefined
   const polling = { start: jest.fn(), stop: jest.fn(), runNow: async (): Promise<void> => { await task() }, isActive: () => true }
-  globalThis.window = { confirm: () => true } as never
+  const confirm = jest.fn(async () => true)
+  ;(globalThis as Record<string, unknown>).useConfirm = () => ({ confirm })
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
   ;(globalThis as Record<string, unknown>).useAsyncData = fakeAsyncData
 
@@ -58,6 +59,7 @@ function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMB
       onMounted: Vue.onMounted,
       onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
+      useConfirm: () => ({ confirm }),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useAsyncData: fakeAsyncData,
@@ -87,16 +89,35 @@ function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMB
       .filter((id): id is string => typeof id === 'string' && id.startsWith('fleet-budget-row-'))
       .map((id) => id.replace('fleet-budget-row-', ''))
   const buttonLabels = (): string[] => app.find('[data-stub="button"]').map((b) => app.textOf(b))
-  return { app, api, settle, rowIds, buttonLabels, polling }
+  return { app, api, settle, rowIds, buttonLabels, polling, confirm }
 }
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).window
+  delete (globalThis as Record<string, unknown>).useConfirm
   delete (globalThis as Record<string, unknown>).useApi
   delete (globalThis as Record<string, unknown>).useAsyncData
 })
 
 describe('Project budgets page (behaviour)', () => {
+  test('BudgetTable remove asks with the policy scope title and explanatory body', async () => {
+    const m = mountProject([policy('rp', { scopeType: 'repo', scopeId: 'r1' })], ADMIN_KEYS)
+    await m.settle()
+    const row = m.app.find('[data-stub="tr"]').find((candidate) => candidate.props['data-testid'] === 'fleet-budget-row-rp')
+    const remove = row && m.app.find('[data-stub="button"]', row).find((button) => m.app.textOf(button) === 'Delete')
+    if (!remove) throw new Error('repo policy delete action missing')
+
+    await (remove.props.onClick as () => void | Promise<void>)()
+
+    expect(m.confirm).toHaveBeenCalledTimes(1)
+    expect(m.confirm).toHaveBeenCalledWith({
+      title: 'Delete the budget policy for repo acme/app?',
+      body: 'A paused scope resumes immediately.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    m.app.unmount()
+  })
   test('a member sees every policy but not one control (Review Focus 3)', async () => {
     const m = mountProject(ROWS)
     await m.settle()

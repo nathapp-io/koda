@@ -52,7 +52,8 @@ function mountBudgets(api: Api, confirmResult = true) {
   const stop = jest.fn()
   let task: () => Promise<void> = async () => undefined
   const polling = { start: jest.fn(), stop, runNow: async (): Promise<void> => { await task() }, isActive: () => true }
-  globalThis.window = { confirm: () => confirmResult } as never
+  const confirm = jest.fn(async () => confirmResult)
+  ;(globalThis as Record<string, unknown>).useConfirm = () => ({ confirm })
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
   ;(globalThis as Record<string, unknown>).useAsyncData = fakeAsyncData
 
@@ -65,6 +66,7 @@ function mountBudgets(api: Api, confirmResult = true) {
       onMounted: Vue.onMounted,
       onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
+      useConfirm: () => ({ confirm }),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useAsyncData: fakeAsyncData,
@@ -94,11 +96,12 @@ function mountBudgets(api: Api, confirmResult = true) {
     if (!button) throw new Error(`no button "${label}" on row ${id}`)
     return { onClick: () => (button.props.onClick as () => void | Promise<void>)() }
   }
-  return { app, api, toasts, stop, settle, rowIds, rowButton }
+  return { app, api, toasts, stop, settle, rowIds, rowButton, confirm }
 }
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).window
+  delete (globalThis as Record<string, unknown>).useConfirm
   delete (globalThis as Record<string, unknown>).useApi
   delete (globalThis as Record<string, unknown>).useAsyncData
 })
@@ -178,6 +181,22 @@ describe('Fleet admin Budgets page', () => {
     expect(m.api.delete).toHaveBeenCalledWith('/fleet/budgets/g')
     expect(m.rowIds()).toEqual([])
     expect(m.toasts.successes).toEqual(['Budget policy deleted'])
+    m.app.unmount()
+  })
+
+  test('BudgetTable remove asks with the policy scope title and explanatory body', async () => {
+    const m = mountBudgets(makeApi([policy('runner-policy', { scopeType: 'runner', scopeId: 'r1' })]))
+    await m.settle()
+
+    await m.rowButton('runner-policy', 'Delete').onClick()
+
+    expect(m.confirm).toHaveBeenCalledTimes(1)
+    expect(m.confirm).toHaveBeenCalledWith({
+      title: 'Delete the budget policy for runner box-1?',
+      body: 'A paused scope resumes immediately.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
     m.app.unmount()
   })
 
