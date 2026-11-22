@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { agentLabelKey } from '~/lib/thread-create'
 import type { AgentChoice } from '~/lib/thread-create'
-import { formatDateTime } from '~/lib/format-date-time'
+import { useLocalDates } from '~/lib/local-dates'
 
 const props = defineProps<{
   choice: AgentChoice
@@ -12,7 +12,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'recheck'): void
 }>()
-const { t, locale } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+const dates = useLocalDates(i18n)
 
 const reasonKey = computed(() => {
   const probe = props.choice.probe
@@ -31,7 +33,7 @@ const reasonKey = computed(() => {
     <p class="font-medium">{{ t(agentLabelKey(choice.agent)) }}</p>
     <p class="text-muted-foreground">{{ t(reasonKey) }}</p>
     <p v-if="choice.probe.checkedAt" class="text-muted-foreground">
-      {{ t('fleet.threads.new.agent.checkedAt', { time: formatDateTime(choice.probe.checkedAt, locale) }) }}
+      {{ t('fleet.threads.new.agent.checkedAt', { time: dates.dateTime(choice.probe.checkedAt) }) }}
     </p>
     <button
       v-if="canRecheck"

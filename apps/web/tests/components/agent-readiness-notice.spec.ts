@@ -1,4 +1,4 @@
-import { describe, expect, test } from '@jest/globals'
+import { describe, expect, jest, test } from '@jest/globals'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { enI18n } from '../helpers/fleet-harness'
@@ -33,10 +33,17 @@ describe('AgentReadinessNotice (US-008)', () => {
     app.unmount()
   })
 
-  test('AC-2: renders the localized checked-at text with the formatted time', () => {
-    const app = mountNotice()
+  test('AC-2: renders checked-at through the shared local date formatter', () => {
+    const formatted = formatDateTime(checkedAt, 'en')
+    const dateTime = jest.fn((iso: string | null | undefined) => iso === checkedAt ? formatted : '-')
+    const app = mountSfc(file, {
+      props: { choice: choice(), canRecheck: true, rechecking: false },
+      globals: { useI18n: () => ({ ...enI18n(), locale: { value: 'en' } }) },
+      alias: { '~/lib/local-dates': { useLocalDates: () => ({ dateTime, date: () => '-' }) } },
+    })
     const notice = must(readiness(app), 'readiness notice')
-    expect(app.textOf(notice)).toContain(enI18n().t('fleet.threads.new.agent.checkedAt', { time: formatDateTime(checkedAt, 'en') }))
+    expect(dateTime).toHaveBeenCalledWith(checkedAt)
+    expect(app.textOf(notice)).toContain(enI18n().t('fleet.threads.new.agent.checkedAt', { time: formatted }))
     app.unmount()
   })
 
