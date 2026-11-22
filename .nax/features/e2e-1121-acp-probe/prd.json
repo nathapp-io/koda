@@ -3,7 +3,7 @@
   "feature": "e2e-1121-acp-probe",
   "branchName": "feat/e2e-1121-acp-probe",
   "createdAt": "2026-11-22T03:15:28.895Z",
-  "updatedAt": "2026-11-22T04:25:06.577Z",
+  "updatedAt": "2026-11-22T04:34:27.712Z",
   "userStories": [
     {
       "id": "US-001",
@@ -441,14 +441,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Pure display-state aggregation and additive locale/types changes; no permission enforcement or authentication behavior is changed."
+        "reasoning": "Pure display-state aggregation and additive locale/types changes; no permission enforcement or authentication behavior is changed.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-create.ts",
@@ -480,7 +483,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9997dd5ce1f341e6f9db42feeb1e13ab47d55ee9"
     },
     {
       "id": "US-008",
