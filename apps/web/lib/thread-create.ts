@@ -1,6 +1,6 @@
 import * as z from 'zod'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
-import type { ChatThreadKind, ThreadAcpOffer, ThreadAgent, ThreadBackend, ThreadMode } from '~/lib/thread-types'
+import type { AcpProbeErrorCode, ChatThreadKind, ThreadAcpOffer, ThreadAgent, ThreadBackend, ThreadMode } from '~/lib/thread-types'
 import { FEATURE_RE } from '~/lib/fleet-dispatch'
 
 type Translate = (key: string) => string
@@ -37,12 +37,20 @@ export type AgentChoiceKey = 'native' | ThreadAgent
 /** Why an agent cannot be picked; each one has its own `fleet.threads.new.agent.reason.*` copy. */
 export type AgentUnavailableReason = 'notInstalled' | 'notLoggedIn' | 'notReady'
 
+/** Probe details aggregated from eligible launchable offers that are not confirmed ready. */
+export interface AgentProbeState {
+  code: AcpProbeErrorCode | null
+  checkedAt: string | null
+  runnerIds: string[]
+}
+
 /** One option of the agent select, with the models and efforts the chosen agent offers. */
 export interface AgentChoice {
   agent: AgentChoiceKey
   available: boolean
   /** Set only while the agent is unavailable, so a caller never reads a stale reason. */
   reason: AgentUnavailableReason | null
+  probe?: AgentProbeState
   models: string[]
   efforts: string[]
 }
@@ -144,10 +152,27 @@ export function eligibleAgents(runners: readonly FleetRunnerSummary[], kind: Cha
       : launchable.length === 0
         ? 'notInstalled'
         : launchable.every(offer => offer.loggedIn === false) ? 'notLoggedIn' : 'notReady'
+    const unavailableOffers = eligible.flatMap((runner) => {
+      const offer = runner.threadBackends?.acpOffers?.find(item => item.agent === agent && item.launchable && item.loggedIn !== true)
+      return offer ? [{ runnerId: runner.id, offer }] : []
+    })
+    const latest = unavailableOffers.reduce<typeof unavailableOffers[number] | undefined>((current, item) => {
+      if (!item.offer.checkedAt) return current
+      if (!current?.offer.checkedAt || Date.parse(item.offer.checkedAt) > Date.parse(current.offer.checkedAt)) return item
+      return current
+    }, undefined)
+    const probe: AgentProbeState | undefined = !available && reason !== 'notInstalled'
+      ? {
+          code: latest?.offer.lastError?.code ?? null,
+          checkedAt: latest?.offer.checkedAt ?? null,
+          runnerIds: unavailableOffers.map(item => item.runnerId),
+        }
+      : undefined
     return {
       agent,
       available,
       reason,
+      ...(probe ? { probe } : {}),
       models: available ? sortedUnion(confirmed.map(offer => offer.models)) : [],
       efforts: available ? sortedUnion(confirmed.map(offer => offer.efforts)) : [],
     }

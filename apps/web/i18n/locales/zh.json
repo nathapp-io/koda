@@ -1174,6 +1174,17 @@
           "codex": "Codex",
           "cursor": "Cursor",
           "defaultModel": "代理默认",
+          "probe": {
+            "timeout": "代理检查超时。",
+            "unavailable": "代理服务不可用。",
+            "error": "代理检查失败。",
+            "unconfirmed": "运行器尚未确认此代理已就绪。",
+            "notLoggedIn": "请在运行器上登录此代理。"
+          },
+          "checkedAt": "上次检查时间：{time}",
+          "recheck": "重新检查",
+          "recheckRequested": "已请求重新检查，正在等待运行器…",
+          "rechecking": "正在重新检查…",
           "reason": {
             "notInstalled": "未安装",
             "notLoggedIn": "未登录",

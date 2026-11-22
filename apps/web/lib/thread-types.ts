@@ -262,12 +262,21 @@ export type ThreadLiveEvent = { id: string; threadId: string; at: string } & (
  * One ACP agent's discovery offer (runner-summary.dto.ts `ThreadAcpOffer`, thread-agents-modes). `loggedIn` is null
  * when the agent was not probed or its probe failed; a not-logged-in agent is still launchable but absent from `acp`.
  */
+export type AcpProbeErrorCode = 'timeout' | 'unavailable' | 'error'
+
+export interface AcpProbeError {
+  code: AcpProbeErrorCode
+  at: string
+}
+
 export interface ThreadAcpOffer {
   agent: ThreadAgent
   launchable: boolean
   loggedIn: boolean | null
   models: string[]
   efforts: string[]
+  checkedAt?: string
+  lastError?: AcpProbeError
 }
 
 /** Runner capability report as the web sees it (runner-summary.dto.ts). */

@@ -203,6 +203,54 @@ describe('eligibleAgents (US-011 AC-1..AC-3)', () => {
     expect(agentOf(choices, 'native').models).toEqual(['m1'])
   })
 
+  describe('US-007 probe details', () => {
+    const t1 = '2026-11-22T02:00:00.000Z'
+    const t2 = '2026-11-22T02:10:00.000Z'
+
+    test('AC-1: not-ready launchable offer exposes its timeout and check time', () => {
+      const choices = eligibleAgents([runner({ id: 'r1', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: null, checkedAt: t1, lastError: { code: 'timeout', at: t1 } })] } })], 'REPO')
+      expect(agentOf(choices, 'codex')).toMatchObject({ reason: 'notReady', probe: { code: 'timeout', checkedAt: t1, runnerIds: ['r1'] } })
+    })
+
+    test('AC-2: newest check supplies the code and all not-ready runners stay ordered', () => {
+      const choices = eligibleAgents([
+        runner({ id: 'r1', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: null, checkedAt: t1, lastError: { code: 'timeout', at: t1 } })] } }),
+        runner({ id: 'r2', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: null, checkedAt: t2, lastError: { code: 'unavailable', at: t2 } })] } }),
+      ], 'REPO')
+      expect(agentOf(choices, 'codex').probe).toEqual({ code: 'unavailable', checkedAt: t2, runnerIds: ['r1', 'r2'] })
+    })
+
+    test('AC-3: logged-out launchable runner reports notLoggedIn with check time', () => {
+      const choices = eligibleAgents([runner({ id: 'r1', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: false, checkedAt: t1 })] } })], 'REPO')
+      expect(agentOf(choices, 'codex')).toMatchObject({ reason: 'notLoggedIn', probe: { code: null, checkedAt: t1, runnerIds: ['r1'] } })
+    })
+
+    test('AC-4: older runner with no probe metadata is unconfirmed', () => {
+      const choices = eligibleAgents([runner({ id: 'r1', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: null })] } })], 'REPO')
+      expect(agentOf(choices, 'codex')).toMatchObject({ reason: 'notReady', probe: { code: null, checkedAt: null, runnerIds: ['r1'] } })
+    })
+
+    test('AC-5: ready agent has no probe even when its offer has an error', () => {
+      const choices = eligibleAgents([runner({ id: 'r1', threadBackends: { native: [], acp: ['codex'], acpOffers: [offer('codex', { loggedIn: true, lastError: { code: 'error', at: t1 } })] } })], 'REPO')
+      expect(agentOf(choices, 'codex')).not.toHaveProperty('probe')
+    })
+
+    test('AC-6: not-installed agent has no probe', () => {
+      const choices = eligibleAgents([runner({ id: 'r1', threadBackends: { native: [], acp: [], acpOffers: [] } })], 'REPO')
+      expect(agentOf(choices, 'cursor')).toMatchObject({ reason: 'notInstalled' })
+      expect(agentOf(choices, 'cursor')).not.toHaveProperty('probe')
+    })
+
+    test('AC-7: any ready runner suppresses probe details from not-ready runners', () => {
+      const choices = eligibleAgents([
+        runner({ id: 'r1', threadBackends: { native: [], acp: ['codex'], acpOffers: [offer('codex', { loggedIn: true })] } }),
+        runner({ id: 'r2', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: null, checkedAt: t1 })] } }),
+      ], 'REPO')
+      expect(agentOf(choices, 'codex')).toMatchObject({ available: true })
+      expect(agentOf(choices, 'codex')).not.toHaveProperty('probe')
+    })
+  })
+
   test('AC-5 support: the picker reads its labels and reasons through one key pair', () => {
     expect(agentLabelKey('claude')).toBe('fleet.threads.new.agent.claude')
     expect(agentLabelKey('native')).toBe('fleet.threads.new.agent.native')

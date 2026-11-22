@@ -209,6 +209,21 @@ describe('Fleet locale parity (en and zh)', () => {
     }
   })
 
+  test('US-007 AC-8: ACP probe and re-check labels exist in both locales', () => {
+    const keys = [
+      'fleet.threads.new.agent.probe.timeout', 'fleet.threads.new.agent.probe.unavailable',
+      'fleet.threads.new.agent.probe.error', 'fleet.threads.new.agent.probe.unconfirmed',
+      'fleet.threads.new.agent.probe.notLoggedIn', 'fleet.threads.new.agent.checkedAt',
+      'fleet.threads.new.agent.recheck', 'fleet.threads.new.agent.recheckRequested',
+      'fleet.threads.new.agent.rechecking',
+    ]
+    for (const locale of [en, zh]) {
+      for (const key of keys) expect(String(at(locale, key) ?? '').trim()).not.toBe('')
+      expect(Object.keys(at(locale, 'fleet.threads.new.agent.probe') as Tree).sort()).toEqual(['error', 'notLoggedIn', 'timeout', 'unavailable', 'unconfirmed'].sort())
+      expect(String(at(locale, 'fleet.threads.new.agent.checkedAt'))).toContain('{time}')
+    }
+  })
+
   // thread-agents-modes US-012: the thread page's mode control renders `fleet.threads.mode.<mode>` and the approval
   // card names its two decisions, all through dynamic or two-letter keys a source scan cannot pin. The mode labels must
   // cover exactly the three `ThreadMode` values, and the approval keys the card and its badge render. B3 adds the two
