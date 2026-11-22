@@ -1588,7 +1588,8 @@
       "title": "执行机",
       "subtitle": "为 koda 运行 nax 任务的机器。",
       "empty": "还没有执行机。请创建注册令牌，并在机器上运行 koda-runner enroll。",
-      "deleteConfirm": "删除执行机 {name}？其密钥将被吊销。有未完成任务或被固定任务的执行机无法删除。",
+      "deleteConfirm": "删除执行机 {name}？",
+      "deleteConfirmBody": "其密钥将被吊销。有未完成任务或被固定任务的执行机无法删除。",
       "table": {
         "name": "名称",
         "status": "状态",
@@ -2042,7 +2043,8 @@
       "title": "仓库",
       "subtitle": "koda 可为执行机任务克隆和推送的仓库。",
       "empty": "还没有注册仓库。",
-      "deleteConfirm": "取消注册 {repo}？有未完成任务的仓库无法移除。",
+      "deleteConfirm": "取消注册 {repo}？",
+      "deleteConfirmBody": "有未完成任务的仓库无法移除。",
       "table": {
         "repo": "仓库",
         "project": "项目",

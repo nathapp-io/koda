@@ -37,6 +37,7 @@ type Node = ReturnType<ReturnType<typeof mountSfc>['find']>[number]
 interface MountedRepos {
   app: ReturnType<typeof mountSfc>
   api: Api
+  confirm: jest.Mock
   toasts: ToastRecorder
   settle: () => Promise<void>
   button: (label: string) => { onClick: () => void | Promise<void> }
@@ -84,7 +85,7 @@ function mountRepos(
   }
   const toasts = toastRecorder()
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
-  globalThis.window = { confirm: () => over.confirm ?? true } as never
+  const confirm = jest.fn(async () => over.confirm ?? true)
   // One composable instance for the page and for the row components, so a save travels the real
   // path: the component asks the composable, the composable patches the API and replaces its row.
   const fleetRepos = useFleetRepos()
@@ -120,6 +121,7 @@ function mountRepos(
       onMounted: Vue.onMounted,
       onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
+      useConfirm: () => ({ confirm }),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useFleetRepos: () => fleetRepos,
@@ -151,7 +153,7 @@ function mountRepos(
     if (!row) throw new Error(`no row for ${id} in: ${app.text()}`)
     return row
   }
-  return { app, api, toasts, settle, button, rows, rowOf, buttonIn, click, unmount: app.unmount }
+  return { app, api, confirm, toasts, settle, button, rows, rowOf, buttonIn, click, unmount: app.unmount }
 }
 
 describe('Fleet admin Repos page (behaviour)', () => {
@@ -371,6 +373,15 @@ describe('Fleet admin Repos page (behaviour)', () => {
     const { api, settle, unmount } = mountRepos()
     await settle()
     expect(api.get).toHaveBeenCalledWith('/fleet/repos', { query: { size: '100' } })
+    unmount()
+  })
+
+  test('AC-1: deleting a repo asks with the full styled confirmation options', async () => {
+    const { confirm, buttonIn, click, rowOf, settle, unmount } = mountRepos()
+    await settle()
+    await click(buttonIn('Delete', rowOf('alpha')))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({ title: 'Unregister acme/alpha?', body: 'A repo with unfinished jobs cannot be removed.', confirmLabel: 'Delete', destructive: true })
     unmount()
   })
 

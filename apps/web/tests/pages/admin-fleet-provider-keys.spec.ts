@@ -74,7 +74,7 @@ function mountPage(over: {
   }
   const toasts = toastRecorder()
   const allowed = new Set(over.permissions ?? ['fleet.credential.read', 'fleet.credential.create', 'fleet.credential.update', 'fleet.credential.delete'])
-  ;(globalThis as Record<string, unknown>).window = { confirm: () => over.confirm ?? true }
+  const confirm = jest.fn(async () => over.confirm ?? true)
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
 
   const app = mountSfc(page, {
@@ -84,6 +84,7 @@ function mountPage(over: {
       ref, computed, watch, nextTick,
       onMounted: Vue.onMounted,
       useI18n: () => enI18n(),
+      useConfirm: () => ({ confirm }),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useGlobalPermissions: () => ({ permissions: computed(() => ({ has: (key: string) => allowed.has(key) })) }),

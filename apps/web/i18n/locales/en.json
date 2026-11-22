@@ -1588,7 +1588,8 @@
       "title": "Runners",
       "subtitle": "Machines that run nax jobs for koda.",
       "empty": "No runners yet. Create an enrollment token and run koda-runner enroll on a machine.",
-      "deleteConfirm": "Delete runner {name}? Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.",
+      "deleteConfirm": "Delete runner {name}?",
+      "deleteConfirmBody": "Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.",
       "table": {
         "name": "Name",
         "status": "Status",
@@ -2042,7 +2043,8 @@
       "title": "Repos",
       "subtitle": "Repositories koda can clone and push for fleet jobs.",
       "empty": "No repos registered.",
-      "deleteConfirm": "Unregister {repo}? A repo with unfinished jobs cannot be removed.",
+      "deleteConfirm": "Unregister {repo}?",
+      "deleteConfirmBody": "A repo with unfinished jobs cannot be removed.",
       "table": {
         "repo": "Repository",
         "project": "Project",

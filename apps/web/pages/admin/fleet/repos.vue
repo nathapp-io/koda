@@ -8,6 +8,7 @@ definePageMeta({ layout: 'default' })
 
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, remove } = useFleetRepos()
 
 const adminOnly = ref(false)
@@ -76,7 +77,7 @@ async function onCreated(repo: FleetRepo): Promise<void> {
 }
 
 async function confirmDelete(repo: FleetRepo): Promise<void> {
-  if (!window.confirm(t('fleet.repos.deleteConfirm', { repo: repoName(repo) }))) return
+  if (!(await confirm({ title: t('fleet.repos.deleteConfirm', { repo: repoName(repo) }), body: t('fleet.repos.deleteConfirmBody'), confirmLabel: t('fleet.repos.actions.delete'), destructive: true }))) return
   try {
     await remove(repo.id)
     toast.success(t('fleet.repos.toast.deleted'))
