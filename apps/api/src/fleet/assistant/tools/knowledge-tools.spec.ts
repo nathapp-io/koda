@@ -440,6 +440,9 @@ const event = (over: Partial<TimelineEvent> = {}): TimelineEvent => ({
   action: 'TICKET_CREATED',
   ticketId: 'ticket-3',
   createdAt: new Date('2026-10-14T00:00:00.000Z'),
+  actorName: null,
+  ticketRef: null,
+  ticketTitle: null,
   ...over,
 });
 
