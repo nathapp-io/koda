@@ -3,7 +3,7 @@
   "feature": "e2e-1121-acp-probe",
   "branchName": "feat/e2e-1121-acp-probe",
   "createdAt": "2026-11-22T03:15:28.895Z",
-  "updatedAt": "2026-11-22T04:34:27.712Z",
+  "updatedAt": "2026-11-22T04:43:21.359Z",
   "userStories": [
     {
       "id": "US-001",
@@ -511,14 +511,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "An isolated two-file Vue component renders translated text and an action from boolean props; it neither reads permission sets nor authorizes requests, so component-first TDD is sufficient."
+        "reasoning": "An isolated two-file Vue component renders translated text and an action from boolean props; it neither reads permission sets nor authorizes requests, so component-first TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/BackendPicker.vue",
@@ -534,7 +537,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "13791ead8a8036c146f98a0cdabae120981926ac"
     },
     {
       "id": "US-009",
