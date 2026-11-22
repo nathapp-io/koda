@@ -20,7 +20,8 @@
     "retry": "Retry",
     "edit": "Edit",
     "save": "Save",
-    "delete": "Delete"
+    "delete": "Delete",
+    "formerMember": "Former member"
   },
   "auth": {
     "forgot": {
@@ -2145,6 +2146,7 @@
       "schedules": "Schedules",
       "approvals": "Approvals",
       "configFeature": "nax config",
+      "threadFeature": "Thread",
       "approvalsSection": { "title": "Approvals", "empty": "No shell command asks yet.", "open": "Open" },
       "needsApproval": "Needs approval ({count})",
       "empty": "No fleet jobs yet",
