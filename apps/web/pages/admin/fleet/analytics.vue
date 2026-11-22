@@ -23,6 +23,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const api = useFleetAnalyticsAdmin()
 
 const range = computed(() => parseRange(route.query))
@@ -114,7 +115,12 @@ async function rerun(jobId: string): Promise<void> {
 }
 
 async function bulk(action: 'backfill' | 'rerunOutdated'): Promise<void> {
-  if (action === 'rerunOutdated' && !window.confirm(t('fleet.analytics.ingest.confirmRerunOutdated'))) return
+  if (action === 'rerunOutdated' && !(await confirm({
+    title: t('fleet.analytics.ingest.confirmRerunOutdated'),
+    body: t('fleet.analytics.ingest.confirmRerunOutdatedBody'),
+    confirmLabel: t('fleet.analytics.ingest.rerunOutdated'),
+    destructive: false,
+  }))) return
   busyAll.value = true
   try {
     const result = action === 'backfill' ? await api.backfill() : await api.rerunOutdated()

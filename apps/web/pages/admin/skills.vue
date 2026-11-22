@@ -8,6 +8,7 @@ definePageMeta({ layout: 'default' })
 
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const { list, update, remove } = useSkillCatalog()
 
 const sources = ref<SkillSourceDto[]>([])
@@ -56,9 +57,14 @@ function onUpdate(source: SkillSourceDto): Promise<void> {
   return guarded(source, async () => replaceSource(await update(source.id)))
 }
 
-function onRemove(source: SkillSourceDto): Promise<void> {
-  if (!window.confirm(t('skills.confirm.remove', { url: source.gitUrl }))) return Promise.resolve()
-  return guarded(source, async () => {
+async function onRemove(source: SkillSourceDto): Promise<void> {
+  if (!(await confirm({
+    title: t('skills.confirm.remove', { url: source.gitUrl }),
+    body: t('skills.confirm.removeBody'),
+    confirmLabel: t('skills.actions.remove'),
+    destructive: true,
+  }))) return
+  await guarded(source, async () => {
     await remove(source.id)
     sources.value = sources.value.filter((s) => s.id !== source.id)
     toast.success(t('skills.toast.removed'))

@@ -25,8 +25,7 @@ interface Mount { app: Mounted; api: FakeApi; toast: { error: jest.Mock; success
 async function mountPage(roles: Role[], options: { keys?: string[]; api?: Partial<FakeApi>; confirm?: boolean } = {}): Promise<Mount> {
   const api = fakeApi(roles, options.api)
   const toast = { error: jest.fn(), success: jest.fn() }
-  const confirm = jest.fn(() => options.confirm ?? true)
-  ;(globalThis as Record<string, unknown>).window = { confirm }
+  const confirm = jest.fn(async () => options.confirm ?? true)
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
   const held = permissionSet(options.keys ?? ['role.read', 'role.manage'])
   const app = mountSfc(pagePath, {
@@ -36,6 +35,7 @@ async function mountPage(roles: Role[], options: { keys?: string[]; api?: Partia
       useI18n: () => enI18n(),
       useAppToast: () => toast,
       useRoles,
+      useConfirm: () => ({ confirm }),
       useGlobalPermissions: () => ({ permissions: computed(() => held) }),
     },
   })
@@ -119,6 +119,9 @@ describe('AC-9: deleting a custom role', () => {
     await settle()
 
     expect(m.confirm).toHaveBeenCalledTimes(1)
+    expect(m.confirm).toHaveBeenCalledWith({
+      title: 'Delete the role "QA"?', body: 'This action cannot be undone.', confirmLabel: 'Delete', destructive: true,
+    })
     expect(m.api.delete).toHaveBeenCalledTimes(1)
     expect((m.api.delete.mock.calls[0] as [string])[0]).toBe('/roles/c1')
     expect(m.api.get.mock.calls.filter(([p]) => p === '/roles').length).toBe(reads + 1)

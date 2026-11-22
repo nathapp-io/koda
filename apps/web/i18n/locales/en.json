@@ -191,6 +191,7 @@
       "delete": "Delete",
       "adminOnly": "You do not have permission to view roles.",
       "deleteConfirm": "Delete the role \"{name}\"?",
+      "deleteConfirmBody": "This action cannot be undone.",
       "table": { "name": "Name", "key": "Key", "scope": "Scope" },
       "scope": { "GLOBAL": "Global", "PROJECT": "Project" },
       "badge": { "system": "System", "locked": "Locked" },
@@ -2533,6 +2534,7 @@
         "backfill": "Backfill",
         "rerunOutdated": "Re-run all (parser upgrade)",
         "confirmRerunOutdated": "Re-ingest every bundle read by an older parser?",
+        "confirmRerunOutdatedBody": "Each bundle is read again with the current parser. This can take a while.",
         "queued": "Queued {n} bundles.",
         "empty": "No ingest rows.",
         "previous": "Previous",
@@ -2784,7 +2786,8 @@
       "submitting": "Adding…"
     },
     "confirm": {
-      "remove": "Remove skill source {url}?"
+      "remove": "Remove skill source {url}?",
+      "removeBody": "Its skills are removed from the catalog."
     },
     "toast": {
       "removed": "Skill source removed"
@@ -3063,6 +3066,7 @@
         "edit": "Edit",
         "delete": "Delete",
         "deleteConfirm": "Delete the policy for {pattern}?",
+        "deleteConfirmBody": "Actions it covers no longer ask for approval under this policy.",
         "noTimeout": "No timeout",
         "timeoutSeconds": "{count} s",
         "empty": "No policy overrides the defaults yet."

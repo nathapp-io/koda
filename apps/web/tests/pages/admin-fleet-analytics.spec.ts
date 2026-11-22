@@ -44,7 +44,7 @@ function mountAdmin(get: Get, confirmAnswer = true) {
   const replace = jest.fn(async (to: { query: Query }) => { route.query = { ...to.query } })
   const post = jest.fn(async () => ({ queued: 1 })) as Post
   const toasts = toastRecorder()
-  globalThis.window = { confirm: () => confirmAnswer } as never
+  const confirm = jest.fn(async () => confirmAnswer)
   const app = mountSfc(page, {
     components: { ...stubs, FleetAnalyticsSpendAreaChart: chartStub },
     fleetComponents: REAL,
@@ -56,6 +56,7 @@ function mountAdmin(get: Get, confirmAnswer = true) {
       ref, computed, watch, onMounted: Vue.onMounted, onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(), useAppToast: () => toasts, useApi: () => ({ $api: { get, post } }),
       useRoute: () => route, useRouter: () => ({ replace }), definePageMeta: () => undefined,
+      useConfirm: () => ({ confirm }),
     },
   })
   const settle = async (): Promise<void> => {
@@ -66,7 +67,7 @@ function mountAdmin(get: Get, confirmAnswer = true) {
   }
   const byId = (id: string) => app.find(`[data-testid="${id}"]`)
   const ingestCalls = () => get.mock.calls.filter(([p]) => p === '/fleet/ingest').map(([, o]) => o?.query ?? {})
-  return { app, settle, byId, post, toasts, ingestCalls, get }
+  return { app, settle, byId, post, toasts, ingestCalls, get, confirm }
 }
 
 describe('admin fleet Analytics page (spec §5.3, D395)', () => {
@@ -142,9 +143,16 @@ describe('admin fleet Analytics page (spec §5.3, D395)', () => {
     declined.byId('fleet-ingest-rerun-outdated')[0].props.onClick()
     await declined.settle()
     expect(declined.post).not.toHaveBeenCalled()
+    expect(declined.confirm).toHaveBeenCalledTimes(1)
+    expect(declined.confirm).toHaveBeenCalledWith({
+      title: 'Re-ingest every bundle read by an older parser?',
+      body: 'Each bundle is read again with the current parser. This can take a while.',
+      confirmLabel: 'Re-run all (parser upgrade)', destructive: false,
+    })
     declined.byId('fleet-ingest-backfill')[0].props.onClick()
     await declined.settle()
     expect(declined.post).toHaveBeenCalledWith('/fleet/ingest/backfill')
+    expect(declined.confirm).toHaveBeenCalledTimes(1)
     declined.app.unmount()
 
     const confirmed = mountAdmin(makeGet(() => PAGE()), true)

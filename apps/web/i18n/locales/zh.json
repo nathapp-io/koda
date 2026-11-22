@@ -191,6 +191,7 @@
       "delete": "删除",
       "adminOnly": "你没有查看角色的权限。",
       "deleteConfirm": "确定删除角色“{name}”？",
+      "deleteConfirmBody": "此操作不可撤销。",
       "table": { "name": "名称", "key": "标识", "scope": "范围" },
       "scope": { "GLOBAL": "全局", "PROJECT": "项目" },
       "badge": { "system": "系统", "locked": "已锁定" },
@@ -2533,6 +2534,7 @@
         "backfill": "回填",
         "rerunOutdated": "全部重新导入（解析器升级）",
         "confirmRerunOutdated": "要重新导入所有由旧版解析器读取的运行包吗？",
+        "confirmRerunOutdatedBody": "每个运行包都会用当前解析器重新读取，可能需要一些时间。",
         "queued": "已排队 {n} 个运行包。",
         "empty": "没有导入记录。",
         "previous": "上一页",
@@ -2784,7 +2786,8 @@
       "submitting": "添加中…"
     },
     "confirm": {
-      "remove": "确定移除技能来源 {url}？"
+      "remove": "确定移除技能来源 {url}？",
+      "removeBody": "其技能将从目录中移除。"
     },
     "toast": {
       "removed": "技能来源已移除"
@@ -3063,6 +3066,7 @@
         "edit": "编辑",
         "delete": "删除",
         "deleteConfirm": "删除 {pattern} 的策略？",
+        "deleteConfirmBody": "其覆盖的操作将不再按此策略请求审批。",
         "noTimeout": "无超时",
         "timeoutSeconds": "{count} 秒",
         "empty": "还没有覆盖默认值的策略。"

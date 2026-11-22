@@ -42,6 +42,7 @@ const addDialogStub = {
 interface Mounted {
   app: ReturnType<typeof mountSfc>
   catalog: Catalog
+  confirm: jest.Mock
   toasts: ToastRecorder
   settle: () => Promise<void>
   rows: () => FakeNode[]
@@ -59,7 +60,7 @@ function mountSkills(over: { sources?: SourceDto[]; list?: jest.Mock; update?: j
     remove: jest.fn(async () => undefined),
   }
   const toasts = toastRecorder()
-  globalThis.window = { confirm: () => over.confirm ?? true } as never
+  const confirm = jest.fn(async () => over.confirm ?? true)
 
   const app = mountSfc(page, {
     components: { ...uiStubs, AddSkillSourceDialog: addDialogStub },
@@ -71,6 +72,7 @@ function mountSkills(over: { sources?: SourceDto[]; list?: jest.Mock; update?: j
       useI18n: () => enI18n(),
       useAppToast: () => toasts,
       useSkillCatalog: () => catalog,
+      useConfirm: () => ({ confirm }),
     },
   })
 
@@ -92,7 +94,7 @@ function mountSkills(over: { sources?: SourceDto[]; list?: jest.Mock; update?: j
     return match[0]
   }
   const click = (node: FakeNode) => (node.props.onClick as () => void | Promise<void>)()
-  return { app, catalog, toasts, settle, rows, rowOf, buttonIn, click, unmount: app.unmount }
+  return { app, catalog, confirm, toasts, settle, rows, rowOf, buttonIn, click, unmount: app.unmount }
 }
 
 /** The nth cell (0-based) of a row: URL, ref, SHA, path, status, skills, actions. */
@@ -208,12 +210,17 @@ describe('Admin skills page (US-006)', () => {
   })
 
   test('US-006 AC10: Remove calls remove after the confirmation is accepted', async () => {
-    const { catalog, rowOf, buttonIn, click, settle, unmount } = mountSkills()
+    const { catalog, confirm, rowOf, buttonIn, click, settle, unmount } = mountSkills()
     await settle()
 
     await click(buttonIn(enI18n().t('skills.actions.remove'), rowOf('alpha')))
     await settle()
 
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({
+      title: 'Remove skill source https://github.com/o/alpha?',
+      body: 'Its skills are removed from the catalog.', confirmLabel: 'Remove', destructive: true,
+    })
     expect(catalog.remove).toHaveBeenCalledWith('alpha')
     unmount()
   })
