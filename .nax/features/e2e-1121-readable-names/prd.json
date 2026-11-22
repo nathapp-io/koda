@@ -3,7 +3,7 @@
   "feature": "e2e-1121-readable-names",
   "branchName": "feat/e2e-1121-readable-names",
   "createdAt": "2026-11-22T09:16:55.665Z",
-  "updatedAt": "2026-11-22T09:36:53.259Z",
+  "updatedAt": "2026-11-22T09:44:01.749Z",
   "userStories": [
     {
       "id": "US-001",
@@ -160,14 +160,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive enrichment through an existing repository/service seam with fixed pagination invariants and existing DB patterns, not a new pagination architecture."
+        "reasoning": "Additive enrichment through an existing repository/service seam with fixed pagination invariants and existing DB patterns, not a new pagination architecture.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/memory/timeline.service.ts",
@@ -201,7 +204,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "16938fab558b94b5634b6b196f4c5c447001a0af"
     },
     {
       "id": "US-004",
