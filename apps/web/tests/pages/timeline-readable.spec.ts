@@ -111,8 +111,10 @@ describe('Timeline readable labels', () => {
   })
 
   test('AC-9: has a Ticket column and links ticket references', () => {
-    const { mounted } = setupPage({ row: { ...event, ticketRef: 'SB-3', ticketTitle: 'Fix login' } })
-    expect(mounted.text()).toContain('Ticket')
+    const { mounted } = setupPage({ row: { ...event, eventType: 'other_event', ticketRef: 'SB-3', ticketTitle: 'Fix login' } })
+    const ticketHeader = mounted.find('th').find(header => mounted.textOf(header) === 'Ticket')
+    expect(ticketHeader).toBeDefined()
+    expect(mounted.textOf(mounted.find('td')[0])).toBe('Other event')
     const link = mounted.one('[data-testid="timeline-ticket"]')
     expect(link?.props.to).toBe('/acme/tickets/SB-3')
     expect(mounted.textOf(link)).toBe('SB-3 Fix login')
