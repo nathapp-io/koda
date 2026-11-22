@@ -84,6 +84,24 @@ export class RunnersService {
   }
 
   /**
+   * US-005 (ACP probe): ask a runner to re-probe its capabilities now, under the audited
+   * `fleet.runner.update` key. The request is only a timestamp on the runner row: the runner's next
+   * sync takes it atomically and answers `reprobe: true`. NotFound for an id that no runner has, so a
+   * stale admin page learns the runner is gone instead of silently writing nothing.
+   */
+  async requestReprobe(actorId: string, id: string, now = new Date()): Promise<{ requestedAt: string }> {
+    const requestedAt = await this.txManager.run(async () => {
+      const requested = await this.repo.requestReprobe(id, now);
+      if (!requested) throw new NotFoundAppException({}, 'fleet.runners');
+      await this.audit.record({ key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: id, projectId: null, summary: 'reprobe requested' });
+      return now;
+    });
+    // Only after the transaction commits: a wake that read the row before the write would wait out the poll.
+    this.notifier.notify(id);
+    return { requestedAt: requestedAt.toISOString() };
+  }
+
+  /**
    * Deleting revokes the runner's key (plan D5) and is refused while any job is
    * unfinished or pinned to the runner (plan D15). The row is locked FOR UPDATE
    * first so the count sees a stable row (review m6).

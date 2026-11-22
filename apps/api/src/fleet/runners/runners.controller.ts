@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
@@ -61,6 +61,30 @@ export class RunnersController {
       variant: RUNNER_ROUTE_VARIANTS.update,
       projectId: null,
       input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  /**
+   * US-005 (ACP probe): ask the runner to re-probe its capabilities now. Built exactly like `update`:
+   * the same approvable key, a command variant of its own, and the 202 the gate adds when a policy asks.
+   */
+  @Post(':id/reprobe')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.runner.update')
+  @ApprovalGated()
+  @ApiOperation({ summary: 'Ask a runner to re-probe its capabilities now (fleet.runner.update, global)' })
+  @ApiResponse({ status: 200, description: '{ requestedAt: ISO time }' })
+  @ApiResponse({ status: 403, description: 'fleet.runner.update is missing globally' })
+  @ApiResponse({ status: 404, description: 'No runner has this id' })
+  async reprobe(@Param('id') id: string) {
+    const outcome = await this.routeGate.run<{ requestedAt: string }>({
+      key: 'fleet.runner.update',
+      variant: RUNNER_ROUTE_VARIANTS.reprobe,
+      projectId: null,
+      input: { id },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

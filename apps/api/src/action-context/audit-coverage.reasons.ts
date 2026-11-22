@@ -4,7 +4,7 @@
  */
 export const BOOKKEEPING_REASONS = {
   'runner.heartbeat': "A runner's liveness, boot id, versions and capabilities from a sync.",
-  'runner.command-delivery': 'The delivered mark of a command handed to a runner.',
+  'runner.command-delivery': 'The delivered mark of a command handed to a runner, and the clearing of a re-probe request the response delivers.',
   'runner.command-ack': "A runner's ack of a command, and an approval answer's delivery outcome, that change no job.",
   'thread.input-ack': "A runner's ack of a thread input, answer or publish command: the message's error mark, the answered question cleared, the command payload trimmed.",
   'runner.event-log': "Runner event rows, the acked sequence, the job fields mirrored from the runner's reported run facts (cost, progress, `naxRunId`, result branch, sha and PR url, finish result, escalation reason, post-run, stories, config result), and a rejected event's activity row; the state transition that ends a run records its own entry.",

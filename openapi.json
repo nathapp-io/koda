@@ -10532,6 +10532,59 @@
         ]
       }
     },
+    "/api/fleet/runners/{id}/reprobe": {
+      "post": {
+        "operationId": "RunnersController_reprobe",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ requestedAt: ISO time }"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.runner.update is missing globally"
+          },
+          "404": {
+            "description": "No runner has this id"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ask a runner to re-probe its capabilities now (fleet.runner.update, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/projects/{slug}/fleet/runners": {
       "get": {
         "operationId": "ProjectFleetRunnersController_list",

@@ -131,14 +131,23 @@ export class SyncService {
       // US-006: a grant or a refusal is an answer, so the runner must not wait out the long poll for it.
       provider.providerKeys.length === 0 && provider.providerKeyErrors.length === 0 && provider.unknownJobIds.length === 0;
     if (idle) {
-      await this.notifier.wait(runnerId, this.fleetConfig.syncWaitMs, async () => (await this.repo.findPendingCommands(runnerId)).length > 0);
+      await this.notifier.wait(runnerId, this.fleetConfig.syncWaitMs, async () =>
+        (await this.repo.findPendingCommands(runnerId)).length > 0 || (await this.repo.hasPendingReprobe(runnerId)));
       commands = await this.deliver(runnerId, new Date());
     }
+    // US-005: a re-probe request is a command handed to the runner, so taking it is bookkeeping. It is taken last,
+    // after a wait that could have ended for another reason, so the request travels in the very response this sync
+    // returns rather than in a response the runner would have to poll again for. A lost response loses that request
+    // (the operator presses Re-check again) — the column is already cleared and that is deliberate.
+    const reprobe = await bookkeeping('runner.command-delivery', () => this.repo.takeReprobeRequest(runnerId));
     return {
       jobAcks, commands, gitTokens: tokens.gitTokens, gitTokenErrors: tokens.gitTokenErrors,
       providerKeys: provider.providerKeys, providerKeyErrors: provider.providerKeyErrors,
       unknownJobIds: [...new Set([...unknownJobIds, ...tokens.unknownJobIds, ...provider.unknownJobIds])],
       archivedThreadIds: await this.threads.archivedThreadIds(runnerId),
+      // Strictly `=== true`: the repository answers a boolean, and a truthy non-boolean from a mis-wired double
+      // must not put a `reprobe` key on the wire.
+      ...(reprobe === true ? { reprobe: true as const } : {}),
     };
   }
 

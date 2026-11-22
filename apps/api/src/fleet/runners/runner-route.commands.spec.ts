@@ -9,7 +9,7 @@ describe('RunnerRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { id: 'r1', enabled: false };
-    const runners = { update: vi.fn().mockResolvedValue(result), remove: vi.fn() };
+    const runners = { update: vi.fn().mockResolvedValue(result), remove: vi.fn(), requestReprobe: vi.fn().mockResolvedValue({ requestedAt: '2026-12-18T09:00:00.000Z' }) };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     const enrollments = { create: vi.fn().mockResolvedValue({ id: 'e1', labels: [], token: 'ke_x', expiresAt: 'x', usedAt: null, runnerId: null, createdById: 'u1', createdAt: 'x' }) };
     new RunnerRouteCommands(registry, runners as unknown as RunnersService, loader as unknown as ActorPrincipalLoader, enrollments as unknown as EnrollmentService).onModuleInit();
@@ -17,8 +17,22 @@ describe('RunnerRouteCommands', () => {
   }
   it('AC-13: registers both matching variants', () => {
     const { registry } = build();
-    expect(Object.values(RUNNER_ROUTE_VARIANTS)).toHaveLength(2);
-    for (const action of ['update', 'delete'] as const) expect(registry.get(`fleet.runner.${action}`, RUNNER_ROUTE_VARIANTS[action])).toMatchObject({ key: `fleet.runner.${action}`, variant: `rest:fleet-runners.${action}` });
+    // US-005 adds the re-probe variant under the existing `fleet.runner.update` key.
+    expect(Object.values(RUNNER_ROUTE_VARIANTS)).toHaveLength(3);
+    for (const [action, key] of [['update', 'fleet.runner.update'], ['delete', 'fleet.runner.delete'], ['reprobe', 'fleet.runner.update']] as const) {
+      expect(registry.get(key, RUNNER_ROUTE_VARIANTS[action])).toMatchObject({ key, variant: `rest:fleet-runners.${action}` });
+    }
+  });
+  it('AC-12 (US-005): the reprobe command parses the id and asks the service to re-probe', async () => {
+    const { registry, runners, loader } = build();
+    const command = registry.get('fleet.runner.update', RUNNER_ROUTE_VARIANTS.reprobe);
+    if (!command) throw new Error('Missing reprobe route command');
+    expect(command.parse({ id: 'r1', extra: 1 })).toEqual({ id: 'r1' });
+    for (const invalid of [null, [], {}, { id: '' }, { id: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
+    const out = await command.execute(command.parse({ id: 'r1' }));
+    expect(runners.requestReprobe).toHaveBeenCalledExactlyOnceWith('a1', 'r1');
+    expect(loader.forContext).toHaveBeenCalledOnce();
+    expect(command.toResult?.(out)).toEqual({ requestedAt: '2026-12-18T09:00:00.000Z' });
   });
   it('update parses patch, reloads actor and projects result', async () => {
     const { registry, runners, loader, result } = build();

@@ -424,6 +424,11 @@ export interface SyncResponse {
   providerKeyErrors?: ProviderKeyError[];
   /** Fleet S5a: archived thread ids the runner should close; at most THREAD_LIMITS.maxArchivedThreadIds. */
   archivedThreadIds?: string[];
+  /**
+   * The runner should re-probe its capabilities now; absent otherwise. Additive and optional, so
+   * the protocol version does not move: a peer that does not know it ignores it.
+   */
+  reprobe?: true;
   nextPollAfterMs?: number;
 }
 

@@ -455,6 +455,16 @@ export interface IFleetJobRepository {
   findSilentHeldIds(runnerSeenBefore: Date): Promise<string[]>;
   /** Updates lastSeenAt and the reported fields; returns the boot id and enabled snapshot from before this sync, or null if the runner is gone. */
   recordRunnerSync(runnerId: string, s: { now: Date; bootId: string; daemonVersion: string; protocolVersion: number; capabilities?: RunnerCapabilities }): Promise<{ previousBootId: string; enabled: boolean } | null>;
+  /**
+   * US-005: whether the runner has an operator re-probe request waiting. Read by the idle long poll's
+   * ready predicate, so a request wakes a waiting sync instead of waiting out the poll.
+   */
+  hasPendingReprobe(runnerId: string): Promise<boolean>;
+  /**
+   * US-005: takes the runner's pending re-probe request in one conditional UPDATE. True when this call
+   * cleared it, so two concurrent syncs deliver one request exactly once; false when there was none.
+   */
+  takeReprobeRequest(runnerId: string): Promise<boolean>;
 
   findPlacementRunners(ids?: readonly string[]): Promise<PlacementRunnerRow[]>;
   /** Locks runner rows in id order (all when ids is undefined); returns the locked ids. */

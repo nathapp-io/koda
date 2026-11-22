@@ -87,6 +87,12 @@ export class PrismaRunnerRepository implements IRunnerRepository {
     await this.db.runner.delete({ where: { id } });
   }
 
+  /** US-005: one conditional UPDATE, so a request that raced a delete reports no runner. */
+  async requestReprobe(id: string, now: Date): Promise<boolean> {
+    const { count } = await this.db.runner.updateMany({ where: { id }, data: { reprobeRequestedAt: now } });
+    return count === 1;
+  }
+
   countUnfinishedJobs(runnerId: string): Promise<number> {
     return this.db.fleetJob.count({ where: { OR: [{ runnerId }, { pinnedRunnerId: runnerId }], state: { in: [...ACTIVE_STATES] } } });
   }

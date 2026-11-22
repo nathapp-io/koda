@@ -369,6 +369,27 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return { previousBootId: before.bootId, enabled: before.enabled };
   }
 
+  /**
+   * US-005: the runner's waiting re-probe request. It lives on the runner row, which this repository
+   * already reads (recordRunnerSync, lockRunners), and the sync that consumes it is here.
+   */
+  async hasPendingReprobe(runnerId: string): Promise<boolean> {
+    const row = await this.db.runner.findUnique({ where: { id: runnerId }, select: { reprobeRequestedAt: true } });
+    return row?.reprobeRequestedAt != null;
+  }
+
+  /**
+   * US-005: one conditional UPDATE, so the row lock decides the race: two concurrent syncs both issue it,
+   * the second re-reads the row after the first commits, finds the column null and changes nothing.
+   * `$executeRaw` answers the row count, which is exactly "did this call take the request".
+   */
+  async takeReprobeRequest(runnerId: string): Promise<boolean> {
+    const changed = await this.db.$executeRaw`
+      UPDATE "Runner" SET "reprobeRequestedAt" = NULL
+       WHERE "id" = ${runnerId} AND "reprobeRequestedAt" IS NOT NULL`;
+    return changed === 1;
+  }
+
   async findPlacementRunners(ids?: readonly string[]): Promise<PlacementRunnerRow[]> {
     const rows = await this.db.runner.findMany({
       where: ids ? { id: { in: [...ids] } } : {},

@@ -68,9 +68,10 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
   // the thread pre-approval routes (fleet flow US-008); 144 after thread/nax flow create (US-009/010);
   // 145 after flow stop (US-011); 146 after the flow answers route (US-011); 148 after the two
   // fleet repo rule-override writes (US-007); 149 after the fleet repo GitLab credentials update
-  // (gitlab-repo-credentials). The OpenAPI contract pins the same operations.
-  it('AC-12 (US-007): collects exactly 149 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(149);
+  // (gitlab-repo-credentials); 150 after the runner re-probe request (e2e-1121-acp-probe US-005).
+  // The OpenAPI contract pins the same operations.
+  it('AC-12 (US-007): collects exactly 150 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(150);
   });
 
   it('AC-2: reports no permission contract violations over the booted app', () => {
