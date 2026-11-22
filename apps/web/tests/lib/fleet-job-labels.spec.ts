@@ -1,4 +1,4 @@
-import { jobFeatureLabel, jobRequesterLabel } from '~/lib/fleet-job-labels'
+import { jobFeatureLabel, jobRequesterLabel, preserveJobLabels } from '~/lib/fleet-job-labels'
 import type { FleetJobDto } from '~/lib/fleet-types'
 
 const job = (overrides: Partial<FleetJobDto> = {}): FleetJobDto => ({
@@ -57,5 +57,43 @@ describe('jobRequesterLabel', () => {
 
   it('AC-9: uses the translated former-member fallback when no name is known', () => {
     expect(jobRequesterLabel(job({ requesterName: null }), () => null, t)).toBe('Former member')
+  })
+})
+
+describe('preserveJobLabels (B1)', () => {
+  it('keeps the requester and thread labels a mutation response sends as null', () => {
+    const shown = job({ command: 'THREAD', id: 'j1', feature: 'thread-cm1', threadTitle: 'Fix login flow', requesterName: 'codex-bot' })
+    // The cancel/requeue routes answer with the same job and both label fields null (spec, Out of Scope).
+    const mutation = job({ command: 'THREAD', id: 'j1', feature: 'thread-cm1', state: 'CANCELLED', threadTitle: null, requesterName: null })
+
+    const merged = preserveJobLabels(mutation, shown)
+
+    expect(merged.threadTitle).toBe('Fix login flow')
+    expect(merged.requesterName).toBe('codex-bot')
+    // The response itself still wins for everything else.
+    expect(merged.state).toBe('CANCELLED')
+  })
+
+  it('takes a label the response does carry over the one on screen', () => {
+    const shown = job({ id: 'j1', requesterName: 'codex-bot', threadTitle: 'Old title' })
+    const fresh = job({ id: 'j1', requesterName: 'Alice', threadTitle: null })
+
+    expect(preserveJobLabels(fresh, shown).requesterName).toBe('Alice')
+    expect(preserveJobLabels(fresh, shown).threadTitle).toBe('Old title')
+  })
+
+  it('returns the response unchanged when the page holds no job yet', () => {
+    const mutation = job({ id: 'j1', requesterName: null, threadTitle: null })
+    expect(preserveJobLabels(mutation, null)).toBe(mutation)
+  })
+
+  it('never carries labels from another job', () => {
+    const other = job({ id: 'j0', requesterName: 'codex-bot', threadTitle: 'Another flow' })
+    const mutation = job({ id: 'j1', requesterName: null, threadTitle: null })
+
+    const merged = preserveJobLabels(mutation, other)
+
+    expect(merged.requesterName).toBeNull()
+    expect(merged.threadTitle).toBeNull()
   })
 })

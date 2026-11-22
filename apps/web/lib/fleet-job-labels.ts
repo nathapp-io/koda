@@ -29,3 +29,18 @@ export function jobRequesterLabel(
 ): string {
   return job.requesterName ?? memberName(job.requestedById) ?? t('common.formerMember')
 }
+
+/**
+ * The labels a cancel, requeue or config response cannot carry: only the list and get routes resolve
+ * `requesterName` and `threadTitle`, so a mutation response sends both as null. Applying it to a page
+ * must not drop the labels already on screen — until another successful GET arrives, and forever when
+ * none does. Labels are carried over per field, and only for the same job.
+ */
+export function preserveJobLabels(next: FleetJobDto, previous: FleetJobDto | null): FleetJobDto {
+  if (previous === null || previous.id !== next.id) return next
+  return {
+    ...next,
+    requesterName: next.requesterName ?? previous.requesterName,
+    threadTitle: next.threadTitle ?? previous.threadTitle,
+  }
+}

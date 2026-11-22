@@ -9,7 +9,7 @@ import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import { projectPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 import type { ApprovalRequestDetail, ApprovalRequestSummary } from '../../lib/approval-requests'
-import type { FleetJobDto } from '../../lib/fleet-types'
+import type { DispatchResultDto, FleetJobDto } from '../../lib/fleet-types'
 import type { ProjectEventHandlers } from '../../lib/project-event-stream'
 
 const webDir = path.join(__dirname, '../..')
@@ -172,8 +172,11 @@ describe('job detail', () => {
   })
 
   test('C9: cancel and requeue render the job from the response, which now carries tickets (Task 1)', () => {
-    expect(detail).toContain('job.value = await jobsApi.cancel(jobId)')
-    expect(detail).toContain('job.value = result.job')
+    // B1: the response is applied as-is (tickets, state) but through preserveJobLabels, because the
+    // cancel/requeue routes send requesterName and threadTitle as null.
+    expect(detail).toContain('applyJobResponse(await jobsApi.cancel(jobId))')
+    expect(detail).toContain('applyJobResponse(result.job)')
+    expect(detail).toContain('job.value = preserveJobLabels(next, job.value)')
   })
 })
 
@@ -306,6 +309,12 @@ export interface EnginePageOver {
   optionsSettledRef?: { value: boolean }
   optionsLoad?: () => Promise<void>
   resolvedRepoName?: string
+  /** Project permission keys the page's gates read; the cancel and requeue buttons need theirs. */
+  permissions?: readonly string[]
+  /** The cancel route's answer: the same job with `requesterName`/`threadTitle` null, as the API sends it. */
+  cancelResponse?: () => Promise<FleetJobDto>
+  /** The requeue route's answer, same null labels. */
+  requeueResponse?: () => Promise<DispatchResultDto>
 }
 
 /**
@@ -326,7 +335,21 @@ export function mountEnginePage(over: EnginePageOver) {
   const app = mountSfc(webFile('pages', '[project]', 'fleet', 'jobs', '[id]', 'index.vue'), {
     components: {
       ...uiStubs,
-      PageHeader: defineComponent({ props: { title: String, subtitle: String }, setup: (props) => () => h('x-page-header', { 'data-stub': 'page-header', title: props.title, subtitle: props.subtitle }) }),
+      PageHeader: defineComponent({
+        props: { title: String, subtitle: String },
+        // The page's action buttons (Requeue, Cancel, …) live in the header's #actions slot, so the
+        // stub renders it: a mutation test clicks the real button, not a hand-written handler.
+        setup(props: { title?: string; subtitle?: string }, { slots }: { slots: Record<string, (() => unknown) | undefined> }) {
+          return () => {
+            const actions = slots.actions?.()
+            return h('x-page-header', {
+              'data-stub': 'page-header',
+              title: props.title,
+              subtitle: props.subtitle,
+            }, (Array.isArray(actions) ? actions : []) as Vue.VNodeChild[])
+          }
+        },
+      }),
       FleetBudgetBanner: defineComponent({
         name: 'StubFleetBudgetBanner',
         props: { slug: String, repoName: Function },
@@ -356,12 +379,12 @@ export function mountEnginePage(over: EnginePageOver) {
       useAppToast: () => toastRecorder(),
       useApi: () => ({ $api: { get } }),
       useAuth: () => ({ user: ref({ id: 'u2' }) }),
-      useProjectPermissions: () => projectPermissionsStub([]),
+      useProjectPermissions: () => projectPermissionsStub(over.permissions ?? []),
       navigateTo: jest.fn(async () => undefined),
       useFleetJobs: () => ({
         get: jest.fn(async () => job),
         events: jest.fn(async () => ({ records: [], total: 0, current: 1, size: 50, hasNext: false, hasPrev: false })),
-        cancel: jest.fn(), requeue: jest.fn(), downloadBundle: jest.fn(),
+        cancel: over.cancelResponse ?? jest.fn(), requeue: over.requeueResponse ?? jest.fn(), downloadBundle: jest.fn(),
       }),
       useFleetDispatchOptions: () => ({
         settled: over.optionsSettledRef ?? ref(over.optionsSettled ?? true),
@@ -488,6 +511,53 @@ describe('review and config job headers', () => {
     await config.settle()
     expect(config.app.one('[data-stub="page-header"]')?.props.title).toBe('nax config')
     config.app.unmount()
+  })
+})
+
+describe('B1: a mutation response keeps the display labels it cannot carry', () => {
+  // The cancel and requeue routes answer with the same job and `requesterName`/`threadTitle` null
+  // (spec, Out of Scope): the page must keep the labels it already resolved, with no live refetch.
+  test('a cancel keeps the THREAD title and the agent requester', async () => {
+    const thread = jobFixture({ command: 'THREAD', feature: 'thread-cm1', state: 'RUNNING', threadTitle: 'Fix login flow', requesterName: 'codex-bot' })
+    const cancelResponse = jest.fn(async () => jobFixture({ ...thread, state: 'CANCELLED', threadTitle: null, requesterName: null }))
+    const m = mountEnginePage({ job: thread, records: [], permissions: ['fleet.job.cancel'], cancelResponse })
+    await m.settle()
+    expect(m.app.one('[data-stub="page-header"]')?.props.title).toBe('Fix login flow')
+    expect(m.app.text()).toContain('codex-bot')
+
+    await (m.byId('fleet-job-cancel-confirm')[0].props.onClick as () => Promise<void>)()
+    await m.settle()
+
+    expect(cancelResponse).toHaveBeenCalledTimes(1)
+    // The response is applied…
+    expect(m.byId('fleet-job-cancel')).toHaveLength(0)
+    // …and the labels it dropped are still on screen.
+    expect(m.app.one('[data-stub="page-header"]')?.props.title).toBe('Fix login flow')
+    expect(m.app.text()).toContain('codex-bot')
+    expect(m.app.text()).not.toContain('Former member')
+    m.app.unmount()
+  })
+
+  test('a requeue keeps the requester name', async () => {
+    const failed = jobFixture({ state: 'FAILED', requesterName: 'codex-bot' })
+    const requeueResponse = jest.fn(async (): Promise<DispatchResultDto> => ({
+      job: jobFixture({ ...failed, state: 'QUEUED', requesterName: null, threadTitle: null }),
+      placement: { assigned: false, runnerId: null, misfits: [] },
+    }))
+    const m = mountEnginePage({ job: failed, records: [], permissions: ['fleet.job.requeue'], requeueResponse })
+    await m.settle()
+    expect(m.byId('fleet-job-requeue')).toHaveLength(1)
+
+    await (m.byId('fleet-job-requeue')[0].props.onClick as () => Promise<void>)()
+    await m.settle()
+
+    expect(requeueResponse).toHaveBeenCalledTimes(1)
+    // The response is applied (QUEUED is not requeueable)…
+    expect(m.byId('fleet-job-requeue')).toHaveLength(0)
+    // …and the requester the response nulled is still shown.
+    expect(m.app.text()).toContain('codex-bot')
+    expect(m.app.text()).not.toContain('Former member')
+    m.app.unmount()
   })
 })
 

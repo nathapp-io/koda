@@ -5,7 +5,7 @@ import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { canCancelJob, canRequeueJob, fixDispatchQuery, isActiveJobState, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, showFixAction, wipPushStatus } from '~/lib/fleet-jobs'
-import { jobFeatureLabel, jobRequesterLabel } from '~/lib/fleet-job-labels'
+import { jobFeatureLabel, jobRequesterLabel, preserveJobLabels } from '~/lib/fleet-job-labels'
 import type { JobViewer } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
@@ -232,15 +232,24 @@ async function act(run: () => Promise<void>): Promise<void> {
   }
 }
 
+/**
+ * B1: a mutation response carries the whole job (so its tickets, state and timestamps are current) but
+ * sends `requesterName` and `threadTitle` as null. Keep the labels the page already resolved, so a
+ * THREAD title and an agent requester survive a cancel or requeue with no live refresh behind it.
+ */
+function applyJobResponse(next: FleetJobDto): void {
+  job.value = preserveJobLabels(next, job.value)
+}
+
 const cancelJob = (): Promise<void> => act(async () => {
-  job.value = await jobsApi.cancel(jobId)
+  applyJobResponse(await jobsApi.cancel(jobId))
   confirmCancel.value = false
   toast.success(t('fleet.jobs.toast.cancelRequested'))
 })
 
 const requeueJob = (): Promise<void> => act(async () => {
   const result = await jobsApi.requeue(jobId)
-  job.value = result.job
+  applyJobResponse(result.job)
   requeueResult.value = result
   toast.success(t('fleet.jobs.toast.requeued'))
   await catchUpEvents()
