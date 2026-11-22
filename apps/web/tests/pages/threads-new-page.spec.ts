@@ -628,6 +628,7 @@ describe('US-005 AC-9: pages/[project]/threads/new.vue repo chooser', () => {
     m.app.unmount()
   })
 })
+
 // ── US-009: the readiness notice and its Re-check on the project form ─────────────────────────
 
 const T0 = '2026-11-22T02:00:00.000Z'
