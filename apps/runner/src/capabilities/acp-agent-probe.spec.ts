@@ -147,7 +147,7 @@ describe('probeAcpAgents: what a launched agent offers (US-002 AC-2, AC-3, AC-4)
       launchable: ['claude'],
       capabilities: () => ({ offeredModels: ['claude-sonnet-4-5', 'bad model!', tooLong, 'gpt-5.5[context=272k,reasoning=medium]'] }),
     });
-    expect(offerFor(await probeAcpAgents(h.deps), 'claude')?.models).toEqual(['claude-sonnet-4-5', 'gpt-5.5[context=272k,reasoning=medium]']);
+    expect(offerFor(await probeAcpAgents(h.deps), 'claude')?.models).toEqual(['claude-sonnet-4-5']);
   });
 
   test('AC-4: at most 32 models and 8 efforts are kept per agent', async () => {
@@ -374,5 +374,51 @@ describe('probeAcpAgents: the open it builds (US-002 AC-8, AC-9)', () => {
     const h = harness({ launchable: ['claude'] });
     await probeAcpAgents(h.deps);
     expect(h.calls.workdirsRemoved).toBe(1);
+  });
+});
+
+describe('probeAcpAgents: agent-specific bare model ids (US-003)', () => {
+  async function models(agent: ThreadAgent, offeredModels: unknown): Promise<string[]> {
+    const h = harness({ launchable: [agent], capabilities: () => ({ offeredModels }) });
+    return offerFor(await probeAcpAgents(h.deps), agent)?.models ?? [];
+  }
+
+  test('AC-1: Claude drops bracketed model ids', async () => {
+    expect(await models('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-5[1m]', 'opus']))
+      .toEqual(['claude-sonnet-4-5', 'opus']);
+  });
+
+  test('AC-2: Codex drops bracketed ids and de-duplicates bare ids in offer order', async () => {
+    expect(await models('codex', ['gpt-6.1-terra', 'gpt-6.1-terra[low]', 'gpt-6.1-terra[high]', 'gpt-6-luna', 'gpt-6-luna']))
+      .toEqual(['gpt-6.1-terra', 'gpt-6-luna']);
+  });
+
+  test('AC-3: Cursor keeps unique bare names after removing one trailing options group', async () => {
+    expect(await models('cursor', ['default[]', 'grok-4.7[context=256k,fast=true]', 'composer-2.5[fast=true]', 'composer-2.5[fast=false]', 'gemini-3.1-pro']))
+      .toEqual(['default', 'grok-4.7', 'gemini-3.1-pro']);
+  });
+
+  test('AC-4: Cursor drops ambiguous names shared by bare and configured ids', async () => {
+    expect(await models('cursor', ['gemini-3.1-pro', 'gemini-3.1-pro[reasoning_effort=high]', 'gpt-5.5[a=1]']))
+      .toEqual(['gpt-5.5']);
+  });
+
+  test('AC-5: the 32-model cap applies after Codex bracketed ids are removed', async () => {
+    const ids = Array.from({ length: 40 }, (_, index) => `model-${index}`);
+    const offered = ids.flatMap((id) => [id, `${id}[low]`]);
+    expect(await models('codex', offered)).toEqual(ids.slice(0, 32));
+  });
+
+  test('AC-6: Claude filters invalid bare ids while keeping valid ones', async () => {
+    expect(await models('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-5[1m]', 'bad model!']))
+      .toEqual(['claude-sonnet-4-5']);
+  });
+
+  test('AC-7: Codex efforts remain unchanged alongside normalized model ids', async () => {
+    const h = harness({
+      launchable: ['codex'],
+      capabilities: () => ({ offeredModels: ['gpt-6.1-terra', 'gpt-6.1-terra[low]'], offeredEfforts: ['low', 'high'] }),
+    });
+    expect(offerFor(await probeAcpAgents(h.deps), 'codex')).toMatchObject({ models: ['gpt-6.1-terra'], efforts: ['low', 'high'] });
   });
 });

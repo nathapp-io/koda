@@ -67,8 +67,23 @@ async function makeTempWorkdir(): Promise<ProbeWorkdir> {
 const offeredIds = (value: unknown): string[] => (Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []);
 
 /** Only ids the API's validator keeps reach the report, so one stale agent id cannot cost the whole `acpOffers`. */
-function offeredModels(capabilities: Readonly<Record<string, unknown>>): string[] {
-  return offeredIds(capabilities['offeredModels']).filter((id) => ACP_MODEL_ID_RE.test(id)).slice(0, MAX_OFFERED_MODELS);
+function offeredModels(agent: ThreadAgent, capabilities: Readonly<Record<string, unknown>>): string[] {
+  const ids = [...new Set(offeredIds(capabilities['offeredModels']))];
+  let models: string[];
+
+  if (agent === 'cursor') {
+    const bareNames = ids.map((id) => id.replace(/\[[^[\]]*\]$/, ''));
+    const counts = new Map<string, number>();
+    for (const name of bareNames) counts.set(name, (counts.get(name) ?? 0) + 1);
+    models = [];
+    for (const name of bareNames) {
+      if ((counts.get(name) ?? 0) === 1 && name.length > 0 && !name.includes('[') && !name.includes(']')) models.push(name);
+    }
+  } else {
+    models = ids.filter((id) => !id.includes('[') && !id.includes(']'));
+  }
+
+  return models.filter((id) => ACP_MODEL_ID_RE.test(id)).slice(0, MAX_OFFERED_MODELS);
 }
 
 function offeredEfforts(capabilities: Readonly<Record<string, unknown>>): string[] {
@@ -141,7 +156,7 @@ async function probeAgent(agent: ThreadAgent, deps: AcpProbeDeps): Promise<Threa
     }
     const { capabilities } = outcome.session.backend;
     try {
-      return { agent, launchable: true, loggedIn: true, models: offeredModels(capabilities), efforts: offeredEfforts(capabilities), checkedAt };
+      return { agent, launchable: true, loggedIn: true, models: offeredModels(agent, capabilities), efforts: offeredEfforts(capabilities), checkedAt };
     } finally {
       await outcome.session.close().catch(() => undefined);
     }
