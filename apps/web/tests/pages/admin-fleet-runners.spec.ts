@@ -243,6 +243,15 @@ describe('Fleet admin Runners page (behaviour)', () => {
     unmount()
   })
 
+  test('AC-3: deleting a runner confirms once with interpolated destructive options', async () => {
+    const { confirm, settle, button, unmount } = mountRunners({ get: jest.fn(async () => pageOf([runner('alpha')])) })
+    await settle()
+    await button('Delete').onClick()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({ title: 'Delete runner alpha?', body: 'Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.', confirmLabel: 'Delete', destructive: true })
+    unmount()
+  })
+
   test('deleting asks first and a cancelled confirm deletes nothing', async () => {
     const del = jest.fn(async () => ({}))
     const { settle, button, unmount } = mountRunners(

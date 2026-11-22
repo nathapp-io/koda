@@ -45,6 +45,7 @@ interface Api {
 interface Mounted {
   app: ReturnType<typeof mountSfc>
   api: Api
+  confirm: jest.Mock
   toasts: ToastRecorder
   settle: () => Promise<void>
   byId: (id: string) => FakeNode[]
@@ -100,6 +101,7 @@ function mountPage(over: {
   return {
     app,
     api,
+    confirm,
     toasts,
     settle,
     byId,
@@ -259,6 +261,16 @@ describe('admin provider keys page (US-012)', () => {
     p.unmount()
   })
 
+  test('AC-5: deleting a credential confirms once with interpolated destructive options', async () => {
+    const p = mountPage({ confirm: false })
+    await p.settle()
+    await click(p, 'provider-key-delete-c1')
+    expect(p.confirm).toHaveBeenCalledTimes(1)
+    expect(p.confirm).toHaveBeenCalledWith({ title: 'Delete the provider key for openrouter?', body: 'The stored key is removed and cannot be recovered.', confirmLabel: 'Delete', destructive: true })
+    expect(p.api.delete).not.toHaveBeenCalled()
+    p.unmount()
+  })
+
   test('AC-8: DELETE runs only after the confirmation is accepted', async () => {
     const refused = mountPage({ confirm: false })
     await refused.settle()
@@ -270,6 +282,7 @@ describe('admin provider keys page (US-012)', () => {
     const accepted = mountPage({ confirm: true })
     await accepted.settle()
     await click(accepted, 'provider-key-delete-c1')
+    expect(accepted.api.delete).toHaveBeenCalledTimes(1)
     expect(accepted.api.delete).toHaveBeenCalledWith('/fleet/provider-credentials/c1')
     expect(accepted.byId('provider-key-c1')).toHaveLength(0)
     accepted.unmount()
