@@ -26,6 +26,7 @@ const props = defineProps<{ slug: string }>()
 const emit = defineEmits<{ 'member-added': [] }>()
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const toast = useAppToast()
 const { permissions } = useProjectPermissions(props.slug)
 const { invites, load, create, resend, cancel } = useProjectInvites(props.slug)
@@ -111,7 +112,12 @@ async function onResend(invite: InviteDto): Promise<void> {
 }
 
 async function onCancel(invite: InviteDto): Promise<void> {
-  if (!window.confirm(t('projects.invites.cancelConfirm', { email: invite.email }))) return
+  if (!(await confirm({
+    title: t('projects.invites.cancelConfirm', { email: invite.email }),
+    body: t('projects.invites.cancelConfirmBody'),
+    confirmLabel: t('projects.invites.cancel'),
+    destructive: true,
+  }))) return
   if (!(await run(() => cancel(invite.id)))) return
   await run(load)
 }

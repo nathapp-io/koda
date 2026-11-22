@@ -10,8 +10,10 @@ const push = jest.fn<(...args: unknown[]) => Promise<void>>(async () => undefine
 const success = jest.fn()
 const error = jest.fn()
 
+const confirm = jest.fn<(...args: unknown[]) => Promise<boolean>>(async () => true)
+
 function mount(confirmed: boolean, reject = false) {
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: { confirm: jest.fn(() => confirmed) } })
+  confirm.mockResolvedValue(confirmed)
   deleted.mockImplementation(reject ? async () => { throw new Error('delete failed') } : async () => ({}))
   const toast = { ...toastRecorder(), success, error }
   return mountSfc(file, {
@@ -22,6 +24,7 @@ function mount(confirmed: boolean, reject = false) {
       useApi: () => ({ $api: { delete: deleted } }),
       useI18n: () => i18nStub(), useAppToast: () => toast,
       useRouter: () => ({ push }),
+      useConfirm: () => ({ confirm }),
     },
   })
 }
@@ -40,9 +43,8 @@ describe('SettingsDangerZoneCard', () => {
 
   test('AC-7: confirms, deletes the project, shows success and navigates home', async () => {
     const app = mount(true)
-    const confirm = (globalThis.window as unknown as { confirm: jest.Mock }).confirm
     await (app.one('[data-testid="project-delete"]')?.props.onClick as () => Promise<void>)()
-    expect(confirm).toHaveBeenCalledWith('projects.settings.deleteConfirm')
+    expect(confirm).toHaveBeenCalledWith({ title: 'projects.settings.deleteConfirm', body: 'projects.settings.deleteConfirmBody', confirmLabel: 'projects.settings.delete', destructive: true })
     expect(deleted).toHaveBeenCalledWith('/projects/web')
     expect(success).toHaveBeenCalledWith('projects.settings.deleted')
     expect(push).toHaveBeenCalledWith('/')

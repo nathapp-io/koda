@@ -8,6 +8,7 @@ import { apiPath } from '~/lib/api-path'
 
 const props = defineProps<{ slug: string }>()
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const toast = useAppToast()
 const { $api } = useApi()
 const { permissions } = useProjectPermissions(props.slug)
@@ -118,7 +119,12 @@ async function setDisabled(row: ProviderCredentialRow, disabled: boolean) {
 async function remove(row: ProviderCredentialRow) {
   if (isSaving(row.id)) return
   // B2/M2: `deleteConfirm` interpolates `{provider}` — the credential's provider id, as the GLOBAL page passes it.
-  if (!window.confirm(t('fleet.providerKeys.deleteConfirm', { provider: row.providerId }))) return
+  if (!(await confirm({
+    title: t('fleet.providerKeys.deleteConfirm', { provider: row.providerId }),
+    body: t('fleet.providerKeys.deleteConfirmBody'),
+    confirmLabel: t('fleet.providerKeys.delete'),
+    destructive: true,
+  }))) return
   setSaving(row.id, true)
   try { const result = await vault.remove(row.id); if (result.kind === 'pending') pendingNotice.value = true } catch (err) { report(err) } finally { setSaving(row.id, false) }
 }

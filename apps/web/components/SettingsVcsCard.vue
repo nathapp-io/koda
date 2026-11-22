@@ -38,6 +38,7 @@ const route = useRoute()
 const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const toast = useAppToast()
 
 const existingConnection = computed(() => props.connection)
@@ -122,7 +123,12 @@ const onSubmit = handleSubmit(async (values) => {
 
 const rotatingSecret = ref(false)
 async function rotateSecret() {
-  if (!window.confirm(t('vcs.secret.rotateConfirm'))) return
+  if (!(await confirm({
+    title: t('vcs.secret.rotateConfirm'),
+    body: t('vcs.secret.rotateConfirmBody'),
+    confirmLabel: t('vcs.secret.rotate'),
+    destructive: true,
+  }))) return
   rotatingSecret.value = true
   try {
     const result = await $api.post<{ webhookSecret: string }>(apiPath`/projects/${slug}/vcs/webhook-secret/rotate`)

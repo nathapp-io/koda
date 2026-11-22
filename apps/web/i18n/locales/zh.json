@@ -313,7 +313,8 @@
       "delete": "删除项目",
       "updated": "项目更新成功",
       "deleted": "项目删除成功",
-      "deleteConfirm": "确认删除此项目？此操作不可撤销。",
+      "deleteConfirm": "确认删除此项目？",
+      "deleteConfirmBody": "此操作不可撤销。",
       "noChanges": "没有可保存的变更"
     },
     "members": {
@@ -323,6 +324,7 @@
       "add": "添加成员",
       "remove": "移除",
       "removeConfirm": "确定将 {name} 移出此项目？",
+      "removeConfirmBody": "其在此项目中的所有角色将被移除。",
       "empty": "暂无成员。",
       "disabledBadge": "已停用",
       "roleLabel": "角色",
@@ -362,6 +364,7 @@
       "resend": "重新发送",
       "cancel": "取消邀请",
       "cancelConfirm": "确定取消发送给 {email} 的邀请？",
+      "cancelConfirmBody": "该邀请链接将失效。",
       "roles": {
         "ADMIN": "管理员",
         "DEVELOPER": "开发者",
@@ -880,7 +883,8 @@
       "copied": "密钥已复制",
       "copyFailed": "无法复制密钥",
       "rotate": "轮换 Webhook 密钥",
-      "rotateConfirm": "确定轮换 Webhook 密钥吗？使用旧密钥签名的投递将被拒绝。"
+      "rotateConfirm": "确定轮换 Webhook 密钥？",
+      "rotateConfirmBody": "使用旧密钥签名的投递将被拒绝。"
     },
     "validation": {
       "providerRequired": "请选择提供商",
@@ -1544,6 +1548,7 @@
       "empty": "尚未保存任何提供商密钥",
       "pending": "审批待处理，密钥列表未发生变化。",
       "deleteConfirm": "删除 {provider} 的提供商密钥？",
+      "deleteConfirmBody": "已保存的密钥将被移除，且无法恢复。",
       "state": { "enabled": "已启用", "disabled": "已禁用" },
       "table": {
         "provider": "提供商", "name": "名称", "last4": "末四位", "fingerprint": "指纹", "state": "状态"

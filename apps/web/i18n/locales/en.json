@@ -313,7 +313,8 @@
       "delete": "Delete Project",
       "updated": "Project updated successfully",
       "deleted": "Project deleted successfully",
-      "deleteConfirm": "Delete this project? This action cannot be undone.",
+      "deleteConfirm": "Delete this project?",
+      "deleteConfirmBody": "This action cannot be undone.",
       "noChanges": "No changes to save"
     },
     "members": {
@@ -323,6 +324,7 @@
       "add": "Add member",
       "remove": "Remove",
       "removeConfirm": "Remove {name} from this project?",
+      "removeConfirmBody": "All of their roles in this project are removed.",
       "empty": "No members yet.",
       "disabledBadge": "Disabled",
       "roleLabel": "Role",
@@ -362,6 +364,7 @@
       "resend": "Resend",
       "cancel": "Cancel invite",
       "cancelConfirm": "Cancel the invite for {email}?",
+      "cancelConfirmBody": "The invite link stops working.",
       "roles": {
         "ADMIN": "Admin",
         "DEVELOPER": "Developer",
@@ -880,7 +883,8 @@
       "copied": "Secret copied",
       "copyFailed": "Could not copy the secret",
       "rotate": "Rotate webhook secret",
-      "rotateConfirm": "Rotate the webhook secret? Deliveries signed with the old secret will be rejected."
+      "rotateConfirm": "Rotate the webhook secret?",
+      "rotateConfirmBody": "Deliveries signed with the old secret will be rejected."
     },
     "validation": {
       "providerRequired": "Please select a provider",
@@ -1544,6 +1548,7 @@
       "empty": "No provider keys stored",
       "pending": "Approval is pending; the key list has not changed.",
       "deleteConfirm": "Delete the provider key for {provider}?",
+      "deleteConfirmBody": "The stored key is removed and cannot be recovered.",
       "state": { "enabled": "Enabled", "disabled": "Disabled" },
       "table": {
         "provider": "Provider", "name": "Name", "last4": "Last 4", "fingerprint": "Fingerprint", "state": "State"

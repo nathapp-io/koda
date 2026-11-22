@@ -25,6 +25,8 @@ const settingsPath = webFile('pages', '[project]', 'settings.vue')
 /** Every gate US-014 introduced, open: this spec is about the writes. */
 const ALL_INVITE_KEYS = ['invite.read', 'invite.create', 'invite.resend', 'invite.cancel'] as const
 
+const confirm = jest.fn(async () => false)
+
 const PROJECT_ROLES = [
   { id: 'r1', key: 'project-admin', name: 'Project Admin', description: '', system: true },
   { id: 'r2', key: 'developer', name: 'Developer', description: '', system: true },
@@ -117,6 +119,7 @@ function mountPanel(overrides: Record<string, unknown> = {}) {
       useI18n: () => enI18n(),
       useAppToast: () => toast,
       useProjectPermissions: () => projectPermissionsStub(ALL_INVITE_KEYS),
+      useConfirm: () => ({ confirm }),
       useProjectRoles: () => ({
         roles: ref(PROJECT_ROLES),
         pending: ref(false),
@@ -250,24 +253,30 @@ describe('ProjectInvitesPanel (US-007)', () => {
     p.app.unmount()
   })
 
-  test('AC6: cancel("i1") is called only when window.confirm returns true', async () => {
-    const confirmCalls: string[] = []
-    let allowed = false
-    setWindow((message) => { confirmCalls.push(String(message)); return allowed })
+  test('AC5/6: confirm options name pending@x.io and declining does not cancel', async () => {
+    confirm.mockResolvedValue(false)
+    confirm.mockClear()
     const p = mountPanel()
     await settle()
 
     fire(node(p.app, 'invite-cancel-i1'), 'onClick')
     await settle()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith({ title: 'Cancel the invite for pending@x.io?', body: 'The invite link stops working.', confirmLabel: 'Cancel invite', destructive: true })
     expect(p.api.cancel).not.toHaveBeenCalled()
+    p.app.unmount()
+  })
 
-    allowed = true
+  test('confirmed invite cancellation still calls cancel and reloads the list', async () => {
+    confirm.mockResolvedValue(true)
+    confirm.mockClear()
+    const p = mountPanel()
+    await settle()
     fire(node(p.app, 'invite-cancel-i1'), 'onClick')
     await settle()
-    expect(p.api.cancel).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledTimes(1)
     expect(p.api.cancel).toHaveBeenCalledWith('i1')
-    // The confirmation names the invite so the admin confirms the right row.
-    expect(confirmCalls.some((message) => message.includes('pending@x.io'))).toBe(true)
+    expect(p.api.load.mock.calls.length).toBeGreaterThan(1)
     p.app.unmount()
   })
 

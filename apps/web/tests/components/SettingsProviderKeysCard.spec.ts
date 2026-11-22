@@ -15,13 +15,14 @@ const post = jest.fn(async (_path: string, _body?: unknown): Promise<unknown> =>
 const patch = jest.fn(async (_path: string, _body?: unknown): Promise<unknown> => row())
 const remove = jest.fn(async (_path: string): Promise<unknown> => ({}))
 const toast = toastRecorder()
+const confirm = jest.fn(async () => false)
 async function flush() { for (let i = 0; i < 5; i++) await nextTick(); await new Promise(resolve => setTimeout(resolve, 0)); await nextTick() }
 async function mountCard(keys: readonly string[] = ['project.credential.read', 'project.credential.create']): Promise<Mounted> {
-  const app = mountSfc(cardFile, { props: { slug: 'web' }, components: uiStubs, alias: { '~/composables/useApi': apiModule }, globals: { useApi: () => ({ $api: { get, post, patch, delete: remove } }), useI18n: () => i18nStub(), useAppToast: () => toast, useProjectPermissions: () => projectPermissionsStub(keys) } })
+  const app = mountSfc(cardFile, { props: { slug: 'web' }, components: uiStubs, alias: { '~/composables/useApi': apiModule }, globals: { useApi: () => ({ $api: { get, post, patch, delete: remove } }), useI18n: () => i18nStub(), useAppToast: () => toast, useProjectPermissions: () => projectPermissionsStub(keys), useConfirm: () => ({ confirm }) } })
   await flush(); return app
 }
 const node = (app: Mounted, id: string) => app.find(`[data-testid="${id}"]`)[0]
-afterEach(() => { get.mockReset().mockImplementation(async (path: string): Promise<unknown> => path.endsWith('/fleet/repos') ? { records: [{ id: 'r1', owner: 'acme', name: 'app' }] } : { records: [row(), row({ id: 'c2', scope: 'REPO', repoId: 'r1', name: 'Repo key' })] }); post.mockReset().mockImplementation(async (_path: string, _body?: unknown): Promise<unknown> => row()); patch.mockReset().mockImplementation(async (_path: string, _body?: unknown): Promise<unknown> => row()); remove.mockReset().mockImplementation(async (_path: string): Promise<unknown> => ({})); toast.errors.length = 0 })
+afterEach(() => { get.mockReset().mockImplementation(async (path: string): Promise<unknown> => path.endsWith('/fleet/repos') ? { records: [{ id: 'r1', owner: 'acme', name: 'app' }] } : { records: [row(), row({ id: 'c2', scope: 'REPO', repoId: 'r1', name: 'Repo key' })] }); post.mockReset().mockImplementation(async (_path: string, _body?: unknown): Promise<unknown> => row()); patch.mockReset().mockImplementation(async (_path: string, _body?: unknown): Promise<unknown> => row()); remove.mockReset().mockImplementation(async (_path: string): Promise<unknown> => ({})); toast.errors.length = 0; confirm.mockReset().mockResolvedValue(false) })
 
 /**
  * web-ssr-data-loading US-002 (R2-15): the card shows its loading text until its first load settles,
@@ -157,34 +158,31 @@ describe('US-013 SettingsProviderKeysCard', () => {
     expect(patch).toHaveBeenLastCalledWith('/projects/web/provider-credentials/c2', { key: 'sk-second-123456789abcdef' })
     app.unmount()
   })
-  test('AC-6: confirms before delete and leaves data when confirmation is declined', async () => {
-    const originalWindow = globalThis.window
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: { confirm: jest.fn(() => false) } })
+  test('AC-4: a declined styled confirmation sends no delete request', async () => {
+    confirm.mockResolvedValue(false)
     const app = await mountCard(['project.credential.read', 'project.credential.delete'])
-    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => void)()
+    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => Promise<void>)()
+    expect(confirm).toHaveBeenCalledTimes(1)
     expect(remove).not.toHaveBeenCalled()
-    ;(globalThis.window.confirm as jest.Mock).mockReturnValue(true)
-    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => void)()
-    await flush()
+    app.unmount()
+  })
+  test('confirmed deletion still calls the provider credential remove action', async () => {
+    confirm.mockResolvedValue(true)
+    const app = await mountCard(['project.credential.read', 'project.credential.delete'])
+    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => Promise<void>)()
     expect(remove).toHaveBeenCalledWith('/projects/web/provider-credentials/c1')
     app.unmount()
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
   })
   test('M2: the delete confirmation interpolates {provider}, the name both locales word', async () => {
-    const originalWindow = globalThis.window
-    const confirm = jest.fn(() => false)
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: { confirm } })
+    confirm.mockResolvedValue(false)
+    confirm.mockClear()
     // The real `t` fills `{provider}` from the params; the stub echoes them, so the key the card passes is observable.
     const t = (key: string, params?: Record<string, unknown>) => `${key} ${JSON.stringify(params ?? {})}`
-    const app = mountSfc(cardFile, { props: { slug: 'web' }, components: uiStubs, alias: { '~/composables/useApi': apiModule }, globals: { useApi: () => ({ $api: { get, post, patch, delete: remove } }), useI18n: () => ({ t, te: () => true }), useAppToast: () => toast, useProjectPermissions: () => projectPermissionsStub(['project.credential.read', 'project.credential.delete']) } })
+    const app = mountSfc(cardFile, { props: { slug: 'web' }, components: uiStubs, alias: { '~/composables/useApi': apiModule }, globals: { useApi: () => ({ $api: { get, post, patch, delete: remove } }), useI18n: () => ({ t, te: () => true }), useAppToast: () => toast, useProjectPermissions: () => projectPermissionsStub(['project.credential.read', 'project.credential.delete']), useConfirm: () => ({ confirm }) } })
     await flush()
-    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => void)()
-    const text = String(confirm.mock.calls[0]?.[0] ?? '')
-    expect(text).toContain('fleet.providerKeys.deleteConfirm')
-    expect(text).toContain('"provider":"openrouter"')
-    expect(text).not.toContain('"name"')
+    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => Promise<void>)()
+    expect(confirm).toHaveBeenCalledWith({ title: 'fleet.providerKeys.deleteConfirm {"provider":"openrouter"}', body: 'fleet.providerKeys.deleteConfirmBody {}', confirmLabel: 'fleet.providerKeys.delete {}', destructive: true })
     app.unmount()
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
   })
   /**
    * B2 (branch review): a rotation in flight must not be able to erase a draft. The row's field and actions are closed
