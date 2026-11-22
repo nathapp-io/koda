@@ -3,7 +3,7 @@
   "feature": "e2e-1121-confirm-dialogs",
   "branchName": "feat/e2e-1121-confirm-dialogs",
   "createdAt": "2026-11-22T06:21:02.543Z",
-  "updatedAt": "2026-11-22T07:08:52.247Z",
+  "updatedAt": "2026-11-22T07:17:38.549Z",
   "userStories": [
     {
       "id": "US-001",
@@ -302,14 +302,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard composable/page migration with both callers and the interface change in one story; no new abstraction or authorization logic. Write failing forwarding/cancellation/scope-copy assertions, migrate globals and retain existing failure/browser journeys."
+        "reasoning": "Standard composable/page migration with both callers and the interface change in one story; no new abstraction or authorization logic. Write failing forwarding/cancellation/scope-copy assertions, migrate globals and retain existing failure/browser journeys.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useConfirm.ts",
@@ -346,7 +349,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7a6ec611ed6e9470b4b7f1e6bf73106510d73b5c"
     },
     {
       "id": "US-006",
