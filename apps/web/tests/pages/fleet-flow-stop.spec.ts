@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
+import * as Vue from 'vue'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FleetFlowDto, FleetFlowOverviewDto } from '~/lib/fleet-flows'
@@ -63,9 +64,10 @@ async function clickStop(mounted: Awaited<ReturnType<typeof mountPage>>['mounted
   const button = mounted.find('button').find(node => mounted.textOf(node) === 'fleet.flows.stop.button')
   if (!button) throw new Error('Stop button not found')
   ;(button.props.onClick as (() => void) | undefined)?.()
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  for (let i = 0; i < 6; i += 1) {
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    await Vue.nextTick()
+  }
 }
 
 describe('fleet flow Stop action (US-008)', () => {
