@@ -167,9 +167,17 @@ describe('US-001 AC-8: inboxHref', () => {
 // US-001 AC-9 — key labels
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('US-001 AC-9: requestKeyLabel falls back to the raw key', () => {
-  test('AC-9: an unknown key stays raw', () => {
-    expect(requestKeyLabel(t, knows([]), 'label.create')).toBe('label.create')
+describe('US-001 AC-9: requestKeyLabel uses a readable fallback', () => {
+  test('AC-9: an unknown key is humanized', () => {
+    expect(requestKeyLabel(t, knows([]), 'label.create')).toBe('Label create')
+  })
+
+  test('US-008 AC-1: an unlabelled fleet key is humanized', () => {
+    expect(requestKeyLabel(t, knows([]), 'fleet.flow.start')).toBe('Fleet flow start')
+  })
+
+  test('US-008 AC-2: an unlabelled memory key is humanized', () => {
+    expect(requestKeyLabel(t, knows([]), 'memory.create')).toBe('Memory create')
   })
 
   test('AC-9: a known key reads approvals.keys.<key with dots replaced>', () => {

@@ -1,5 +1,6 @@
 import type { NotificationDto } from '~/lib/notification-types'
 import { humanizeCode } from '~/lib/humanize-code'
+import { requestKeyLabel } from '~/lib/approval-requests'
 
 export interface NotificationI18n {
   t: (key: string, named?: Record<string, unknown>) => string
@@ -9,7 +10,12 @@ export interface NotificationI18n {
 /** S4a §1: the web words a notification from `kind` + `params`; an unknown kind shows the API's English title. */
 export function notificationText(n: NotificationDto, i18n: NotificationI18n): string {
   const key = `notifications.kinds.${n.kind}`
-  return i18n.te(key) ? i18n.t(key, { ...n.params }) : n.title
+  if (!i18n.te(key)) return n.title
+  const params = { ...n.params }
+  if (n.kind === 'approval_request' && typeof params.key === 'string') {
+    params.key = requestKeyLabel(i18n.t, i18n.te, params.key)
+  }
+  return i18n.t(key, params)
 }
 
 /** A localized detail for flow stops; other notification kinds keep their API-provided body. */

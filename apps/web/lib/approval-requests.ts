@@ -18,6 +18,7 @@
  */
 import * as z from 'zod'
 import type { TranslateNamed } from '~/lib/fleet-budgets'
+import { humanizeCode } from '~/lib/humanize-code'
 
 /** vue-i18n's `te`: does this locale know the key? */
 export type TranslationExists = (key: string) => boolean
@@ -200,12 +201,11 @@ export function inboxHref(slug: string | null, id?: string): string {
 
 /**
  * The label of a permission key: `approvals.keys.<key with '.' replaced by '_'>` when the locale
- * knows it, else the key itself. Only keys the UI has words for get a label; every other one reads
- * as its own self-explanatory name.
+ * knows it, else a readable humanization of the raw key.
  */
 export function requestKeyLabel(t: TranslateNamed, te: TranslationExists, key: string): string {
   const i18nKey = `approvals.keys.${key.replace(/\./g, '_')}`
-  return te(i18nKey) ? t(i18nKey) : key
+  return te(i18nKey) ? t(i18nKey) : humanizeCode(key)
 }
 
 /**

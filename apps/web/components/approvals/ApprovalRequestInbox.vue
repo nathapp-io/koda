@@ -44,7 +44,7 @@
             data-testid="approval-request-toggle"
             @click="toggle(row.id)"
           >
-            <span class="min-w-0 flex-1 font-medium">{{ keyLabel(row.permissionKey) }}</span>
+            <span class="min-w-0 flex-1 font-medium" :title="row.permissionKey">{{ keyLabel(row.permissionKey) }}</span>
             <span class="text-xs text-muted-foreground" :title="t('approvals.inbox.row.requester')" data-testid="approval-request-requester">
               {{ requesterLabel(row) }}
             </span>
