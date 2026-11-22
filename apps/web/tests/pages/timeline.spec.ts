@@ -324,9 +324,9 @@ describe('Timeline AC9: each row renders eventType, actorId, action', () => {
     expect(source).toMatch(/\{\{[^}]*event\.eventType[^}]*\}\}/)
   })
 
-  test('the v-for body interpolates {{ event.actorId }} (binds the data field)', () => {
+  test('the v-for body interpolates actorName(event) for the actor cell', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/\{\{[^}]*event\.actorId[^}]*\}\}/)
+    expect(source).toMatch(/\{\{[^}]*actorName\(event\)[^}]*\}\}/)
   })
 
   test('the v-for body interpolates {{ event.action }} (binds the data field)', () => {
@@ -348,7 +348,7 @@ describe('Timeline AC9: each row renders eventType, actorId, action', () => {
     expect(trEnd).toBeGreaterThan(trStart)
     const rowBody = source.slice(trStart, trEnd)
     expect(rowBody).toMatch(/\{\{[^}]*event\.eventType[^}]*\}\}/)
-    expect(rowBody).toMatch(/\{\{[^}]*event\.actorId[^}]*\}\}/)
+    expect(rowBody).toMatch(/\{\{[^}]*actorName\(event\)[^}]*\}\}/)
     expect(rowBody).toMatch(/\{\{[^}]*event\.action[^}]*\}\}/)
   })
 })
@@ -502,7 +502,7 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
 
     // Readable Timeline labels
     eventTypeLabel: (code: string) => code,
-    actorName: (id: string) => id,
+    actorName: (event: TimelineEvent) => event.actorId,
     humanizeCode: (code: string) => code,
 
     // Utility
@@ -521,6 +521,9 @@ interface TimelineEvent {
   actorId: string
   action: string
   createdAt: string
+  actorName: string | null
+  ticketRef: string | null
+  ticketTitle: string | null
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -535,9 +538,9 @@ describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with
   test('AC1: renders one <tr> per event showing eventType, actorId, and action columns', async () => {
     const ctx = createRenderContext({
       events: VueFull.ref([
-        { id: 'e1', eventType: 'ticket_event', actorId: 'user-1', action: 'created ticket #42', createdAt: '2026-01-01T00:00:00Z' },
-        { id: 'e2', eventType: 'agent_event', actorId: 'agent-7', action: 'paused', createdAt: '2026-01-02T00:00:00Z' },
-        { id: 'e3', eventType: 'decision_event', actorId: 'admin', action: 'approved', createdAt: '2026-01-03T00:00:00Z' },
+        { id: 'e1', eventType: 'ticket_event', actorId: 'user-1', action: 'created ticket #42', createdAt: '2026-01-01T00:00:00Z', actorName: null, ticketRef: null, ticketTitle: null },
+        { id: 'e2', eventType: 'agent_event', actorId: 'agent-7', action: 'paused', createdAt: '2026-01-02T00:00:00Z', actorName: null, ticketRef: null, ticketTitle: null },
+        { id: 'e3', eventType: 'decision_event', actorId: 'admin', action: 'approved', createdAt: '2026-01-03T00:00:00Z', actorName: null, ticketRef: null, ticketTitle: null },
       ]),
       isLoading: VueFull.ref(false),
       error: VueFull.ref(null),
@@ -691,7 +694,7 @@ describe('Timeline AC3/AC5 composable contract (SSR-verified reactive transition
     const ctx = createRenderContext({
       isLoading: VueFull.ref(false),
       events: VueFull.ref([
-        { id: 'e1', eventType: 't', actorId: 'a', action: 'x', createdAt: 'now' },
+        { id: 'e1', eventType: 't', actorId: 'a', action: 'x', createdAt: 'now', actorName: null, ticketRef: null, ticketTitle: null },
       ]),
       error: VueFull.ref(null),
     })
@@ -733,7 +736,7 @@ describe('Timeline AC6/AC7 (Behavioral SSR): filter UI renders with correct bind
       toFilter: VueFull.ref(to),
       isLoading: VueFull.ref(false),
       events: VueFull.ref([
-        { id: 'e1', eventType: 'x', actorId: 'a', action: 'y', createdAt: 'now' },
+        { id: 'e1', eventType: 'x', actorId: 'a', action: 'y', createdAt: 'now', actorName: null, ticketRef: null, ticketTitle: null },
       ]),
       error: VueFull.ref(null),
     })

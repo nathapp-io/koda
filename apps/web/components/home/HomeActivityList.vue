@@ -18,7 +18,14 @@ const { t } = useI18n()
       <ul v-else class="divide-y divide-border">
         <li v-for="event in activity" :key="event.id" class="flex items-center gap-2 px-4 py-2 text-sm" :data-testid="`home-activity-${event.eventType}`">
           <span class="w-16 shrink-0 text-xs text-muted-foreground">{{ t(`home.activity.eventType.${event.eventType}`) }}</span>
-          <span class="truncate font-medium" :title="event.action">{{ humanizeCode(event.action) }}</span>
+          <span data-testid="home-activity-actor" class="truncate font-medium">{{ event.actorName ?? t('common.formerMember') }}</span>
+          <span class="truncate" :title="event.action">{{ humanizeCode(event.action) }}</span>
+          <NuxtLink
+            v-if="event.ticketRef && event.projectSlug"
+            :to="`/${event.projectSlug}/tickets/${event.ticketRef}`"
+            data-testid="home-activity-ticket"
+            class="truncate text-primary hover:underline"
+          >{{ event.ticketTitle ? `${event.ticketRef} ${event.ticketTitle}` : event.ticketRef }}</NuxtLink>
           <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{{ event.projectSlug }}</span>
           <FleetAge class="shrink-0 text-xs text-muted-foreground" :iso="event.createdAt" :now="now" mode="ago" />
         </li>

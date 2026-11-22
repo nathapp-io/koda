@@ -529,6 +529,7 @@
       "eventType": "事件",
       "actorId": "操作者",
       "action": "动作",
+      "ticket": "工单",
       "created": "时间"
     }
   },

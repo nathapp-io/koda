@@ -5,7 +5,7 @@ import { useProjectAgentNames } from '../../composables/useProjectAgentNames'
 import { useProjectMemberNames } from '../../composables/useProjectMemberNames'
 
 const page = webFile('pages', '[project]', 'timeline.vue')
-const rows = [{ id: 'e-agent', eventType: 'ticket_event', actorId: 'agent-1', action: 'TICKET_CREATED', createdAt: '2026-01-01T00:00:00Z' }, { id: 'e-user', eventType: 'ticket_event', actorId: 'user-1', action: 'TICKET_CREATED', createdAt: '2026-01-01T00:00:00Z' }]
+const rows = [{ id: 'e-agent', eventType: 'ticket_event', actorId: 'agent-1', action: 'TICKET_CREATED', createdAt: '2026-01-01T00:00:00Z', actorName: null, ticketRef: null, ticketTitle: null }, { id: 'e-user', eventType: 'ticket_event', actorId: 'user-1', action: 'TICKET_CREATED', createdAt: '2026-01-01T00:00:00Z', actorName: null, ticketRef: null, ticketTitle: null }]
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); await nextTick() }
 
 type Api = { get: (path: string, options?: unknown) => Promise<unknown> }
@@ -54,16 +54,18 @@ describe('timeline agent actor names', () => {
     mounted.unmount()
   })
 
-  test('falls back to raw actor id and does not toast when the roster request rejects', async () => {
+  test('falls back to common.formerMember without a raw actor id or toast when the roster request rejects', async () => {
     const { mounted, errors } = setup(true)
     await flush()
-    const agentRow = mounted.find('tr').find(row => mounted.textOf(row).includes('agent-1'))
+    const dataRows = mounted.find('tr').filter(row => mounted.find('td', row).length > 0)
+    const agentRow = dataRows[0]
     expect(agentRow).toBeDefined()
     if (!agentRow) return
     const actorCell = mounted.find('td', agentRow)[1]
     expect(actorCell).toBeDefined()
     if (!actorCell) return
-    expect(mounted.textOf(actorCell)).toBe('agent-1')
+    expect(mounted.textOf(actorCell)).toBe('common.formerMember')
+    expect(mounted.text()).not.toContain('agent-1')
     expect(errors).not.toHaveBeenCalled()
     mounted.unmount()
   })
