@@ -3,7 +3,7 @@
   "feature": "e2e-1121-confirm-dialogs",
   "branchName": "feat/e2e-1121-confirm-dialogs",
   "createdAt": "2026-11-22T06:21:02.543Z",
-  "updatedAt": "2026-11-22T06:21:02.543Z",
+  "updatedAt": "2026-11-22T06:37:09.290Z",
   "userStories": [
     {
       "id": "US-001",
@@ -30,14 +30,17 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard existing-pattern component migrations; key rotation, credential deletion and role removal require strict security test isolation. Write mounted/options/cancellation and literal locale tests first, migrating existing mocks without changing shared tests."
+        "reasoning": "Standard existing-pattern component migrations; key rotation, credential deletion and role removal require strict security test isolation. Write mounted/options/cancellation and literal locale tests first, migrating existing mocks without changing shared tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useConfirm.ts",
@@ -66,7 +69,11 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d8870e2ab17ed320603da534c0f7dd0a1477d43c"
     },
     {
       "id": "US-002",
@@ -128,7 +135,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -186,7 +196,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -250,7 +263,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -315,7 +331,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -357,7 +376,10 @@
       "workdirSource": "stated",
       "suggestedCriteria": [
         "[review] When web source outside the *.spec.ts override calls window.confirm(), globalThis.confirm() or an unbound global confirm(), the applicable ESLint restriction reports an error naming useConfirm()."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Existing-code enhancement confined to apps/web. This is Nuxt 4/Vue SSR, not the detected-context table's Next.js (apps/web/package.json:5, :36). Jest handles components/pages/composables and Playwright handles browser journeys (apps/web/package.json:13-16). MCP navigation was unavailable; direct reads and targeted searches were used. App guidance was read from .nax/mono/apps/web/context.md. No API, persistence, OpenAPI, client generation or other workspace changes are needed. No layout, navigation, token or ticket-board redesign is needed.\n\nShared implementation is read-only: ConfirmOptions already supports the four required fields (apps/web/composables/useConfirm.ts:3); confirm returns Promise<boolean>, supersedes a pending request with false and exposes settle/current (same file:6-22). Use it inside client interactions, not during setup/SSR. The host is mounted once outside NuxtLayout (apps/web/app.vue:11), settles false on close, and renders body/action label/destructive styling (apps/web/components/ConfirmDialogHost.vue:7-23). CommentThread.deleteComment is the await/early-return reference (apps/web/components/CommentThread.vue:134-141), not a migration target. No new host, option or abstraction is needed.\n\nSearch confirmed all 18 production window.confirm sites. US-001 modifies components/SettingsVcsCard.vue:125, SettingsProviderKeysCard.vue:121, ProjectInvitesPanel.vue:114, ProjectMembersPanel.vue:226 and SettingsDangerZoneCard.vue:20 under apps/web. Await before existing busy flags, notices, requests, toasts and navigation. Preserve provider pending approvals and member binding-removal sequencing/error reload (apps/web/components/ProjectMembersPanel.vue:217-255); do not alter onRemoveChip. Migrate native assertions in tests/components/SettingsProviderKeysCard.spec.ts:160-182, ProjectInvitesPanel.spec.ts:253-270 and settings-danger-zone-card.spec.ts:41-52. VCS currently has source/key checks, not a behavioral rotate mount (apps/web/tests/pages/settings-vcs-webhook-secret.spec.ts:17-49), so add the specified VCS/member specs. US-001 owns shared provider body copy.\n\nUS-002 modifies pages/admin/fleet/analytics.vue:117, roles.vue:55, approval-policies.vue:84 and skills.vue:60 under apps/web. Only rerunOutdated prompts; backfill stays unprompted and busyAll begins after consent (apps/web/pages/admin/fleet/analytics.vue:116-128). Roles/policies retain their list on failure and reload after success. Skills onRemove currently returns Promise<void>; make it async without losing the awaited guarded action, busy cleanup or source.gitUrl (apps/web/pages/admin/skills.vue:43-66). Migrate tests/pages/admin-fleet-analytics.spec.ts:42-47, admin-roles.spec.ts:25-29, admin-approval-policies.spec.ts:86-90 and admin-skills.spec.ts:54-62. US-002 owns shared approval body copy.\n\nUS-003 modifies pages/admin/fleet/repos.vue:79, runners.vue:64 and provider-keys.vue:156 under apps/web. Preserve repoName(repo), runner.name and credential.providerId. Admin credential confirmLabel is fleet.providerKeys.actions.delete, unlike the settings card label. Keep notice/saving/pending-approval behavior (apps/web/pages/admin/fleet/provider-keys.vue:154-174). Migrate tests/pages/admin-fleet-repos.spec.ts:58-87, admin-fleet-runners.spec.ts:60-75 and admin-fleet-provider-keys.spec.ts:64-77, retaining window.location.origin in the runners harness. Depend on US-001 for the provider body; own only repo/runner copy.\n\nUS-004 modifies pages/[project]/approval-policies.vue:72, flows/[id].vue:76, kb.vue:101 and fleet/repos/[id]/config.vue:111 under apps/web. Preserve flow permission/live/busy gates and finally reload (flow page:73-98), and KB's special 403/error handling and success refresh (KB page:100-114). Config's guard at :109-112 must return Promise<boolean>; clean/submitted drafts allow leaving without a prompt. submitted becomes true before navigateTo while edits remain (:147-155). Capture the guard currently discarded at apps/web/tests/pages/fleet-repo-config-page.spec.ts:62; use its existing edit/submit journey (:69-91) to test real state transitions. Migrate project-approval-policies.spec.ts:43-47 and fleet-flow-stop.spec.ts:31-32/:92-96 to promise-resolving mocks. Add the specified KB spec, finding delete by label/variant. Depend on US-002 for approval body. No beforeunload handler.\n\nUS-005 modifies both composables and both budget callers together. Schedule remove retains Promise<boolean>, false on cancellation/failure and existing run/busy/error/onStale behavior (apps/web/composables/useFleetScheduleActions.ts:10-45); unchanged consumers are pages/[project]/fleet/schedules/index.vue:79 and schedules/[id].vue:106. Budget remove's string becomes { title, body }, preserving success and error-triggered void refresh (apps/web/composables/useFleetBudgetPage.ts:70-79). Adapt both callers' scopeText/nameOf prompts and remove events: apps/web/pages/admin/fleet/budgets.vue:30-32/:79 and apps/web/pages/[project]/fleet/budgets.vue:41-43/:101. Other useFleetBudgetPage imports use isForbidden, including approval pages, analytics, schedules list, dashboard/credential composables and approval components; preserve that export and avoid module-level useConfirm calls. Migrate global setup/cleanup in tests/composables/useFleetScheduleActions.spec.ts:10-26 and useFleetBudgetPage.spec.ts:21-36. Keep ApiError identity; budget spec:32 warns against resetting modules. Add remove-event scope/body assertions to tests/pages/admin-fleet-budgets.spec.ts and fleet-budgets-project-page.spec.ts. Only existing Playwright delete interaction changes: replace native-dialog acceptance at apps/web/tests/e2e/fleet-budgets.e2e.spec.ts:136 with styled confirmation after delete, retaining :138 row count and hydration waits. No networkidle waits/new journeys.\n\nHarness already lists useConfirm and defaults to async true (apps/web/tests/helpers/mount-sfc.ts:150, :176). Override globals.useConfirm with a recording promise mock as in apps/web/tests/components/comment-thread-author.spec.ts:20-31/:80-115. Recursive local imports receive the globals, enabling page tests of real composables. fleet-harness preserves event handlers and supplies enI18n (apps/web/tests/helpers/fleet-harness.ts:58-107, :207). Await settlement before no-call checks; otherwise old synchronous mocks/default true can mask cancellation failures. Unconditional window stubs with no declined/asserted native path need no edit. Locale changes must be narrow; files are shared by all runtime stories. Split combined originals at en/zh lines :316, :883, :1585, :1755, :1771, :2039; rewrite leave title at :2713. Preserve every unchanged title and unrelated locale value. Exact bilingual value comparisons, not existence checks, belong in the five new copy specs. US-001/US-002 own the two shared body keys. Eight new specs total; no new production module.\n\nUS-006 modifies only apps/web/.eslintrc.cjs:1-31, adding top-level rules and disabling them in the existing spec override while retaining Vue parsing. Browser globals are already enabled (packages/eslint-config/vue.js:6-10), so local confirm bindings remain allowed. Existing lint already uses --max-warnings=0 (apps/web/package.json:9); no package script/shared-preset/test changes. Execute after every migration.\n\nFailure-table mapping: cancel/Escape/close resolves false and must leave handlers inert; per-site cancellation ACs cover this. Shared supersession and confirmed-failure handling are explicit feature-level exclusions from new implementation/test work. Keep useConfirm.spec.ts:22-29 unchanged and retain existing useFleetBudgetPage.spec.ts:143-160 error assertions while adapting only prompt arguments/mocks. The audit removed the two extra acceptance criteria that converted these exclusions into story requirements; the original cancellation criteria remain the runtime negative-path/regression anchors. Risks: forgetting await; changing state before consent; wrong interpolation/labels; prompting backfill; losing skills Promise<void>; returning no guard boolean; adapting only one budget caller; deleting origin stubs; broad locale rewrites. Preserve server-owned rules, UI permission gates and approval responses. Dependencies are binding: US-001/002/005 start independently; US-003 follows 001; US-004 follows 002; US-006 follows all five. Runtime migrations are medium complexity; key/credential/role/governance stories use strict three-session-tdd, US-005 uses tdd-simple, and lint is no-test. Quality gates are verification, not ACs. Guidance/acceptance material under .nax and generated AGENTS.md remain untouched by implementation.\n\nRefine-pass AC preservation audit: all 51 numbered spec ACs remain in their original stories and order. US-001: 1 rotate options; 2 declined rotate sends no POST; 3 provider options, where provider is row.providerId; 4 declined key delete sends nothing; 5 invite options name pending@x.io; 6 declined invite cancel calls nothing; 7 member options, where name is the row display name; 8 declined member removal deletes no binding; 9 project delete options; 10 declined project delete sends nothing; 11 exact seven listed en/zh copy values. US-002: 1 rerunOutdated options with destructive false; 2 declined rerun calls nothing; 3 backfill without confirm; 4 role options; 5 declined role DELETE sends nothing; 6 admin policy options; 7 declined admin policy DELETE sends nothing; 8 skill options, where url is source.gitUrl; 9 declined catalog remove calls nothing; 10 exact four listed en/zh body values. US-003: 1 repo options; 2 declined repo is not deleted; 3 runner options; 4 declined runner is not deleted; 5 admin credential options; 6 declined credential sends no DELETE; 7 accepted credential sends exactly one DELETE; 8 exact four listed en/zh repo/runner values. US-004: 1 project policy options; 2 declined project policy sends no DELETE; 3 live-flow stop options; 4 declined flow calls no stop; 5 document delete options; 6 declined document sends no delete; 7 clean guard allows leaving without confirm; 8 one unsaved edit prompts with all four fields; 9 dirty guard resolves false on false; 10 dirty guard resolves true on true; 11 submitted true with edits still present allows leaving without confirm; 12 exact five listed en/zh project values. US-005: 1 nightly schedule options; 2 declined schedule returns false without api.remove; 3 budget prompt T/B forwarded with delete label and destructive true; 4 declined budget calls no remove; 5 admin table remove uses that policy's scope text and body; 6 project table remove uses that policy's scope text and body; 7 exact four listed en/zh schedule/budget values. US-006: 1 error-level restricted window/globalThis properties with useConfirm messages; 2 error-level restricted global confirm with useConfirm message; 3 existing *.spec.ts override turns both off. All original interpolation, scope-text and submitted-with-edits qualifiers survive. No deprecated grep/file/verbatim tags occur. Locale ACs are observable exact file-content comparisons; option/no-call ACs use recorded promise mocks; guards use awaited booleans; lint ACs use configuration review. The added US-006 rejection criterion makes its negative path explicit without creating tests or treating a quality gate as an AC. Runtime negative and compatibility anchors are US-001 2/4/6/8/10, US-002 2/3/5/7/9, US-003 2/4/6/7, US-004 2/4/6/7/9/10/11, and US-005 2/4/5/6.\n\nRefine-pass scope/context audit: all 11 feature exclusions remain verbatim: shared code/tests/options; existing supersession; unchanged API-failure handling; ThreadStaleBanner; already migrated ticket/comment components; browser close/reload; other styled dialogs; unrelated locale changes; no new E2E except adapting budgets; manual post-merge context note; unconditional native stubs. Do not turn exclusions into new implementation ACs. No story-local exclusion has been hoisted. Context lists exactly match the spec's recommended sets (5, 3, 3, 4, 4 and 2 files); no newly created spec is a context file. Expected files and dependencies match the binding stories and shared-copy ownership; all referenced story IDs exist. In US-005 the spec's BudgetTable means the FleetBudgetTable component actually rendered by both pages, not a proposed new helper. The existing budget E2E stays in scope while new E2Es stay out. Routing retains medium/default migrations, applying heavier strategy only where the original security override requires it, and config-only no-test for lint. The audit also repaired literal line breaks inside the JSON analysis string; descriptions and analysis must remain escaped JSON strings.",
