@@ -661,6 +661,15 @@ const readyCodexRunner = (): Record<string, unknown> => runnerWithModels(['m1'],
   ],
 })
 
+/** AC-8 fixture: online, enabled, REPO-capable r1 with native m1, whose codex and claude probes timed out at T0. */
+const twoNotReadyRunner = (): Record<string, unknown> => runnerWithModels(['m1'], { id: 'r1' }, {
+  acp: [],
+  acpOffers: [
+    codexTimeoutOffer(),
+    acpOffer('claude', { launchable: true, loggedIn: null, checkedAt: T0, lastError: { code: 'timeout', at: T0 } }),
+  ],
+})
+
 const readinessNotice = (app: Mounted): FakeNode | undefined => app.one('[data-testid="agent-readiness-codex"]')
 const recheckButton = (app: Mounted): FakeNode | undefined => app.one('[data-testid="agent-recheck-codex"]')
 
@@ -742,6 +751,41 @@ describe('US-009 AC-8..AC-10, AC-12: agent readiness on pages/[project]/threads/
     // The not-ready claude still renders its own notice: the absence of codex's is about codex.
     expect(m.app.one('[data-testid="agent-readiness-claude"]')).toBeDefined()
     expect(readinessNotice(m.app)).toBeUndefined()
+    m.app.unmount()
+  })
+
+  // B1 (review round 2): only one re-check runs at a time, so every notice is locked while one is in
+  // flight. Without this a second click started a second post and a second polling loop, and the
+  // first one to finish re-enabled the other's button.
+  test('B1: while codex re-checks, the claude button is disabled and a second codex click posts nothing', async () => {
+    const m = mountPage({
+      realDispatch: true,
+      dispatchRunners: [twoNotReadyRunner()],
+      globalKeys: ['fleet.runner.update'],
+    })
+    await m.settle()
+    const claudeButton = (): FakeNode | undefined => m.app.one('[data-testid="agent-recheck-claude"]')
+    expect(must(claudeButton(), 'claude re-check button').props.disabled).toBeFalsy()
+
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] })
+    try {
+      // The post settles now; the 10 s refresh keeps the re-check running, so the state stays held.
+      click(must(recheckButton(m.app), 'codex re-check button'))
+      await m.settle()
+
+      expect(must(recheckButton(m.app), 'codex re-check button').props.disabled).toBe(true)
+      expect(must(claudeButton(), 'claude re-check button').props.disabled).toBe(true)
+      // The notice keeps its own copy: only the button state is locked.
+      expect(m.app.textOf(must(claudeButton(), 'claude re-check button')))
+        .toContain('fleet.threads.new.agent.recheck')
+
+      click(must(recheckButton(m.app), 'codex re-check button'))
+      await m.settle()
+      expect(m.post.mock.calls).toEqual([['/fleet/runners/r1/reprobe']])
+    }
+    finally {
+      jest.useRealTimers()
+    }
     m.app.unmount()
   })
 })

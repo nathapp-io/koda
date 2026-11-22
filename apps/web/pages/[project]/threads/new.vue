@@ -222,6 +222,7 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
         :choice="notice"
         :can-recheck="canRecheck"
         :rechecking="rechecking === notice.agent"
+        :disabled="rechecking !== null"
         @recheck="recheckAgent(notice.agent)"
       />
       <FormField v-if="!isProject" v-slot="{ componentField }" name="mode">

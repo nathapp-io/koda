@@ -205,6 +205,7 @@ const submit = handleSubmit(async (formValues: WorkspaceThreadCreateFormValues) 
         :choice="notice"
         :can-recheck="canRecheck"
         :rechecking="rechecking === notice.agent"
+        :disabled="rechecking !== null"
         @recheck="recheckAgent(notice.agent)"
       />
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>

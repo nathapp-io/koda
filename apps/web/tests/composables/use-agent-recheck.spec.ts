@@ -39,6 +39,16 @@ const readyCodex = (checkedAt: string): AgentChoice => ({
   probe: { code: null, checkedAt, runnerIds: [] },
 })
 
+/** A claude choice that is not ready, on its own runner. */
+const claudeChoice = (checkedAt: string | null): AgentChoice => ({
+  agent: 'claude',
+  available: false,
+  reason: 'notReady',
+  probe: { code: 'unavailable', checkedAt, runnerIds: ['r3'] },
+  models: [],
+  efforts: [],
+})
+
 interface Harness {
   post: jest.Mock
   reload: jest.Mock
@@ -191,6 +201,71 @@ describe('US-009 AC-6, AC-7: rechecking state and a rejected request', () => {
 
     expect(h.reload).toHaveBeenCalledTimes(1)
     expect(h.toasts.errors).toEqual(['fleet.runners.unavailable'])
+    expect(rechecking.value).toBeNull()
+  })
+})
+
+/**
+ * B1 (review round 2): `rechecking` names one agent, so two overlapping re-checks cannot both be
+ * represented — the one that finished first cleared the state under the other, which re-enabled its
+ * button and let a second post and a second polling loop start for the same agent.
+ */
+describe('B1: one re-check at a time', () => {
+  test('B1: a click on another agent while the first is still posting is dropped and keeps the state', async () => {
+    jest.useFakeTimers()
+    const h = harness()
+    // The first codex post stays pending: the first re-check owns `rechecking` for the whole test.
+    let releaseFirstPost: (() => void) | undefined
+    h.post.mockImplementation((path: string) => {
+      if (path === '/fleet/runners/r1/reprobe' && releaseFirstPost === undefined) {
+        return new Promise((resolve) => { releaseFirstPost = () => resolve({}) })
+      }
+      return Promise.resolve({})
+    })
+    // Codex reports a fresh probe time once the refresh has read the list; claude never settles.
+    h.read.mockImplementation((agent: ThreadAgent) => agent === 'claude'
+      ? claudeChoice(T0)
+      : codexChoice(h.reload.mock.calls.length > 0 ? LATER : T0))
+    const { recheck, rechecking } = useAgentRecheck(h.reload, h.read, { intervalMs: 10_000 })
+
+    const first = recheck('codex')
+    await jest.advanceTimersByTimeAsync(0)
+    expect(rechecking.value).toBe('codex')
+
+    // The second click neither posted nor replaced the shared state, and started no refresh.
+    const second = recheck('claude')
+    await jest.advanceTimersByTimeAsync(0)
+    expect(h.post.mock.calls).toEqual([['/fleet/runners/r1/reprobe']])
+    expect(h.reload).not.toHaveBeenCalled()
+    expect(rechecking.value).toBe('codex')
+    await second
+
+    // The first re-check still owns the state: it posts r2 once and finishes its own refresh.
+    releaseFirstPost?.()
+    await jest.advanceTimersByTimeAsync(10_000)
+    await first
+
+    expect(h.post.mock.calls).toEqual([
+      ['/fleet/runners/r1/reprobe'],
+      ['/fleet/runners/r2/reprobe'],
+    ])
+    expect(h.reload).toHaveBeenCalledTimes(1)
+    expect(rechecking.value).toBeNull()
+  })
+
+  test('B1: the guard is released, so a re-check started after it finished still works', async () => {
+    const h = harness()
+    h.read.mockImplementation((agent: ThreadAgent) => (agent === 'claude' ? claudeChoice(T0) : codexChoice(T0)))
+    const { recheck, rechecking } = useAgentRecheck(h.reload, h.read, { intervalMs: 1, attempts: 1 })
+
+    await recheck('codex')
+    await recheck('claude')
+
+    expect(h.post.mock.calls).toEqual([
+      ['/fleet/runners/r1/reprobe'],
+      ['/fleet/runners/r2/reprobe'],
+      ['/fleet/runners/r3/reprobe'],
+    ])
     expect(rechecking.value).toBeNull()
   })
 })

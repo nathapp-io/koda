@@ -93,4 +93,15 @@ describe('AgentReadinessNotice (US-008)', () => {
     expect(readiness(app)).toBeUndefined()
     app.unmount()
   })
+
+  // B1 (review round 2): only one re-check runs at a time, so a notice is locked while another
+  // agent's re-check is in flight — without claiming that this agent itself is being re-checked.
+  test('B1: disabled locks the button while another agent\'s re-check runs and keeps this copy', () => {
+    const app = mountNotice({ disabled: true })
+    const button = must(app.one('[data-testid="agent-recheck-codex"]'), 're-check button')
+    expect(button.props.disabled).toBe(true)
+    expect(app.textOf(button)).toContain(enI18n().t('fleet.threads.new.agent.recheck'))
+    expect(app.textOf(button)).not.toContain(enI18n().t('fleet.threads.new.agent.rechecking'))
+    app.unmount()
+  })
 })

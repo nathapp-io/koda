@@ -51,6 +51,14 @@ export function useAgentRecheck(
   const { t } = useI18n()
   const { intervalMs = AGENT_RECHECK_INTERVAL_MS, attempts = AGENT_RECHECK_ATTEMPTS } = options
   const rechecking = ref<ThreadAgent | null>(null)
+  /**
+   * One re-check at a time. `rechecking` names a single agent, so two overlapping re-checks cannot
+   * both be represented: the one that finishes first would clear the state while the other is still
+   * posting, and a page that keys the disabled state off it would take a second click for the same
+   * agent. The pages also disable every notice while a re-check runs; this guard is what makes that
+   * a defence rather than the only enforcement.
+   */
+  let inFlight = false
 
   /**
    * Re-reads the runner list until the agent's probe is worth showing differently. A reload that fails
@@ -75,9 +83,13 @@ export function useAgentRecheck(
   }
 
   async function recheck(agent: ThreadAgent): Promise<void> {
+    // A second click while one re-check runs is dropped: it would post again and start a second
+    // polling loop whose finish clears the shared state under the first one.
+    if (inFlight) return
     const probe = read(agent)?.probe
     const checkedBefore = probe?.checkedAt ?? null
     // Set before the first request, so the button is disabled while the posts themselves are in flight.
+    inFlight = true
     rechecking.value = agent
     try {
       for (const runnerId of probe?.runnerIds ?? []) {
@@ -92,6 +104,7 @@ export function useAgentRecheck(
     }
     finally {
       rechecking.value = null
+      inFlight = false
     }
   }
 
