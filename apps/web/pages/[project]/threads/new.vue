@@ -5,10 +5,12 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { extractApiError } from '~/composables/useApi'
 import type { ProjectSkillDto } from '~/composables/useProjectSkills'
 import { buildThreadCreateSchema, eligibleAgents, isAgentChoiceKey, threadModeChoices, toCreateThreadBody } from '~/lib/thread-create'
-import type { ThreadCreateFormValues } from '~/lib/thread-create'
+import type { AgentChoiceKey, ThreadCreateFormValues } from '~/lib/thread-create'
 import type { ChatThreadKind } from '~/lib/thread-types'
 import { repoChoices } from '~/lib/fleet-repo-choices'
 import { apiPath } from '~/lib/api-path'
+import AgentReadinessNotice from '~/components/fleet/threads/AgentReadinessNotice.vue'
+import { useAgentRecheck } from '~/composables/useAgentRecheck'
 
 definePageMeta({ layout: 'default' })
 
@@ -39,6 +41,23 @@ const chosenAgent = computed(() => agents.value.find(choice => choice.agent === 
   ?? agents.value[0])
 const models = computed(() => chosenAgent.value?.models ?? [])
 const efforts = computed(() => chosenAgent.value?.efforts ?? [])
+/**
+ * US-009: every not-ready agent the form can offer, with the probe detail that explains it. One
+ * notice each, shown under the picker whichever agent is chosen — a native-chosen form still tells
+ * the person that Codex timed out and can be re-checked.
+ */
+const readinessNotices = computed(() => agents.value.filter(choice => choice.probe !== undefined))
+/** The global Re-check gate: it is the key `POST /fleet/runners/:id/reprobe` requires. */
+const { permissions: globalPermissions } = useGlobalPermissions()
+const canRecheck = computed(() => globalPermissions.value.has('fleet.runner.update'))
+/**
+ * US-009: the Re-check reads the form's own agent list back, and `options.load` re-reads both fleet
+ * lists in place (it never blanks them, so `watch(agents)` keeps the chosen agent where it is).
+ */
+const { recheck, rechecking } = useAgentRecheck(
+  options.load,
+  agent => agents.value.find(choice => choice.agent === agent),
+)
 /**
  * Create needs a ready agent, not a model: a native backend always has one (readiness means a runner
  * offers a native model), while a ready ACP agent may advertise none and run on its own default.
@@ -93,6 +112,12 @@ function chooseAgent(agent: string): void {
   const choice = agents.value.find(option => option.agent === agent)
   setFieldValue('model', choice?.models[0] ?? '')
   setFieldValue('effort', '')
+}
+
+/** US-009: re-check the agent whose notice was clicked — never the one the form has chosen. */
+function recheckAgent(agent: AgentChoiceKey): void {
+  if (!isAgentChoiceKey(agent) || agent === 'native') return
+  void recheck(agent)
 }
 
 onMounted(async () => {
@@ -190,6 +215,15 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
           <FormMessage />
         </FormItem>
       </FormField>
+      <!-- US-009: one readiness notice per not-ready agent under the picker, whichever agent is chosen. -->
+      <AgentReadinessNotice
+        v-for="notice in readinessNotices"
+        :key="notice.agent"
+        :choice="notice"
+        :can-recheck="canRecheck"
+        :rechecking="rechecking === notice.agent"
+        @recheck="recheckAgent(notice.agent)"
+      />
       <FormField v-if="!isProject" v-slot="{ componentField }" name="mode">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.mode.label') }}</FormLabel>
