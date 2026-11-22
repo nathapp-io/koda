@@ -3,7 +3,7 @@
   "feature": "e2e-1121-acp-probe",
   "branchName": "feat/e2e-1121-acp-probe",
   "createdAt": "2026-11-22T03:15:28.895Z",
-  "updatedAt": "2026-11-22T03:32:36.815Z",
+  "updatedAt": "2026-11-22T03:38:57.352Z",
   "userStories": [
     {
       "id": "US-001",
@@ -99,14 +99,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Local probe enhancement with injected clock, but session lifecycle and authentication-required classification mandate the security override."
+        "reasoning": "Local probe enhancement with injected clock, but session lifecycle and authentication-required classification mandate the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/capabilities/acp-agent-probe.ts",
@@ -127,7 +130,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f2d14cf1ba1c49c28101933fe5c4c10acdfa92ca"
     },
     {
       "id": "US-003",
