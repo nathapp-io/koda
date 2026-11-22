@@ -291,6 +291,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   });
 
   let stopReason: StopReason | null = null;
+  let wakeLoop = (): void => undefined;
+  const reprobe = async (): Promise<void> => {
+    try {
+      if (await reporter.refresh()) wakeLoop();
+    } catch (error) {
+      // D102, Review focus 3: nax upgraded or removed under a running daemon; the last report stays.
+      log.warn('capability probe failed; keeping the last report', { error: errorMessage(error) });
+    }
+  };
   const loop = new SyncLoop({
     client, journal, bootId, daemonVersion: DAEMON_VERSION,
     // Fleet S5a B1-R1: a THREAD job holds no nax slot; the server counts thread slots.
@@ -308,6 +317,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       for (const error of errors) log.warn('provider key refused', { jobId: error.jobId, providerId: error.providerId, reason: error.reason });
     },
     onArchivedThreads: (ids) => { archivedThreadIds = [...ids]; },
+    onReprobe: () => { void reprobe(); },
     onTokens: (requested, granted, errors) => {
       tokens.apply(requested, granted, errors, Date.now());
       for (const error of errors) log.warn('git token refused', { jobId: error.jobId, reason: error.reason });
@@ -318,19 +328,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     },
     log, sleep, random: Math.random, nowMs: () => performance.now(), minGapMs: tuning.syncMinGapMs,
   });
+  wakeLoop = () => loop.wake();
   deferredAck.sink = (ack) => { loop.queueAck(ack); };
   const stopNeedListener = tokens.onNeed(() => loop.wake());
   const stopProviderKeyNeedListener = providerKeys.onNeed(() => loop.wake());   // US-008: a new request wakes the poll
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
-
-  const reprobe = async (): Promise<void> => {
-    try {
-      if (await reporter.refresh()) loop.wake();
-    } catch (error) {
-      // D102, Review focus 3: nax upgraded or removed under a running daemon; the last report stays.
-      log.warn('capability probe failed; keeping the last report', { error: errorMessage(error) });
-    }
-  };
 
   const timers = [
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),

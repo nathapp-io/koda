@@ -31,12 +31,13 @@ interface FakeServer {
   mode: { status: number; capacity: number };
   logs: Map<string, string>;
   order: string[];
+  reprobeOnSync?: number;
   stop(): void;
 }
 
-function fakeServer(): FakeServer {
+function fakeServer(options: { reprobeOnSync?: number } = {}): FakeServer {
   const acked = new Map<string, number>();
-  const server: FakeServer = { url: 'https://runner.test', fetch: async () => new Response('not ready', { status: 503 }), syncs: [], uploads: [], queue: [], mode: { status: 200, capacity: 2 }, logs: new Map(), order: [], stop: () => undefined };
+  const server: FakeServer = { url: 'https://runner.test', fetch: async () => new Response('not ready', { status: 503 }), syncs: [], uploads: [], queue: [], mode: { status: 200, capacity: 2 }, logs: new Map(), order: [], ...options, stop: () => undefined };
   // Inject the transport: these daemon assertions need no listening socket.
   server.fetch = async (rawUrl, init) => {
     const req = new Request(rawUrl, init);
@@ -61,7 +62,7 @@ function fakeServer(): FakeServer {
       });
       const commands = server.queue.splice(0);
       if (jobAcks.length === 0 && commands.length === 0) await Bun.sleep(25);
-      return envelope({ jobAcks, commands, gitTokens: [], gitTokenErrors: [], unknownJobIds: [] });
+      return envelope({ jobAcks, commands, gitTokens: [], gitTokenErrors: [], unknownJobIds: [], ...(server.reprobeOnSync === server.syncs.length ? { reprobe: true } : {}) });
     }
     const logRoute = /^\/api\/fleet\/runner\/jobs\/([^/]+)\/logs\/(run|stdout|stderr)$/.exec(url.pathname);
     if (logRoute && req.method === 'PUT') {
@@ -529,6 +530,23 @@ describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
 
   // thread-agents-modes US-002: the one seam the daemon adds — an ACP probe the production `run` command supplies,
   // so a real sync advertises its agents without this host having any of them installed.
+  test('AC-4: reprobes after the second sync response without waiting for the periodic timer', async () => {
+    const server = fakeServer({ reprobeOnSync: 2 });
+    const nax = new FakeNaxCli({ version: '0.83.1' });
+    const p = await probed(server, nax, { socketDir: await shortSocketDir() });
+    let probes = 0;
+    const daemon = await p.start({ acpProbe: async () => { probes += 1; return []; }, tuning: { ...tuning, capabilityProbeMs: 60_000 } });
+    try {
+      await waitFor(() => server.syncs.length >= 1);
+      const beforeSecondResponse = probes;
+      await waitFor(() => server.syncs.length >= 2 && probes > beforeSecondResponse);
+      expect(probes).toBe(beforeSecondResponse + 1);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
   test('US-002 AC-14: an injected acpProbe puts its logged-in agents in the synced threadBackends, with no host login', async () => {
     const server = fakeServer();
     // A unix socket path is at most 100 bytes, so the socket dir sits directly in $TMPDIR: a deep TMPDIR still fits.
