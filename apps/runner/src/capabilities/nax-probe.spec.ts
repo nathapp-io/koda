@@ -388,6 +388,41 @@ describe('NaxCapabilityProbe ACP agents (thread-agents-modes US-002)', () => {
   });
 });
 
+describe('NaxCapabilityProbe ACP probe warnings (US-004)', () => {
+  const T1 = '2026-11-22T02:00:00.000Z';
+  const KEPT = { agent: 'codex' as const, launchable: true, loggedIn: true, models: [], efforts: [], checkedAt: T1 };
+  const KEPT_FAILED = { ...KEPT, lastError: { code: 'timeout' as const, at: T1 } };
+
+  test('AC-11: a kept offer stays in threadBackends.acp', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], async () => [KEPT_FAILED]).run();
+    expect(capabilities.threadBackends?.acp).toContain('codex');
+  });
+
+  test('AC-12: a kept offer warns with the code and the time the agent was confirmed', async () => {
+    const home = await naxHome([]);
+    const { warnings } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], async () => [KEPT_FAILED]).run();
+    expect(warnings).toContain('ACP agent codex probe failed (timeout); reporting the offer confirmed at 2026-11-22T02:00:00.000Z');
+  });
+
+  test('AC-13: an offer that was not kept warns that the agent is not ready, with the probe code only', async () => {
+    const home = await naxHome([]);
+    const cursor = {
+      agent: 'cursor' as const, launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: T1,
+      lastError: { code: 'unavailable' as const, at: T1 },
+    };
+    const { warnings, capabilities } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], async () => [cursor]).run();
+    expect(warnings).toContain('ACP agent cursor is not ready: probe unavailable');
+    expect(capabilities.threadBackends?.acp).toEqual([]);
+  });
+
+  test('a confirmed offer without a lastError adds no warning', async () => {
+    const home = await naxHome([]);
+    const { warnings } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], async () => [KEPT]).run();
+    expect(warnings).toEqual([]);
+  });
+});
+
 describe('NaxCapabilityProbe interaction checks (#207 spec §3.2)', () => {
   test('a failing base config is reported as capabilities.interaction and warned once, with the message', async () => {
     const home = await naxHome(['fast']);

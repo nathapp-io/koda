@@ -1,5 +1,6 @@
 import { ConfigError, loadRunnerConfig, resolveHome } from '../config/runner-config';
-import { probeAcpAgents } from '../capabilities/acp-agent-probe';
+import { probeAcpAgents, type AcpAgentProbe } from '../capabilities/acp-agent-probe';
+import { createAcpOfferMemory } from '../capabilities/acp-offer-memory';
 import type { DaemonHandle, DaemonOptions } from '../daemon/daemon';
 import { errorMessage, StartupError } from '../errors';
 import { IdentityError, readIdentity } from '../identity/identity-store';
@@ -11,6 +12,11 @@ export interface RunDeps {
   readonly log: Logger;
   readonly start: (options: DaemonOptions) => Promise<DaemonHandle>;
   readonly onSignal: (signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP', handler: () => void) => void;
+  /**
+   * US-004: the probe the offer memory wraps. Production leaves it unset, which probes the real ACP agents; a spec
+   * injects a fake so it can watch the remembered offer without starting an agent.
+   */
+  readonly acpProbe?: AcpAgentProbe;
 }
 
 /** Exit codes: 0 clean stop (also a server stop under launchd, which must not be restarted), 1 not enrolled, bad config, nax missing or too old, or workspace untrusted, 2 stopped by the server (426 or 401). */
@@ -25,7 +31,11 @@ export async function runCommand(homeOverride: string | undefined, deps: RunDeps
       throw new ConfigError(`identity.json was issued by ${identity.serverUrl} but runner.json points at ${config.serverUrl}`);
     }
     // thread-agents-modes US-002: the production runner is the one caller that advertises its ACP agents.
-    daemon = await deps.start({ home, config, identity, log: deps.log, acpProbe: probeAcpAgents });
+    // US-004: wrapped in the offer memory, so one failed probe reports the last confirmed offer instead of dropping
+    // the agent from `threadBackends.acp` for a whole probe interval.
+    daemon = await deps.start({
+      home, config, identity, log: deps.log, acpProbe: createAcpOfferMemory(deps.acpProbe ?? (() => probeAcpAgents())),
+    });
   } catch (error) {
     if (error instanceof ConfigError || error instanceof IdentityError || error instanceof StartupError) {
       deps.log.error(error.message);

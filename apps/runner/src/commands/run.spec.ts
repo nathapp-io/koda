@@ -7,7 +7,8 @@ import { createMemoryLogger } from '../logger';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { runCommand, type RunDeps } from './run';
 import { NaxUnavailableError } from '../nax/nax-cli';
-import { probeAcpAgents } from '../capabilities/acp-agent-probe';
+import { probeAcpAgents, type AcpAgentProbe } from '../capabilities/acp-agent-probe';
+import type { ThreadAcpOffer } from '@nathapp/fleet-protocol';
 import type { DaemonHandle, DaemonOptions } from '../daemon/daemon';
 
 const tmp = makeTempDirs();
@@ -129,15 +130,43 @@ describe('runCommand', () => {
     expect(await runCommand(home.dir, deps)).toBe(1);
     expect(h.log.lines.some((l) => l.level === 'error' && l.message === 'koda-runner needs nax 0.83.1 or newer (found 0.80.0)')).toBe(true);
   });
-  // thread-agents-modes US-002: the production runner is the only caller that probes ACP agents, and it hands the
-  // daemon the real probe — never a stub — so a sync can advertise claude, codex and cursor.
-  test('US-002 AC-13: the run command starts the daemon with probeAcpAgents itself as its acpProbe', async () => {
+  // US-004: the production runner still wraps its ACP probe in the offer memory, so one failed probe reports the
+  // last confirmed offer instead of dropping the agent from threadBackends.acp until the next probe.
+  test('US-004 AC-14: with an injected base probe the started daemon reports the remembered offer after a timeout', async () => {
+    const home = await enrolledHome();
+    const h = harness(() => undefined);
+    let calls = 0;
+    const base: AcpAgentProbe = async () => {
+      const first = calls === 0;
+      calls += 1;
+      const at = new Date().toISOString();
+      const offer: ThreadAcpOffer = {
+        agent: 'codex', launchable: true, loggedIn: first ? true : null, models: [], efforts: [], checkedAt: at,
+        ...(first ? {} : { lastError: { code: 'timeout' as const, at } }),
+      };
+      return [offer];
+    };
+    const finished = runCommand(home.dir, { ...h.deps, acpProbe: base });
+    await Promise.race([h.ready, finished]);
+    const acpProbe = h.started[0]?.acpProbe;
+    expect(acpProbe).toBeDefined();
+    await acpProbe?.();
+    const codex = (await acpProbe?.())?.find((offer) => offer.agent === 'codex');
+    expect(codex?.loggedIn).toBe(true);
+    expect(codex?.lastError?.code).toBe('timeout');
+    h.signals.get('SIGTERM')?.();
+    expect(await finished).toBe(0);
+  });
+  // US-004: a runner that injects no base probe still advertises its ACP agents, and the daemon's probe is the offer
+  // memory over `probeAcpAgents` — never a stub, and never the raw probe (which would drop a remembered offer).
+  test('US-004 AC-15: without an injected base probe the started daemon still gets a probe function', async () => {
     const home = await enrolledHome();
     const h = harness(() => undefined);
     const finished = runCommand(home.dir, h.deps);
     await Promise.race([h.ready, finished]);
     expect(h.started).toHaveLength(1);
-    expect(h.started[0]?.acpProbe).toBe(probeAcpAgents);
+    expect(typeof h.started[0]?.acpProbe).toBe('function');
+    expect(h.started[0]?.acpProbe).not.toBe(probeAcpAgents);
     h.signals.get('SIGTERM')?.();
     expect(await finished).toBe(0);
   });

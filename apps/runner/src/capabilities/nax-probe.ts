@@ -33,6 +33,20 @@ function interactionWarning(subject: string, interaction: Interaction): string {
   return `interaction ${plugin ?? 'unknown'} failed for ${subject}: ${code ?? 'INTERACTION_INIT_FAILED'}${detail}`;
 }
 
+/**
+ * US-004: why one ACP agent is not usable right now, in the runner's own words — the agent's stderr never leaves this
+ * host, so only the code and the time are reported. A kept offer (`loggedIn: true`, from the offer memory) is
+ * launchable and stays in `acp`, so its wording says the agent is still offered and when it was last confirmed.
+ */
+function acpWarning(offer: ThreadAcpOffer): string[] {
+  const error = offer.lastError;
+  if (error === undefined) return [];
+  if (offer.loggedIn === true && offer.checkedAt !== undefined) {
+    return [`ACP agent ${offer.agent} probe failed (${error.code}); reporting the offer confirmed at ${offer.checkedAt}`];
+  }
+  return [`ACP agent ${offer.agent} is not ready: probe ${error.code}`];
+}
+
 export interface EmptyDir {
   readonly dir: string;
   remove(): Promise<void>;
@@ -238,11 +252,17 @@ export class NaxCapabilityProbe implements CapabilityProbe {
   /**
    * thread-agents-modes US-002: a failed ACP probe reports no agents rather than stopping the report — the runner's
    * other capabilities (and its threads) stay available, and the warning says why no agent is offered.
+   *
+   * US-004: a failed agent's offer carries a code, and the offer memory may have kept the last confirmed one. One
+   * warning per such offer: a kept offer says when it was confirmed, an unusable one says it is not ready. Only the
+   * code travels — never the agent's own error text, which stays on this host. The texts change only when the state
+   * changes, so `CapabilityReporter` logs each state once.
    */
   private async acpAgents(): Promise<{ offers: ThreadAcpOffer[]; warnings: string[] }> {
     if (this.deps.acpProbe === undefined) return { offers: [], warnings: [] };
     try {
-      return { offers: await this.deps.acpProbe(), warnings: [] };
+      const offers = await this.deps.acpProbe();
+      return { offers, warnings: offers.flatMap(acpWarning) };
     } catch (error) {
       return { offers: [], warnings: [`ACP agent probe failed (${sanitizeDiagnostic(errorMessage(error))}); no ACP agents reported`] };
     }
