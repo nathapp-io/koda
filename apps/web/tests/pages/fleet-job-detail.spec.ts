@@ -221,6 +221,8 @@ export const jobFixture = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   state: 'RUNNING',
   stateReason: null,
   requestedById: 'u1',
+  requesterName: null,
+  threadTitle: null,
   queuedAt: '2026-10-01T00:00:00.000Z',
   assignedAt: null,
   startedAt: null,
@@ -462,6 +464,18 @@ describe('review and config job headers', () => {
     await fix.settle()
     expect(fix.app.one('[data-stub="page-header"]')?.props.title).toBe('PR #42')
     fix.app.unmount()
+  })
+
+  test('AC-3: a THREAD job shows its title in PageHeader and its API requester', async () => {
+    const thread = mountEnginePage({
+      job: jobFixture({ command: 'THREAD', feature: 'thread-cm1', threadTitle: 'Fix login flow', requesterName: 'codex-bot' }),
+      records: [],
+    })
+    await thread.settle()
+    expect(thread.app.one('[data-stub="page-header"]')?.props.title).toBe('Fix login flow')
+    expect(thread.app.text()).toContain('codex-bot')
+    expect(thread.app.text()).not.toContain('thread-cm1')
+    thread.app.unmount()
   })
 
   test('REVIEW header shows PR #42 and config header keeps the translated nax config label', async () => {

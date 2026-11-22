@@ -4,7 +4,8 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, fixDispatchQuery, isActiveJobState, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, reviewPrNumber, safePrUrl, showFixAction, wipPushStatus } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, fixDispatchQuery, isActiveJobState, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, showFixAction, wipPushStatus } from '~/lib/fleet-jobs'
+import { jobFeatureLabel, jobRequesterLabel } from '~/lib/fleet-job-labels'
 import type { JobViewer } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
@@ -84,14 +85,7 @@ const viewer = computed<JobViewer>(() => ({
 const canEditConfig = computed(() => permissions.value.has('fleet.job.config.edit'))
 /** S3 §6: config jobs run no nax session; the page shows the config panel instead of progress, stories and cost. */
 const configJob = computed(() => job.value !== null && isConfigJob(job.value))
-const jobTitle = computed(() => {
-  const current = job.value
-  if (!current) return ''
-  if (configJob.value) return t('fleet.jobs.configFeature')
-  if (current.command !== 'REVIEW' && current.command !== 'FIX') return current.feature
-  const prNumber = reviewPrNumber(current.feature)
-  return prNumber === null ? current.feature : `PR #${prNumber}`
-})
+const jobTitle = computed(() => job.value === null ? '' : jobFeatureLabel(job.value, t))
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
 const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canDispatch)
@@ -360,7 +354,7 @@ const formatTime = (iso: string | null): string => dates.dateTime(iso)
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ job.runnerId === null ? t('fleet.jobs.detail.unassigned') : options.settled.value ? options.runnerName(job.runnerId) : t('common.loading') }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ jobRequesterLabel(job, people.nameOf, t) }}</dd></div>
         <div v-if="!configJob && job.profiles.length > 0"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.join(' > ') }}</dd></div>
         <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.queuedAt') }}</dt><dd>{{ formatTime(job.queuedAt) }}</dd></div>

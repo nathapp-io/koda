@@ -17,12 +17,65 @@ const liveHandlers = (source: string): string => {
   return source.slice(start, source.indexOf('\n})', start))
 }
 
+const listFixture = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
+  id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'login', planFrom: null, profiles: [], maxCostUsd: '1',
+  bashMode: 'raw', approvalTimeoutSec: 600, pendingApprovals: 0, selectorLabels: [], pinnedRunnerId: null,
+  runnerId: null, leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u1', requesterName: null, threadTitle: null,
+  queuedAt: '2026-10-01T00:00:00Z', assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null,
+  naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0',
+  lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null,
+  resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, scheduleId: null, coalescedCount: 0,
+  configEdit: null, workflow: null, ...over,
+})
+
+function mountJobs(jobs: FleetJobDto[], memberName: (id: string) => string | null = () => null) {
+  const noop = async (): Promise<void> => undefined
+  return mountSfc(webFile('pages', '[project]', 'fleet', 'index.vue'), {
+    globals: {
+      useRoute: () => ({ params: { project: 'demo' } }),
+      useI18n: () => enI18n(), useAppToast: () => ({ error: jest.fn(), success: jest.fn() }),
+      useFleetJobs: () => ({ jobs: ref(jobs), total: ref(jobs.length), hasNext: ref(false), load: async () => true }),
+      useFleetDispatchOptions: () => ({ repos: ref([]), runners: ref([]), repoName: () => 'repo', runnerName: () => null, load: noop }),
+      useProjectMemberNames: () => ({ members: ref([]), nameOf: memberName, load: noop }),
+      useProjectPermissions: () => ({ permissions: ref({ has: () => true }) }),
+      useProjectEvents: noop,
+    },
+    components: { ...uiStubs, RepoConfigList: { template: '<div />' } },
+  })
+}
+
 describe('fleet jobs list', () => {
+  test('AC-1: a THREAD row shows its title and API requester instead of identifiers', async () => {
+    const mounted = mountJobs([listFixture({ command: 'THREAD', feature: 'thread-cm1', threadTitle: 'Fix login flow', requesterName: 'codex-bot' })])
+    try {
+      await new Promise((resolve) => { setImmediate(resolve) })
+      const row = mounted.one('[data-testid="fleet-job-row-j1"]')
+      expect(row).toBeDefined()
+      if (!row) throw new Error('THREAD job row missing')
+      expect(mounted.textOf(row)).toContain('Fix login flow')
+      expect(mounted.textOf(row)).toContain('codex-bot')
+      expect(mounted.textOf(row)).not.toContain('thread-cm1')
+      expect(mounted.textOf(row)).not.toContain('Unknown member')
+    }
+    finally { mounted.unmount() }
+  })
+
+  test('AC-2: a requester who left is labelled Former member', async () => {
+    const mounted = mountJobs([listFixture({ requestedById: 'gone', requesterName: null })])
+    try {
+      await new Promise((resolve) => { setImmediate(resolve) })
+      const row = mounted.one('[data-testid="fleet-job-row-j1"]')
+      expect(row).toBeDefined()
+      if (!row) throw new Error('RUN job row missing')
+      expect(mounted.textOf(row)).toContain('Former member')
+    }
+    finally { mounted.unmount() }
+  })
   test('renders RUN, REVIEW, and FIX rows with the appropriate feature title and command label', async () => {
     const fixture = (id: string, command: FleetJobDto['command'], feature: string): FleetJobDto => ({
       id, projectId: 'p1', repoId: 'r1', ref: 'main', command, feature, planFrom: null, profiles: [], maxCostUsd: '1',
       bashMode: 'raw', approvalTimeoutSec: 600, pendingApprovals: 0, selectorLabels: [], pinnedRunnerId: null,
-      runnerId: null, leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u1', queuedAt: '2026-10-01T00:00:00Z',
+      runnerId: null, leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u1', requesterName: null, threadTitle: null, queuedAt: '2026-10-01T00:00:00Z',
       assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null,
       naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', lastHeartbeatAt: null,
       finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
@@ -127,7 +180,7 @@ describe('fleet jobs list', () => {
 
   test('the table scrolls sideways on narrow screens and names a requester who left', () => {
     expect(list).toMatch(/<div class="overflow-x-auto">\s*<Table data-testid="fleet-jobs-table">/)
-    expect(list).toContain("people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember')")
+    expect(list).toContain('jobRequesterLabel(job, people.nameOf, t)')
   })
 
   test('every member gets a Budgets button next to Dispatch (D187)', () => {
@@ -173,7 +226,7 @@ describe('fleet jobs list', () => {
   })
 
   test('S3 §6: config jobs show a readable feature without changing RUN/REVIEW/FIX rendering', () => {
-    expect(list).toContain("if (isConfigJob(job)) return t('fleet.jobs.configFeature')")
+    expect(list).toContain('jobFeatureLabel(job, t)')
     expect(list).toContain("codeLabel(t, te, 'fleet.command', job.command)")
   })
 
