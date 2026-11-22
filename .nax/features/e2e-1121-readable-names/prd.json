@@ -1,0 +1,532 @@
+{
+  "project": "koda",
+  "feature": "e2e-1121-readable-names",
+  "branchName": "feat/e2e-1121-readable-names",
+  "createdAt": "2026-11-22T09:16:55.665Z",
+  "updatedAt": "2026-11-22T09:16:55.665Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add shared event label readers",
+      "description": "**Goal** — Add reusable batch readers for principal display names and ticket ref/title labels without changing existing consumers yet.\n\n**Motivation** — The dashboard spans projects, while the web's name lookups (`useProjectMemberNames`, `useProjectAgentNames`) are per project, so the API has to send the names.\n\n**Approach** — New `apps/api/src/common/utils/event-labels.ts`. It takes the Prisma client as an argument and imports only the `PrismaClient` type, as `common/utils/advisory-lock.ts` does; it is called only from `*.repository.ts` files (`prisma-home.repository.ts`, `prisma-timeline.repository.ts`, `prisma-fleet-job-labels.repository.ts`), so Prisma access stays in the repository layer:\n\n- Both functions drop duplicate and empty-string ids, and make no query when nothing is left.\n- `readPrincipalNames` issues one `user.findMany({ where: { id: { in: ids } }, select: { id, name, email } })` and one `agent.findMany({ where: { id: { in: ids } }, select: { id, name } })`. An id found in neither table is absent from the map.\n- `readTicketLabels` issues one `ticket.findMany({ where: { id: { in: ids } }, select: { id, number, title, project: { select: { key: true } } } })`. The ref is `${project.key}-${number}`.\n\nThe select notation above names selected fields; implement Prisma select flags as `true`. Mirror the user's trimmed name/email-local-part and agent-name precedent, but do not copy that reader's missing-principal prose. A soft-deleted agent keeps its name. A ticket id that no longer exists has no map entry; soft-deleted tickets are deliberately included. Errors propagate normally with no catch.\n\n**Scope** — In: the two new utility functions and their co-located fake-client unit tests. Out: home/timeline/fleet wiring belongs to US-002/US-003/US-004; DTOs, generated contracts and web rendering belong to downstream stories. No existing module or test needs modification for this story.\n\n**Interface** —\n```ts\nimport type { PrismaClient } from '../../generated/prisma/client';\n\nexport type EventLabelClient = Pick<PrismaClient, 'user' | 'agent' | 'ticket'>;\n\nexport interface TicketLabel { ref: string; title: string }\n\n/** Display names by principal id: a user's trimmed name, else the email local part; an agent's name. Never an email. */\nexport async function readPrincipalNames(client: EventLabelClient, ids: readonly string[]): Promise<Map<string, string>>;\n\n/** `KEY-N` ref and title by ticket id. Soft-deleted tickets are included: an event about a deleted ticket still names it. */\nexport async function readTicketLabels(client: EventLabelClient, ids: readonly string[]): Promise<Map<string, TicketLabel>>;\n```\n\n**Tests** — Write `apps/api/src/common/utils/event-labels.spec.ts` first, using fake `user`, `agent` and `ticket` delegates whose findMany methods are vi spies. Assert the real functions' returned maps and query arguments, including duplicate/empty ids and no-query empty input. No database is needed.",
+      "acceptanceCriteria": [
+        "[unit] readPrincipalNames(client, ['u1']) returns a map with u1 -> Alice when client.user.findMany resolves [{ id: 'u1', name: '  Alice ', email: 'alice@example.com' }] and client.agent.findMany resolves [].",
+        "[unit] readPrincipalNames(client, ['u2']) returns u2 -> bob when the user row is { id: 'u2', name: null, email: 'bob@example.com' }.",
+        "[unit] readPrincipalNames(client, ['u3']) returns u3 -> carol when the user row is { id: 'u3', name: '   ', email: 'carol@example.com' }.",
+        "[unit] readPrincipalNames(client, ['a1']) returns a1 -> codex-bot when client.user.findMany resolves [] and client.agent.findMany resolves [{ id: 'a1', name: 'codex-bot' }].",
+        "[unit] readPrincipalNames(client, ['gone']) returns a map with no gone key when both reads resolve [].",
+        "[unit] readPrincipalNames(client, ['u1', 'u1', '']) calls client.user.findMany once, with where: { id: { in: ['u1'] } }.",
+        "[unit] readPrincipalNames(client, []) resolves an empty map, and calls neither client.user.findMany nor client.agent.findMany.",
+        "[unit] readTicketLabels(client, ['t1']) returns t1 -> { ref: 'SB-34', title: 'Fix login' } when client.ticket.findMany resolves [{ id: 't1', number: 34, title: 'Fix login', project: { key: 'SB' } }].",
+        "[unit] readTicketLabels(client, ['t1']) calls client.ticket.findMany with a where of exactly { id: { in: ['t1'] } }, so soft-deleted tickets are not filtered out.",
+        "[unit] readTicketLabels(client, []) resolves an empty map and does not call client.ticket.findMany."
+      ],
+      "tags": [
+        "api",
+        "readable-names",
+        "persistence"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two small new functions with generated-client typing and batched persistence reads; established display-name and Pick patterns, with no security-policy changes."
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/ticket-notification-reads.repository.ts",
+        "apps/api/src/common/utils/advisory-lock.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/src/common/utils/event-labels.ts",
+        "apps/api/src/common/utils/event-labels.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "readTicketLabels(client, ['t1', 't1', '']) queries tickets with exactly ['t1'] in where.id.in.",
+        "readPrincipalNames(client, ['']) returns an empty map without querying either principal table.",
+        "readPrincipalNames returns a soft-deleted agent's retained display name when that agent is among the requested ids."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Enrich home activity with actor names and ticket labels",
+      "description": "**Goal** — Return actorName, ticketRef and ticketTitle on home activity rows and document them in the generated API/CLI contract.\n\n**Motivation** — `buildHomeView` in `apps/api/src/home/home.types.ts` maps each activity row to `{ id, eventType, projectSlug, action, actorId, ticketId, createdAt }`.\n\n**Approach** —\n- `HomeActivityRow` in `apps/api/src/home/home.types.ts`.\n  - Target: it also has `actorName: string | null`, `ticketRef: string | null` and `ticketTitle: string | null`.\n- `PrismaHomeRepository.findRecentActivity`. Target: after the three reads, it calls `readPrincipalNames` once with every row's `actorId` and `readTicketLabels` once with every non-null `ticketId`, passing `this.prisma.client`, and sets the three fields on every row. A row whose actor or ticket is not in the map gets `null`.\n- `HomeActivityView` (same file) and `HomeActivityDto` (`apps/api/src/home/dto/home-dashboard.dto.ts`).\n  - Target: both also have `actorName: string | null`, `ticketRef: string | null` and `ticketTitle: string | null`, and `buildHomeView` copies them from the row. The DTO declares each with `@ApiProperty(NULLABLE_STRING)` and a description: `actorName` 'Display name of the actor; null when the user or agent no longer exists', `ticketRef` 'Project key + number of the ticket the event is about', `ticketTitle` 'Title of that ticket'.\n\nNormalize decisionEvent.agentId as the existing actorId mapping does; agent/decision rows continue to have null ticketId. Keep project visibility, existing no-project early return, event scan/display limits, ordering, counts and slug fallback unchanged. Use the real US-001 utilities, not separate name rules. Annotate nullable strings using the existing NULLABLE_STRING options with the supplied descriptions.\n\n Run `bun run generate` from the repo root, so that `openapi.json` and the CLI client document the new fields. Check that the regenerated diff carries only these fields.\n\nFailure handling: an unknown actor is null; a missing ticket gives null ticketRef/ticketTitle; a soft-deleted ticket keeps its ref/title. A label read fails (database error): the route fails as any other read on it does today. No partial or fallback response is built.\n\n**Scope** — In: PrismaHomeRepository.findRecentActivity, HomeActivityRow/View, buildHomeView, HomeActivityDto, related tests, generated openapi.json and apps/cli/src/generated/types.gen.ts. Out: shared-reader implementation is US-001; timeline and fleet enrichment are US-003/US-004; home rendering is US-007. A test for a failing label read: it propagates like any other repository error on those routes (no catch is added), so it needs no new handling. The error-propagation acceptance assertion records the Failure Handling contract for review, not a request to author the excluded failure-read test.\n\n**Interface** — HomeActivityRow and HomeActivityView retain their existing fields and add `actorName: string | null`, `ticketRef: string | null`, `ticketTitle: string | null`; HomeActivityDto implements HomeActivityView with those fields exposed as nullable Swagger strings.\n\n**Tests** — Create `apps/api/src/home/prisma-home.repository.activity.spec.ts` for AC-1 through AC-6. Call findRecentActivity(['p1'], 25) with fake Prisma delegates: two ticket rows te1/t1 and te2/gone-t by u1; one agent row by a1; one decision row with agentId gone. Set user rows to [{ id: 'u1', name: 'Alice', email: 'alice@example.com' }], agent rows to [{ id: 'a1', name: 'codex-bot' }], and ticket rows to [{ id: 't1', number: 12, title: 'Fix login', project: { key: 'WEB' } }]. Exercise real helpers, asserting a single principal/ticket batch. In home.types.spec.ts add null fields to existing inline row literals, leave every existing assertion unchanged, and add AC-7/8. Append AC-9/10/11 after the last existing home-api.integration.spec.ts case. Each case creates a CLOSED ticket with the file's ticket() helper in dev's visible project and directly inserts a ticketEvent with ticketId, action TICKET_CREATED, actorType user, source api. The helper writes no event. Clean event then ticket in finally, preserving existing exact counts and seeded event-type assertions. Extend the local HomeSnapshot activity type as needed for the new fields. Use the shared DB gate and run scoped integration checks on the host; sandbox skips are not verification.",
+      "acceptanceCriteria": [
+        "[unit] Given the fake Prisma fixture described above, findRecentActivity(['p1'], 25) returns the te1 ticket event row with actorName: 'Alice', ticketRef: 'WEB-12' and ticketTitle: 'Fix login'.",
+        "[unit] Given that fixture, findRecentActivity returns the agent event row with actorName: 'codex-bot', ticketRef: null and ticketTitle: null.",
+        "[unit] Given that fixture, findRecentActivity returns the decision event row with actorName: null.",
+        "[unit] Given a second ticket event with ticketId: 'gone-t', which ticket.findMany does not return, findRecentActivity returns that row with ticketRef: null and ticketTitle: null.",
+        "[unit] Given that fixture, findRecentActivity calls user.findMany once, with where.id.in holding exactly u1, a1 and gone (in any order).",
+        "[unit] Given that fixture, findRecentActivity calls ticket.findMany once, with where.id.in holding exactly t1 and gone-t (in any order).",
+        "[unit] buildHomeView with one activity row carrying actorName: 'Alice', ticketRef: 'WEB-12', ticketTitle: 'Fix login' returns an activity entry with those three values.",
+        "[unit] buildHomeView with one activity row carrying actorName: null, ticketRef: null, ticketTitle: null returns an activity entry with those three values null.",
+        "[integration] Given a directly inserted TICKET_CREATED event for a CLOSED ticket in dev's visible project, with actorId set to the seeded dev user's id, GET /api/home as dev returns 200 with an activity entry whose ticketRef is that ticket's KEY-N, whose ticketTitle is its title, and whose actorName is dev.",
+        "[integration] After prisma.ticket.update sets that CLOSED ticket's deletedAt, GET /api/home still returns the entry with the same ticketRef and ticketTitle.",
+        "[integration] Given that ticket event's actorId matches no User or Agent row, GET /api/home returns the entry with actorName: null."
+      ],
+      "tags": [
+        "api",
+        "home",
+        "readable-names",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard additive repository-to-view-to-DTO propagation with bounded shared queries, existing unit/DB fixture patterns and generated contract updates; no access-control changes."
+      },
+      "contextFiles": [
+        "apps/api/src/home/prisma-home.repository.ts",
+        "apps/api/src/home/home.types.ts",
+        "apps/api/src/home/home.types.spec.ts",
+        "apps/api/test/integration/home/home-api.integration.spec.ts",
+        "apps/api/src/home/dto/home-dashboard.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/home/prisma-home.repository.activity.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/home/home.types.spec.ts",
+          "reason": "the inline activity row literals gain `actorName`, `ticketRef` and `ticketTitle` (null), because `HomeActivityRow` now requires them. Add this story's AC-7 and AC-8 here. Every existing assertion stays unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/home/home-api.integration.spec.ts",
+          "reason": "append the AC-9 to AC-11 cases after the last existing case. Existing cases assert exact counts over the seeded world (`[['web', 2, 2]]` open tickets, exactly three event types), so each new case creates its ticket with `status: 'CLOSED'` (not open) and deletes the ticket event and the ticket in a `finally`, as the file's AC-1 case cleans up `seedAgentCreate`. Existing cases stay unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the three new `HomeActivityDto` fields."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate` for the three new `HomeActivityDto` fields; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "suggestedCriteria": [
+        "[unit] Given buildHomeView's existing fixture with te1 two days old, ae1 0.1 days old and de1 one day old in project p1 with slug web, adding labels leaves activity.map(e => [e.id, e.projectSlug, e.eventType]) equal to [['ae1', 'web', 'agent_event'], ['de1', 'web', 'decision_event'], ['te1', 'web', 'ticket_event']], preserving the existing newest-first merge and project-slug assertion."
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Enrich project timeline pages with actor and ticket names",
+      "description": "**Goal** — Resolve names and ticket labels for the final project timeline page through the repository without changing pagination or ticket-history behavior.\n\n**Motivation** — The table has no ticket column at all.\n\n**Approach** —\n- `TimelineEvent` in `apps/api/src/memory/timeline.service.ts`.\n  - Target: it also has `actorName: string | null`, `ticketRef: string | null` and `ticketTitle: string | null`.\n- `PrismaTimelineRepository` (`apps/api/src/memory/prisma-timeline.repository.ts`). Target: a new method `findEventLabels(actorIds: readonly string[], ticketIds: readonly string[]): Promise<{ names: Map<string, string>; tickets: Map<string, TicketLabel> }>` that calls `readPrincipalNames` and `readTicketLabels` with `this.prisma.client`.\n- `TimelineService.getProjectTimeline`. Target: each table's rows are mapped with the three fields set to `null`, as today's mapping plus those keys. After the merged page is sliced to `limit`, it calls `findEventLabels` exactly once with the page's actor ids and ticket ids, and returns each event with the three fields filled from the maps (`null` when absent). It is called even for an empty page with two empty arrays (the helpers then make no query).\n- `TimelineService.getTicketHistory`. Target: it sets the three new fields to `null` on every event, because `TimelineEvent` now requires them. It makes no label read; its other behaviour is unchanged.\n\nUse the real US-001 helpers inside the repository; no Prisma access in TimelineService. Keep every existing filter, per-table limit+1 read, comparison, event order, nextCursor and cursor-validation behavior. Label only sliced returned events, not lookahead rows. Missing actor/ticket entries become null; soft-deleted agents retain their names and soft-deleted tickets keep ref/title. Database errors propagate as ordinary read failures, with no catch or partial response. The timeline route has no response DTO, so `openapi.json` does not change.\n\n**Scope** — In: timeline event type, repository read method, project-page enrichment and null-field compatibility in ticket-history mapping and explicitly typed fixtures. Out: reader implementation is US-001; timeline UI is US-007; home/fleet are US-002/US-004. Labels on `TimelineService.getTicketHistory` (it sets the new fields to `null` and makes no label read) and the koda timeline tool output (unchanged). A test for a failing label read: it propagates like any other repository error on those routes (no catch is added), so it needs no new handling.\n\n**Interface** —\n```ts\nfindEventLabels(actorIds: readonly string[], ticketIds: readonly string[]): Promise<{ names: Map<string, string>; tickets: Map<string, TicketLabel> }>\n```\n`TimelineEvent` retains existing fields and adds `actorName: string | null`, `ticketRef: string | null`, `ticketTitle: string | null`. TicketLabel comes from US-001.\n\n**Tests** — In timeline.service.spec.ts add `findEventLabels: vi.fn().mockResolvedValue({ names: new Map(), tickets: new Map() })` to mockTimelineRepo. Add AC-1 to AC-5 there; existing assertions on ids, order and cursors stay unchanged. In prisma-timeline.repository.spec.ts add user/agent/ticket findMany fake delegates and AC-6 through the real readers; existing cases stay unchanged. Create `apps/api/test/integration/memory/timeline-labels.integration.spec.ts` for AC-7 to AC-9 with the real repository/service and shared DB gate; mirror the pagination integration setup, not its stale Jest command. Add null label fields to the typed TimelineEvent fixture in `apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts`; do not change tool output expectations or production formatting. The DB cases must execute under host test:scoped, not merely compile or skip.",
+      "acceptanceCriteria": [
+        "[unit] getProjectTimeline({ projectId: 'p1', limit: 2 }), with the repository returning three ticket events, calls findEventLabels exactly once, with the actor ids and ticket ids of the two returned events only.",
+        "[unit] When findEventLabels resolves names with u1 -> Alice and tickets with t1 -> { ref: 'SB-3', title: 'Fix login' }, the returned event with actorId: 'u1' and ticketId: 't1' has actorName: 'Alice', ticketRef: 'SB-3' and ticketTitle: 'Fix login'.",
+        "[unit] A returned agent event, with an actor the names map lacks, has actorName: null, ticketRef: null and ticketTitle: null.",
+        "[unit] A returned ticket event whose ticketId the tickets map lacks has ticketRef: null and ticketTitle: null.",
+        "[unit] getProjectTimeline with every repository read resolving [] returns events: [] and calls findEventLabels once with two empty arrays.",
+        "[unit] findEventLabels(['u1'], ['t1']) over a fake Prisma client whose user, agent and ticket delegates resolve [{ id: 'u1', name: 'Alice', email: 'a@x.io' }], [] and [{ id: 't1', number: 3, title: 'Fix login', project: { key: 'SB' } }] returns names with u1 -> Alice and tickets with t1 -> { ref: 'SB-3', title: 'Fix login' }, through the real US-001 readers.",
+        "[integration] Given a real PrismaTimelineRepository and a project holding one ticket created by a user named Alice, getProjectTimeline returns that ticket's event with actorName: 'Alice', the ticket's KEY-N as ticketRef, and its title as ticketTitle.",
+        "[integration] Given a real PrismaTimelineRepository, getProjectTimeline returns a ticket event whose actorId matches no User or Agent row with actorName: null.",
+        "[integration] Given a real PrismaTimelineRepository, getProjectTimeline returns an agent event by a soft-deleted agent named retired-bot with actorName: 'retired-bot'."
+      ],
+      "tags": [
+        "api",
+        "timeline",
+        "readable-names",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive enrichment through an existing repository/service seam with fixed pagination invariants and existing DB patterns, not a new pagination architecture."
+      },
+      "contextFiles": [
+        "apps/api/src/memory/timeline.service.ts",
+        "apps/api/src/memory/prisma-timeline.repository.ts",
+        "apps/api/src/memory/timeline.service.spec.ts",
+        "apps/api/test/integration/memory/timeline-pagination.integration.spec.ts",
+        "apps/api/src/memory/timeline.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/memory/timeline-labels.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "getTicketHistory returns all three new label fields as null on each event and never calls findEventLabels, preserving its existing event ordering and ticketId.",
+        "[unit] Given the existing keyset fixture with tk3 at 2026-01-03T00:00:00.000Z, ag2 at 2026-01-02T00:00:00.000Z and tk1 at 2026-01-01T00:00:00.000Z, getProjectTimeline({ projectId: 'p1', limit: 2 }) with label enrichment returns a nextCursor decoding to { createdAt: new Date('2026-01-02T00:00:00.000Z'), id: 'ag2' }, preserving the existing cursor boundary after the merged page is sliced."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/prisma-timeline.repository.spec.ts",
+          "reason": "its fake Prisma client gains `user`, `agent` and `ticket` delegates with `findMany` spies, for the AC-6 case. Existing cases stay unchanged."
+        },
+        {
+          "path": "apps/api/src/memory/timeline.service.spec.ts",
+          "reason": "`mockTimelineRepo` gains `findEventLabels: vi.fn().mockResolvedValue({ names: new Map(), tickets: new Map() })`, because `getProjectTimeline` now calls it on every page. Existing assertions on ids, order and cursors stay unchanged. Add this story's AC-1 to AC-5 here."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+          "reason": "its typed `TimelineEvent` fixture gains `actorName`, `ticketRef` and `ticketTitle` (null), because `TimelineEvent` now requires them; the tool output expectations stay unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Expose fleet requester names and thread titles on list and get",
+      "description": "**Goal** — Add nullable requesterName/threadTitle to fleet job DTOs and enrich list/get with a module-wired batch reader.\n\n**Motivation** — The jobs list and job detail print `people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember')`, where `people` is the project member list, so every agent-requested job (10 live) reads \"Unknown member\".\n\n**Approach** —\n- `FleetJobDto` in `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts`.\n  - Target: it also has `requesterName: string | null` and `threadTitle: string | null` (both `@ApiPropertyOptional({ type: String, nullable: true })`, described 'Display name of the requester; null when the user or agent no longer exists' and 'Title of the thread the job was dispatched from; null when the job has no thread or the thread was deleted'). `FleetJobDto.from` sets both to `null`.\n- New `apps/api/src/fleet/jobs/prisma-fleet-job-labels.repository.ts` (a repository file, since `.nax/rules/api-data.md` confines Prisma access to `*.repository.ts`).\n\nIt calls `readPrincipalNames` once with the jobs' requester ids, and issues one `chatThread.findMany({ where: { id: { in: threadIds } }, select: { id, title } })` with the non-null thread ids (no query when there are none). It is registered as a provider in `FleetJobsModule` and injected as its concrete class, with no token, as `PrismaTimelineRepository` is in `MemoryModule`: it is a read-only escape-hatch query, not an `AbstractPrismaRepository` aggregate.\n\n- `FleetJobsService` constructor.\n  - Target: a 16th, last parameter `@Optional() private readonly labels?: PrismaFleetJobLabelsRepository`, with `Optional` added to the `@nestjs/common` import. The six specs that call `new FleetJobsService(...)` with 15 arguments keep working, because the new parameter is last and optional.\n- `FleetJobsService.list` and `FleetJobsService.get`. Target: each calls `this.labels.read` once with an array of `{ requestedById, threadId }` objects built from its row(s) (not the records themselves) and sets `requesterName` (from `names.get(requestedById)`) and `threadTitle` (from `threads.get(threadId)`, only when `threadId` is non-null) on the returned DTO(s), `null` when absent. With no reader injected, both fields stay `null`. Other routes that return a `FleetJobDto` (cancel, requeue, dispatch, config jobs) are unchanged and keep `null`.\n\nDeduplicate thread ids; use `true` select flags for the selected id/title fields. Do not add deletedAt filtering to principal lookup. Any command with a threadId receives its thread title, not just THREAD. Do not put enrichment inside withPending or withDetail, since those are shared by routes outside scope. Preserve remapPage metadata, pending-approval counts, single-job tickets/configEdit, list summary omissions, and get's existing project-scoped lookup. No changes to requestedByType, stored feature, dispatch or transitions. Label database errors propagate without a catch.\n\n Run `bun run generate` from the repo root, and check that the regenerated diff carries only these fields.\n\n**Scope** — In: DTO defaults/Swagger fields, concrete repository, provider wiring, last optional constructor argument, list/get enrichment, unit/DI/contract tests and generated artifacts. Out: shared reader implementation is US-001; web types/helpers/pages are US-005/US-006. Names on fleet job DTOs returned by cancel, requeue, dispatch and config-job routes: they keep `requesterName` and `threadTitle` `null`. The web reads names from the list and get routes only. A test for a failing label read: it propagates like any other repository error on those routes (no catch is added), so it needs no new handling.\n\n**Interface** —\n```ts\n@Injectable()\nexport class PrismaFleetJobLabelsRepository {\n  constructor(private readonly prisma: PrismaService<PrismaClient>) {}\n\n  /** Requester names by principal id and thread titles by thread id, for one page of jobs. */\n  async read(jobs: ReadonlyArray<{ requestedById: string; threadId: string | null }>): Promise<{ names: Map<string, string>; threads: Map<string, string> }>;\n}\n```\nConstructor addition: `@Optional() private readonly labels?: PrismaFleetJobLabelsRepository`. DTO additions: `requesterName: string | null` and `threadTitle: string | null`.\n\n**Tests** — Create `apps/api/src/fleet/jobs/fleet-jobs.labels.spec.ts` for AC-1 to AC-9. For AC-2 to AC-8 construct FleetJobsService with the existing 15 arguments used by fleet-jobs.service.spec.ts plus the labels stub as argument 16, except the explicit no-reader compatibility case. Check exact projected read input, one call, fields and null fallbacks, and exercise the real US-001 name helper in the new repository fake-client case. In fleet-jobs.module.spec.ts add AC-10 through the no-DB GlobalStubsModule compilation harness; the existing compile case stays unchanged. Assert the resolved service's labels is the same resolved repository instance, so Optional cannot hide missing wiring. In fleet-openapi.contract.spec.ts append AC-11 beside existing FleetJobDto property checks, preserving existing assertions.",
+      "acceptanceCriteria": [
+        "[unit] FleetJobDto.from on any record returns requesterName: null and threadTitle: null.",
+        "[unit] list on a page of one THREAD job with requestedById: 'u1' and threadId: 'th1' calls the labels stub's read exactly once, with exactly [{ requestedById: 'u1', threadId: 'th1' }].",
+        "[unit] When read resolves names with u1 -> Alice and threads with th1 -> Fix login flow, that list row has requesterName: 'Alice' and threadTitle: 'Fix login flow'.",
+        "[unit] A listed job whose threadId is null has threadTitle: null, even when the threads map is not empty.",
+        "[unit] A listed job whose requester the names map lacks has requesterName: null.",
+        "[unit] get for a job with requestedById: 'a1' and threadId: null returns requesterName from the stub's names map (a1 -> codex-bot) and calls read once.",
+        "[unit] list on a page of one PLAN job with threadId: 'th1', when threads maps th1 -> Fix login flow, returns threadTitle: 'Fix login flow' (any job with a thread gets its title; the web shows it only for THREAD jobs).",
+        "[unit] With only the 15 existing arguments passed (no labels repository), list returns rows with requesterName: null and threadTitle: null.",
+        "[unit] new PrismaFleetJobLabelsRepository(prisma).read([{ requestedById: 'u1', threadId: 'th1' }, { requestedById: 'u1', threadId: null }]), over a fake Prisma client, calls chatThread.findMany once with where: { id: { in: ['th1'] } }, and returns u1 -> the user's display name from the real readPrincipalNames (a user row { id: 'u1', name: 'Alice', email: 'a@x.io' } gives Alice).",
+        "[unit] The compiled FleetJobsModule resolves PrismaFleetJobLabelsRepository, and the resolved FleetJobsService instance's labels field is that same instance (so the @Optional() parameter is really injected).",
+        "[unit] The regenerated openapi.json FleetJobDto schema lists the properties requesterName and threadTitle."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "readable-names",
+        "openapi",
+        "di"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small concrete batch reader follows the existing PrismaTimelineRepository and no-DB module-test patterns; DTO additions and list/get enrichment are localized, with no new orchestration, concurrency or security-policy behavior."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.module.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.module.spec.ts",
+        "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/prisma-fleet-job-labels.repository.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.labels.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "PrismaFleetJobLabelsRepository.read returns an empty threads map and makes no chatThread query when every job's threadId is null.",
+        "PrismaFleetJobLabelsRepository.read queries each distinct non-null thread id once when multiple jobs reference the same thread.",
+        "FleetJobsService.get returns null requesterName and threadTitle with no labels reader injected, preserving existing detail fields."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.module.spec.ts",
+          "reason": "add the AC-10 case. The existing compile case stays unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "add the AC-11 case next to the existing `FleetJobDto` property checks, which stay unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run generate` for the two new `FleetJobDto` fields."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate` for the two new `FleetJobDto` fields; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Centralize web fleet feature and requester labels",
+      "description": "**Goal** — Add shared fleet display helpers, the web's THREAD/nullable label types and localized fallback labels.\n\n**Motivation** — Fleet thread-turn jobs use `thread-<cuid>` as their feature name (F11).\n\n**Approach** —\n- `FleetJobDto` in `apps/web/lib/fleet-types.ts` gains `requesterName: string | null` and `threadTitle: string | null`.\n- `FleetJobKind` in `apps/web/lib/fleet-types.ts` gains `'THREAD'`, which the API enum (`apps/api/src/common/enums.ts`) already has; without it `job.command === 'THREAD'` fails the web type-check.\n- New `apps/web/lib/fleet-job-labels.ts`.\n- `jobFeatureLabel`, in order: a config job (`isConfigJob`) -> `t('fleet.jobs.configFeature')`; a `THREAD` job -> `job.threadTitle` when it is a non-blank string, else `t('fleet.jobs.threadFeature')`; a `REVIEW` or `FIX` job whose `reviewPrNumber(job.feature)` is a number -> `PR #<n>`; every other job -> `job.feature`. This moves the logic that `featureLabel` (`pages/[project]/fleet/index.vue`) and `jobTitle` (`pages/[project]/fleet/jobs/[id]/index.vue`) duplicate today, and adds the THREAD branch.\n- `jobRequesterLabel`: `job.requesterName ?? memberName(job.requestedById) ?? t('common.formerMember')`.\n- i18n, in both `en.json` and `zh.json`:\n  - New `common.formerMember`: en `Former member`, zh `已离开的成员`.\n  - New `fleet.jobs.threadFeature`: en `Thread`, zh `线程` (the zh word `nav.threads` already uses).\n  - `fleet.jobs.unknownMember` is left in place, unused.\n\nUnused describes the completed feature: US-006 removes the existing page reads; this helper story keeps the locale key and does not edit either page's rendering.\n\nExisting `isConfigJob` and `reviewPrNumber` are actually exported by `~/lib/fleet-jobs` in this checkout; reuse them there rather than inventing competing parsers in fleet-types. Return a non-blank thread title itself; use trimming only to detect blankness. Missing/deleted threads use the localized Thread fallback. An API requesterName short-circuits memberName; preserve the exact nullish precedence rather than truthiness. A PLAN/RUN job with a threadTitle still uses feature.\n\n**Scope** — In: fleet-job-labels.ts, required web DTO fields, THREAD union member, two locale keys in both languages and pure helper tests. Out: API enrichment is US-004; removing the duplicated page logic and integrating helpers is US-006; home/timeline types and Ticket locale are US-007. Removing the now-unused `fleet.jobs.unknownMember` key.\n\n**Interface** —\n```ts\nimport type { FleetJobDto } from '~/lib/fleet-types'\n\ntype Translate = (key: string) => string\n\n/** The feature cell and page title of a job. */\nexport function jobFeatureLabel(job: FleetJobDto, t: Translate): string\n\n/** The requester cell of a job: the API name, else the project member name, else \"Former member\". */\nexport function jobRequesterLabel(job: FleetJobDto, memberName: (id: string) => string | null, t: Translate): string\n```\n\n**Tests** — Create `apps/web/tests/lib/fleet-job-labels.spec.ts` with THREAD populated/null/blank cases, existing review PR formatting, ordinary feature and config behavior, plus requester API/member/former-member precedence and the short-circuit spy assertion. Use the actual fleet-jobs helpers.",
+      "acceptanceCriteria": [
+        "[unit] jobFeatureLabel on a THREAD job with threadTitle: 'Fix login flow' and feature: 'thread-cm1' returns Fix login flow.",
+        "[unit] jobFeatureLabel on a THREAD job with threadTitle: null returns the fleet.jobs.threadFeature translation.",
+        "[unit] jobFeatureLabel on a THREAD job with threadTitle: '   ' returns the fleet.jobs.threadFeature translation.",
+        "[unit] jobFeatureLabel on a REVIEW job with feature: 'review-pr-18' returns PR #18.",
+        "[unit] jobFeatureLabel on a RUN job with feature: 'c3-clamp' and threadTitle: 'ignored' returns c3-clamp.",
+        "[unit] jobFeatureLabel on a CONFIG_EDIT job returns the fleet.jobs.configFeature translation.",
+        "[unit] jobRequesterLabel on a job with requesterName: 'codex-bot' returns codex-bot, and does not call memberName.",
+        "[unit] jobRequesterLabel on a job with requesterName: null, where memberName('u1') returns Alice, returns Alice.",
+        "[unit] jobRequesterLabel on a job with requesterName: null, where memberName returns null, returns the common.formerMember translation."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "readable-names",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure formatting helpers reuse standard existing functions with additive hand-written types and locale keys; no business rules or permissions change."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/index.vue",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-job-labels.ts",
+        "apps/web/tests/lib/fleet-job-labels.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "jobFeatureLabel returns PR #18 for a FIX job whose feature is review-pr-18.",
+        "jobFeatureLabel returns the original feature for a REVIEW or FIX job whose feature has no canonical PR number.",
+        "jobFeatureLabel returns the fleet.jobs.configFeature translation for CONFIG_DRIFT."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "add `common.formerMember` and `fleet.jobs.threadFeature`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "add `common.formerMember` and `fleet.jobs.threadFeature`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Use readable labels on fleet list and job detail",
+      "description": "**Goal** — Integrate the real shared label helpers into both fleet jobs surfaces so THREAD titles and API requester names are visible.\n\n**Motivation** — Fleet jobs requested by an agent, or by someone who left, show \"Unknown member\" (F11).\n\n**Approach** — `pages/[project]/fleet/index.vue` and `pages/[project]/fleet/jobs/[id]/index.vue`. Target: the feature cell and the page title use `jobFeatureLabel(job, t)`; the requester cells use `jobRequesterLabel(job, people.nameOf, t)`. The `fleet.jobs.unknownMember` key is no longer read.\n\nUse `jobFeatureLabel` and `jobRequesterLabel` on the jobs list page and the job detail page in place of `featureLabel`, `jobTitle` and the `people.nameOf(...) ?? t('fleet.jobs.unknownMember')` cells, as in Design. Remove duplicated title decision logic and unnecessary imports, not unrelated uses of isConfigJob. The detail page may retain a null-safe computed title adapter around jobFeatureLabel so PageHeader still sees an empty string before a job loads. Keep detail's configJob computed for its panels and action logic. Real helper behavior is config first, THREAD title/non-blank fallback, REVIEW/FIX canonical PR label, else feature; requester is API name, member name, then common.formerMember. No mocks replacing the imported helpers in integration mounts. Preserve non-THREAD titles, existing member-name fallback, codeLabel command rendering, horizontal scroll, routes, permissions, actions, live reload and filter behavior.\n\n**Scope** — In: the two pages and their existing list/detail page tests. Out: helper/type/locale implementation is US-005; API enrichment is US-004; home/timeline display is US-007. Other surfaces that print a thread job's `thread-<id>` feature: `components/home/HomeNeedsYou.vue`, the fleet overview's `ActiveRunsTable.vue` and `RecentRunsList.vue`, and the job logs page. Only the jobs list and job detail page change here. Removing the now-unused `fleet.jobs.unknownMember` key.\n\n**Interface** — Calls to upstream helpers: `jobFeatureLabel(job, t)` and `jobRequesterLabel(job, people.nameOf, t)` from `~/lib/fleet-job-labels`. DTO input fields are `requesterName: string | null` and `threadTitle: string | null`, supplied by list/get.\n\n**Tests** — Add list AC-1/2 to fleet-jobs-list.spec.ts, using the existing mountSfc/fleet harness. Its fixtures gain requesterName: null and threadTitle: null. The test \"the table scrolls sideways on narrow screens and names a requester who left\" pins the source text `people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember')`. That line is replaced by `jobRequesterLabel`, so the pin changes to the invariant that the requester cell reads `jobRequesterLabel(job, people.nameOf, t)`. The `overflow-x-auto` assertion stays unchanged. The test \"S3 §6: config jobs show a readable feature without changing RUN/REVIEW/FIX rendering\" pins the source text `if (isConfigJob(job)) return t('fleet.jobs.configFeature')`, which moves into the US-005 label helper; that pin changes to the invariant that the feature cell reads `jobFeatureLabel(job, t)`, and its `codeLabel(t, te, 'fleet.command', job.command)` assertion stays unchanged. In fleet-job-detail.spec.ts add AC-3 using the existing PageHeader stub exposing title and useProjectMemberNames stub; fixtures gain both null fields. Existing title/requester assertions stay unchanged: a non-THREAD job's title is still its feature, and a null requesterName falls back to the member name as before.",
+      "acceptanceCriteria": [
+        "[unit] The jobs list page (pages/[project]/fleet/index.vue), mounted with one THREAD job row { command: 'THREAD', feature: 'thread-cm1', threadTitle: 'Fix login flow', requesterName: 'codex-bot' }, renders Fix login flow and codex-bot in that row, and neither thread-cm1 nor Unknown member.",
+        "[unit] The jobs list page, mounted with one RUN job { requesterName: null, requestedById: 'gone' } and a member list without gone, renders Former member in its requester cell.",
+        "[unit] The job detail page (pages/[project]/fleet/jobs/[id]/index.vue), mounted with a THREAD job with threadTitle: 'Fix login flow' and requesterName: 'codex-bot', passes Fix login flow as the PageHeader title and renders codex-bot as the requester."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "readable-names",
+        "ui"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two established pages replace duplicated presentation logic with upstream helpers; existing mounts and source-pin changes are localized, with permission controls explicitly unchanged."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/index.vue",
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+        "apps/web/tests/pages/fleet-job-detail.spec.ts",
+        "apps/web/lib/fleet-job-labels.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+          "reason": "the test \"the table scrolls sideways on narrow screens and names a requester who left\" pins the source text `people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember')`. That line is replaced by `jobRequesterLabel`, so the pin changes to the invariant that the requester cell reads `jobRequesterLabel(job, people.nameOf, t)`. The `overflow-x-auto` assertion stays unchanged. The test \"S3 §6: config jobs show a readable feature without changing RUN/REVIEW/FIX rendering\" pins the source text `if (isConfigJob(job)) return t('fleet.jobs.configFeature')`, which moves into the US-005 label helper; that pin changes to the invariant that the feature cell reads `jobFeatureLabel(job, t)`, and its `codeLabel(t, te, 'fleet.command', job.command)` assertion stays unchanged. Its job fixtures gain `requesterName: null` and `threadTitle: null`. Add this story's AC-1 and AC-2 here."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "add the AC-3 case, using the file's existing `PageHeader` stub (which exposes `title`) and its `useProjectMemberNames` stub. Its job fixtures gain `requesterName: null` and `threadTitle: null`. Existing title and requester assertions stay unchanged: a non-THREAD job's title is still its feature, and a `null` `requesterName` falls back to the member name as before."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Show actors and ticket links in dashboard and timeline rows",
+      "description": "**Goal** — Render API actor names and ticket links on home activity and project timeline with localized former-member fallback.\n\n**Motivation** — `components/home/HomeActivityList.vue` renders only the event type, the humanized action and the project slug.\n\n**Approach** —\n- `HomeActivity` in `apps/web/lib/home-types.ts` gains `actorName: string | null`, `ticketRef: string | null`, `ticketTitle: string | null`.\n- `TimelineEvent` in `apps/web/composables/useTimelineEvents.ts` gains the same three fields.\n- `components/home/HomeActivityList.vue`. Target, per row in this order:\n  - the event-type label (unchanged);\n  - the actor: `event.actorName ?? t('common.formerMember')`, in an element with `data-testid=\"home-activity-actor\"`;\n  - the humanized action, with the raw code as its `title` (unchanged);\n  - when `event.ticketRef` and `event.projectSlug` are both non-empty strings (a truthiness check, so a fixture without the field, or the `''` slug `buildHomeView` falls back to, renders no link), a `NuxtLink` to `/${event.projectSlug}/tickets/${event.ticketRef}` with `data-testid=\"home-activity-ticket\"`, reading `${ticketRef} ${ticketTitle}` (just the ref when the title is null);\n  - the project slug and the age (unchanged).\n- `pages/[project]/timeline.vue`.\n  - Target: `actorName(event)` is `event.actorName ?? memberNames.nameOf(event.actorId) ?? agentNames.nameOf(event.actorId) ?? t('common.formerMember')`. A new Ticket column (header `t('timeline.columns.ticket')`) sits between action and when. When `event.ticketRef` is a non-empty string (truthiness), its cell holds a `NuxtLink` to `/${slug}/tickets/${event.ticketRef}` with `data-testid=\"timeline-ticket\"`, reading `${ticketRef} ${ticketTitle}` (just the ref when the title is null). Otherwise the cell is empty.\n- i18n, in both `en.json` and `zh.json`:\n  - New `timeline.columns.ticket`: en `Ticket`, zh `工单`.\n\nUS-005 supplies common.formerMember (en Former member, zh 已离开的成员). Use text interpolation for names/titles, never v-html. Home does not add cross-project roster reads. Timeline keeps existing member/agent loads and silent roster-failure behavior, but never displays a raw actor id when all name sources miss. API names take precedence even if the current member roster names the same id differently. Missing tickets have no link; soft-deleted ticket links use the existing ticket page's not-found state, not new navigation/error handling. Fetch, filters, pagination, times and action humanization/tooltip remain unchanged.\n\n**Scope** — In: home/timeline wire types, HomeActivityList, timeline page, three timeline test suites plus home component tests, both Ticket locale keys. Out: API enrichment is US-002/US-003; common fallback key is US-005; fleet pages are US-006; approval wording is US-008. Links for agent and decision events on the dashboard and timeline: those tables carry no ticket, and there is no page for one event.\n\n**Interface** — Add `actorName: string | null`, `ticketRef: string | null`, `ticketTitle: string | null` to HomeActivity and the web TimelineEvent; timeline actorName now accepts a TimelineEvent rather than a string id. Link targets and test ids are exactly the ones specified above.\n\n**Tests** — In home-activity-list.spec.ts extend event() with actorName: 'Alice', ticketRef: 'ACME-12', ticketTitle: 'Fix login'; keep its two existing tests unchanged and add AC-1 to AC-5. In timeline-readable.spec.ts extend row fixtures with null fields, resolve member/agent roster requests for mounts, map common.formerMember to Former member and timeline.columns.ticket to Ticket in the t stub, and add AC-6 to AC-10. Change the unknown-actor expectation from former-user to Former member while preserving humanized event/action and silent member-failure assertions. In timeline-agent-actor.spec.ts extend fixtures with null fields; the roster-rejection test must locate the agent event by row position, not raw agent-1 text, and expect common.formerMember because its t stub returns keys, retaining no-toast behavior. In timeline.spec.ts replace both event.actorId interpolation source pins with actorName(event) within the v-for; keep eventType/action pins unchanged. Extend its fixtures with null fields and change the SSR context stub from `(id: string) => id` to `(event: TimelineEvent) => event.actorId`, preserving user-1, agent-7 and admin in SSR output. Use mountSfc/uiStubs's NuxtLink representation to assert to/text rather than relying on a browser navigation.",
+      "acceptanceCriteria": [
+        "[unit] HomeActivityList mounted with a ticket event with actorName: 'Alice', ticketRef: 'ACME-12', ticketTitle: 'Fix login' and projectSlug: 'acme' renders Alice in its home-activity-actor element.",
+        "[unit] The same home activity event renders a home-activity-ticket link whose to is /acme/tickets/ACME-12 and whose text is ACME-12 Fix login.",
+        "[unit] A home activity event with ticketRef: 'ACME-12' and ticketTitle: null renders a home-activity-ticket link whose text is ACME-12.",
+        "[unit] A home activity agent event with ticketRef: null renders no home-activity-ticket element.",
+        "[unit] A home activity event with actorName: null renders Former member in its home-activity-actor element.",
+        "[unit] The timeline page, mounted with an event with actorName: 'Alice' and actorId: 'u1', where the member list names u1 as Someone Else, shows Alice in its actor cell.",
+        "[unit] The timeline page, mounted with an event with actorName: null and actorId: 'u1', where the member list names u1 as Bob, shows Bob in its actor cell.",
+        "[unit] The timeline page, mounted with an event with actorName: null and an actorId neither roster knows, shows Former member in its actor cell, and the raw id appears nowhere in the row.",
+        "[unit] The timeline table header contains Ticket, and an event with ticketRef: 'SB-3' and ticketTitle: 'Fix login' renders a timeline-ticket link whose to is /<slug>/tickets/SB-3 and whose text is SB-3 Fix login.",
+        "[unit] A timeline event with ticketRef: null renders no timeline-ticket element in its row."
+      ],
+      "tags": [
+        "web",
+        "home",
+        "timeline",
+        "readable-names",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard additive Vue rendering/type/i18n work on two existing surfaces; API fields and the shared fallback key are upstream, with explicit test-pin and SSR compatibility requirements."
+      },
+      "contextFiles": [
+        "apps/web/components/home/HomeActivityList.vue",
+        "apps/web/tests/components/home-activity-list.spec.ts",
+        "apps/web/pages/[project]/timeline.vue",
+        "apps/web/tests/pages/timeline-readable.spec.ts",
+        "apps/web/composables/useTimelineEvents.ts"
+      ],
+      "suggestedCriteria": [
+        "HomeActivityList renders no ticket link when projectSlug is an empty string even if ticketRef is populated.",
+        "HomeActivityList renders no ticket link when a legacy fixture omits ticketRef.",
+        "A timeline event with no API actorName and no member name displays the matching agent roster name.",
+        "A timeline event with a ticketRef and null ticketTitle displays a link containing only the ref."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/home-activity-list.spec.ts",
+          "reason": "the `event()` factory gains `actorName: 'Alice'`, `ticketRef: 'ACME-12'`, `ticketTitle: 'Fix login'`. The two existing tests stay unchanged. Add this story's AC-1 to AC-5 here."
+        },
+        {
+          "path": "apps/web/tests/pages/timeline-readable.spec.ts",
+          "reason": "its `t` stub maps only a few keys, so it gains `common.formerMember` -> `Former member` and `timeline.columns.ticket` -> `Ticket`. The test \"falls back to raw actor and readable unknown event/action codes; member failure is silent\" expects `former-user` (the raw id) for an actor no lookup knows. The fallback is now `common.formerMember`, so that expectation changes to `Former member`. The invariant: an actor no source knows never shows its raw id, the event type and action are still humanized, and the member failure is still silent. Its row fixture gains `actorName: null`, `ticketRef: null`, `ticketTitle: null`. Add this story's AC-6 to AC-10 here."
+        },
+        {
+          "path": "apps/web/tests/pages/timeline-agent-actor.spec.ts",
+          "reason": "its `t` stub returns the key, so the fallback cell reads `common.formerMember`. The test \"falls back to raw actor id and does not toast when the roster request rejects\" finds the row by `textOf(row).includes('agent-1')` and expects the actor cell to read `agent-1`. The row no longer shows the raw id, so it is located by its position (the agent event's row index) instead, and the actor cell is expected to read `common.formerMember`. The invariant: an unknown actor never shows its raw id, and no toast fires when the roster request rejects. Its fixture rows gain `actorName: null`, `ticketRef: null`, `ticketTitle: null`."
+        },
+        {
+          "path": "apps/web/tests/pages/timeline.spec.ts",
+          "reason": "the source pins \"the v-for body interpolates {{ event.actorId }} (binds the data field)\" and \"eventType, actorId, action bindings are inside the v-for loop body\" require an `{{ ... event.actorId ... }}` interpolation, which `actorName(event)` replaces. Both pins change to require an interpolation of `actorName(event)` inside the `v-for` body; the eventType and action pins stay unchanged. The SSR render test builds its context with `actorName: (id: string) => id`; that stub becomes `actorName: (event: TimelineEvent) => event.actorId`, so the rendered HTML still contains `user-1`, `agent-7` and `admin`. Its event fixtures gain `actorName: null`, `ticketRef: null`, `ticketTitle: null`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "add `timeline.columns.ticket`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "add `timeline.columns.ticket`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Humanize approval keys and notification copy",
+      "description": "**Goal** — Use translated or humanized permission labels consistently in approval UI and approval_request notification text.\n\n**Motivation** — Toasts and the approval inbox already pass the key through `requestKeyLabel`, but only 2 of the 130 approvable keys have an `approvals.keys.*` label, and `requestKeyLabel` falls back to the raw key.\n\n**Approach** —\n- `requestKeyLabel(t, te, key)` in `apps/web/lib/approval-requests.ts`.\n  - Target: the same label when the locale has it, else `humanizeCode(key)`.\n- `components/approvals/ApprovalRequestInbox.vue`. Target: the key label span also carries `:title=\"row.permissionKey\"`, so the raw key stays readable as a tooltip, as with every other `humanizeCode` use.\n- `notificationText(n, i18n)` in `apps/web/lib/notifications.ts`. Target: for `n.kind === 'approval_request'` with a string `n.params.key`, the `key` param passed to `t` is `requestKeyLabel(i18n.t, i18n.te, n.params.key)`. Every other kind and param is unchanged.\n\nThe locale lookup remains `approvals.keys.<key with dots replaced by underscores>`. Reuse the existing humanizeCode implementation: fleet.flow.start -> Fleet flow start, memory.create -> Memory create. Copy notification params before replacing the display key; do not mutate persisted/received params or API titles. Keep unknown-kind title fallback and all other notification/detail/link behavior. Existing requestKeyLabel callers (toasts, inbox, HomeNeedsYou and JobApprovals) receive the fallback centrally; do not duplicate humanization at each call site. Preserve known translations such as approvals.keys.fleet_budget_override. Presentation only: do not change viewerActions, access checks, approval modes, policy, request creation, decisions or producer data. No API or schema changes.\n\n**Scope** — In: requestKeyLabel fallback, raw-key label tooltip, notificationText's approval_request interpolation and affected existing web tests. Out: fleet label helpers/pages are US-005/US-006; actor/ticket rows are US-007. Locale labels for the 128 approvable permission keys that have none: the humanized key is the fallback. Adding `approvals.keys.*` labels is a separate copy task. The thread system note \"Action <uuid> (koda_add_memory) was approved and done: memory:<id> saved\" (F11). It is English text the agent reads, persisted in `ChatMessage.content`. Showing it readably needs structured message metadata, not parsing the English in the web.\n\n**Interface** — Existing signatures stay unchanged:\n```ts\nexport function requestKeyLabel(t: TranslateNamed, te: TranslationExists, key: string): string\nexport function notificationText(n: NotificationDto, i18n: NotificationI18n): string\n```\n\n**Tests** — Add AC-1/2 in tests/lib/approval-requests.spec.ts. The existing \"AC-9: an unknown key stays raw\" expectation for label.create becomes Label create; the known-key test stays unchanged. Add AC-3 in tests/components/approval-request-inbox.spec.ts. The unknown brand.new.key case now expects Brand new key as text and brand.new.key as the label's title, retaining raw-key visibility in the tooltip. Add AC-4/5/6 in tests/lib/notifications.spec.ts through the real requestKeyLabel and real en locale; change only the approval_request label.create matrix row to Approval needed: Label create, every other row stays unchanged. In tests/components/home-needs-you.spec.ts change the unlabelled approval key assertion (te returns false) from label.create to Label create. In tests/components/notification-bell.spec.ts change Approval needed: label.create to Approval needed: Label create. Preserve existing safe-link, unknown-kind and unrelated notification assertions.",
+      "acceptanceCriteria": [
+        "[unit] requestKeyLabel(t, te, 'fleet.flow.start'), where te knows no key, returns Fleet flow start.",
+        "[unit] requestKeyLabel(t, te, 'memory.create'), where te knows no key, returns Memory create.",
+        "[unit] ApprovalRequestInbox.vue, mounted as approval-request-inbox.spec.ts does with one pending request whose permissionKey is fleet.flow.start, renders Fleet flow start, and that label element's title attribute is fleet.flow.start.",
+        "[unit] notificationText on { kind: 'approval_request', params: { key: 'fleet.flow.start' }, title: 'Approval needed: fleet.flow.start' }, with the real en locale, returns Approval needed: Fleet flow start.",
+        "[unit] notificationText on { kind: 'approval_request', params: { key: 'fleet.budget.override' } }, with the real en locale, returns Approval needed: Fleet budget override (the existing approvals.keys.fleet_budget_override label).",
+        "[unit] notificationText on a ticket_assigned notification with params { actorName: 'Alice', ref: 'SB-1', ticketTitle: 'Fix' } returns the same text it returned before this change: the locale's ticket_assigned message with those params."
+      ],
+      "tags": [
+        "web",
+        "approvals",
+        "notifications",
+        "readable-names",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized presentation changes fan out through existing pure helpers and UI tests. This story does not alter access control, approval decisions, credentials or authentication, so the security override does not apply."
+      },
+      "contextFiles": [
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/lib/notifications.ts",
+        "apps/web/tests/lib/notifications.spec.ts",
+        "apps/web/components/approvals/ApprovalRequestInbox.vue",
+        "apps/web/lib/humanize-code.ts"
+      ],
+      "suggestedCriteria": [
+        "notificationText leaves a non-string approval_request params.key unchanged when passing params to the locale translator.",
+        "notificationText leaves the input notification's params.key unchanged after rendering an approval_request.",
+        "notificationText returns the API title unchanged when the notification kind has no locale message."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/lib/approval-requests.spec.ts",
+          "reason": "the test \"AC-9: an unknown key stays raw\" expects `requestKeyLabel(t, knows([]), 'label.create')` to be `label.create`. The fallback is now `humanizeCode`, so it expects `Label create`. The known-key test stays unchanged. Add this story's AC-1 and AC-2 here."
+        },
+        {
+          "path": "apps/web/tests/lib/notifications.spec.ts",
+          "reason": "the table row `['approval_request', { key: 'label.create' }, 'Approval needed: label.create']` changes its expected text to `Approval needed: Label create`, because the key now goes through `requestKeyLabel`. Every other row stays unchanged. Add this story's AC-4 to AC-6."
+        },
+        {
+          "path": "apps/web/tests/components/home-needs-you.spec.ts",
+          "reason": "the assertion that an approval row with an unlabelled key (`te: () => false`) contains `label.create` changes to `Label create`. The invariant: an unlabelled key reads as words."
+        },
+        {
+          "path": "apps/web/tests/components/approval-request-inbox.spec.ts",
+          "reason": "the test \"a key the locale does not know reads as itself\" expects `brand.new.key`. It now expects the label `Brand new key`, and the raw `brand.new.key` as that label's `title` attribute (the tooltip is where the raw key is now asserted). Add this story's AC-3 here."
+        },
+        {
+          "path": "apps/web/tests/components/notification-bell.spec.ts",
+          "reason": "the expectation `Approval needed: label.create` changes to `Approval needed: Label create`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Discovery and architecture\nThe codebase-memory MCP tools are unavailable in this session, so discovery used repository Read/Grep/Glob tools. Findings below cite the current checkout, not just the supplied baseline. This is an enhancement to existing NestJS/Fastify and Nuxt code, not greenfield work. The supplied package detector calls the web Next.js, but apps/web/package.json:6 and apps/web/package.json:33 establish Nuxt 4; .nax/mono/apps/web/context.md:20 documents Vue, Nuxt SSR and hand-written composables. API business logic and persistence remain server-owned; web formatting stays client-side. No database schema changes, new package dependencies, new routes, permissions, authentication, authorization or persisted-data rewrites are needed. The eight supplied story ids, workdirs and dependency edges are binding, including apps/api workdirs for the two stories that also regenerate root/CLI artifacts. Read app context before implementation; do not edit generated AGENTS.md. Before NestJS implementation consult the Nathapp capability catalog and documentation MCP when available; planning here introduces no NestJS code.\n\nShared labels and persistence boundaries (US-001)\napps/api/src/notifications/ticket-notification-reads.repository.ts:45-54 is the display-name precedent: agents retain their name; users use trimmed name or email local part, never the complete address. Do not change this notification reader or reuse its single-id fallback strings ('Someone'/'An agent'); the new batch helpers return maps with missing ids absent. apps/api/src/common/utils/advisory-lock.ts:1,16 demonstrates a generated PrismaClient type-only import with Pick. The new EventLabelClient selects user, agent and ticket delegates; both helper inputs deduplicate and discard empty-string ids, with zero queries for an empty effective set. One user and one agent query resolve all principals across the relevant page; one ticket query resolves ref/title. Schema evidence: User has optional name and email at apps/api/prisma/schema.prisma:25-28; Agent tombstones keep a name at apps/api/prisma/schema.prisma:58-69. Consequently neither the agent reader nor ticket reader should filter deletedAt. Queries are bounded by the ids of already-selected rows, not unbounded roster scans or N+1 reads. .nax/rules/api-data.md:24-39 requires repository -> service -> public layering. The spec's client-taking utility is a narrow persistence helper called only from repository files; do not inject Prisma into HomeService, TimelineService, FleetJobsService or controllers. New FleetJobLabels is a concrete module-private read query, not an aggregate or a cross-module exported repository.\n\nHome impact (US-002 -> US-007)\napps/api/src/home/prisma-home.repository.ts:168-198 currently reads the three event tables, normalizes decision.agentId to actorId, and assigns null ticketId to agent/decision events. Keep its project filtering, no-project early return, ordering and per-table take. Resolve all normalized actors and non-null ticket ids once after these three reads. apps/api/src/home/home.types.ts:10-18 caps activityScan at 25 per table and displayed activity at 10; apps/api/src/home/home.service.ts:34,44 feeds those rows into buildHomeView. HomeActivityRow (home.types.ts:82) and HomeActivityView (home.types.ts:137) currently lack labels. buildHomeView (home.types.ts:259-271) merges, sorts, caps, maps slug with an empty-string fallback and currently discards actor/ticket context. Add and copy actorName/ticketRef/ticketTitle without changing any cap, order, counts or scope. HomeActivityDto is already exposed via HomeDashboardDto (apps/api/src/home/dto/home-dashboard.dto.ts:60-68,85) and @ApiExtraModels(HomeActivityDto) (apps/api/src/home/home.controller.ts:24); annotate nullable strings with the supplied descriptions. IHomeRepository derives findRecentActivity's return type from the concrete repository at apps/api/src/home/home.domain.ts:17, so no independent competing contract is needed. Existing HomeService mocks return empty activity (apps/api/src/home/home.service.spec.ts:38).\nHome tests: apps/api/src/home/home.types.spec.ts:118-130 has the inline activity literals and order/slug assertions: add null label fields without changing assertions and append the populated/null copy cases. Add prisma-home.repository.activity.spec.ts using real label functions with fake Prisma delegates; do not mock away that seam. apps/api/test/integration/home/home-api.integration.spec.ts:21-33 has a local response type that must expose the fields used by new assertions; :63-67 provides ticket(); :132-136 seeds exactly three visible event types; :171-183 pins open ticket/activity counts. Append the three new integration cases after existing cases, create CLOSED tickets, explicitly create TICKET_CREATED events, and delete each case's event then ticket in finally. Reuse dev authentication/fixtures and bootHttpApp; do not loosen existing counts or grant new roles.\nWeb HomeActivity is hand-written at apps/web/lib/home-types.ts:57-65. HomeActivityList currently shows only type/action/project/age at apps/web/components/home/HomeActivityList.vue:19-23; insert actor and conditional ticket link in the specified order. Its test factory at apps/web/tests/components/home-activity-list.spec.ts:11-14 needs the new defaults. Preserve raw action tooltip, empty-state and timing behavior; require both ticketRef and projectSlug truthy, guarding older/missing fixture fields and empty slug.\n\nTimeline impact (US-003 -> US-007)\napps/api/src/memory/timeline.service.ts:23-30 defines a shared TimelineEvent used by both project timeline and ticket history. getProjectTimeline at :46-129 does table-specific filtering, limit+1 reads, cross-table sorting, slicing and cursor generation. Enrich only the final sliced page via a single findEventLabels call, including exactly one empty-arrays call for an empty page. Never resolve extra rows from lookahead, change compareEventsDesc, ticket filtering or cursor semantics. PrismaTimelineRepository at apps/api/src/memory/prisma-timeline.repository.ts:35-62 is the persistence seam for the new method. getTicketHistory at timeline.service.ts:131-145 must now populate required nullable fields with null but must not start querying labels. The controller returns JsonResponse.Ok(data) without a response DTO (apps/api/src/memory/timeline.controller.ts:82-93), so timeline adds no OpenAPI changes.\nTests: apps/api/src/memory/timeline.service.spec.ts:10-14 has a mock repository without findEventLabels; add a default resolved empty-map spy and preserve existing ordering/filter/cursor assertions. apps/api/src/memory/prisma-timeline.repository.spec.ts:8-17 needs user/agent/ticket findMany spies to exercise the real helpers. The new DB spec should mirror the real service/repository setup and DB gate at apps/api/test/integration/memory/timeline-pagination.integration.spec.ts:16-34, while using the current test Prisma adapter/helpers rather than copying its stale Jest command comment. Important additional consumer discovered: apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts:436-445 creates an explicitly typed TimelineEvent, so US-003 must add null fields to this fixture as mechanical type propagation. Production koda_timeline formatting uses its own project-scoped ticket refs and deliberately emits no actor (apps/api/src/fleet/assistant/tools/knowledge-tools.ts:250-272); do not change its output or replace that lookup with the new labels.\nThe web TimelineEvent is at apps/web/composables/useTimelineEvents.ts:4-11. Fetching, append, race suppression and cursor/filter behavior (:38-89) remain unchanged. apps/web/pages/[project]/timeline.vue:23-25 currently falls back to a raw actor id, and :110-124 renders four columns. Change actorName to take the event and prioritize the API label, then existing member/agent composables, then common.formerMember; insert Ticket between action and when. Keep roster loads and silent failures (:56-60). Update timeline-readable.spec.ts, timeline-agent-actor.spec.ts and timeline.spec.ts only where label/type/source pins intentionally change; keep humanization, raw-action tooltip, no-toast, event/action bindings and SSR invariants. The SSR test stub must change from id -> id to event -> event.actorId, preserving its user-1/agent-7/admin output.\n\nFleet API and web integration (US-004 -> US-005 -> US-006)\nFleetJob already carries requestedById/requestedByType and nullable threadId; apps/api/prisma/schema.prisma:1182-1183,1224,1236 documents the principal discriminator and onDelete:SetNull thread relation. ChatThread has title at :1408. Thread job creation intentionally persists feature thread-<id> at apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:712; this feature must NOT change that feature key, dispatch or stored records. FleetJobDto already supports THREAD on the API at apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:68; from() and summary() at :132-163 are the initialization/summary seams. Add two nullable fields, initialize both null in from(), enrich only list and get. apps/api/src/fleet/jobs/fleet-jobs.service.ts:69-86 currently takes 15 constructor parameters, ending in prRulings; add an optional concrete 16th labels parameter to preserve positional test construction, e.g. apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts:166-183 and other thread/requeue/audit/project-deletion specs. list at fleet-jobs.service.ts:201-206 uses remapPage with one grouped pending count; retain all pagination metadata, pending counts and summary omissions. get at :512-514 resolves project scope via findInProject before building withDetail. withPending/withDetail at :287-294 are shared by other operations, so do NOT put label enrichment there: doing so would leak work/behavior into cancel/requeue/dispatch. Pass only projected { requestedById, threadId } values to labels.read, once per list/get; no full records. Missing reader means null defaults, not an error. Add PrismaFleetJobLabelsRepository to providers only in apps/api/src/fleet/jobs/fleet-jobs.module.ts:39-52. The optional injection must still really resolve in production, proven by the existing no-DB compilation harness at fleet-jobs.module.spec.ts:18-25. Add OpenAPI property assertions alongside apps/api/src/fleet/fleet-openapi.contract.spec.ts:82-85,180.\nThe web FleetJobKind at apps/web/lib/fleet-types.ts:223-224 is missing THREAD despite the API accepting it. Add THREAD plus required nullable requesterName/threadTitle on the web DTO. Contrary to the context list's shorthand, isConfigJob and reviewPrNumber are actually exported from apps/web/lib/fleet-jobs.ts:255 and :216-222, NOT fleet-types.ts; import them from the existing helper module. fleet/index.vue:102-107 and fleet/jobs/[id]/index.vue:87-95 duplicate config/review/fix title logic today; move decision logic into fleet-job-labels.ts and add THREAD precedence. Preserve config first, canonical REVIEW/FIX PR-number parsing, and normal job.feature. THREAD titles are used only if non-blank, otherwise localized Thread; a PLAN carrying a thread title still displays its feature. requesterName wins over the member lookup with nullish fallback; agent requesters no longer depend on the user roster. The existing requester cells are fleet/index.vue:204 and fleet/jobs/[id]/index.vue:363. Keep configJob state needed elsewhere on the detail page. Do not alter viewer permissions, actions, live reload, command labels, links or filters.\nTests: apps/web/tests/pages/fleet-jobs-list.spec.ts:21-65 already mounts real page logic and pins RUN/REVIEW/FIX; typed fixtures need null fields, and intentional source pins must target jobFeatureLabel/jobRequesterLabel rather than removed duplicate expressions. Preserve overflow-x-auto and codeLabel command assertions. apps/web/tests/pages/fleet-job-detail.spec.ts uses mountSfc and PageHeader/member stubs; append THREAD/API-requester coverage preserving existing non-THREAD title and member fallback assertions. New lib tests exercise actual imported helpers, not replacement mocks. apps/web/tests/helpers/fleet-harness.ts:81-91,207 provides NuxtLink stubs and real-en i18n. Keep text interpolated, not v-html.\n\nPermission-label fanout (US-008)\napps/web/lib/approval-requests.ts:201-209 currently returns the raw key when approvals.keys.<dots_to_underscores> is missing. humanizeCode is already the exact desired separator/case formatter at apps/web/lib/humanize-code.ts:5-8. Retain known translations first. Existing requestKeyLabel callers include useApprovalRequestNotifications.ts:57, ApprovalRequestInbox.vue:200, JobApprovals.vue:52 and HomeNeedsYou.vue:29; changing the central fallback intentionally affects all of them. ApprovalRequestInbox.vue:47 needs the raw key as title. apps/web/lib/notifications.ts:10-13 currently forwards cloned params directly to t; clone and replace ONLY a string key for kind approval_request through the real requestKeyLabel. notificationText fans out to NotificationBell.vue:56 and pages/notifications.vue:112. Preserve unknown-kind API-title fallback, notificationDetail, safe-link validation and every other kind/param. This story is presentation-only: do not touch viewerActions, approval gating, decisions, permissions, notification persistence or producer params. Thus it is not security-critical work despite the approvals file name.\napps/web/tests/lib/notifications.spec.ts:18-31 pins the notification matrix; change only approval_request's label.create expectation and append the three specified cases. Update approvals lib unknown-key expectation, ApprovalRequestInbox's unknown-key label/tooltip test, HomeNeedsYou's unlabelled-key expectation and NotificationBell's approval text. Keep existing known-label and all unrelated tests unchanged. en.json:2920-2921 already supplies shell-escalate and fleet-budget labels; en.json:2834 uses Approval needed: {key}. Only three new locale keys are required across both locales: common.formerMember, fleet.jobs.threadFeature and timeline.columns.ticket. en.json:627 is comments.author.formerMember, NOT common.formerMember; add the new common key rather than moving the comment-specific one. Do not delete fleet.jobs.unknownMember (:2152) or add 128 permission translations.\n\nFailure handling and compatibility\nMissing/hard-deleted principals map to absent entries -> null API labels -> Former member on web (US-001 AC-5, US-002 AC-3/11, US-003 AC-3/8, US-004 AC-5, US-005 AC-9, US-006 AC-2, US-007 AC-5/8). Missing tickets produce null ref/title and no link (US-002 AC-4, US-003 AC-4, US-007 AC-4/10); soft-deleted tickets still resolve names (US-001 AC-9, US-002 AC-10), with the destination's existing not-found behavior unchanged. Deleted threads become null threadId, null threadTitle and localized Thread (US-004 AC-4 and US-005 AC-2). Label query failures propagate and abort the route; do not add a catch, partial response or special fallback. US-002's error-propagation criterion records that explicit failure-handling requirement as an observable snapshot rejection; the feature explicitly excludes adding a new failure-read test, so verify propagation by review rather than authoring such a test. Schema/data migrations are unnecessary: additive DTO fields and on-read enrichment cover existing events/jobs. Deploy API before web when possible; the specified nullish/truthiness fallbacks also tolerate older payloads in display logic. Required nullable TypeScript additions can break typed fixture literals, so repair such fixtures minimally without changing unrelated behavior or broadening feature scope. Display names use no email addresses. Existing project visibility, authentication and access checks remain untouched.\n\nGeneration, testing and sequencing\nRoot package.json:20-23 defines bun run generate as API build/spec export followed by CLI generation. US-002 regenerates only HomeActivityDto's actorName/ticketRef/ticketTitle; US-004 regenerates only FleetJobDto's requesterName/threadTitle, preserving upstream generated changes already present. Never hand-edit openapi.json or apps/cli/src/generated/types.gen.ts, and never generate a web client. These two sibling stories can contend on generated artifacts: integrate or serialize generation against current combined source so neither drops the other's additive fields. No CLI behavior implementation is necessary. Dependency order: US-001 first; US-002/003/004 consume it; US-005 follows US-004; US-006 follows US-005; US-007 follows US-002/003/005; US-008 is independent. The two web locale writers must preserve each other's keys.\nAPI uses Vitest/vi, oxlint and strict generated Prisma types; apps/api/package.json:12,19-20 defines unit/scoped/DB commands. Module DI verification stays a unit test without Postgres. Integration cases use canRunDbTests(), current fixture helpers and the isolated test database; host scoped runs are required for real DB assertions, not sandbox skips. .nax/mono/apps/api/context.md:183-191 documents KODA_DB_TESTS=1, NAX_SANDBOXED=1, compose/Testcontainers selection and serial DB resets. Do not run concurrent DB-mode suites on the same database. The web uses Jest with mountSfc; apps/web/package.json:14,65-74 excludes e2e and generated .nax tests from ordinary unit runs. Generated acceptance files are not hand-edited or copied: use the app-specific acceptance runners separately. Testing is part of each implementation story, never a separate story or quality-gate AC. No browser-check story is added; koda-wk browser confirmation is post-deploy manual work. The workspace findings report is outside this repository's file root and was not inspected; the supplied spec is the requirements source.\n\nRefine-pass adversarial audit\nRe-read spec.md:328-434 and compared all 69 numbered spec assertions individually. The following mapping is spec AC number -> same story acceptanceCriteria position; no original assertion was moved, deleted or weakened. US-001: 1 trimmed Alice -> 1; 2 null-name bob -> 2; 3 whitespace-name carol -> 3; 4 agent codex-bot -> 4; 5 absent gone -> 5; 6 duplicate/empty ids query u1 once -> 6; 7 empty principal ids no query -> 7; 8 SB-34 ref/title -> 8; 9 exact id-only ticket where, so soft-deleted tickets are not filtered out -> 9; 10 empty tickets no query -> 10. US-002: 1 ticket Alice/WEB-12/title -> 1; 2 agent name/null ticket fields -> 2; 3 missing decision actor -> 3; 4 absent gone-t -> 4; 5 one all-principal batch, any order -> 5; 6 one all-ticket batch, any order -> 6; 7 populated builder labels -> 7; 8 null builder labels -> 8; 9 dev GET 200 labels -> 9; 10 soft-deleted ticket still same labels -> 10; 11 unknown principal null -> 11. US-003: 1 one final-page-only label read -> 1; 2 filled label maps -> 2; 3 unknown agent null -> 3; 4 missing ticket null -> 4; 5 empty page still one empty-arrays call -> 5; 6 fake repository through real US-001 readers -> 6; 7 real DB Alice/ticket labels -> 7; 8 DB unknown actor -> 8; 9 DB soft-deleted retired-bot -> 9. US-004: 1 DTO.from null defaults -> 1; 2 exact projected list input once -> 2; 3 list map labels -> 3; 4 null thread even with nonempty map -> 4; 5 absent requester null -> 5; 6 get agent name and one read -> 6; 7 PLAN also receives thread title, with the qualifying clause that any job with a thread gets its title and the web shows it only for THREAD -> 7; 8 existing 15-argument compatibility -> 8; 9 one thread query and real principal-name helper with Alice row -> 9; 10 same resolved repository injected despite Optional -> 10; 11 generated schema properties -> 11. US-005: 1 THREAD title -> 1; 2 null title Thread -> 2; 3 blank title Thread -> 3; 4 REVIEW PR #18 -> 4; 5 RUN retains c3-clamp and ignores title -> 5; 6 CONFIG_EDIT label -> 6; 7 API requester short-circuits member read -> 7; 8 member fallback Alice -> 8; 9 former-member fallback -> 9. US-006: 1 list renders title/requester and neither raw thread-cm1 nor Unknown member -> 1; 2 missing RUN requester Former member -> 2; 3 detail PageHeader title and requester -> 3. US-007: 1 home actor Alice -> 1; 2 home link target/text -> 2; 3 home null title ref-only -> 3; 4 agent no link -> 4; 5 home Former member -> 5; 6 API actor overrides roster -> 6; 7 member fallback Bob -> 7; 8 unknown actor Former member with raw id nowhere in row -> 8; 9 Ticket header/link target/text -> 9; 10 timeline null ref no link -> 10. US-008: 1 missing flow label humanized -> 1; 2 missing memory label humanized -> 2; 3 inbox text plus raw-key title -> 3; 4 notification real-en humanized flow key -> 4; 5 known budget label, retaining the existing approvals.keys.fleet_budget_override qualifier -> 5; 6 ticket_assigned same text as before using locale/params -> 6. The real-reader, existing-label, same-value, no-query, any-order, Optional-injection and before-change qualifiers all survive alongside their original assertions. No deprecated file-check tags occur in these spec ACs.\nNegative-path check: each story already has a mandatory negative case, so no speculative new failure AC is necessary: US-001 AC-5 unknown principal; US-002 AC-4 missing ticket and AC-11 missing actor; US-003 AC-3/4 missing names/tickets; US-004 AC-4/5 null thread/missing requester; US-005 AC-2/3/9 null/blank title or unresolved requester; US-006 AC-2 absent former requester; US-007 AC-4/5/8/10 absent ticket/name; US-008 AC-1/2/4 missing locale permission label. These are explicit fallback/absence paths, not quality gates. The separate spec Failure Handling rows are covered by those cases, soft-delete ACs and US-002's review-only propagation assertion; the failing-read test exclusion remains binding.\nObservable assertions and regressions: the original broad route-failure wording was tightened to HomeService.snapshot rejecting with the same error E, supported by home.service.ts:25-35,44 (no catch). This remains a review invariant, not a new failing-label-read test. US-002 gains an explicit backward-compatibility AC for the unchanged existing activity id/slug/type order in home.types.spec.ts:118-130. US-003 gains an explicit cursor-boundary regression AC using the exact existing tk3/ag2/tk1 keyset fixture at timeline.service.spec.ts:103-121; its now-duplicate suggested cursor assertion was removed. These two appended ACs preserve assertions the spec's Modifies section explicitly requires to stay unchanged. US-004 AC-8 protects old constructor calls; US-005 AC-4/5/6 protect extracted legacy formatting; US-006 AC-1 and US-007 AC-8 prove old opaque placeholders are gone; US-008 AC-5/6 protect known translations and unrelated notifications. New helper US-001 has no legacy consumer behavior to migrate. All assertions are observable via returned data, spy arguments, rendered output, exception identity, DI identity or generated schema content.\nContext and codebase-fit audit: all spec-recommended contextFiles are included in their respective stories, at most five per story. US-006's new helper context is created by upstream US-005; no story lists its own output as context. Concrete reader creation, optional last constructor injection, real helper calls, repository-layer Prisma access and unchanged shared withDetail usage match current source. The existing isConfigJob/reviewPrNumber location correction is retained. US-005's wording now distinguishes the final unused-key target from US-006's responsibility to remove page reads. No description contradicts its mandatory assertions; typed-fixture repairs and generated root/CLI outputs are explicitly in scope.\nBinding dependency audit: preserve US-001 [], US-002 [US-001], US-003 [US-001], US-004 [US-001], US-005 [US-004], US-006 [US-005], US-007 [US-002, US-003, US-005], US-008 []; all referenced ids exist and workdirs remain exactly the binding table. No minimization may override this structure. Routing audit reduced US-004 from complex/three-session-tdd-lite to medium/tdd-simple: the reader, module registration, DTO additions and two service methods follow established patterns (fleet-jobs.module.spec.ts:18-25 and fleet-jobs.service.ts:201-206,287-294), with no new concurrency or architectural uncertainty requiring heavier isolation. Other medium/tdd-simple classifications remain appropriate; none of these label-only stories changes security-critical decisions.\nFeature exclusion audit: all 11 spec items remain verbatim and in source order in top-level outOfScope: (1) persisted thread system note, (2) deliberate flow ID row, (3) memory user-id fallback, (4) 128 permission translations, (5) fleet mutation/config-route label enrichment, (6) ticket-history enrichment/tool output, (7) agent/decision event links, (8) deleting unknownMember, (9) other thread-feature surfaces, (10) failing-label-read test, (11) real-browser post-deploy checks. There are no story-local spec exclusion blocks to hoist. Nearby stories echo the relevant exclusions in Scope Out; US-002/003/004 explicitly echo the failing-label-read-test exclusion while continuing to propagate ordinary read errors. No exclusion has been converted into new work.",
+  "outOfScope": [
+    "The thread system note \"Action <uuid> (koda_add_memory) was approved and done: memory:<id> saved\" (F11). It is English text the agent reads, persisted in `ChatMessage.content`. Showing it readably needs structured message metadata, not parsing the English in the web.",
+    "The flow detail page's ID row (F11): it is shown deliberately, and `tests/pages/flow-detail-readable.spec.ts` pins it.",
+    "The memory page's user-id fallback (F11): the memory spec allows it.",
+    "Locale labels for the 128 approvable permission keys that have none: the humanized key is the fallback. Adding `approvals.keys.*` labels is a separate copy task.",
+    "Names on fleet job DTOs returned by cancel, requeue, dispatch and config-job routes: they keep `requesterName` and `threadTitle` `null`. The web reads names from the list and get routes only.",
+    "Labels on `TimelineService.getTicketHistory` (it sets the new fields to `null` and makes no label read) and the koda timeline tool output (unchanged).",
+    "Links for agent and decision events on the dashboard and timeline: those tables carry no ticket, and there is no page for one event.",
+    "Removing the now-unused `fleet.jobs.unknownMember` key.",
+    "Other surfaces that print a thread job's `thread-<id>` feature: `components/home/HomeNeedsYou.vue`, the fleet overview's `ActiveRunsTable.vue` and `RecentRunsList.vue`, and the job logs page. Only the jobs list and job detail page change here.",
+    "A test for a failing label read: it propagates like any other repository error on those routes (no catch is added), so it needs no new handling.",
+    "Checking the dashboard, timeline, jobs list and notifications in a real browser: a post-deploy manual check on koda-wk, not a story."
+  ],
+  "routingProfile": "native-codex-dsm"
+}
