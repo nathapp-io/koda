@@ -108,6 +108,13 @@ describe('ACP offer rules (thread-agents-modes US-001)', () => {
     expect(apiThreads.ACP_MODEL_ID_RE.test('a'.repeat(129))).toBe(false);
   });
 
+  it('US-001 AC-13: mirrors the ACP probe error codes and timestamp rule', () => {
+    expect(apiThreads.ACP_PROBE_ERROR_CODES).toEqual(pkg.ACP_PROBE_ERROR_CODES);
+    expect(apiThreads.ACP_PROBE_ERROR_CODES).toEqual(['timeout', 'unavailable', 'error']);
+    expect(apiThreads.ACP_PROBE_TIME_RE.source).toBe(pkg.ACP_PROBE_TIME_RE.source);
+    expect(apiThreads.ACP_PROBE_TIME_RE.flags).toBe(pkg.ACP_PROBE_TIME_RE.flags);
+  });
+
   it('pins ACP_EFFORT_RE and ACP_OFFER_LIMITS to the package', () => {
     expect(apiThreads.ACP_EFFORT_RE.source).toBe(pkg.ACP_EFFORT_RE.source);
     expect(apiThreads.ACP_EFFORT_RE.test('high')).toBe(true);

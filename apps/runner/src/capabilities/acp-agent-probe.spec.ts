@@ -44,6 +44,7 @@ interface HarnessInput {
   /** Overrides the open itself (a refusal, a hang); `opened` builds a close-recording session. */
   readonly open?: (agent: ThreadAgent, opened: (agent: ThreadAgent) => OpenedBackend) => Promise<OpenedBackend>;
   readonly timers?: AcpProbeTimers;
+  readonly now?: () => Date;
 }
 
 function harness(input: HarnessInput = {}) {
@@ -72,6 +73,7 @@ function harness(input: HarnessInput = {}) {
         calls.workdirsRemoved += 1;
       },
     }),
+    now: input.now ?? (() => new Date('2026-11-22T02:00:00.000Z')),
     ...(input.timers === undefined ? {} : { timers: input.timers }),
   };
   return { deps, calls, openedFor };
@@ -112,7 +114,7 @@ describe('probeAcpAgents: launch check (US-002 AC-1)', () => {
   test('AC-1: an agent the launch check cannot start is not launchable and opens no session', async () => {
     const h = harness({ launchable: ['claude', 'cursor'] });
     const offers = await probeAcpAgents(h.deps);
-    expect(offerFor(offers, 'codex')).toEqual({ agent: 'codex', launchable: false, loggedIn: null, models: [], efforts: [] });
+    expect(offerFor(offers, 'codex')).toEqual({ agent: 'codex', launchable: false, loggedIn: null, models: [], efforts: [], checkedAt: '2026-11-22T02:00:00.000Z' });
     expect(h.calls.open).not.toContain('codex');
     expect(h.calls.backend.map(nameOf)).toEqual(['claude', 'cursor']);
   });
@@ -135,7 +137,7 @@ describe('probeAcpAgents: what a launched agent offers (US-002 AC-2, AC-3, AC-4)
   test('AC-2: a launchable claude reports its offered models and efforts and the session is closed', async () => {
     const h = harness({ launchable: ['claude'], capabilities: () => ({ offeredModels: ['claude-sonnet-4-5'], offeredEfforts: ['high'] }) });
     const offers = await probeAcpAgents(h.deps);
-    expect(offerFor(offers, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: true, models: ['claude-sonnet-4-5'], efforts: ['high'] });
+    expect(offerFor(offers, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: true, models: ['claude-sonnet-4-5'], efforts: ['high'], checkedAt: '2026-11-22T02:00:00.000Z' });
     expect(h.calls.closed).toEqual(['claude']);
   });
 
@@ -145,7 +147,7 @@ describe('probeAcpAgents: what a launched agent offers (US-002 AC-2, AC-3, AC-4)
       launchable: ['claude'],
       capabilities: () => ({ offeredModels: ['claude-sonnet-4-5', 'bad model!', tooLong, 'gpt-5.5[context=272k,reasoning=medium]'] }),
     });
-    expect(offerFor(await probeAcpAgents(h.deps), 'claude')?.models).toEqual(['claude-sonnet-4-5', 'gpt-5.5[context=272k,reasoning=medium]']);
+    expect(offerFor(await probeAcpAgents(h.deps), 'claude')?.models).toEqual(['claude-sonnet-4-5']);
   });
 
   test('AC-4: at most 32 models and 8 efforts are kept per agent', async () => {
@@ -174,7 +176,7 @@ describe('probeAcpAgents: failures (US-002 AC-5, AC-6, AC-7, AC-15)', () => {
       },
     });
     const offers = await probeAcpAgents(h.deps);
-    expect(offerFor(offers, 'cursor')).toEqual({ agent: 'cursor', launchable: true, loggedIn: false, models: [], efforts: [] });
+    expect(offerFor(offers, 'cursor')).toEqual({ agent: 'cursor', launchable: true, loggedIn: false, models: [], efforts: [], checkedAt: '2026-11-22T02:00:00.000Z' });
     expect(h.calls.closed).toEqual([]);
   });
 
@@ -188,8 +190,8 @@ describe('probeAcpAgents: failures (US-002 AC-5, AC-6, AC-7, AC-15)', () => {
       },
     });
     const offers = await probeAcpAgents(h.deps);
-    expect(offerFor(offers, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [] });
-    expect(offerFor(offers, 'codex')).toEqual({ agent: 'codex', launchable: true, loggedIn: true, models: ['gpt-5.5'], efforts: ['low'] });
+    expect(offerFor(offers, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: '2026-11-22T02:00:00.000Z', lastError: { code: 'error', at: '2026-11-22T02:00:00.000Z' } });
+    expect(offerFor(offers, 'codex')).toEqual({ agent: 'codex', launchable: true, loggedIn: true, models: ['gpt-5.5'], efforts: ['low'], checkedAt: '2026-11-22T02:00:00.000Z' });
   });
 
   test('AC-6: an open that does not settle within 20 s is loggedIn null and the other agents still come back', async () => {
@@ -212,7 +214,7 @@ describe('probeAcpAgents: failures (US-002 AC-5, AC-6, AC-7, AC-15)', () => {
     expect(clock.delays.every((ms) => ms === 20_000)).toBe(true);
     clock.fire();
     const offers = await running;
-    expect(offerFor(offers, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [] });
+    expect(offerFor(offers, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: '2026-11-22T02:00:00.000Z', lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z' } });
     expect(offerFor(offers, 'codex')).toMatchObject({ launchable: true, loggedIn: true, models: ['gpt-5.5'] });
     expect(clock.waiting).toBe(0);
   });
@@ -224,7 +226,7 @@ describe('probeAcpAgents: failures (US-002 AC-5, AC-6, AC-7, AC-15)', () => {
     const running = probeAcpAgents(h.deps);
     await waitFor(() => clock.waiting === 1);
     clock.fire();
-    expect(offerFor(await running, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [] });
+    expect(offerFor(await running, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: '2026-11-22T02:00:00.000Z', lastError: { code: 'timeout', at: '2026-11-22T02:00:00.000Z' } });
     expect(h.calls.closed).toEqual([]);
     late.resolve(h.openedFor('claude'));
     await waitFor(() => h.calls.closed.length === 1);
@@ -242,6 +244,62 @@ describe('probeAcpAgents: failures (US-002 AC-5, AC-6, AC-7, AC-15)', () => {
     };
     expect(offerFor(await probeAcpAgents(deps), 'codex')).toMatchObject({ launchable: true });
     expect(h.calls.open).toContain('codex');
+  });
+});
+
+describe('probeAcpAgents: offer probe time and failure codes (US-002)', () => {
+  const at = '2026-11-22T02:00:00.000Z';
+
+  test('AC-1: stamps a successful session offer with checkedAt and no lastError', async () => {
+    const h = harness({ launchable: ['claude'] });
+    expect(offerFor(await probeAcpAgents(h.deps), 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: true, models: [], efforts: [], checkedAt: at });
+  });
+
+  test('AC-2: classifies an open that misses the deadline as timeout', async () => {
+    const clock = fakeTimers();
+    const started = deferred<void>();
+    const h = harness({ launchable: ['claude'], timers: clock.timers, open: async () => { started.resolve(); return await never(); } });
+    const running = probeAcpAgents(h.deps);
+    await started.promise;
+    await waitFor(() => clock.waiting === 1);
+    clock.fire();
+    expect(offerFor(await running, 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: at, lastError: { code: 'timeout', at } });
+  });
+
+  test('AC-3: classifies backend unavailable without exposing its text', async () => {
+    const h = harness({ launchable: ['claude'], open: async () => { throw new AgentSessionError('private stderr detail', 'AGENT_SESSION_BACKEND_UNAVAILABLE'); } });
+    expect(offerFor(await probeAcpAgents(h.deps), 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: at, lastError: { code: 'unavailable', at } });
+  });
+
+  test('AC-4: classifies an arbitrary open error as error without exposing its text', async () => {
+    const h = harness({ launchable: ['claude'], open: async () => { throw new Error('boom'); } });
+    expect(offerFor(await probeAcpAgents(h.deps), 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: at, lastError: { code: 'error', at } });
+  });
+
+  test('AC-5: classifies workdir construction failure as error', async () => {
+    const h = harness({ launchable: ['claude'] });
+    const deps: AcpProbeDeps = { ...h.deps, makeWorkdir: async () => { throw new Error('workdir failure'); } };
+    expect(offerFor(await probeAcpAgents(deps), 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: null, models: [], efforts: [], checkedAt: at, lastError: { code: 'error', at } });
+  });
+
+  test('AC-6: keeps auth-required as loggedIn false without a lastError', async () => {
+    const h = harness({ launchable: ['claude'], open: async () => { throw new AgentSessionError('login required', 'AGENT_SESSION_AUTH_REQUIRED'); } });
+    expect(offerFor(await probeAcpAgents(h.deps), 'claude')).toEqual({ agent: 'claude', launchable: true, loggedIn: false, models: [], efforts: [], checkedAt: at });
+  });
+
+  test('AC-7: stamps an unlaunchable offer without a lastError', async () => {
+    const h = harness({ launchable: ['claude'] });
+    expect(offerFor(await probeAcpAgents(h.deps), 'codex')).toEqual({ agent: 'codex', launchable: false, loggedIn: null, models: [], efforts: [], checkedAt: at });
+  });
+
+  test('AC-8: uses the system clock when no now dependency is provided', async () => {
+    const h = harness({ launchable: ['claude'] });
+    const { now: _now, ...deps } = h.deps;
+    const before = Date.now();
+    const offer = offerFor(await probeAcpAgents(deps), 'claude');
+    const checked = Date.parse(offer?.checkedAt ?? '');
+    expect(Number.isNaN(checked)).toBe(false);
+    expect(Math.abs(checked - before)).toBeLessThanOrEqual(5_000);
   });
 });
 
@@ -316,5 +374,51 @@ describe('probeAcpAgents: the open it builds (US-002 AC-8, AC-9)', () => {
     const h = harness({ launchable: ['claude'] });
     await probeAcpAgents(h.deps);
     expect(h.calls.workdirsRemoved).toBe(1);
+  });
+});
+
+describe('probeAcpAgents: agent-specific bare model ids (US-003)', () => {
+  async function models(agent: ThreadAgent, offeredModels: unknown): Promise<string[]> {
+    const h = harness({ launchable: [agent], capabilities: () => ({ offeredModels }) });
+    return offerFor(await probeAcpAgents(h.deps), agent)?.models ?? [];
+  }
+
+  test('AC-1: Claude drops bracketed model ids', async () => {
+    expect(await models('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-5[1m]', 'opus']))
+      .toEqual(['claude-sonnet-4-5', 'opus']);
+  });
+
+  test('AC-2: Codex drops bracketed ids and de-duplicates bare ids in offer order', async () => {
+    expect(await models('codex', ['gpt-6.1-terra', 'gpt-6.1-terra[low]', 'gpt-6.1-terra[high]', 'gpt-6-luna', 'gpt-6-luna']))
+      .toEqual(['gpt-6.1-terra', 'gpt-6-luna']);
+  });
+
+  test('AC-3: Cursor keeps unique bare names after removing one trailing options group', async () => {
+    expect(await models('cursor', ['default[]', 'grok-4.7[context=256k,fast=true]', 'composer-2.5[fast=true]', 'composer-2.5[fast=false]', 'gemini-3.1-pro']))
+      .toEqual(['default', 'grok-4.7', 'gemini-3.1-pro']);
+  });
+
+  test('AC-4: Cursor drops ambiguous names shared by bare and configured ids', async () => {
+    expect(await models('cursor', ['gemini-3.1-pro', 'gemini-3.1-pro[reasoning_effort=high]', 'gpt-5.5[a=1]']))
+      .toEqual(['gpt-5.5']);
+  });
+
+  test('AC-5: the 32-model cap applies after Codex bracketed ids are removed', async () => {
+    const ids = Array.from({ length: 40 }, (_, index) => `model-${index}`);
+    const offered = ids.flatMap((id) => [id, `${id}[low]`]);
+    expect(await models('codex', offered)).toEqual(ids.slice(0, 32));
+  });
+
+  test('AC-6: Claude filters invalid bare ids while keeping valid ones', async () => {
+    expect(await models('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-5[1m]', 'bad model!']))
+      .toEqual(['claude-sonnet-4-5']);
+  });
+
+  test('AC-7: Codex efforts remain unchanged alongside normalized model ids', async () => {
+    const h = harness({
+      launchable: ['codex'],
+      capabilities: () => ({ offeredModels: ['gpt-6.1-terra', 'gpt-6.1-terra[low]'], offeredEfforts: ['low', 'high'] }),
+    });
+    expect(offerFor(await probeAcpAgents(h.deps), 'codex')).toMatchObject({ models: ['gpt-6.1-terra'], efforts: ['low', 'high'] });
   });
 });

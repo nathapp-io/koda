@@ -3,8 +3,11 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { extractApiError } from '~/composables/useApi'
 import { eligibleAgents, isAgentChoiceKey } from '~/lib/thread-create'
+import type { AgentChoiceKey } from '~/lib/thread-create'
 import { buildWorkspaceThreadCreateSchema, toCreateWorkspaceThreadBody } from '~/lib/workspace-thread-create'
 import type { WorkspaceThreadCreateFormValues } from '~/lib/workspace-thread-create'
+import AgentReadinessNotice from '~/components/fleet/threads/AgentReadinessNotice.vue'
+import { useAgentRecheck } from '~/composables/useAgentRecheck'
 
 definePageMeta({ layout: 'default' })
 
@@ -56,6 +59,23 @@ const efforts = computed(() => chosenAgent.value?.efforts ?? [])
  * offers a native model), while a ready ACP agent may advertise none and run on its own default.
  */
 const canSubmit = computed(() => chosenAgent.value?.available === true)
+/**
+ * US-009: every not-ready agent the form can offer, with the probe detail that explains it. One notice
+ * each, under the picker, whichever agent is chosen.
+ */
+const readinessNotices = computed(() => agents.value.filter(choice => choice.probe !== undefined))
+/** The global Re-check gate: it is the key `POST /fleet/runners/:id/reprobe` requires. */
+const { permissions: globalPermissions } = useGlobalPermissions()
+const canRecheck = computed(() => globalPermissions.value.has('fleet.runner.update'))
+/**
+ * US-009: the slug the last `loadRunners` read. A Re-check must re-read the same project's summaries
+ * *without* `loadRunners` — that blanks the list first, which would move the chosen agent.
+ */
+const loadedRunnerSlug = ref('')
+const { recheck, rechecking } = useAgentRecheck(
+  () => (loadedRunnerSlug.value === '' ? Promise.resolve() : runnerSummaries.load(loadedRunnerSlug.value)),
+  agent => agents.value.find(choice => choice.agent === agent),
+)
 
 /** The project whose runners offer the models: the picked home project, else the first listed one. */
 const runnerSlug = computed(() => values.homeProject || projects.value[0]?.slug || '')
@@ -82,8 +102,16 @@ function chooseAgent(agent: string): void {
   setFieldValue('effort', '')
 }
 
+/** US-009: re-check the agent whose notice was clicked — never the one the form has chosen. */
+function recheckAgent(agent: AgentChoiceKey): void {
+  if (!isAgentChoiceKey(agent) || agent === 'native') return
+  void recheck(agent)
+}
+
 async function loadRunners(): Promise<void> {
   const slug = runnerSlug.value
+  // Recorded before the read so a Re-check reloads the project this list came from.
+  loadedRunnerSlug.value = slug
   runnerSummaries.runners.value = []
   if (!slug) return
   try {
@@ -170,6 +198,16 @@ const submit = handleSubmit(async (formValues: WorkspaceThreadCreateFormValues) 
           <FormMessage />
         </FormItem>
       </FormField>
+      <!-- US-009: one readiness notice per not-ready agent under the picker, whichever agent is chosen. -->
+      <AgentReadinessNotice
+        v-for="notice in readinessNotices"
+        :key="notice.agent"
+        :choice="notice"
+        :can-recheck="canRecheck"
+        :rechecking="rechecking === notice.agent"
+        :disabled="rechecking !== null"
+        @recheck="recheckAgent(notice.agent)"
+      />
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>
       <Button type="submit" :disabled="isSubmitting || !canSubmit">{{ t('fleet.threads.new.create') }}</Button>
     </form>

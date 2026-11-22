@@ -18,6 +18,8 @@ export const ENROLLMENT_ROUTE_VARIANTS = {
 export const RUNNER_ROUTE_VARIANTS = {
   update: 'rest:fleet-runners.update',
   delete: 'rest:fleet-runners.delete',
+  /** US-005: the re-probe request is a `fleet.runner.update` write on its own route. */
+  reprobe: 'rest:fleet-runners.reprobe',
 } as const;
 
 @Injectable()
@@ -48,6 +50,12 @@ export class RunnerRouteCommands implements OnModuleInit {
         return { ...ids, patch: parseBody(UpdateRunnerDto, patch) };
       },
       run: (principal, input) => this.runners.update(principal.id, input.id, input.patch),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ id: string }, { requestedAt: string }>({
+      key: 'fleet.runner.update', variant: RUNNER_ROUTE_VARIANTS.reprobe,
+      parse: (input) => parseRouteInput(input, ['id']),
+      run: (principal, input) => this.runners.requestReprobe(principal.id, input.id),
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<{ id: string }, null>({

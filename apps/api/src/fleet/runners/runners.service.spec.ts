@@ -11,7 +11,7 @@ const row = (over = {}) => ({
 });
 
 describe('RunnersService', () => {
-  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForUpdate: vi.fn(), lockForNoKeyUpdate: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForUpdate: vi.fn(), lockForNoKeyUpdate: vi.fn(), countUnfinishedJobs: vi.fn(), requestReprobe: vi.fn() };
   const activity = { record: vi.fn() };
   const jobs = { cancelForRunnerDisabled: vi.fn() };
   const live = { publish: vi.fn() };
@@ -133,6 +133,38 @@ describe('RunnersService', () => {
     const dto = await service.update('u9', 'r1', { threadCapacity: 3 });
     expect(repo.updateRunner).toHaveBeenCalledWith('r1', { threadCapacity: 3 });
     expect(dto.threadCapacity).toBe(3);
+  });
+
+  it('US-005 AC-10: requesting a re-probe sets the column, audits it and wakes the runner', async () => {
+    repo.requestReprobe.mockResolvedValue(true);
+    const result = await service.requestReprobe('u1', 'r1');
+    expect(repo.requestReprobe).toHaveBeenCalledWith('r1', expect.any(Date));
+    expect(Date.parse(result.requestedAt)).not.toBeNaN();
+    expect(result.requestedAt).toBe(new Date(repo.requestReprobe.mock.calls[0]?.[1] as Date).toISOString());
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+      key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'reprobe requested',
+    });
+    expect(notifier.notify).toHaveBeenCalledWith('r1');
+  });
+
+  it('US-005 AC-11: 404s a re-probe for an unknown runner and wakes nobody', async () => {
+    repo.requestReprobe.mockResolvedValue(false);
+    await expect(service.requestReprobe('u1', 'missing')).rejects.toBeInstanceOf(NotFoundAppException);
+    expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+    expect(notifier.notify).not.toHaveBeenCalled();
+  });
+
+  it('US-005: wakes the runner only after the re-probe transaction commits', async () => {
+    let committed = false;
+    tx.run = async <T>(fn: () => Promise<T>) => {
+      const value = await fn();
+      committed = true;
+      return value;
+    };
+    repo.requestReprobe.mockResolvedValue(true);
+    notifier.notify.mockImplementation(() => expect(committed).toBe(true));
+    await service.requestReprobe('u1', 'r1');
+    expect(notifier.notify).toHaveBeenCalledWith('r1');
   });
 
   it('deletes and records', async () => {

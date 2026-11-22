@@ -1174,6 +1174,17 @@
           "codex": "Codex",
           "cursor": "Cursor",
           "defaultModel": "Agent default",
+          "probe": {
+            "timeout": "The agent check timed out.",
+            "unavailable": "The agent service is unavailable.",
+            "error": "The agent check failed.",
+            "unconfirmed": "The runner has not confirmed this agent is ready.",
+            "notLoggedIn": "Sign in to this agent on the runner."
+          },
+          "checkedAt": "Last checked {time}",
+          "recheck": "Re-check",
+          "recheckRequested": "Re-check requested. Waiting for the runner…",
+          "rechecking": "Re-checking…",
           "reason": {
             "notInstalled": "Not installed",
             "notLoggedIn": "Not logged in",

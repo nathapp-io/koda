@@ -67,6 +67,8 @@ export interface SyncLoopDeps {
   readonly onProviderKeys?: (requested: readonly ProviderKeyRequest[], grants: readonly ProviderKeyGrant[], errors: readonly ProviderKeyError[]) => void;
   /** Fleet S5a §3: the thread ids the server has archived. An absent field keeps the previous list. */
   readonly onArchivedThreads?: (ids: readonly string[]) => void;
+  /** US-006: the server requested an immediate capability re-probe. */
+  readonly onReprobe?: () => void;
   readonly onStop: (reason: StopReason) => void;
   readonly log: Logger;
   readonly sleep: Sleep;
@@ -210,6 +212,7 @@ export class SyncLoop {
     this.deps.onProviderKeys?.(request.providerRequests ?? [], response.providerKeys ?? [], response.providerKeyErrors ?? []);
     // Fleet S5a §3: the prune pass keeps the latest list; a response without the field keeps the previous one.
     if (response.archivedThreadIds !== undefined) this.deps.onArchivedThreads?.(response.archivedThreadIds);
+    if (response.reprobe === true) this.deps.onReprobe?.();
     const unknown = response.unknownJobIds ?? [];
     if (unknown.length > 0) this.deps.abandonUnknown(unknown);
     const commands = response.commands ?? [];

@@ -807,6 +807,8 @@ model Runner {
   bootedAt        DateTime? // start of the current daemon boot: set at enroll and when sync reports a new bootId (D131)
   enabled         Boolean   @default(true)
   lastSeenAt      DateTime
+  /// US-005 (ACP probe): set by an operator's re-probe request, cleared atomically by the sync that delivers it.
+  reprobeRequestedAt DateTime?
   createdById     String // User.id who issued the enrollment token
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

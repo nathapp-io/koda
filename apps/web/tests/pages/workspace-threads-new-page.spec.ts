@@ -4,11 +4,12 @@ import { defineComponent, h } from 'vue'
 import { useField } from 'vee-validate'
 import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
-import { i18nStub, uiStubs } from '../helpers/fleet-harness'
+import { enI18n, i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 import { useFleetDispatchOptions } from '~/composables/useFleetDispatchOptions'
 import { useProjectRunnerSummaries } from '~/composables/useProjectRunnerSummaries'
+import { globalPermissionsStub } from '../helpers/permission-nav'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
 
 /**
@@ -77,6 +78,10 @@ interface PageOver {
   projectsFail?: boolean
   /** Mirrors production `useApi()`: it reads i18n state, so it only works with a component instance. */
   setupOnlyApi?: boolean
+  /** The global (no project) keys the caller holds; the Re-check gate reads `fleet.runner.update` there. */
+  globalKeys?: string[]
+  /** Mount with the real English copy instead of the key-echo stub (copy assertions). */
+  englishCopy?: boolean
 }
 
 function mountPage(over: PageOver = {}) {
@@ -109,7 +114,11 @@ function mountPage(over: PageOver = {}) {
     alias: { '~/composables/useApi': apiModule },
     globals: {
       definePageMeta: () => undefined,
-      useI18n: () => i18nStub(),
+      useI18n: () => (over.englishCopy === true ? enI18n() : i18nStub()),
+      // US-009: `useAgentRecheck` calls `useAppToast()` at setup, and the Re-check gate reads the
+      // global `fleet.runner.update` key through `useGlobalPermissions()`.
+      useAppToast: () => toastRecorder(),
+      useGlobalPermissions: () => globalPermissionsStub(over.globalKeys ?? []),
       useApi: api,
       useRoute: () => ({ params: {}, query: {} }),
       navigateTo: nav,
@@ -443,6 +452,40 @@ describe('US-011 AC-11: the workspace form posts the chosen agent and never a mo
     // The picker sorts an agent's models, like the native list it replaced, and leads with the empty
     // entry that means "the agent's own default" (F2).
     expect(modelOptions(m.app)).toEqual(['', 'cursor-large', 'cursor-small'])
+    m.app.unmount()
+  })
+})
+
+// ── US-009: the readiness notice on the personal (workspace) form ───────────────────────────────
+
+const T0 = '2026-11-22T02:00:00.000Z'
+
+/**
+ * AC-11 fixture: an online WORKSPACE runner with native m1, whose codex is launchable but has no
+ * confirmed login after a probe that timed out at T0.
+ */
+const codexTimeoutRunner = (): FleetRunnerSummary => runner({
+  id: 'r1',
+  threadBackends: {
+    native: ['m1'],
+    acp: [],
+    acpOffers: [acpOffer('codex', {
+      launchable: true,
+      loggedIn: null,
+      checkedAt: T0,
+      lastError: { code: 'timeout', at: T0 },
+    })],
+  } as FleetRunnerSummary['threadBackends'],
+})
+
+describe('US-009 AC-11: agent readiness on pages/threads/new.vue', () => {
+  test('AC-11: renders the codex timeout notice and no Re-check button without fleet.runner.update', async () => {
+    const m = mountPage({ runners: [codexTimeoutRunner()], englishCopy: true })
+    await m.settle()
+
+    const notice = must(m.app.one('[data-testid="agent-readiness-codex"]'), 'codex readiness notice')
+    expect(m.app.textOf(notice)).toContain(enI18n().t('fleet.threads.new.agent.probe.timeout'))
+    expect(m.app.one('[data-testid="agent-recheck-codex"]')).toBeUndefined()
     m.app.unmount()
   })
 })

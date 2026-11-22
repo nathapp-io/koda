@@ -2,7 +2,7 @@
 import type { ChatThreadKind, ThreadAgent, ThreadCommandType } from '@nathapp/fleet-protocol';
 
 export type {
-  ChatThreadKind, ProjectRepoAssign, ProjectRepoUnavailable,
+  AcpProbeError, AcpProbeErrorCode, ChatThreadKind, ProjectRepoAssign, ProjectRepoUnavailable,
   ThreadAction, ThreadAcpOffer, ThreadAgent, ThreadAnswerPayload, ThreadAssign, ThreadBackend, ThreadBackends, ThreadCommandType,
   ThreadMode, ThreadInputPayload, ThreadSkill, ThreadSkillSource,
 } from '@nathapp/fleet-protocol';
@@ -35,6 +35,10 @@ export const ACP_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@=,[\]-]{0,127}$/;
 export const ACP_EFFORT_RE = /^[a-z0-9_-]{1,32}$/;
 /** Mirror of the package's ACP_OFFER_LIMITS; thread-jobs.spec.ts pins them equal. */
 export const ACP_OFFER_LIMITS = { maxEfforts: 8 } as const;
+/** Mirror of ACP_PROBE_ERROR_CODES; thread-jobs.spec.ts pins it to the package. */
+export const ACP_PROBE_ERROR_CODES = ['timeout', 'unavailable', 'error'] as const;
+/** Mirror of ACP_PROBE_TIME_RE; thread-jobs.spec.ts pins it to the package. */
+export const ACP_PROBE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 /** The ACP agents the API admits, mirroring the package's `ThreadAgent` union (thread-agents-modes US-001). */
 export const THREAD_AGENTS: readonly ThreadAgent[] = ['claude', 'codex', 'cursor'];

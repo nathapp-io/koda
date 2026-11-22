@@ -71,6 +71,15 @@ export class RunnerSummaryDto {
             loggedIn: { type: 'boolean', nullable: true, description: 'null when not probed or the probe failed' },
             models: { type: 'array', items: { type: 'string' } },
             efforts: { type: 'array', items: { type: 'string' } },
+            checkedAt: { type: 'string', format: 'date-time' },
+            lastError: {
+              type: 'object',
+              properties: {
+                code: { type: 'string', enum: ['timeout', 'unavailable', 'error'] },
+                at: { type: 'string', format: 'date-time' },
+              },
+              required: ['code', 'at'],
+            },
           },
         },
       },

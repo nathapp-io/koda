@@ -71,6 +71,11 @@ export interface IRunnerRepository {
   findRunnerPage(page: IPageOption): Promise<IPageResult<RunnerRecord>>;
   updateRunner(id: string, patch: RunnerPatch): Promise<RunnerRecord>;
   deleteRunner(id: string): Promise<void>;
+  /**
+   * US-005: stamps the runner's re-probe request; false when no runner has the id. A repeated request
+   * only moves the timestamp — the runner's capability reporter queues at most one extra probe.
+   */
+  requestReprobe(id: string, now: Date): Promise<boolean>;
   /** Number of the runner's jobs in an active state, as runner or as pin (plan D15). */
   countUnfinishedJobs(runnerId: string): Promise<number>;
   /**

@@ -374,6 +374,7 @@ describe('fleet OpenAPI contract', () => {
       ['/api/fleet/runners', 'get', 'fleet.runner.read'],
       ['/api/fleet/runners/{id}', 'get', 'fleet.runner.read'],
       ['/api/fleet/runners/{id}', 'patch', 'fleet.runner.update'],
+      ['/api/fleet/runners/{id}/reprobe', 'post', 'fleet.runner.update'],
       ['/api/fleet/runners/{id}', 'delete', 'fleet.runner.delete'],
     ];
     const documented = routes.map(([path, method, key]) => {

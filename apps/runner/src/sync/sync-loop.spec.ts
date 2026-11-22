@@ -1068,3 +1068,26 @@ describe('the isolated capability probe (US-003)', () => {
     expect(f.journal.pendingEvents('jB', 1, 10)).toHaveLength(1);
   });
 });
+
+describe('requested capability re-probes (US-006)', () => {
+  test('AC-1: calls onReprobe exactly once when a sync response requests it', async () => {
+    script.push(ok({ reprobe: true }));
+    let reprobeCalls = 0;
+    const onReprobe = () => { reprobeCalls += 1; };
+    expect(await makeLoop({ onReprobe }).syncOnce()).toEqual({ kind: 'ok' });
+    expect(reprobeCalls).toBe(1);
+  });
+
+  test('AC-2: does not call onReprobe when the sync response has no request', async () => {
+    script.push(ok());
+    let reprobeCalls = 0;
+    await makeLoop({ onReprobe: () => { reprobeCalls += 1; } }).syncOnce();
+    expect(reprobeCalls).toBe(0);
+  });
+
+  test('AC-3: processes response commands when reprobe is requested without a callback', async () => {
+    script.push(ok({ reprobe: true, commands: [assignCmd] }));
+    await makeLoop().syncOnce();
+    expect(handled).toEqual([[assignCmd]]);
+  });
+});

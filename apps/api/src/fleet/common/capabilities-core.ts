@@ -1,5 +1,5 @@
 import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from './protocol';
-import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, ACP_OFFER_LIMITS, MODEL_ID_RE, THREAD_AGENTS, THREAD_LIMITS, type ThreadAcpOffer, type ThreadAgent, type ThreadBackends } from './thread-jobs';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, ACP_OFFER_LIMITS, ACP_PROBE_ERROR_CODES, ACP_PROBE_TIME_RE, MODEL_ID_RE, THREAD_AGENTS, THREAD_LIMITS, type ThreadAcpOffer, type ThreadAgent, type ThreadBackends } from './thread-jobs';
 
 export const MAX_CAPABILITIES_BYTES = 65_536;
 /** #161: bounded names (same rule as dispatch profiles, Task 11) and bounded collections. */
@@ -62,7 +62,10 @@ function parseProfile(name: string, v: unknown): ProfileNeeds {
 }
 
 /** Exactly these keys on one discovery offer; anything else is a malformed entry. */
-const ACP_OFFER_KEYS = new Set(['agent', 'launchable', 'loggedIn', 'models', 'efforts']);
+const ACP_OFFER_KEYS = new Set(['agent', 'launchable', 'loggedIn', 'models', 'efforts', 'checkedAt', 'lastError']);
+const ACP_PROBE_ERROR_KEYS = new Set(['code', 'at']);
+const isAcpProbeTime = (value: unknown): value is string =>
+  typeof value === 'string' && ACP_PROBE_TIME_RE.test(value) && !Number.isNaN(Date.parse(value));
 const THREAD_BACKENDS_KEYS = new Set(['native', 'acp', 'acpOffers']);
 
 /** One offer, or null when any field is malformed (the caller drops the whole list). */
@@ -71,6 +74,18 @@ function parseAcpOffer(v: unknown): ThreadAcpOffer | null {
   const offer = v as Obj;
   if (!THREAD_AGENTS.includes(offer.agent as ThreadAgent) || !isBool(offer.launchable)) return null;
   if (offer.loggedIn !== null && !isBool(offer.loggedIn)) return null;
+  const hasCheckedAt = Object.hasOwn(offer, 'checkedAt');
+  const hasLastError = Object.hasOwn(offer, 'lastError');
+  if (hasCheckedAt && !isAcpProbeTime(offer.checkedAt)) return null;
+  if (hasLastError) {
+    const lastError = offer.lastError;
+    if (
+      !isObj(lastError) || Object.keys(lastError).some((key) => !ACP_PROBE_ERROR_KEYS.has(key)) ||
+      Object.keys(lastError).length !== ACP_PROBE_ERROR_KEYS.size ||
+      !ACP_PROBE_ERROR_CODES.includes(lastError.code as (typeof ACP_PROBE_ERROR_CODES)[number]) ||
+      !isAcpProbeTime(lastError.at)
+    ) return null;
+  }
   const { models, efforts } = offer;
   if (!Array.isArray(models) || models.length > THREAD_LIMITS.maxNativeModels) return null;
   if (!models.every((id) => typeof id === 'string' && ACP_MODEL_ID_RE.test(id))) return null;
@@ -82,6 +97,8 @@ function parseAcpOffer(v: unknown): ThreadAcpOffer | null {
     loggedIn: offer.loggedIn as boolean | null,
     models: [...(models as string[])],
     efforts: [...(efforts as string[])],
+    ...(hasCheckedAt ? { checkedAt: offer.checkedAt as string } : {}),
+    ...(hasLastError ? { lastError: offer.lastError as ThreadAcpOffer['lastError'] } : {}),
   };
 }
 

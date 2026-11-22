@@ -543,6 +543,9 @@ function mountNewThreadPage(project: readonly string[]): Mounted {
       useApi: () => ({ $api }),
       useAsyncData: fakeAsyncData,
       useProjectPermissions,
+      // US-009: the form's Re-check gate reads the global `fleet.runner.update` key, so this mount
+      // resolves the real global-scope composable too (the harness answers both scopes).
+      useGlobalPermissions,
       useRoute: () => ({ params: { project: 'web' } }),
       navigateTo: jest.fn(async () => undefined),
       useFleetDispatchOptions: () => {

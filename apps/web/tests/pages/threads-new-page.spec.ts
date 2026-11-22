@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from '@jest/globals'
+import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { defineComponent, h, ref } from 'vue'
 import { useField } from 'vee-validate'
@@ -6,8 +6,9 @@ import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { enI18n, i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
-import { projectPermissionsStub } from '../helpers/permission-nav'
+import { globalPermissionsStub, projectPermissionsStub } from '../helpers/permission-nav'
 import { ApiError } from '../../composables/useApi'
+import { useFleetDispatchOptions } from '~/composables/useFleetDispatchOptions'
 
 /**
  * US-005 AC11-AC15: pages/[project]/threads/new.vue — the validated create-thread form.
@@ -88,6 +89,12 @@ type PageOver = {
   acp?: { acp?: string[]; acpOffers?: Record<string, unknown>[] }
   /** The project keys the caller holds; the default is the create key alone. */
   permissions?: string[]
+  /** The global (no project) keys the caller holds; the Re-check gate reads `fleet.runner.update` there. */
+  globalKeys?: string[]
+  /** Mount with the real `useFleetDispatchOptions` over the fake transport, so `options.load` really reloads. */
+  realDispatch?: boolean
+  /** The runner summaries the transport answers `/fleet/runners` with (real-dispatch mounts only). */
+  dispatchRunners?: Record<string, unknown>[]
   /** Mount with the real English copy instead of the key-echo stub (label assertions). */
   englishCopy?: boolean
   /** The repos `useFleetDispatchOptions` reports; the default is the single plain `acme/app`. */
@@ -103,11 +110,26 @@ const acpOffer = (agent: string, over: Record<string, unknown> = {}) => ({
 })
 
 function mountPage(over: PageOver = {}) {
+  const g = globalThis as Record<string, unknown>
   const post = over.post ?? jest.fn(async () => ({ id: 'th9' }))
-  const get = jest.fn(async () => ({}))
+  const paths: string[] = []
+  // The transport answers the two fleet lists the dispatch form reads (so the real
+  // `useFleetDispatchOptions` can reload), and `{}` everywhere else.
+  const get = jest.fn(async (path: string) => {
+    paths.push(path)
+    if (path.endsWith('/fleet/runners')) {
+      return { records: over.dispatchRunners ?? runners, hasNext: false }
+    }
+    if (path.endsWith('/fleet/repos')) return { records: over.repos ?? [repo()], hasNext: false }
+    return {}
+  })
   const nav = jest.fn(async () => undefined)
   const push = jest.fn(async () => undefined)
   const runners = over.models ? [runnerWithModels(over.models, { projectThreads: over.projectThreads ?? false }, over.acp ?? {})] : []
+  const api = () => ({ $api: { get, post } })
+  // The real `useFleetDispatchOptions` (US-009 AC-10) resolves `useApi` as an auto-import, which in
+  // this harness lives on globalThis rather than on the mount globals.
+  g.useApi = api
   const app = mountSfc(pageFile, {
     components: { ...stubs, FormField, Input, FleetThreadsBackendPicker: backendPicker },
     fleetComponents: ['FleetNativeSelect'],
@@ -116,25 +138,29 @@ function mountPage(over: PageOver = {}) {
       definePageMeta: () => undefined,
       useI18n: () => (over.englishCopy === true ? enI18n() : i18nStub()),
       useAppToast: () => toastRecorder(),
-      useApi: () => ({ $api: { get, post } }),
+      useApi: api,
       useRoute: () => ({ params: { project: 'web' } }),
       useRouter: () => ({ push, replace: jest.fn(async () => undefined) }),
       navigateTo: nav,
       // Permissions P1 US-007: the create form follows the project `thread.create` key, and the
       // REPO mode select follows the two `thread.mode.*` keys (thread-agents-modes US-011).
       useProjectPermissions: () => projectPermissionsStub(over.permissions ?? ['thread.create']),
-      useFleetDispatchOptions: () => ({
-        repos: ref(over.repos ?? [repo()]),
-        runners: ref(runners),
-        moreRepos: ref(false),
-        moreRunners: ref(false),
-        settled: ref(over.settled ?? true),
-        load: jest.fn(async () => undefined),
-        profileOptions: ref([]),
-        labelOptions: ref([]),
-        repoName: (id: string) => id,
-        runnerName: (id: string | null) => id,
-      }),
+      // US-009: the Re-check of a not-ready agent follows the global `fleet.runner.update` key.
+      useGlobalPermissions: () => globalPermissionsStub(over.globalKeys ?? []),
+      useFleetDispatchOptions: over.realDispatch === true
+        ? useFleetDispatchOptions
+        : () => ({
+            repos: ref(over.repos ?? [repo()]),
+            runners: ref(runners),
+            moreRepos: ref(false),
+            moreRunners: ref(false),
+            settled: ref(over.settled ?? true),
+            load: jest.fn(async () => undefined),
+            profileOptions: ref([]),
+            labelOptions: ref([]),
+            repoName: (id: string) => id,
+            runnerName: (id: string | null) => id,
+          }),
       useProjectSkills: () => ({ list: jest.fn(async () => (over.skills ?? [])) }),
     },
   })
@@ -144,8 +170,12 @@ function mountPage(over: PageOver = {}) {
       await Vue.nextTick()
     }
   }
-  return { app, post, nav, push, settle }
+  return { app, post, nav, push, paths, settle }
 }
+
+afterEach(() => {
+  delete (globalThis as Record<string, unknown>).useApi
+})
 
 // ── tree helpers ─────────────────────────────────────────────────────────────
 
@@ -595,6 +625,167 @@ describe('US-005 AC-9: pages/[project]/threads/new.vue repo chooser', () => {
       'acme/app (gitlab.com)',
       'acme/app (gitlab.example.com)',
     ])
+    m.app.unmount()
+  })
+})
+
+// ── US-009: the readiness notice and its Re-check on the project form ─────────────────────────
+
+const T0 = '2026-11-22T02:00:00.000Z'
+
+/** The codex probe that timed out at T0: launchable on r1, login unconfirmed. */
+const codexTimeoutOffer = (): Record<string, unknown> => acpOffer('codex', {
+  launchable: true,
+  loggedIn: null,
+  checkedAt: T0,
+  lastError: { code: 'timeout', at: T0 },
+})
+
+/** AC-8 fixture: online, enabled, REPO-capable r1 with native m1, whose codex probe timed out at T0. */
+const timeoutRunner = (): Record<string, unknown> => runnerWithModels(['m1'], { id: 'r1' }, { acp: [], acpOffers: [codexTimeoutOffer()] })
+
+/**
+ * A runner that already reports codex ready (so codex has nothing to re-check), plus a claude probe
+ * that timed out: the notice area does render on this mount, just never for codex.
+ */
+const readyCodexRunner = (): Record<string, unknown> => runnerWithModels(['m1'], { id: 'r1' }, {
+  acp: ['codex'],
+  acpOffers: [
+    acpOffer('codex', { checkedAt: T0 }),
+    acpOffer('claude', {
+      launchable: true,
+      loggedIn: null,
+      checkedAt: T0,
+      lastError: { code: 'timeout', at: T0 },
+    }),
+  ],
+})
+
+/** AC-8 fixture: online, enabled, REPO-capable r1 with native m1, whose codex and claude probes timed out at T0. */
+const twoNotReadyRunner = (): Record<string, unknown> => runnerWithModels(['m1'], { id: 'r1' }, {
+  acp: [],
+  acpOffers: [
+    codexTimeoutOffer(),
+    acpOffer('claude', { launchable: true, loggedIn: null, checkedAt: T0, lastError: { code: 'timeout', at: T0 } }),
+  ],
+})
+
+const readinessNotice = (app: Mounted): FakeNode | undefined => app.one('[data-testid="agent-readiness-codex"]')
+const recheckButton = (app: Mounted): FakeNode | undefined => app.one('[data-testid="agent-recheck-codex"]')
+
+/** Clicks a rendered button the way a person does. */
+const click = (node: FakeNode): void => {
+  const onClick = node.props.onClick as (() => void) | undefined
+  must(onClick, 'click handler')()
+}
+
+describe('US-009 AC-8..AC-10, AC-12: agent readiness on pages/[project]/threads/new.vue', () => {
+  test('AC-8: a not-ready codex renders its notice with the timeout text while native stays chosen', async () => {
+    const m = mountPage({
+      models: ['m1'],
+      acp: { acp: [], acpOffers: [codexTimeoutOffer()] },
+      globalKeys: ['fleet.runner.update'],
+      englishCopy: true,
+    })
+    await m.settle()
+
+    expect(must(agentSelect(m.app), 'agent select').props.value).toBe('native')
+    expect(m.app.textOf(must(readinessNotice(m.app), 'codex readiness notice')))
+      .toContain(enI18n().t('fleet.threads.new.agent.probe.timeout'))
+    m.app.unmount()
+  })
+
+  test('AC-9: clicking agent-recheck-codex posts /fleet/runners/r1/reprobe', async () => {
+    const m = mountPage({
+      realDispatch: true,
+      dispatchRunners: [timeoutRunner()],
+      globalKeys: ['fleet.runner.update'],
+    })
+    await m.settle()
+
+    // The refresh the click starts schedules its first read 10 s out; the post itself settles now.
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] })
+    try {
+      click(must(recheckButton(m.app), 're-check button'))
+      await m.settle()
+
+      expect(m.post.mock.calls).toEqual([['/fleet/runners/r1/reprobe']])
+    }
+    finally {
+      jest.useRealTimers()
+    }
+    m.app.unmount()
+  })
+
+  test('AC-10: a re-check reloads the runner list through options.load and keeps the chosen native', async () => {
+    const m = mountPage({
+      realDispatch: true,
+      dispatchRunners: [timeoutRunner()],
+      globalKeys: ['fleet.runner.update'],
+    })
+    await m.settle()
+    const runnersBefore = m.paths.filter(path => path.endsWith('/fleet/runners')).length
+
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] })
+    try {
+      click(must(recheckButton(m.app), 're-check button'))
+      await jest.advanceTimersByTimeAsync(10_000)
+
+      expect(m.paths.filter(path => path.endsWith('/fleet/runners')).length).toBe(runnersBefore + 1)
+      expect(must(agentSelect(m.app), 'agent select').props.value).toBe('native')
+    }
+    finally {
+      jest.useRealTimers()
+    }
+    m.app.unmount()
+  })
+
+  test('AC-12: a runner whose codex is in acp renders no codex readiness notice', async () => {
+    const m = mountPage({
+      realDispatch: true,
+      dispatchRunners: [readyCodexRunner()],
+      globalKeys: ['fleet.runner.update'],
+    })
+    await m.settle()
+
+    // The not-ready claude still renders its own notice: the absence of codex's is about codex.
+    expect(m.app.one('[data-testid="agent-readiness-claude"]')).toBeDefined()
+    expect(readinessNotice(m.app)).toBeUndefined()
+    m.app.unmount()
+  })
+
+  // B1 (review round 2): only one re-check runs at a time, so every notice is locked while one is in
+  // flight. Without this a second click started a second post and a second polling loop, and the
+  // first one to finish re-enabled the other's button.
+  test('B1: while codex re-checks, the claude button is disabled and a second codex click posts nothing', async () => {
+    const m = mountPage({
+      realDispatch: true,
+      dispatchRunners: [twoNotReadyRunner()],
+      globalKeys: ['fleet.runner.update'],
+    })
+    await m.settle()
+    const claudeButton = (): FakeNode | undefined => m.app.one('[data-testid="agent-recheck-claude"]')
+    expect(must(claudeButton(), 'claude re-check button').props.disabled).toBeFalsy()
+
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] })
+    try {
+      // The post settles now; the 10 s refresh keeps the re-check running, so the state stays held.
+      click(must(recheckButton(m.app), 'codex re-check button'))
+      await m.settle()
+
+      expect(must(recheckButton(m.app), 'codex re-check button').props.disabled).toBe(true)
+      expect(must(claudeButton(), 'claude re-check button').props.disabled).toBe(true)
+      // The notice keeps its own copy: only the button state is locked.
+      expect(m.app.textOf(must(claudeButton(), 'claude re-check button')))
+        .toContain('fleet.threads.new.agent.recheck')
+
+      click(must(recheckButton(m.app), 'codex re-check button'))
+      await m.settle()
+      expect(m.post.mock.calls).toEqual([['/fleet/runners/r1/reprobe']])
+    }
+    finally {
+      jest.useRealTimers()
+    }
     m.app.unmount()
   })
 })
