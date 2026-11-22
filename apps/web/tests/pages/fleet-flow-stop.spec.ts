@@ -91,6 +91,19 @@ describe('fleet flow Stop action (US-008)', () => {
     page.mounted.unmount()
   })
 
+  test('AC-3 stop requests styled destructive confirmation with complete copy', async () => {
+    const page = await mountPage()
+    await clickStop(page.mounted)
+    expect(page.confirm).toHaveBeenCalledTimes(1)
+    expect(page.confirm).toHaveBeenCalledWith({
+      title: 'fleet.flows.stop.confirm',
+      body: 'fleet.flows.stop.confirmBody',
+      confirmLabel: 'fleet.flows.stop.button',
+      destructive: true,
+    })
+    page.mounted.unmount()
+  })
+
   test('AC-4 declining confirmation does not call stop', async () => {
     const page = await mountPage()
     page.confirm.mockResolvedValue(false)

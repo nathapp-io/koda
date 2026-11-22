@@ -31,10 +31,18 @@ const flush = async (): Promise<void> => {
 }
 const click = (n: FakeNode | undefined): unknown => (n?.props.onClick as () => unknown)()
 
+async function editContext(app: ReturnType<typeof harness>['app']): Promise<void> {
+  await flush()
+  click(app.find('[data-testid="nax-file"]').find((n) => n.props['data-path'] === '.nax/context.md'))
+  await flush()
+  ;(app.one('[data-testid="md-editor"]')?.props.onInput as (e: unknown) => void)({ target: { value: 'changed' } })
+  await flush()
+}
+
 /** Permissions P1 US-008: editing is fleet.job.config.edit, the drift check fleet.repo.drift.check. */
 const EDITOR = ['fleet.job.config.edit', 'fleet.repo.drift.check']
 
-function harness(opts: { project?: readonly string[]; query?: Record<string, string>; api?: Record<string, jest.Mock> } = {}) {
+function harness(opts: { project?: readonly string[]; query?: Record<string, string>; api?: Record<string, jest.Mock>; confirm?: boolean } = {}) {
   const api = {
     list: jest.fn(async () => LIST),
     read: jest.fn(async (_repo: string, path: string) => ({ path, blobSha: path === '.nax/context.md' ? 'ctx1' : 'cfg1', content: path.endsWith('.json') ? '{}' : 'hello' })),
@@ -47,6 +55,8 @@ function harness(opts: { project?: readonly string[]; query?: Record<string, str
   }
   const navigateTo = jest.fn(async () => undefined)
   const toasts = toastRecorder()
+  let leaveGuard: (() => unknown) | undefined
+  const confirm = jest.fn(async () => opts.confirm ?? true)
   const app = mountSfc(page, {
     components: uiStubs,
     alias: { '@nathapp/fleet-protocol': protocol, '~/composables/useApi': apiModule, '~/components/MarkdownEditor.vue': mdStub },
@@ -59,13 +69,53 @@ function harness(opts: { project?: readonly string[]; query?: Record<string, str
       useFleetDispatchOptions: () => ({ load: async () => undefined, repoName: () => 'acme/app' }),
       useProjectPermissions: () => projectPermissionsStub(opts.project ?? EDITOR),
       navigateTo,
-      onBeforeRouteLeave: () => undefined,
+      useConfirm: () => ({ confirm }),
+      onBeforeRouteLeave: (guard: () => unknown) => { leaveGuard = guard },
     },
   })
-  return { app, api, navigateTo, toasts }
+  return { app, api, navigateTo, toasts, confirm, leaveGuard: () => leaveGuard?.() }
 }
 
 describe('config page (S3 §6)', () => {
+  test('AC-7 clean draft leaves without asking', async () => {
+    const m = harness()
+    await flush()
+    await expect(m.leaveGuard()).resolves.toBe(true)
+    expect(m.confirm).not.toHaveBeenCalled()
+  })
+
+  test('AC-8 unsaved draft asks with the destructive leave prompt', async () => {
+    const m = harness()
+    await editContext(m.app)
+    await m.leaveGuard()
+    expect(m.confirm).toHaveBeenCalledTimes(1)
+    expect(m.confirm).toHaveBeenCalledWith({
+      title: enI18n().t('fleet.config.page.leaveConfirm'),
+      body: enI18n().t('fleet.config.page.leaveConfirmBody'),
+      confirmLabel: enI18n().t('fleet.config.page.leaveConfirmLabel'),
+      destructive: true,
+    })
+  })
+
+  test.each([[false, false], [true, true]])('AC-9/10 unsaved draft reflects confirm result %s', async (answer, expected) => {
+    const m = harness({ confirm: answer })
+    await editContext(m.app)
+    await expect(m.leaveGuard()).resolves.toBe(expected)
+  })
+
+  test('AC-11 submitted edits bypass confirmation', async () => {
+    const m = harness()
+    await editContext(m.app)
+    click(m.app.one('[data-testid="config-save"]'))
+    await flush()
+    ;(m.app.find('[data-testid="config-pr-title"]')[0].props['onUpdate:modelValue'] as (v: string) => void)('Edit context')
+    await flush()
+    click(m.app.one('[data-testid="config-pr-submit"]'))
+    await flush()
+    await expect(m.leaveGuard()).resolves.toBe(true)
+    expect(m.confirm).not.toHaveBeenCalled()
+  })
+
   test('loads the list, reads a file at baseSha on select, edits, and submits the edit set', async () => {
     const { app, api, navigateTo } = harness()
     await flush()
