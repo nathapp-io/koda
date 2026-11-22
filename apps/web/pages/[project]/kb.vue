@@ -12,6 +12,7 @@ const i18n = useI18n()
 const { t } = i18n
 const dates = useLocalDates(i18n)
 const toast = useAppToast()
+const { confirm } = useConfirm()
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 
@@ -98,7 +99,12 @@ async function optimizeKb() {
 }
 
 async function deleteDocument(sourceId: string) {
-  if (!window.confirm(t('kb.documents.deleteConfirm'))) return
+  if (!(await confirm({
+    title: t('kb.documents.deleteConfirm'),
+    body: t('kb.documents.deleteConfirmBody'),
+    confirmLabel: t('common.delete'),
+    destructive: true,
+  }))) return
   try {
     await $api.delete(apiPath`/projects/${slug}/kb/documents/${sourceId}`)
     toast.success(t('kb.toast.deleted'))

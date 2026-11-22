@@ -779,6 +779,7 @@
       "addDescription": "将文档添加到该项目的知识库。",
       "optimize": "优化",
       "deleteConfirm": "确认从知识库删除该来源文档？",
+      "deleteConfirmBody": "其已索引内容将从搜索中移除。",
       "empty": "暂无文档。",
       "emptyHint": "添加文档后即可搜索。",
       "indexed": "{count} 个文档已索引",
@@ -2719,7 +2720,9 @@
         "pickFile": "请在左侧选择文件。",
         "deleteFile": "删除文件",
         "deletedNotice": "PR 将删除此文件。放弃此改动即可保留。",
-        "leaveConfirm": "nax 文件有未保存的改动。确定离开并丢弃吗？"
+        "leaveConfirm": "离开并丢弃未保存的改动？",
+        "leaveConfirmBody": "你对 nax 文件的改动将丢失。",
+        "leaveConfirmLabel": "离开"
       },
       "problem": {
         "json": "JSON 无效",

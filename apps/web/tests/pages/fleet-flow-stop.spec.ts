@@ -28,13 +28,13 @@ async function mountPage(options: {
   const success = jest.fn()
   const error = jest.fn()
   const toast = { success, error }
-  const confirm = jest.fn(() => true)
-  ;(globalThis as { window?: { confirm: jest.Mock } }).window = { confirm }
+  const confirm = jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
   const mounted = mountSfc(webFile('pages', '[project]', 'flows', '[id].vue'), {
     globals: {
       useRoute: () => ({ params: { project: 'web', id: 'flow-1' } }),
       useI18n: () => ({ t: (key: string) => key }),
       useAppToast: () => toast,
+      useConfirm: () => ({ confirm }),
       useFleetFlows: () => ({ get, overview: overviewGet, stop }),
       useProjectMemberNames: () => ({ members: [], load: jest.fn<() => Promise<void>>().mockResolvedValue(undefined), nameOf: () => null }),
       useProjectPermissions: () => ({ permissions: { value: { has: (key: string) => key === 'fleet.flow.stop' && (options.allowed ?? true) } } }),
@@ -91,7 +91,7 @@ describe('fleet flow Stop action (US-008)', () => {
 
   test('AC-4 declining confirmation does not call stop', async () => {
     const page = await mountPage()
-    page.confirm.mockReturnValue(false)
+    page.confirm.mockResolvedValue(false)
     await clickStop(page.mounted)
     expect(page.confirm).toHaveBeenCalled()
     expect(page.stop).not.toHaveBeenCalled()

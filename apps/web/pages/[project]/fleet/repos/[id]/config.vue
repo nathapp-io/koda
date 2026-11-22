@@ -21,6 +21,7 @@ const repoId = route.params.id as string
 const reopenJobId = typeof route.query.reopen === 'string' && route.query.reopen !== '' ? route.query.reopen : null
 const { t } = useI18n()
 const toast = useAppToast()
+const { confirm } = useConfirm()
 const configApi = useFleetRepoConfig(slug)
 const options = useFleetDispatchOptions(slug)
 // Permissions P1 US-008: editing follows fleet.job.config.edit, the drift check fleet.repo.drift.check.
@@ -106,9 +107,14 @@ onMounted(() => {
 })
 
 // D474: the draft lives only here, so leaving with unsaved edits asks first.
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (submitted.value || edits.value.length === 0) return true
-  return window.confirm(t('fleet.config.page.leaveConfirm'))
+  return await confirm({
+    title: t('fleet.config.page.leaveConfirm'),
+    body: t('fleet.config.page.leaveConfirmBody'),
+    confirmLabel: t('fleet.config.page.leaveConfirmLabel'),
+    destructive: true,
+  })
 })
 
 async function select(path: string): Promise<void> {

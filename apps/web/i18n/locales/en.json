@@ -779,6 +779,7 @@
       "addDescription": "Index a document into the knowledge base for this project.",
       "optimize": "Optimize",
       "deleteConfirm": "Delete this document source from KB?",
+      "deleteConfirmBody": "Its indexed content is removed from search.",
       "empty": "No documents yet.",
       "emptyHint": "Add a document to make it searchable.",
       "indexed": "{count} document(s) indexed",
@@ -1038,7 +1039,8 @@
       },
       "stop": {
         "button": "Stop flow",
-        "confirm": "Stop this flow?"
+        "confirm": "Stop this flow?",
+        "confirmBody": "The flow does not continue to its next step."
       },
       "answer": {
         "required": "Answer is required",
@@ -2719,7 +2721,9 @@
         "pickFile": "Pick a file on the left.",
         "deleteFile": "Delete file",
         "deletedNotice": "This file will be deleted by the PR. Discard the change to keep it.",
-        "leaveConfirm": "You have unsaved changes to nax files. Leave and lose them?"
+        "leaveConfirm": "Leave with unsaved changes?",
+        "leaveConfirmBody": "Your edits to nax files are lost.",
+        "leaveConfirmLabel": "Leave"
       },
       "problem": {
         "json": "invalid JSON",
