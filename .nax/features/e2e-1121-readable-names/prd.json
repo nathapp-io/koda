@@ -3,7 +3,7 @@
   "feature": "e2e-1121-readable-names",
   "branchName": "feat/e2e-1121-readable-names",
   "createdAt": "2026-11-22T09:16:55.665Z",
-  "updatedAt": "2026-11-22T09:28:45.155Z",
+  "updatedAt": "2026-11-22T09:36:53.259Z",
   "userStories": [
     {
       "id": "US-001",
@@ -86,14 +86,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard additive repository-to-view-to-DTO propagation with bounded shared queries, existing unit/DB fixture patterns and generated contract updates; no access-control changes."
+        "reasoning": "Standard additive repository-to-view-to-DTO propagation with bounded shared queries, existing unit/DB fixture patterns and generated contract updates; no access-control changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/home/prisma-home.repository.ts",
@@ -130,7 +133,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "df5da6c644d1d8a94a18b6df69a736e06a18285a"
     },
     {
       "id": "US-003",
