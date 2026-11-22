@@ -9,8 +9,10 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
-import { enrollRunner, FleetHttpWorld, insertRunner, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
+import { enrollRunner, FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { asTestActor, fixtureDb } from '../../helpers/action-context';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
+import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import type { SyncResponse } from '../../../src/fleet/common/protocol';
 
@@ -95,6 +97,35 @@ describeIntegration('runner re-probe request (PG)', () => {
     });
     // The row the API wrote is the one the operator asked for: one request, one entry.
     expect((await storedRequest())).not.toBeNull();
+  });
+
+  it('US-005: an approval policy answers 202 and the approved request stamps the row', async () => {
+    // A distinct approver is required, so the requester is an agent that holds the key globally and the
+    // decider is root. This is the policy path AC-1 deliberately runs without.
+    const agent = await seedFleetHttpAgent(server, world.tokens.root);
+    await grantKeys(prisma, { type: 'AGENT', id: agent.id }, ['fleet.runner.update'], null);
+    await app.get(PermissionCache).invalidate();
+    const policy = await prisma.approvalPolicy.create({ data: {
+      selector: '*|fleet.runner.update|any', projectId: null, permissionPattern: 'fleet.runner.update',
+      principalType: null, mode: 'agent', updatedByType: 'SYSTEM', updatedById: 'test',
+    } });
+    try {
+      await prisma.runner.update({ where: { id: runner.runnerId }, data: { reprobeRequestedAt: null } });
+      const summary = data<{ id: string; permissionKey: string }>(await reprobe(runner.runnerId, agent.apiKey).expect(202));
+      expect(summary.permissionKey).toBe('fleet.runner.update');
+      // Nothing was written while the request waits.
+      expect(await storedRequest()).toBeNull();
+
+      // Approving runs the registered reprobe command: the variant the controller named is the one the
+      // engine executes, so an unregistered variant would fail here.
+      const decided = data<{ status: string }>(
+        await request(server).post(`/api/approvals/${summary.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200),
+      );
+      expect(decided.status).toBe('executed');
+      expect(await storedRequest()).not.toBeNull();
+    } finally {
+      await prisma.approvalPolicy.delete({ where: { id: policy.id } });
+    }
   });
 
   it('AC-13: two concurrent takes of one pending request resolve exactly one true and one false', async () => {
