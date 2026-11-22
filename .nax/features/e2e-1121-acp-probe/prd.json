@@ -3,7 +3,7 @@
   "feature": "e2e-1121-acp-probe",
   "branchName": "feat/e2e-1121-acp-probe",
   "createdAt": "2026-11-22T03:15:28.895Z",
-  "updatedAt": "2026-11-22T03:15:28.895Z",
+  "updatedAt": "2026-11-22T03:32:36.815Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,17 @@
         "validation"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive diagnostic fields, strict shape validation and DTO documentation follow existing parser patterns; readiness and authorization rules remain unchanged, so ordinary unit-first TDD is sufficient."
+        "reasoning": "Additive diagnostic fields, strict shape validation and DTO documentation follow existing parser patterns; readiness and authorization rules remain unchanged, so ordinary unit-first TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "packages/fleet-protocol/src/threads.ts",
@@ -67,7 +70,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e6965c9361baee44cbc391ce4fc1d94acb258f4c"
     },
     {
       "id": "US-002",
@@ -117,7 +124,10 @@
       "workdirSource": "stated",
       "suggestedCriteria": [
         "When backend construction throws, probeAcpAgents returns that agent with launchable: true, loggedIn: null, empty models and efforts, checkedAt at and lastError { code: 'error', at }."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -166,7 +176,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -231,7 +244,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -330,7 +346,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -374,7 +393,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -435,7 +457,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -482,7 +507,10 @@
         "apps/web/tests/components/agent-readiness-notice.spec.ts"
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -553,7 +581,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Repository investigation: codebase-memory MCP is unavailable in this session, so discovery used direct reads and literal/regex searches rooted at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. This is an enhancement of an existing Bun/Turborepo TypeScript system, not greenfield. Read the app context sources before implementation: .nax/mono/apps/api/context.md:1, .nax/mono/apps/runner/context.md:1 and .nax/mono/apps/web/context.md:1. Despite the automatically supplied Next.js label, web is Nuxt 4 SSR/Vue with Jest, not Next.js (.nax/mono/apps/web/context.md:23). API is NestJS over Fastify with Prisma/Postgres and Vitest; runner is Bun-only with bun:test. Do not change generated AGENTS.md or generated CLI sources by hand. Before Nest implementation consult .nax/rules/nathapp-packages.md and Nathapp docs MCP if available.\n\nGoal and scope: correct F3 transient ACP readiness flapping and its lack of explanations/retry, and F18 effort-suffixed model ids crowding out bare models. Preserve the existing probe deadlines, timer interval, concurrency and placement semantics. Exactly US-001 through US-009 form the binding work graph: US-001 -> US-002 -> US-003; US-002 -> US-004; independent US-005 -> US-006; US-001 -> US-007 -> US-008; US-005 and US-008 -> US-009. Keep their declared workdirs even when the API stories also edit shared protocol files and regenerate root/CLI artifacts. No extra documentation/test-only stories.\n\nWire/validator seam (US-001): packages/fleet-protocol/src/threads.ts:28 defines ThreadBackends and :41 defines the current five-field ThreadAcpOffer; :54-60 defines ACP id/effort regexes and limits. packages/fleet-protocol/src/index.ts:13 already re-exports threads, so runner runtime constants come through that export. API production imports from the package must remain type-only: apps/api/src/fleet/common/thread-jobs.ts:1-8 is the local mirror/type re-export seam; its existing constants at :32-40 and equality tests in apps/api/src/fleet/common/thread-jobs.spec.ts:1 provide precedent. apps/api/src/fleet/common/capabilities-core.ts:69-92 currently rejects every offer key beyond agent/launchable/loggedIn/models/efforts, so both optional keys must be admitted with strict nested-key and ISO regex plus Date.parse validation. parseAcpOffers at :99 rejects the whole offer list for one malformed entry or duplicate agent; parseThreadBackends at :112-133 drops only that malformed list and preserves native/acp. The same parser is called for stored input by apps/api/src/fleet/runners/dto/runner-summary.dto.ts:17-29; its inline Swagger item schema at :62-76 must document the new fields without exposing the request timestamp. Existing parsing cases live in apps/api/src/fleet/common/capabilities-thread.spec.ts:99-180. Add DTO round-trip coverage alongside the relevant existing DTO specs. Runtime mirrors must equal both the error codes and timestamp regex from the package, preserving every existing pin.\n\nProbe seam (US-002/003): apps/runner/src/capabilities/acp-agent-probe.ts:40-50 has injected launch/backend/open/workdir/timer seams but no now clock. probeAgent at :105-145 uses a no-offers builder, launch check, temporary workdir, tool-less ask-profile memory-only session, a fixed deadline and late-session cleanup. It currently collapses timeout and non-auth errors to loggedIn:null, with AGENT_SESSION_AUTH_REQUIRED alone yielding false (:127-131). Keep session closing, directory removal and non-blocking late cleanup intact. agentSessionCode is already exported by apps/runner/src/thread/session-factory.ts:82. Timestamp every returned offer, including not-installed and auth-required; only failed probes get lastError. Keep error text out of wire and logs. offeredModels at :67 currently filters and slices raw ids without normalization/deduplication, while offeredEfforts at :71 stays unchanged. Implement the specified per-agent transformation before regex filtering and the 32-model cap; Cursor uniqueness counts distinct original ids, so duplicate identical ids do not make a bare name ambiguous but an explicit bare id plus a suffixed id does. Do not tighten the public model regex or migrate old bracketed thread ids. Existing harness and whole-offer assertions are in apps/runner/src/capabilities/acp-agent-probe.spec.ts:39, :112-148 and :169-227; extend its clock and update the listed expectations rather than deleting assertions.\n\nLast-good seam (US-004): add an in-process per-agent decorator around AcpAgentProbe, not persistent state or a second scheduler. Only launchable/loggedIn:true offers are confirmed; retain the original checkedAt and attach the latest failure, expire inclusively after 30 minutes, and immediately invalidate on logged-out/not-launchable answers. A missing/unparseable remembered timestamp cannot sustain readiness. apps/runner/src/capabilities/nax-probe.ts:175-178 runs ACP alongside profile/tool probes, and :196-200 already derives acp only from launchable && loggedIn === true. Keep that rule, so last-good offers remain placement-ready. acpAgents at :242-249 currently returns warnings:[] for successful probe calls, even when individual offers failed; add deterministic code-only per-offer warnings there. Existing rejected-whole-probe diagnostic behavior has a regression test at apps/runner/src/capabilities/nax-probe.spec.ts:367-375; retain it unless it would expose agent stderr, which the feature expressly forbids. CapabilityReporter in apps/runner/src/capabilities/capability-probe.ts:50-98 already serializes refreshes, queues one extra and deduplicates the joined warning state. hashCapabilities at :40-43 excludes sandbox.probedAt only; do not add checkedAt to its exclusions, since each probe result must be delivered. runCommand at apps/runner/src/commands/run.ts:9-14 and :28 currently passes probeAcpAgents directly; replace with a fresh per-run memory wrapper and optional injected base probe. Its existing reference-identity assertion at apps/runner/src/commands/run.spec.ts:134-140 must become the behavioral two-probe seam assertion. Existing ACP aggregation cases are in apps/runner/src/capabilities/nax-probe.spec.ts:337-375.\n\nAPI retry seam (US-005): model Runner is at apps/api/prisma/schema.prisma:794; ship the exact nullable TIMESTAMP(3) column in the prescribed migration and regenerate Prisma before building the API. This is additive, with no backfill, new enum or protocol bump. The runner administration repository interface is apps/api/src/fleet/runners/domain/runner.domain.ts:58; implement requestReprobe in apps/api/src/fleet/runners/prisma-runner.repository.ts using its transaction-aware db getter (:20). Existing RUNNER_SELECT at :10 deliberately excludes secrets and must not start leaking reprobeRequestedAt. RunnersService already injects repository/transaction/audit/notifier at apps/api/src/fleet/runners/runners.service.ts:21-29; its update transaction and post-commit pattern at :53-86 is the precedent. The new request is audited with the existing key and only notifies after successful commit; missing runner must neither audit nor notify. apps/api/src/fleet/runners/runners.controller.ts:51-67 shows the exact permission + ApprovalGated + routeGate.run pattern, and apps/api/src/fleet/runners/runner-route.commands.ts:18-21 and :43-61 shows variant registration and id parsing. Extend these, not a direct service call bypassing approvals. The permission is global, not project scoped; UI visibility is not authorization.\n\nSync delivery seam (US-005/006): SyncResponse is in packages/fleet-protocol/src/index.ts:413-430; optional reprobe:true is additive at protocol 4 (:9). SyncService at apps/api/src/fleet/sync/sync.service.ts:56 already owns IFleetJobRepository: extend that interface and apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts rather than adding constructor dependencies. That repository already writes runner heartbeat at :357-370 and lists commands at :509. Add hasPendingReprobe and a single conditional SQL UPDATE that clears the column and returns affected-row boolean, not read-then-clear; concurrent consumers must return exactly one true. The idle branch at sync.service.ts:131-142 waits for pending commands only today; add pending reprobe to its ready predicate and take the request after waiting, inside bookkeeping('runner.command-delivery', ...). Return the key only for === true, because deep mocks may return truthy non-booleans. Preserve all token/ack/job/archived-thread delivery behavior and never hold a transaction across the wait. RunnerNotifier.wait registers before checking readiness at apps/api/src/fleet/jobs/runner-notifier.ts:23-35, closing a lost-wakeup window; leave it intact. The once-delivered request is intentionally not durable after a lost response. Runner-side apply at apps/runner/src/sync/sync-loop.ts:190-225 already applies reports/tokens, archived threads, unknowns and commands. Add optional onReprobe adjacent to onArchivedThreads and invoke only for literal true, without awaiting a fresh probe or changing command delivery. apps/runner/src/daemon/daemon.ts:294-326 constructs the loop and :326-333 defines reprobe, which refreshes and wakes only on a changed report. Wire a closure over that existing function; be mindful of initialization order but do not add a second probe path.\n\nRetry tests/contracts: extend apps/api/src/fleet/runners/runners.service.spec.ts and runner-route.commands.spec.ts (:18-21 currently pins exactly two runner variants). Add sync-reprobe.spec.ts using constructor/mocking precedent from apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts:19-48, and add DB-backed runner-reprobe.integration.spec.ts for HTTP authorization, persistence/audit, sequential delivery and Promise.all atomic consumption. The approval-specific failure handling also requires a 202/pending then approval-execution assertion. Preserve update/delete command checks; add the third variant using the SAME fleet.runner.update key. Update the existing 149-route pins to 150 at apps/api/test/integration/permissions/permission-contract.integration.spec.ts:70-73 and apps/api/src/approvals/approval-openapi.contract.spec.ts:201, :295-297; add post /api/fleet/runners/{id}/reprobe to gatedOperations (:16) and the fleet OpenAPI documented route table. Unit DI tests remain DB-free. Runner SyncLoop tests already inject the client; apps/runner/test/unit/daemon.spec.ts:37-63 is an injected HTTP fake with no listener and a hard-coded sync response. Add an opt-in single-response reprobe knob and use the existing probed helper (:429) and ACP seam (:532-540), preserving default fake responses. No live ACP binaries, installed auth or real 10-minute waits in unit tests.\n\nWeb aggregation seam (US-007): apps/web/lib/thread-types.ts is deliberately hand-written (:1-6); add the optional timestamp/error shapes there, not a generated web client. AgentChoice is in apps/web/lib/thread-create.ts:41-49; eligibleAgents at :126-170 first filters online/enabled/scope capability, then treats threadBackends.acp as sole readiness authority. Retain this; confirmed offers supply lists, not availability. Probe state belongs ONLY on unavailable ACP choices with notReady/notLoggedIn. Collect runnerIds in eligible runner order from launchable nonconfirmed offers; choose latest checkedAt, stable first-runner ties, and code from that same offer (not lastError.at). An old runner without time still supplies retry identity and null time/code. Available/kept agents and notInstalled/native entries do not expose probe. Existing readiness invariants are extensively covered at apps/web/tests/lib/thread-create-agents.spec.ts:51-206, including offers-only non-readiness and mixed runners. Add both locale trees under fleet.threads.new.agent without removing existing reason keys (en reason entries currently :1179-1180). Extend apps/web/tests/i18n/fleet-locale-parity.spec.ts:21 dynamic-key pins.\n\nNotice/page seam (US-008/009): BackendPicker explicitly disables unavailable options at apps/web/components/fleet/threads/BackendPicker.vue:37-44, and uses agentLabelKey/agentReasonKey (:4), so a retry UI tied to the chosen agent would be unreachable. New AgentReadinessNotice renders per probe-bearing choice, with text interpolation, localized reason/time, conditional permission-controlled button and rechecking state; use existing formatDateTime, not new formatting. Component mounting precedent is apps/web/tests/components/thread-backend-picker.spec.ts:1-38 with real locale helpers. Both pages must explicitly import the new notice and composable. Project page agents/options live at apps/web/pages/[project]/threads/new.vue:19-45; its watch at :72-75 auto-moves unavailable selections, and existing thread-new-unavailable at :208 stays unchanged. Pass options.load: apps/web/composables/useFleetDispatchOptions.ts:17-32 swaps lists only after requests finish. Workspace page at apps/web/pages/threads/new.vue:24-30 already documents setup-time composable requirements; its loadRunners at :85-98 blanks runners, which would trigger agent/model watchers, so track the slug used by the last loadRunners and pass a direct runnerSummaries.load(lastSlug) closure for refresh. apps/web/composables/useProjectRunnerSummaries.ts:17-23 does not blank on reload. Do not call useApi/useI18n/useAppToast from a delayed callback: create useAgentRecheck during setup. It posts sequentially with no body, then bounded 10-second polling, stopping on changed probe.checkedAt, availability or 12 reloads. A failed post stops before further posts/reloads and resets state. A 202 pending is intentionally treated as success with no approval-state UX. Permissions come from useGlobalPermissions().permissions, a computed PermissionSet with has(key), not a role string or an object-level can() method (apps/web/composables/usePermissions.ts:97-114). useAppToast returns the callable toast with success/error helpers (apps/web/composables/useAppToast.ts:19-27).\n\nWeb tests: extend apps/web/tests/pages/threads-new-page.spec.ts (real vee-validate/mountSfc and runnerWithModels fixture at :35-45), workspace-threads-new-page.spec.ts and project-permission-gates.spec.ts mount harnesses; preserve every assertion. Inject useGlobalPermissions through the established globalPermissionsStub in apps/web/tests/helpers/permission-nav.ts:1-20; workspace also needs setup-time useAppToast. New composable tests use fake timers and real observable reads; page integration means mounted Vue pages with fake transport, not Postgres or Playwright. Optional hardening suggestions belong only to suggestedCriteria, not extra stories.\n\nCompatibility/deployment/regression risks: optional offer keys let new API/web accept older runner offers; deploying a new runner before API validator support can drop acpOffers but must preserve acp readiness. Deploy the additive migration/API before runner and web retry usage. New timestamps intentionally change hashes on every successful fresh probe or latest-error update. Carry-over must never extend its own TTL from a failed probe, and auth-required/not-installed clears memory immediately. The in-process decorator must not cross-contaminate agents or daemons. Never persist or transmit stderr. Additive reprobe can be ignored by older runner builds; bounded UI polling prevents indefinite busy state. Keep approval-required writes gated and audited; exactly-one delivery is consumption semantics, not reliable command ack/replay. US-001 and US-005 both regenerate the same root/CLI files, so coordinate generated-artifact merges without adding dependencies contrary to the binding table. Run bun run generate from root (package.json:20-23: export/build API then openapi-ts); never hand-edit openapi.json or CLI generated types/sdk to compensate. Existing stored thread model suffixes and session model resolution remain unchanged.\n\nVerification/migration workflow: tests are implementation work within each story, not separate deliverables. Use Vitest for API and Jest for web, bun:test for runner; preserve existing pins and invariants identified above. API DB specs require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and an isolated *_test database; use the app's test:scoped host command when available. DB-mode runs reset schema, so do not run them concurrently against one database. Use fake timers/injected sessions/clients/clocks for probe/poll tests and real Postgres for atomic SQL race tests. Generated acceptance files, if supplied, run separately using per-app guidance and must not be edited/copied into normal tests. This PRD drafting session made no implementation changes or test claims. Post-merge app-context notes and post-deploy koda-wk checks are explicitly deferred, not story work.\n\nRefine audit: enumerated and checked every original Acceptance Criteria entry against its same-story, same-position PRD entry: US-001 1-13; US-002 1-8; US-003 1-7; US-004 1-15; US-005 1-13; US-006 1-4; US-007 1-8; US-008 1-9; US-009 1-12 (89 original criteria total). No original criterion was removed or moved. Retained the unchanged DTO/failed-offer qualifiers, older-runner fallback, exact-age boundary, no-body post requirement, request-count/chosen-agent regression anchor and without-waiting qualifier. Three existing additional mandatory assertions cover explicit failure/design rows: backend construction failure and approval pending/approved execution. Every story already has a directly observable negative path and a regression anchor, so no invented failure criterion was needed. All 14 feature-level exclusions remain verbatim, with binding ids/workdirs/dependencies unchanged. Corrected US-002 error semantics to agentSessionCode(error), which reads error.code (apps/runner/src/thread/session-factory.ts:82-87), and US-004 probe fixtures to resolve lists, as AcpAgentProbe requires. Replaced two missing recommended contexts with nax-probe.spec.ts (US-004) and permission-nav.ts (US-009). globalPermissionsStub returns an object (apps/web/tests/helpers/permission-nav.ts:81-89), so page harnesses must expose useGlobalPermissions as () => globalPermissionsStub(keys), not assign the object as a callable global. The current project-page options.load mock is a no-op (apps/web/tests/pages/threads-new-page.spec.ts:141); the runners-request-count case needs the real dispatch-options loader over the fake transport or a transport-backed load double. The workspace runner fixture already sets workspaceThreads:true (apps/web/tests/pages/workspace-threads-new-page.spec.ts:28-39), preserving eligibility for the workspace notice assertion. Lightened US-001 and US-008 to ordinary TDD because diagnostic validation and prop-only rendering do not implement authentication or authorization; actual auth-state and permission-gated mutation stories retain strict security isolation.",
