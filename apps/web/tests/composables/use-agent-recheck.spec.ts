@@ -175,4 +175,22 @@ describe('US-009 AC-6, AC-7: rechecking state and a rejected request', () => {
     expect(h.reload).not.toHaveBeenCalled()
     expect(rechecking.value).toBeNull()
   })
+
+  // F1 (review round 1): the pages do not see this read, so a failed reload must be reported here —
+  // otherwise the person keeps the stale readiness and never learns the refresh stopped.
+  test('F1: a rejected reload toasts extractApiError, stops the refresh and clears rechecking', async () => {
+    jest.useFakeTimers()
+    const h = harness()
+    h.reload.mockImplementation(async () => { throw new ApiError(503, 'fleet.runners.unavailable') })
+    const { recheck, rechecking } = useAgentRecheck(h.reload, h.read, { intervalMs: 10_000 })
+
+    const done = recheck('codex')
+    await jest.advanceTimersByTimeAsync(0)
+    await jest.advanceTimersByTimeAsync(10_000)
+    await done
+
+    expect(h.reload).toHaveBeenCalledTimes(1)
+    expect(h.toasts.errors).toEqual(['fleet.runners.unavailable'])
+    expect(rechecking.value).toBeNull()
+  })
 })

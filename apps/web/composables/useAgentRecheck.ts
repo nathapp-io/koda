@@ -54,7 +54,9 @@ export function useAgentRecheck(
 
   /**
    * Re-reads the runner list until the agent's probe is worth showing differently. A reload that fails
-   * stops the wait: the page surfaces its own load failure, and there is no fresh result coming.
+   * is reported here and stops the wait: the refresh calls `reload` directly, so neither page's own
+   * error handling sees it, and the person would otherwise keep a stale readiness with no sign that the
+   * refresh stopped. `recheck`'s `finally` is what clears `rechecking`.
    */
   async function refreshUntilSettled(agent: ThreadAgent, checkedBefore: string | null): Promise<void> {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -62,7 +64,8 @@ export function useAgentRecheck(
       try {
         await reload()
       }
-      catch {
+      catch (error: unknown) {
+        toast.error(extractApiError(error))
         return
       }
       const choice = read(agent)
