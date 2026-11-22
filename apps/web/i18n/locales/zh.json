@@ -1039,7 +1039,8 @@
       },
       "stop": {
         "button": "停止流程",
-        "confirm": "确定要停止此流程吗？"
+        "confirm": "确定要停止此流程吗？",
+        "confirmBody": "该流程将不再继续下一步。"
       },
       "answer": {
         "required": "必须填写回答",
