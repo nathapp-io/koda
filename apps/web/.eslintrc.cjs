@@ -1,11 +1,35 @@
 module.exports = {
   root: true,
   extends: ['@nathapp/eslint-config/vue'],
+  rules: {
+    'no-restricted-properties': [
+      'error',
+      {
+        object: 'window',
+        property: 'confirm',
+        message: 'Use useConfirm() (styled dialog) instead of the native confirm.',
+      },
+      {
+        object: 'globalThis',
+        property: 'confirm',
+        message: 'Use useConfirm() (styled dialog) instead of the native confirm.',
+      },
+    ],
+    'no-restricted-globals': [
+      'error',
+      {
+        name: 'confirm',
+        message: 'Use useConfirm() (styled dialog) instead of the global confirm().',
+      },
+    ],
+  },
   overrides: [
     {
       files: ['*.spec.ts'],
       rules: {
         '@typescript-eslint/no-require-imports': 'off',
+        'no-restricted-properties': 'off',
+        'no-restricted-globals': 'off',
       },
     },
     {
