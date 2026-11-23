@@ -75,6 +75,36 @@ describeIntegration('fleet dashboard repository (PG)', () => {
     expect(await repo.findActiveJobs({ kind: 'global' }, 1)).toHaveLength(1);
   });
 
+  it('AC-4 and AC-5: active THREAD jobs expose their thread title while RUN jobs without a thread return null', async () => {
+    const thread = await prisma.chatThread.create({
+      data: { projectId: web.projectId, title: 'Triage flaky test', createdById: web.adminId, backend: {}, skills: [] },
+    });
+    const threaded = await job(web, { command: 'THREAD', state: 'RUNNING', runnerId, threadId: thread.id });
+    const withoutThread = await job(web, { command: 'RUN', state: 'RUNNING', runnerId });
+    try {
+      const rows = await repo.findActiveJobs({ kind: 'project', projectId: web.projectId }, 20);
+      expect(rows.find((row) => row.id === threaded.id)?.threadTitle).toBe('Triage flaky test');
+      expect(rows.find((row) => row.id === withoutThread.id)?.threadTitle).toBeNull();
+    } finally {
+      await prisma.fleetJob.deleteMany({ where: { id: { in: [threaded.id, withoutThread.id] } } });
+      await prisma.chatThread.delete({ where: { id: thread.id } });
+    }
+  });
+
+  it('AC-6: recent THREAD jobs expose their thread title', async () => {
+    const thread = await prisma.chatThread.create({
+      data: { projectId: web.projectId, title: 'Finished thread title', createdById: web.adminId, backend: {}, skills: [] },
+    });
+    const finished = await job(web, { command: 'THREAD', state: 'COMPLETED', finishedAt: minutesAgo(5), threadId: thread.id });
+    try {
+      const rows = await repo.findRecentJobs({ kind: 'project', projectId: web.projectId }, minutesAgo(60), 20);
+      expect(rows.find((row) => row.id === finished.id)?.threadTitle).toBe('Finished thread title');
+    } finally {
+      await prisma.fleetJob.delete({ where: { id: finished.id } });
+      await prisma.chatThread.delete({ where: { id: thread.id } });
+    }
+  });
+
   it('reads the global queued window including soft-deleted projects, flagged', async () => {
     const window = await repo.findQueuedWindow(50);
     expect(window.map((j) => j.projectDeleted)).toEqual([true, false]);

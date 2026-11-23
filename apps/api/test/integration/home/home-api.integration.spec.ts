@@ -26,7 +26,7 @@ interface HomeSnapshot {
     ticketsTotal: number;
     approvals: Array<{ id: string; permissionKey: string; type: string | null; projectId: string | null; projectSlug: string | null; jobId: string | null; requestedAt: string }>;
     approvalsTotal: number;
-    jobs: Array<{ id: string; state: string; reason: string; pendingApprovals: number }>;
+    jobs: Array<{ id: string; state: string; reason: string; pendingApprovals: number; threadTitle: string | null }>;
     jobsTotal: number;
   };
   projects: Array<{ slug: string; openTickets: number; attentionJobs: number }>;
@@ -239,6 +239,46 @@ describeIntegration('home dashboard API (PG)', () => {
       [...v.needsYou.approvals].map((a) => a.requestedAt).sort((a, b) => b.localeCompare(a)),
     );
     expect(v.needsYou.approvals.length).toBeLessThanOrEqual(HOME_LIMITS.approvals);
+  });
+
+  it('AC-8: GET /home includes the thread title for a recent failed THREAD job', async () => {
+    const thread = await prisma.chatThread.create({
+      data: { projectId: webId, title: 'Failed thread title', createdById: world.ids.dev, backend: {}, skills: [] },
+    });
+    const failed = await job(webId, world.repoId, {
+      command: 'THREAD', threadId: thread.id, state: 'FAILED', finishedAt: new Date(), feature: 'failed-thread-title',
+    });
+    try {
+      const snapshot = await home('dev');
+      expect(snapshot.needsYou.jobs.find((entry) => entry.id === failed.id)).toMatchObject({ threadTitle: 'Failed thread title', reason: 'failed' });
+    } finally {
+      await prisma.fleetJob.delete({ where: { id: failed.id } });
+      await prisma.chatThread.delete({ where: { id: thread.id } });
+    }
+  });
+
+  it('AC-9: GET /home includes the thread title for a THREAD job blocked on approval', async () => {
+    const thread = await prisma.chatThread.create({
+      data: { projectId: webId, title: 'Blocked thread title', createdById: world.ids.dev, backend: {}, skills: [] },
+    });
+    const blockedThread = await job(webId, world.repoId, {
+      command: 'THREAD', threadId: thread.id, state: 'QUEUED', requestedById: world.ids.dev, feature: 'blocked-thread-title',
+    });
+    const ask = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: webId, createdAt: new Date(), onBehalfOf: { type: 'USER', id: world.ids.dev },
+      input: { jobId: blockedThread.id, leaseEpoch: 1, naxAskId: 'ask-home-blocked-thread-title', payload: {} },
+      link: { jobId: blockedThread.id, leaseEpoch: 1, naxAskId: 'ask-home-blocked-thread-title' },
+    });
+    try {
+      const snapshot = await home('dev');
+      expect(snapshot.needsYou.jobs.find((entry) => entry.id === blockedThread.id)).toMatchObject({
+        threadTitle: 'Blocked thread title', reason: 'blocked', pendingApprovals: 1,
+      });
+    } finally {
+      await prisma.approvalRequest.delete({ where: { id: ask.requestId } });
+      await prisma.fleetJob.delete({ where: { id: blockedThread.id } });
+      await prisma.chatThread.delete({ where: { id: thread.id } });
+    }
   });
 
   it('returns an empty snapshot for a signed-in user with no memberships', async () => {
