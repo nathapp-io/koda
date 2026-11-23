@@ -29,6 +29,7 @@
       "email": "电子邮箱",
       "submit": "发送重置链接",
       "checkEmail": "如果此邮箱对应的账户存在，请查看收件箱中的重置链接。",
+      "backToSignIn": "返回登录",
       "link": "忘记密码？"
     },
     "reset": {
@@ -52,7 +53,7 @@
     },
     "login": {
       "title": "Koda",
-      "subtitle": "开发工单追踪器",
+      "subtitle": "工单、会话与智能体运行",
       "email": "邮箱",
       "emailPlaceholder": "you{'@'}example.com",
       "password": "密码",

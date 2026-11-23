@@ -9,7 +9,7 @@ const navigateTo = jest.fn()
 const error = jest.fn()
 function page(name: string, query: Record<string, string> = {}) {
   return mountSfc(`pages/${name}.vue`, {
-    globals: { useI18n: () => ({ t: (k: string) => k }), useHead: () => undefined, useRoute: () => ({ params: { token: 'tok' }, query }), navigateTo, useAppToast: () => ({ error }), useAuth: () => ({ login: jest.fn() }), useRegistrationStatus: () => ({ open: false, load: jest.fn() }), onMounted: () => undefined },
+    globals: { useI18n: () => ({ t: (k: string) => k === 'auth.forgot.backToSignIn' ? 'Back to sign in' : k }), useHead: () => undefined, useRoute: () => ({ params: { token: 'tok' }, query }), navigateTo, useAppToast: () => ({ error }), useAuth: () => ({ login: jest.fn() }), useRegistrationStatus: () => ({ open: false, load: jest.fn() }), onMounted: () => undefined },
     alias: { '~/composables/usePasswordActions': { usePasswordActions: () => ({ requestReset, confirmReset }) } },
     components: { Button: { template: '<button><slot /></button>' }, NuxtLink: { props: ['to'], template: '<a :href="to"><slot /></a>' }, FormField: { template: '<div><slot :componentField="{}" /></div>' }, FormItem: { template: '<div><slot /></div>' }, FormLabel: { template: '<label><slot /></label>' }, FormControl: { template: '<div><slot /></div>' }, FormMessage: { template: '<div />' }, Input: { template: '<input />' } },
   })
@@ -27,6 +27,23 @@ async function submit(m: ReturnType<typeof page>, fields: Record<string, string>
   for (let i = 0; i < 10; i++) { await new Promise(resolve => setTimeout(resolve, 0)); await nextTick() }
 }
 beforeEach(() => { requestReset.mockReset().mockResolvedValue(); confirmReset.mockReset().mockResolvedValue(); navigateTo.mockReset(); error.mockReset() })
+test('AC-3 forgot page links back to sign in before submit', () => {
+  const m = page('forgot-password')
+  const link = m.find('a').find(n => n.props['data-testid'] === 'forgot-back-to-login')
+  expect(link).toBeDefined()
+  expect(link?.props.href).toBe('/login')
+  expect(link ? m.textOf(link) : '').toBe('Back to sign in')
+  m.unmount()
+})
+test('AC-4 forgot page keeps sign-in link after successful request', async () => {
+  const m = page('forgot-password'); await submit(m, { email: 'a@b.com' })
+  const link = m.find('a').find(n => n.props['data-testid'] === 'forgot-back-to-login')
+  expect(m.text()).toContain('auth.forgot.checkEmail')
+  expect(link).toBeDefined()
+  expect(link?.props.href).toBe('/login')
+  expect(link ? m.textOf(link) : '').toBe('Back to sign in')
+  m.unmount()
+})
 test.each(['resolved', 'rejected'])('AC-3/4 forgot feedback after %s request', async outcome => {
   if (outcome === 'rejected') requestReset.mockRejectedValue(new Error('offline'))
   const m = page('forgot-password'); await submit(m, { email: 'a@b.com' })

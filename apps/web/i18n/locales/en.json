@@ -29,6 +29,7 @@
       "email": "Email",
       "submit": "Send reset link",
       "checkEmail": "If an account exists for this email, check your inbox for a reset link.",
+      "backToSignIn": "Back to sign in",
       "link": "Forgot password?"
     },
     "reset": {
@@ -52,7 +53,7 @@
     },
     "login": {
       "title": "Koda",
-      "subtitle": "Dev Ticket Tracker",
+      "subtitle": "Tickets, threads and agent runs",
       "email": "Email",
       "emailPlaceholder": "you{'@'}example.com",
       "password": "Password",
