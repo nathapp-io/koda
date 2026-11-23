@@ -3,7 +3,7 @@
   "feature": "e2e-1121-polish",
   "branchName": "feat/e2e-1121-polish",
   "createdAt": "2026-11-23T03:31:31.594Z",
-  "updatedAt": "2026-11-23T03:52:24.546Z",
+  "updatedAt": "2026-11-23T04:06:57.648Z",
   "userStories": [
     {
       "id": "US-001",
@@ -88,14 +88,17 @@
         "prisma"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The existing Prisma relations, explicit projections, view builders and generation command make this a mechanical nullable-field extension across two read models, not a new abstraction or authorization path; failing mapper, database and contract tests can guide one implementation session."
+        "reasoning": "The existing Prisma relations, explicit projections, view builders and generation command make this a mechanical nullable-field extension across two read models, not a new abstraction or authorization path; failing mapper, database and contract tests can guide one implementation session.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
@@ -152,7 +155,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "24bdf75b88873e7ce55dd963fbfc66e29b895521"
     },
     {
       "id": "US-003",
