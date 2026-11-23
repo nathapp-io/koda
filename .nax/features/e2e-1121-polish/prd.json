@@ -3,7 +3,7 @@
   "feature": "e2e-1121-polish",
   "branchName": "feat/e2e-1121-polish",
   "createdAt": "2026-11-23T03:31:31.594Z",
-  "updatedAt": "2026-11-23T04:37:40.285Z",
+  "updatedAt": "2026-11-23T04:52:31.621Z",
   "userStories": [
     {
       "id": "US-001",
@@ -415,14 +415,17 @@
         "tickets"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Filtering, deterministic prefix grouping and counting use pure array operations with existing token/picker components and form props; standard Jest helper and mount tests suffice without a new service, concurrent state or credential handling."
+        "reasoning": "Filtering, deterministic prefix grouping and counting use pure array operations with existing token/picker components and form props; standard Jest helper and mount tests suffice without a new service, concurrent state or credential handling.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/FleetTokenListInput.vue",
@@ -473,7 +476,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fa503f280a383a8dbfb42bdef44312f71019f17c"
     },
     {
       "id": "US-007",
