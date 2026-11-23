@@ -1,10 +1,69 @@
 import { describe, expect, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import * as Vue from 'vue'
+import { useField } from 'vee-validate'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { enI18n } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 
 const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
 const dispatch = read('pages', '[project]', 'fleet', 'dispatch.vue')
+const dispatchPage = webFile('pages', '[project]', 'fleet', 'dispatch.vue')
+
+function mountDispatch() {
+  const fields: Record<string, { value: { value: unknown } }> = {}
+  const FormField = {
+    props: ['name'],
+    setup(props: { name: string }, { slots }: { slots: { default?: (arg: unknown) => unknown } }) {
+      const field = useField(() => props.name)
+      fields[props.name] = field
+      const componentField = Vue.computed(() => ({
+        modelValue: field.value.value,
+        'onUpdate:modelValue': field.handleChange,
+        onBlur: field.handleBlur,
+      }))
+      return () => Vue.h('x-field', slots.default?.({ componentField: componentField.value }) as never)
+    },
+  }
+  const TokenInput = {
+    props: { modelValue: Array, suggestions: Array, placeholder: String, testId: String, groupByPrefix: Boolean },
+    render(this: { $props: Record<string, unknown> }) {
+      return Vue.h('x-token-input', {
+        'data-testid': this.$props.testId,
+        'data-group-by-prefix': String(Boolean(this.$props['group-by-prefix'] ?? this.$props.groupByPrefix)),
+      })
+    },
+  }
+  const app = mountSfc(dispatchPage, {
+    components: {
+      FormField,
+      FormItem: { setup: (_p: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
+      FormControl: { setup: (_p: unknown, { slots }: { slots: { default?: () => unknown } }) => () => Vue.h('div', slots.default?.() as never) },
+      FormLabel: 'label', FormMessage: 'span', Input: 'input', Button: 'button', Label: 'label',
+      PageHeader: 'header', ErrorState: 'div', LoadingState: 'x-loading-state', FleetPlacementResult: 'div', FleetBudgetBanner: 'div', NuxtLink: 'a',
+    },
+    fleetComponents: ['FleetNativeSelect'],
+    alias: {
+      '~/components/fleet/FleetTokenListInput.vue': TokenInput,
+      '~/components/fleet/TicketPicker.vue': { props: ['testId'], render(this: { testId: string }) { return Vue.h('x-ticket-picker', { 'data-testid': this.testId }) } },
+    },
+    globals: {
+      ref: Vue.ref, computed: Vue.computed, onMounted: Vue.onMounted,
+      useRoute: () => ({ params: { project: 'koda' }, query: {} }),
+      useI18n: () => enI18n(), useAppToast: () => ({ error: () => undefined }),
+      useFleetDispatchOptions: () => ({
+        repos: Vue.ref([{ id: 'repo-1', owner: 'acme', name: 'app', defaultBranch: 'main' }]),
+        runners: Vue.ref([]), moreRepos: Vue.ref(false), moreRunners: Vue.ref(false),
+        profileOptions: Vue.ref([]), labelOptions: Vue.ref([]), runnerName: () => '', load: async () => undefined,
+      }),
+      useProjectPermissions: () => projectPermissionsStub(['fleet.job.dispatch']),
+      useFleetJobs: () => ({ dispatch: async () => null, findActiveJob: async () => null }),
+    },
+  })
+  return { app, fields }
+}
 
 describe('dispatch page', () => {
   test('validates with the shared schema and sends toDispatchBody', () => {
@@ -54,19 +113,25 @@ describe('dispatch page', () => {
     expect(dispatch).toContain("t('fleet.dispatch.prefilled')")
   })
 
-  test('profile suggestions opt into prefix groups while label suggestions stay flat', () => {
-    expect(dispatch).toMatch(/test-id="dispatch-profiles"\s+group-by-prefix/)
-    expect(dispatch).toMatch(/test-id="dispatch-labels"[\s\S]*?@update:model-value/)
-    expect(dispatch).not.toMatch(/test-id="dispatch-labels"\s+group-by-prefix/)
+  test('profile token list receives grouping and label token list does not', async () => {
+    const { app } = mountDispatch()
+    await Vue.nextTick()
+    expect(app.one('[data-testid="dispatch-profiles"]')?.props['data-group-by-prefix']).toBe('true')
+    const labels = app.one('[data-testid="placement-labels"]')
+    if (!labels) throw new Error('Missing labels placement option')
+    ;(labels.props.onChange as () => void)()
+    await Vue.nextTick()
+    expect(app.one('[data-testid="dispatch-labels"]')?.props['data-group-by-prefix']).toBe('false')
+    app.unmount()
   })
 
-  test('max cost carries the translated hint instead of a silent prefill (#205)', () => {
-    expect(dispatch).toContain("t('fleet.dispatch.maxCostHint')")
-    expect(dispatch).toContain('id="dispatch-max-cost-hint"')
-    expect(dispatch).toContain('data-testid="dispatch-max-cost"')
-    // The en locale is pinned here to the user-visible copy, not merely a translation key.
-    const en = read('i18n', 'locales', 'en.json')
-    expect(en).toContain('"maxCostHint": "The run is billed up to this amount."')
+  test('renders the English max-cost hint text in its hint element (#205)', async () => {
+    const { app } = mountDispatch()
+    await Vue.nextTick()
+    const hint = app.one('[id="dispatch-max-cost-hint"]')
+    if (!hint) throw new Error('Missing dispatch max-cost hint element')
+    expect(app.textOf(hint)).toBe('The run is billed up to this amount.')
+    app.unmount()
   })
 
   test('bash mode select and timeout only for RUN; the timeout only for gated/escalate (D299)', () => {

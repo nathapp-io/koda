@@ -1,5 +1,4 @@
 import { describe, test, expect, afterEach, jest } from '@jest/globals'
-import { readFileSync } from 'node:fs'
 import * as Vue from 'vue'
 import { ref, computed, watch, nextTick } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
@@ -9,6 +8,15 @@ import { ApiError } from '../../composables/useApi'
 import type { ScheduleDto } from '../../lib/fleet-types'
 
 const dialog = webFile('components', 'fleet', 'ScheduleEditDialog.vue')
+const tokenListStub = {
+  props: { modelValue: Array, suggestions: Array, placeholder: String, testId: String, groupByPrefix: Boolean },
+  render(this: { $props: Record<string, unknown> }) {
+    return Vue.h('x-token-list', {
+      'data-testid': this.$props.testId,
+      'data-group-by-prefix': String(this.$props.groupByPrefix),
+    })
+  },
+}
 
 const schedule = (over: Partial<ScheduleDto> = {}): ScheduleDto => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * 1-5', timezone: 'Asia/Singapore', feature: 'login',
@@ -43,7 +51,7 @@ function mountDialog(props: Record<string, unknown>, api: Api, toasts: ReturnTyp
   return mountSfc(dialog, {
     components: uiStubs,
     props: { slug: 'koda', repoOptions: [{ value: 'r1', label: 'acme/app' }], runnerOptions: [{ value: 'run1', label: 'mac-1' }], ...props },
-    alias: { '~/composables/useApi': apiModule },
+    alias: { '~/composables/useApi': apiModule, '~/components/fleet/FleetTokenListInput.vue': tokenListStub },
     globals: {
       ref, computed, watch, nextTick,
       onMounted: Vue.onMounted,
@@ -65,10 +73,18 @@ const testids = (app: ReturnType<typeof mountDialog>): string[] =>
 afterEach(() => { delete (globalThis as Record<string, unknown>).useApi })
 
 describe('FleetScheduleEditDialog (behaviour)', () => {
-  test('profile suggestions opt into prefix groups while label suggestions stay flat', () => {
-    const source = readFileSync(dialog, 'utf-8')
-    expect(source).toMatch(/test-id="fleet-schedule-profiles"\s+group-by-prefix/)
-    expect(source).not.toMatch(/test-id="fleet-schedule-labels"\s+group-by-prefix/)
+  test('profile token list receives grouping and label token list does not', async () => {
+    const profileHarness = harness()
+    const profiles = mountDialog({ open: true, schedule: schedule() }, profileHarness.api, profileHarness.toasts)
+    await profileHarness.flush()
+    expect(profiles.one('[data-testid="fleet-schedule-profiles"]')?.props['data-group-by-prefix']).toBe('true')
+    profiles.unmount()
+
+    const labelHarness = harness()
+    const labels = mountDialog({ open: true, schedule: schedule({ pinnedRunnerId: null, selectorLabels: ['gpu'] }) }, labelHarness.api, labelHarness.toasts)
+    await labelHarness.flush()
+    expect(labels.one('[data-testid="fleet-schedule-labels"]')?.props['data-group-by-prefix']).toBe('false')
+    labels.unmount()
   })
 
   test('edit of a pinned schedule patches every editable field, keeps the pin, then emits saved and closes', async () => {
