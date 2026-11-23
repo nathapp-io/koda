@@ -1,6 +1,7 @@
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
+import { useBrowserApprovalNotificationPreference } from '~/composables/useBrowserApprovalNotificationPreference'
 import { inboxHref, requestKeyLabel, viewerActions } from '~/lib/approval-requests'
 import type { ApprovalRequestCounts, ApprovalRequestSummary } from '~/lib/approval-requests'
 
@@ -29,8 +30,9 @@ interface ActiveNotice {
  * - **A failed refresh changes nothing.** The engine list can refuse or fail transiently; the toasts
  *   on screen stay until a successful refresh says otherwise.
  *
- * Delivery is browser-only and optional (`koda-approval-notifications-<userId>`), the API stays the
- * authority on membership and decision rights.
+ * Delivery is browser-only and optional. The preference itself lives in
+ * `useBrowserApprovalNotificationPreference` — one per tab, shared with the settings page that sets
+ * it — and the API stays the authority on membership and decision rights.
  */
 export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCounts | null>) {
   const inbox = useApprovalInbox()
@@ -43,15 +45,13 @@ export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCount
     'approval-request-notifications-announced',
     () => ({}),
   )
-  const enabled = ref(false)
-  const supported = ref(false)
+  const { enabled, supported } = useBrowserApprovalNotificationPreference()
   const active = new Map<string, ActiveNotice>()
   const closed = new Set<string>()
   let mounted = false
   let generation = 0
 
   const toastId = (id: string): string => `approval-request-${auth.user.value?.id}-${id}`
-  const preferenceKey = (): string => `koda-approval-notifications-${auth.user.value?.id}`
 
   /** The words for a request's permission key (`approvals.keys.*` when the locale has them). */
   const label = (row: ApprovalRequestSummary): string => requestKeyLabel(t, te, row.permissionKey)
@@ -179,33 +179,14 @@ export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCount
     dismiss(id)
   }
 
-  async function toggleBrowserNotifications(): Promise<void> {
-    if (!mounted || !supported.value) return
-    const userId = auth.user.value?.id
-    const permission = enabled.value ? Notification.permission : await Notification.requestPermission()
-    if (!mounted || auth.user.value?.id !== userId) return
-    enabled.value = !enabled.value && permission === 'granted'
-    try {
-      localStorage.setItem(preferenceKey(), String(enabled.value))
-    } catch {
-      // Intentional: storage is optional (private mode), the choice still holds for this tab.
-    }
-  }
-
   onMounted(() => {
     mounted = true
-    supported.value = typeof Notification !== 'undefined'
-    try {
-      enabled.value = supported.value && Notification.permission === 'granted' && localStorage.getItem(preferenceKey()) === 'true'
-    } catch {
-      // Intentional: unreadable storage means the preference defaults to opt-out.
-    }
   })
-  // The identity is the user id: a real account change closes every toast and forgets the preference.
+  // The identity is the user id: a real account change closes every toast. The preference forgets
+  // itself on the same change (`useBrowserApprovalNotificationPreference` owns that read).
   watch(() => auth.user.value?.id ?? null, () => {
     generation += 1
     for (const id of [...active.keys()]) dismiss(id)
-    enabled.value = false
     closed.clear()
   })
   onBeforeUnmount(() => {
@@ -214,5 +195,5 @@ export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCount
     for (const id of [...active.keys()]) dismiss(id)
   })
 
-  return { refresh, decided, enabled, supported, toggleBrowserNotifications }
+  return { refresh, decided, enabled, supported }
 }

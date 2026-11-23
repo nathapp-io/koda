@@ -14,19 +14,6 @@
       <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-status-review" aria-hidden="true" />
       <span class="tabular-nums">{{ t('fleet.approvals.badge.waiting', { count: badgeText(count) }) }}</span>
     </NuxtLink>
-    <button
-      v-if="notifications.supported.value"
-      type="button"
-      class="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:h-9 sm:w-9"
-      :aria-label="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
-      :title="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
-      :aria-pressed="notifications.enabled.value"
-      data-testid="fleet-approval-notifications"
-      @click="notifications.toggleBrowserNotifications"
-    >
-      <BellRing v-if="notifications.enabled.value" class="h-4 w-4" aria-hidden="true" />
-      <BellOff v-else class="h-4 w-4" aria-hidden="true" />
-    </button>
   </div>
 </template>
 
@@ -47,9 +34,12 @@
  * - **A refusal is not a transient failure.** A caller with no decide key anywhere gets a 403, so the
  *   badge stops polling and renders nothing. Any other error keeps the count and the notices on screen
  *   and retries at the next poll or event.
+ * - **The browser-notification preference is not here.** It is named and set on
+ *   `/settings/notifications` (US-004); the notices read the tab's shared value, so the badge is only a
+ *   count and a link.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { BellOff, BellRing, Inbox } from 'lucide-vue-next'
+import { Inbox } from 'lucide-vue-next'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
 import { useApprovalRequestNotifications } from '~/composables/useApprovalRequestNotifications'
 import { isForbidden } from '~/composables/useFleetBudgetPage'

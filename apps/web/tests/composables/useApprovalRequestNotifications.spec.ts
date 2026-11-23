@@ -145,6 +145,17 @@ async function mountNotifications(options: HarnessOptions) {
   return { api, host, toasts, navigate, storage, browserNotifications: notification.instances }
 }
 
+/**
+ * The tab's own browser-approval preference, mounted beside the notices. It resolves against the
+ * same stubbed `useState`, so it is the shared per-tab owner the notices read (US-004).
+ */
+async function mountPreference() {
+  const mod = await import('~/composables/useBrowserApprovalNotificationPreference')
+  let preference!: ReturnType<typeof mod.useBrowserApprovalNotificationPreference>
+  const host = mountSetup(() => { preference = mod.useBrowserApprovalNotificationPreference() })
+  return { preference, host }
+}
+
 afterEach(() => {
   delete g.useApi
   delete g.useAuth
@@ -369,46 +380,46 @@ describe('US-005 AC-8: a successful refresh dismisses the toasts it no longer li
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-9 — the browser notification preference
+// US-004 AC-8, AC-9 — the shared browser preference gates delivery
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('US-005 AC-9: the browser notification preference is per user', () => {
-  test('AC-9: a granted toggle stores koda-approval-notifications-<userId> as true', async () => {
-    const m = await mountNotifications({ get: jest.fn(async () => page([])), permission: 'granted' })
-
-    await m.api.toggleBrowserNotifications()
-
-    expect(m.storage.setItem).toHaveBeenCalledWith('koda-approval-notifications-u1', 'true')
-    expect(m.api.enabled.value).toBe(true)
-    m.host.unmount()
-  })
-
-  test('AC-9 (edge): a stored preference plus a granted browser enables it on mount', async () => {
+describe('US-004 AC-8: with the shared preference off, a notice stays in-app', () => {
+  test('AC-8: shared enabled false creates no browser Notification and still raises the toast', async () => {
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
+    const get = jest.fn(async () => page([summary({ id: 'r1' })]))
     const storage = fakeStorage({ 'koda-approval-notifications-u1': 'true' })
-    const m = await mountNotifications({ get: jest.fn(async () => page([])), permission: 'granted', storage })
+    const m = await mountNotifications({ get, counts, storage, permission: 'granted', hiddenTab: true })
+    // The same tab's preference owner is signed in and starts opted in...
+    const preference = await mountPreference()
+    expect(preference.preference.enabled.value).toBe(true)
+    // ...and the settings page turns it off. The notices must follow, without a remount.
+    await preference.preference.toggle()
+    expect(preference.preference.enabled.value).toBe(false)
 
-    expect(m.api.enabled.value).toBe(true)
-    expect(m.api.supported.value).toBe(true)
+    await m.api.refresh()
+
+    expect(m.toasts.calls).toHaveLength(1)
+    expect(m.browserNotifications).toHaveLength(0)
+    preference.host.unmount()
     m.host.unmount()
   })
+})
 
-  test('AC-9 (edge): a denied permission stays off and records the opt-out', async () => {
-    const m = await mountNotifications({ get: jest.fn(async () => page([])), permission: 'denied' })
+describe('US-004 AC-9: with the shared preference on, a hidden tab gets one browser Notification', () => {
+  test('AC-9: enabled through the shared preference delivers exactly one Notification', async () => {
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
+    const get = jest.fn(async () => page([summary({ id: 'r1' })]))
+    const m = await mountNotifications({ get, counts, permission: 'granted', hiddenTab: true })
+    // The settings page enables the preference in this tab; the notices are already mounted.
+    const preference = await mountPreference()
+    expect(preference.preference.enabled.value).toBe(false)
+    await preference.preference.toggle()
+    expect(preference.preference.enabled.value).toBe(true)
 
-    await m.api.toggleBrowserNotifications()
+    await m.api.refresh()
 
-    expect(m.storage.setItem).toHaveBeenCalledWith('koda-approval-notifications-u1', 'false')
-    expect(m.api.enabled.value).toBe(false)
-    m.host.unmount()
-  })
-
-  test('AC-9 (edge): a browser without Notification is unsupported and toggles nothing', async () => {
-    const m = await mountNotifications({ get: jest.fn(async () => page([])), withoutNotification: true })
-
-    await m.api.toggleBrowserNotifications()
-
-    expect(m.api.supported.value).toBe(false)
-    expect(m.storage.setItem).not.toHaveBeenCalled()
+    expect(m.browserNotifications).toHaveLength(1)
+    preference.host.unmount()
     m.host.unmount()
   })
 })

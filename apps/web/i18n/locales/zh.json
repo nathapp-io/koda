@@ -2824,6 +2824,12 @@
     "next": "下一页",
     "filter": { "all": "全部", "unread": "未读" },
     "bell": { "label": "通知，{count} 条未读", "title": "通知" },
+    "browser": {
+      "title": "浏览器通知",
+      "approvals": "有待我处理的审批时显示浏览器通知",
+      "unsupported": "此浏览器不支持通知。",
+      "denied": "此网站的通知已被阻止。请在浏览器的网站设置中允许。"
+    },
     "kinds": {
       "ticket_assigned": "{actorName} 将 {ref} 分配给你：{ticketTitle}",
       "ticket_mentioned": "{actorName} 在 {ref} 中提到了你",

@@ -2824,6 +2824,12 @@
     "next": "Next",
     "filter": { "all": "All", "unread": "Unread" },
     "bell": { "label": "Notifications, {count} unread", "title": "Notifications" },
+    "browser": {
+      "title": "Browser notifications",
+      "approvals": "Show a browser notification when an approval is waiting for me",
+      "unsupported": "This browser does not support notifications.",
+      "denied": "Notifications are blocked for this site. Allow them in your browser's site settings."
+    },
     "kinds": {
       "ticket_assigned": "{actorName} assigned you {ref}: {ticketTitle}",
       "ticket_mentioned": "{actorName} mentioned you on {ref}",

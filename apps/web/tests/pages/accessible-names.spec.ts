@@ -17,9 +17,14 @@ const settle = async () => { for (let i = 0; i < 6; i++) { await new Promise(res
 function notifications(load: () => Promise<void> = async () => undefined) {
   const view = ref({ emailAvailable: true, emailEnabled: true, items: [] as NotificationPreferenceDto[] })
   const fake = { view, pending: ref(false), load: jest.fn(async () => { await load(); view.value.items = preferences }), setInApp: jest.fn(), setEmail: jest.fn(), setEmailEnabled: jest.fn() }
+  // US-004: the page also reads the tab's browser-approval preference, which has no Nuxt/browser globals here.
+  const browser = { supported: ref(true), enabled: ref(false), permissionDenied: ref(false), toggle: jest.fn(async () => undefined) }
   const app = mountSfc(notificationPage, {
     components: uiStubs,
-    alias: { '~/composables/useNotificationPreferences': { useNotificationPreferences: () => fake } },
+    alias: {
+      '~/composables/useNotificationPreferences': { useNotificationPreferences: () => fake },
+      '~/composables/useBrowserApprovalNotificationPreference': { useBrowserApprovalNotificationPreference: () => browser },
+    },
     globals: { useI18n: () => enI18n(), useAppToast: () => toastRecorder(), definePageMeta: () => undefined },
   })
   return { app, fake }
