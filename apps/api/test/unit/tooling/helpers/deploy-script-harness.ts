@@ -42,6 +42,13 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
  * `KODA_DEPLOY_HARNESS_VERIFY_TREE`), so "the verifier keeps no plaintext copy" covers writes outside
  * `backups/` as well as inside it, including one a downstream command deletes again before the script exits.
  *
+ * The script's `TMPDIR` is the harness's own empty directory (`run.tmpDir`), and the same decompression probe
+ * lists it too (see `KODA_DEPLOY_HARNESS_VERIFY_TMP`): a copy the verifier writes through `mktemp` or
+ * `${TMPDIR:-/tmp}` is out of reach of a listing of the deployment directory, and is caught here instead.
+ * The limit is a path outside both: a hard-coded `/tmp/...` or anywhere else on the host is invisible to a
+ * listing probe, so the guarantee these tests give is "no plaintext copy in the deployment directory or in
+ * the temp directory the script was given", not "no plaintext copy anywhere on the machine" (koda #497).
+ *
  * The stub does not only record: a `compose run … -c <script> <args…>` call (how a restore pipeline reaches
  * the volume) really executes that command on the host with `/data` bound to a fake volume under the run
  * directory and `/backup` bound to the host directory the call mounts. `opts.seedVolume` populates that
@@ -79,6 +86,12 @@ export interface ScriptRun {
    * mounts, so a test can assert the files a restore leaves behind (review B12, B13).
    */
   dataDir: string;
+  /**
+   * The temp directory the script ran with as `TMPDIR`: inside `dir`, so `cleanupDeployScriptRuns` removes it,
+   * and empty before the run. A scratch file the script asks the system for (`mktemp`,
+   * `${TMPDIR:-/tmp}`) lands here, where the decompression probe lists it.
+   */
+  tmpDir: string;
   /** Runs the same script again against the same deployment and Docker stub state, with a fresh call log. */
   rerun: (args: string[]) => ScriptRun;
 }
@@ -119,6 +132,10 @@ const BASH_SHIM = '#!/bin/sh\nexec /bin/bash "$@"\n';
  *   deletes again — is on record too. Nothing can delete such a file while this process runs: the pipeline
  *   and the commands after it are still waiting for it to exit. `backup-db-script.spec.ts` reads it as
  *   `verifyTree`.
+ * - The same moment also appends the entries of the script's `TMPDIR` to `$KODA_DEPLOY_HARNESS_VERIFY_TMP`,
+ *   under a `listing` marker so a clean directory reads differently from a probe that never ran, plus every
+ *   entry below it. A verifier that wants a plaintext file reaches for `mktemp` or `${TMPDIR:-/tmp}`, which
+ *   the listing above cannot see because it is outside the deployment directory (koda #497).
  */
 const gzipShim = (realGzip: string): string => `#!/bin/bash
 file_mode() {
@@ -159,6 +176,13 @@ if [[ -n "\${KODA_DEPLOY_HARNESS_VERIFY_TREE-}" ]] && is_decompress "\${1-}"; th
   ( cd "\${KODA_DEPLOY_HARNESS_DIR-}" && \\
     find . -path ./backups -prune -o -path ./.harness -prune -o -print | LC_ALL=C sort ) \\
     >> "$KODA_DEPLOY_HARNESS_VERIFY_TREE"
+  # The temp directory the script was given, which the listing above cannot see. The marker line keeps an
+  # empty listing (the probe ran, the directory was clean) distinguishable from a probe that never ran.
+  if [[ -n "\${KODA_DEPLOY_HARNESS_VERIFY_TMP-}" && -d "\${TMPDIR-}" ]]; then
+    printf 'listing\\n' >> "$KODA_DEPLOY_HARNESS_VERIFY_TMP"
+    ( cd "\${TMPDIR}" && find . -mindepth 1 -print | LC_ALL=C sort ) \\
+      >> "$KODA_DEPLOY_HARNESS_VERIFY_TMP"
+  fi
   exit $decompressed_status
 fi
 exec "${realGzip}" "$@"
@@ -275,11 +299,13 @@ export interface RunOptions {
 interface Harness {
   dir: string;
   dataDir: string;
+  tmpDir: string;
   env: Record<string, string>;
   scriptPath: string;
   recordFile: string;
   verifyMomentFile: string;
   verifyTreeFile: string;
+  verifyTmpFile: string;
   outputFile: string;
   childUmask: string | undefined;
 }
@@ -298,8 +324,11 @@ function prepareHarness(script: DeployScriptName, opts: RunOptions): Harness {
   const harnessDir = join(dir, '.harness');
   const binDir = join(harnessDir, 'bin');
   const dataDir = join(harnessDir, 'volume');
+  /** The script's `TMPDIR`: empty, and listed by the decompression probe, so a copy written there is seen. */
+  const tmpDir = join(harnessDir, 'tmp');
   mkdirSync(binDir, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
+  mkdirSync(tmpDir, { recursive: true });
   opts.seedVolume?.(dataDir);
 
   const backupsDir = join(dir, 'backups');
@@ -315,8 +344,10 @@ function prepareHarness(script: DeployScriptName, opts: RunOptions): Harness {
   const pgDumpFile = join(harnessDir, 'pg-dump');
   const verifyMomentFile = join(harnessDir, 'verify-moment');
   const verifyTreeFile = join(harnessDir, 'verify-tree');
+  const verifyTmpFile = join(harnessDir, 'verify-tmp');
   writeFileSync(pgDumpFile, opts.docker?.pgDump ?? DEFAULT_PG_DUMP);
   writeFileSync(verifyTreeFile, '');
+  writeFileSync(verifyTmpFile, '');
 
   writeExecutable(join(binDir, 'docker'), readFileSync(join(STUB_DIR, 'docker'), 'utf8'));
   writeExecutable(join(binDir, 'date'), readFileSync(join(STUB_DIR, 'date'), 'utf8'));
@@ -334,6 +365,10 @@ function prepareHarness(script: DeployScriptName, opts: RunOptions): Harness {
     ...opts.env,
     PATH: `${binDir}:${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? dir,
+    // A scratch file the script asks the system for lands in the run directory, where a probe can list it,
+    // instead of the machine's temp directory shared with everything else running on the host (koda #497).
+    // Harness keys follow `opts.env`, so a test cannot point this at the host.
+    TMPDIR: tmpDir,
     KODA_DEPLOY_HARNESS_RECORD: recordFile,
     KODA_DEPLOY_HARNESS_DIR: dir,
     KODA_DEPLOY_HARNESS_VOLUME: dataDir,
@@ -342,6 +377,7 @@ function prepareHarness(script: DeployScriptName, opts: RunOptions): Harness {
     KODA_DEPLOY_HARNESS_FAIL_ON: (opts.docker?.failOn ?? []).join('\n'),
     KODA_DEPLOY_HARNESS_VERIFY_MOMENT: verifyMomentFile,
     KODA_DEPLOY_HARNESS_VERIFY_TREE: verifyTreeFile,
+    KODA_DEPLOY_HARNESS_VERIFY_TMP: verifyTmpFile,
   };
   const childUmask = opts.umask;
   if (childUmask !== undefined && !/^[0-7]{1,4}$/.test(childUmask)) {
@@ -351,11 +387,13 @@ function prepareHarness(script: DeployScriptName, opts: RunOptions): Harness {
   return {
     dir,
     dataDir,
+    tmpDir,
     env,
     scriptPath: join(dir, script),
     recordFile,
     verifyMomentFile,
     verifyTreeFile,
+    verifyTmpFile,
     outputFile,
     childUmask,
   };
@@ -367,6 +405,7 @@ function beginRun(harness: Harness): number {
   // Every run starts with no observation of its own, so a reading belongs to the run that made it.
   writeFileSync(harness.verifyMomentFile, '');
   writeFileSync(harness.verifyTreeFile, '');
+  writeFileSync(harness.verifyTmpFile, '');
   // Both streams go to one file so the output keeps the order the script wrote it in.
   return openSync(harness.outputFile, 'w');
 }
@@ -391,6 +430,7 @@ function observation(harness: Harness, status: number): Omit<ScriptRun, 'rerun'>
     dockerCalls: readDockerCalls(harness.recordFile),
     dir: harness.dir,
     dataDir: harness.dataDir,
+    tmpDir: harness.tmpDir,
   };
 }
 

@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join, relative } from 'node:path';
 import { cleanupDeployScriptRuns, runDeployScript } from './helpers/deploy-script-harness';
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -128,6 +128,18 @@ describe('deploy script harness', () => {
 
     expect(statSync(join(run.dir, 'backups')).isFile()).toBe(true);
     expect(run.status).not.toBe(0);
+  });
+
+  it('gives the script a private empty TMPDIR inside the run directory', () => {
+    // A scratch file the script asks the system for has to stay inside the run, where the decompression probe
+    // can list it and `cleanupDeployScriptRuns` removes it, instead of the host temp directory shared with
+    // every other test and process (koda #497).
+    const run = runDeployScript('backup-db.sh', []);
+
+    const insideRun = relative(run.dir, run.tmpDir);
+    expect(isAbsolute(insideRun)).toBe(false);
+    expect(insideRun.startsWith('..')).toBe(false);
+    expect(readdirSync(run.tmpDir)).toEqual([]);
   });
 
   it('writes a gzip stream the script has to reject when the dump is corrupt', () => {
