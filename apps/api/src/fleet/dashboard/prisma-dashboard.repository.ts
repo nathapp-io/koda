@@ -15,6 +15,7 @@ const JOB_SELECT = {
   lastHeartbeatAt: true, profiles: true, selectorLabels: true, pinnedRunnerId: true, bashMode: true,
   project: { select: { slug: true, deletedAt: true } },
   repo: { select: { owner: true, name: true, provider: true } },
+  thread: { select: { title: true } },
 } satisfies Prisma.FleetJobSelect;
 
 /**
@@ -30,6 +31,7 @@ const RECENT_SELECT = {
   id: true, feature: true, command: true, state: true, stateReason: true, costSpentUsd: true, startedAt: true, finishedAt: true, resultPrUrl: true,
   project: { select: { slug: true } },
   repo: { select: { owner: true, name: true } },
+  thread: { select: { title: true } },
   runner: { select: { name: true } },
 } satisfies Prisma.FleetJobSelect;
 
@@ -40,7 +42,7 @@ type RecentSelected = Prisma.FleetJobGetPayload<{ select: typeof RECENT_SELECT }
 const toJobRow = (r: JobSelected): DashboardJobRow => ({
   id: r.id, projectId: r.projectId, projectSlug: r.project.slug, projectDeleted: r.project.deletedAt !== null,
   repoId: r.repoId, repoOwner: r.repo.owner, repoName: r.repo.name, provider: r.repo.provider as DashboardJobRow['provider'],
-  feature: r.feature, command: r.command as FleetJobKind, state: r.state as FleetJobState, runnerId: r.runnerId,
+  feature: r.feature, threadTitle: r.thread?.title ?? null, command: r.command as FleetJobKind, state: r.state as FleetJobState, runnerId: r.runnerId,
   currentStoryId: r.currentStoryId, currentPhase: r.currentPhase, stories: r.stories as unknown as FleetJobStory[] | null,
   storiesTruncated: r.storiesTruncated, costSpentUsd: r.costSpentUsd.toString(), maxCostUsd: r.maxCostUsd.toString(),
   queuedAt: r.queuedAt, assignedAt: r.assignedAt, startedAt: r.startedAt, lastHeartbeatAt: r.lastHeartbeatAt,
@@ -65,7 +67,7 @@ const toQueuedJobRow = (r: QueuedSelected): DashboardJobRow => ({
 
 const toRecentRow = (r: RecentSelected): DashboardRecentRow => ({
   id: r.id, projectSlug: r.project.slug, repoOwner: r.repo.owner, repoName: r.repo.name, feature: r.feature,
-  command: r.command as FleetJobKind, state: r.state as FleetJobState, stateReason: r.stateReason, runnerName: r.runner?.name ?? null,
+  threadTitle: r.thread?.title ?? null, command: r.command as FleetJobKind, state: r.state as FleetJobState, stateReason: r.stateReason, runnerName: r.runner?.name ?? null,
   costSpentUsd: r.costSpentUsd.toString(), startedAt: r.startedAt, finishedAt: r.finishedAt as Date, resultPrUrl: r.resultPrUrl,
 });
 

@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-3">
     <EmptyState v-if="policies.length === 0" :message="t('approvals.policies.list.empty')" />
-    <Table v-else data-testid="policy-list">
+    <Table v-else :region-label="t('approvals.policies.tableRegion')" data-testid="policy-list">
       <TableHeader>
         <TableRow>
           <TableHead>{{ t('approvals.policies.list.pattern') }}</TableHead>

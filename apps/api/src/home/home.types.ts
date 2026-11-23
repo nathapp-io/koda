@@ -72,6 +72,7 @@ export interface HomeJobRow {
   command: string;
   state: string;
   stateReason: string | null;
+  threadTitle: string | null;
   costSpentUsd: string;
   resultPrUrl: string | null;
   queuedAt: Date;
@@ -123,6 +124,7 @@ export interface HomeJobView {
   command: string;
   state: string;
   stateReason: string | null;
+  threadTitle: string | null;
   pendingApprovals: number;
   costSpentUsd: string;
   resultPrUrl: string | null;
@@ -246,6 +248,7 @@ export function buildHomeView(input: HomeSnapshotInput): HomeView {
       command: j.command,
       state: j.state,
       stateReason: j.stateReason,
+      threadTitle: j.threadTitle,
       pendingApprovals: pendingByJob.get(j.id) ?? 0,
       costSpentUsd: j.costSpentUsd,
       resultPrUrl: j.resultPrUrl,

@@ -25,7 +25,7 @@ const template = (d: AreaRow): string => crosshairHtml(d, props.series, props.bu
       <VisArea :x="x" :y="y" :color="color" />
       <VisAxis type="x" :tick-format="xTick" :num-ticks="6" :grid-line="false" />
       <VisAxis type="y" :tick-format="yTick" :num-ticks="4" />
-      <VisCrosshair :template="template" :color="color" />
+      <VisCrosshair :x="x" :y-stacked="y" :template="template" :color="color" />
       <VisTooltip />
     </VisXYContainer>
   </div>

@@ -28,7 +28,7 @@ export const dashRunner = (over: Partial<DashboardRunnerRow> = {}): DashboardRun
 
 export const dashJob = (over: Partial<DashboardJobRow> = {}): DashboardJobRow => ({
   id: 'j1', projectId: 'p1', projectSlug: 'web', projectDeleted: false, repoId: 'repo1', repoOwner: 'acme', repoName: 'app', provider: 'github',
-  feature: 'add-auth', command: 'RUN', state: 'RUNNING', runnerId: 'r1', currentStoryId: 'US-001', currentPhase: 'implement',
+  feature: 'add-auth', command: 'RUN', state: 'RUNNING', threadTitle: null, runnerId: 'r1', currentStoryId: 'US-001', currentPhase: 'implement',
   stories: null, storiesTruncated: false, costSpentUsd: '0.42', maxCostUsd: '2', queuedAt: secAgo(900), assignedAt: secAgo(890),
   startedAt: secAgo(880), lastHeartbeatAt: secAgo(30), profiles: ['fast'], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', ...over,
 });

@@ -29,6 +29,7 @@
       "email": "Email",
       "submit": "Send reset link",
       "checkEmail": "If an account exists for this email, check your inbox for a reset link.",
+      "backToSignIn": "Back to sign in",
       "link": "Forgot password?"
     },
     "reset": {
@@ -52,7 +53,7 @@
     },
     "login": {
       "title": "Koda",
-      "subtitle": "Dev Ticket Tracker",
+      "subtitle": "Tickets, threads and agent runs",
       "email": "Email",
       "emailPlaceholder": "you{'@'}example.com",
       "password": "Password",
@@ -383,6 +384,10 @@
     "filter": { "search": "Filter by ref or title…", "priority": "Priority", "clear": "Clear filters", "showing": "Showing {n} of {total}" },
     "newTicket": "New Ticket",
     "loadMore": "Load more",
+    "board": {
+      "scrollRight": "Show more columns",
+      "scrollLeft": "Show earlier columns"
+    },
     "live": { "deleted": "This ticket was deleted." },
     "status": {
       "CREATED": "Created",
@@ -451,6 +456,12 @@
         "open": "Open",
         "draft": "Draft",
         "closed": "Closed"
+      },
+      "chip": {
+        "merged": "PR merged",
+        "open": "PR open",
+        "draft": "PR draft",
+        "closed": "PR closed"
       },
       "mergedActivity": "PR merged: {repo}#{number} by {author}"
     },
@@ -2374,7 +2385,9 @@
       "add": "Add",
       "remove": "Remove {item}",
       "maxCost": "Max cost (USD)",
-      "maxCostHint": "Billed up to this amount. Test runs typically cost $1-2.",
+      "maxCostHint": "The run is billed up to this amount.",
+      "profileGroupOther": "Other",
+      "ticketsMore": "{count} more match. Keep typing to narrow the list.",
       "prefilled": "Pre-filled from the PLAN job. Check the ref before dispatching.",
       "prefilledReview": "Pre-filled from the pull request review. Check the details before dispatching.",
       "prefilledTicket": "Pre-filled from the ticket. Pick the repo, and for a PLAN the spec path, before dispatching.",
@@ -2824,6 +2837,12 @@
     "next": "Next",
     "filter": { "all": "All", "unread": "Unread" },
     "bell": { "label": "Notifications, {count} unread", "title": "Notifications" },
+    "browser": {
+      "title": "Browser notifications",
+      "approvals": "Show a browser notification when an approval is waiting for me",
+      "unsupported": "This browser does not support notifications.",
+      "denied": "Notifications are blocked for this site. Allow them in your browser's site settings."
+    },
     "kinds": {
       "ticket_assigned": "{actorName} assigned you {ref}: {ticketTitle}",
       "ticket_mentioned": "{actorName} mentioned you on {ref}",
@@ -3035,6 +3054,7 @@
     },
     "policies": {
       "title": "Approval policies",
+      "tableRegion": "Approval policies",
       "subtitle": "Which actions wait for a decision, and who may give it.",
       "project": { "title": "Project approval policies", "inherited": "Inherited" },
       "create": "New policy",

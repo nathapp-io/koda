@@ -1,6 +1,23 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { mountSfc } from '../helpers/mount-sfc'
+import en from '../../i18n/locales/en.json'
+
+test('AC-2 real login mount renders the English subtitle', () => {
+  const mounted = mountSfc('pages/login.vue', {
+    globals: {
+      useI18n: () => ({ t: (key: string) => key.split('.').reduce((value: unknown, part) => (value as Record<string, unknown>)[part], en as unknown) as string }),
+      useAuth: () => ({ login: jest.fn() }),
+      useRegistrationStatus: () => ({ open: false, load: jest.fn() }),
+      useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
+      useRoute: () => ({ query: {} }),
+    },
+    components: { FormField: { template: '<div><slot :componentField="{}" /></div>' }, FormItem: { template: '<div><slot /></div>' }, FormLabel: { template: '<label><slot /></label>' }, FormControl: { template: '<div><slot /></div>' }, FormMessage: { template: '<div />' }, Input: { template: '<input />' }, Button: { template: '<button><slot /></button>' }, NuxtLink: { template: '<a><slot /></a>' } },
+  })
+  expect(mounted.text()).toContain('Tickets, threads and agent runs')
+  mounted.unmount()
+})
 
 const webDir = join(__dirname, '../..')
 const loginPath = join(webDir, 'pages', 'login.vue')

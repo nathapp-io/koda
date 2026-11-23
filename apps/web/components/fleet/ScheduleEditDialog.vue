@@ -72,6 +72,7 @@
               :suggestions="profileSuggestions"
               :placeholder="t('fleet.schedules.form.profilePlaceholder')"
               test-id="fleet-schedule-profiles"
+              group-by-prefix
               @update:model-value="setFieldValue('profiles', $event)"
             />
             <FormMessage />

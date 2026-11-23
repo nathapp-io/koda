@@ -37,5 +37,6 @@ const onSubmit = handleSubmit(async values => {
       </div>
       <Button type="submit" :disabled="isSubmitting" class="w-full">{{ t('auth.forgot.submit') }}</Button>
     </form>
+    <NuxtLink to="/login" data-testid="forgot-back-to-login">{{ t('auth.forgot.backToSignIn') }}</NuxtLink>
   </section>
 </template>

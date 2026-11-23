@@ -4,7 +4,7 @@ import type { DashboardRecentRow } from './dashboard.types';
 
 const recent = (over: Partial<DashboardRecentRow> = {}): DashboardRecentRow => ({
   id: 'd1', projectSlug: 'web', repoOwner: 'acme', repoName: 'app', feature: 'done', command: 'RUN', state: 'COMPLETED', stateReason: null,
-  runnerName: 'wk-mac', costSpentUsd: '0.1', startedAt: secAgo(4000), finishedAt: secAgo(3600), resultPrUrl: null, ...over,
+  runnerName: 'wk-mac', threadTitle: null, costSpentUsd: '0.1', startedAt: secAgo(4000), finishedAt: secAgo(3600), resultPrUrl: null, ...over,
 });
 
 const input = (over: Partial<ViewInput> = {}): ViewInput => ({
@@ -46,9 +46,18 @@ describe('buildDashboardView (spec §1.2)', () => {
     expect(v.runners[0]).toEqual(expect.objectContaining({ naxVersion: null, daemonVersion: null, credentials: [] }));
   });
 
+  it('AC-1 and AC-3: copies present and null thread titles for active jobs', () => {
+    expect(buildDashboardView(input({ active: [dashJob({ threadTitle: 'Fix login' })] })).activeJobs[0].threadTitle).toBe('Fix login');
+    expect(buildDashboardView(input({ active: [dashJob({ threadTitle: null })] })).activeJobs[0].threadTitle).toBeNull();
+  });
+
+  it('AC-2: copies thread titles for recent jobs', () => {
+    expect(buildDashboardView(input({ recent: [recent({ threadTitle: 'Fix login' })] })).recentJobs[0].threadTitle).toBe('Fix login');
+  });
+
   it('maps active jobs with stories progress, runner name and pending approvals', () => {
     expect(buildDashboardView(input()).activeJobs[0]).toEqual({
-      id: 'j1', projectSlug: 'web', repo: 'acme/app', feature: 'add-auth', command: 'RUN', state: 'RUNNING', runnerId: 'r1', runnerName: 'wk-mac',
+      id: 'j1', projectSlug: 'web', repo: 'acme/app', feature: 'add-auth', command: 'RUN', state: 'RUNNING', threadTitle: null, runnerId: 'r1', runnerName: 'wk-mac',
       currentStoryId: 'US-001', currentPhase: 'implement', storiesDone: 1, storiesTotal: 2, costSpentUsd: '0.42', maxCostUsd: '2',
       queuedAt: secAgo(900).toISOString(), startedAt: secAgo(880).toISOString(), lastHeartbeatAt: secAgo(30).toISOString(), pendingApprovals: 2,
     });
@@ -69,7 +78,7 @@ describe('buildDashboardView (spec §1.2)', () => {
 
   it('maps recent jobs', () => {
     expect(buildDashboardView(input()).recentJobs[0]).toEqual({
-      id: 'd1', projectSlug: 'web', repo: 'acme/app', feature: 'done', command: 'RUN', state: 'COMPLETED', stateReason: null, runnerName: 'wk-mac',
+      id: 'd1', projectSlug: 'web', repo: 'acme/app', feature: 'done', command: 'RUN', state: 'COMPLETED', stateReason: null, runnerName: 'wk-mac', threadTitle: null,
       costSpentUsd: '0.1', startedAt: secAgo(4000).toISOString(), finishedAt: secAgo(3600).toISOString(), resultPrUrl: null,
     });
   });

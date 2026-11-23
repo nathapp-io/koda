@@ -33,6 +33,7 @@ export interface HomeJob {
   projectId: string
   projectSlug: string
   feature: string
+  threadTitle: string | null
   command: string
   state: string
   stateReason: string | null

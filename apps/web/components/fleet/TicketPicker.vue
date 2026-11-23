@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import { apiPath } from '~/lib/api-path'
 import { removeToken } from '~/lib/fleet-dispatch'
-import { addTicketRef, isLinkableTicket, matchTicketOptions, MAX_DISPATCH_TICKETS, normalizeTicketRef, type TicketOption } from '~/lib/fleet-ticket-links'
+import { addTicketRef, countTicketMatches, isLinkableTicket, matchTicketOptions, MAX_DISPATCH_TICKETS, normalizeTicketRef, type TicketOption } from '~/lib/fleet-ticket-links'
 import type { FleetPage } from '~/lib/fleet-types'
 
 /** Dispatch tickets (C9 §4): picked from the newest open tickets or typed as KEY-N; the server validates (D450). */
@@ -31,6 +31,7 @@ onMounted(async () => {
 
 const full = computed(() => props.modelValue.length >= MAX_DISPATCH_TICKETS)
 const matches = computed(() => matchTicketOptions(options.value, props.modelValue, query.value))
+const hiddenMatchCount = computed(() => Math.max(0, countTicketMatches(options.value, props.modelValue, query.value) - matches.value.length))
 const titleOf = (ticketRef: string): string | null => options.value.find(o => o.ref === ticketRef)?.title ?? null
 
 function add(value: string): void {
@@ -84,5 +85,8 @@ function remove(ticketRef: string): void {
         + {{ option.ref }} {{ option.title }}
       </Button>
     </div>
+    <p v-if="!full && hiddenMatchCount > 0" class="text-xs text-muted-foreground" :data-testid="`${testId}-more`">
+      {{ t('fleet.dispatch.ticketsMore', { count: hiddenMatchCount }) }}
+    </p>
   </div>
 </template>

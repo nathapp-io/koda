@@ -13,13 +13,13 @@ const page = {
   ],
 }
 
-function mountPicker(modelValue: string[], opts: { fail?: boolean } = {}) {
+function mountPicker(modelValue: string[], opts: { fail?: boolean; records?: Array<Record<string, unknown>> } = {}) {
   const gets: Array<{ path: string; query: unknown }> = []
   const api = {
     get: async (path: string, init?: { query?: unknown }) => {
       gets.push({ path, query: init?.query })
       if (opts.fail) throw new Error('down')
-      return page
+      return opts.records ? { records: opts.records } : page
     },
   }
   const app = mountSfc(picker, {
@@ -95,6 +95,30 @@ describe('FleetTicketPicker (C9 §4, P1)', () => {
     expect(byTestid(app, 'dispatch-tickets-input')[0].props.disabled).toBe(true)
     expect(byTestid(app, 'dispatch-tickets-full')).toHaveLength(1)
     expect(byTestid(app, 'dispatch-tickets-suggestion')).toHaveLength(0)
+    app.unmount()
+  })
+
+  test('shows the number of matching tickets hidden by the eight-item limit', async () => {
+    const records = Array.from({ length: 12 }, (_, i) => ({ ref: `WEB-${i + 1}`, title: `Fix issue ${i + 1}`, status: 'CREATED' }))
+    const { app } = mountPicker([], { records })
+    await flush()
+    const input = byTestid(app, 'dispatch-tickets-input')[0]
+    ;(input.props['onUpdate:modelValue'] as (value: string) => void)('fix')
+    await flush()
+    expect(byTestid(app, 'dispatch-tickets-suggestion')).toHaveLength(8)
+    expect(byTestid(app, 'dispatch-tickets-more')).toHaveLength(1)
+    expect(app.textOf(byTestid(app, 'dispatch-tickets-more')[0])).toBe('4 more match. Keep typing to narrow the list.')
+    app.unmount()
+  })
+
+  test('does not show a hidden-match line when five options match', async () => {
+    const records = Array.from({ length: 5 }, (_, i) => ({ ref: `WEB-${i + 1}`, title: `Fix issue ${i + 1}`, status: 'CREATED' }))
+    const { app } = mountPicker([], { records })
+    await flush()
+    const input = byTestid(app, 'dispatch-tickets-input')[0]
+    ;(input.props['onUpdate:modelValue'] as (value: string) => void)('fix')
+    await flush()
+    expect(byTestid(app, 'dispatch-tickets-more')).toHaveLength(0)
     app.unmount()
   })
 

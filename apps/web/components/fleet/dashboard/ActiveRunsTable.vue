@@ -2,6 +2,7 @@
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import { costText, jobPath, storiesText } from '~/lib/fleet-dashboard'
 import { phaseLabelKey } from '~/lib/fleet-phase'
+import { jobFeatureLabel } from '~/lib/fleet-job-labels'
 import type { DashboardActiveJob, ScopeKind } from '~/lib/fleet-dashboard-types'
 
 /** Spec §4.2: what is queued or running now, oldest first; the feature opens the job page. */
@@ -48,7 +49,7 @@ function runnerText(job: DashboardActiveJob): string {
                 :to="jobPath(job.projectSlug, job.id)"
                 class="break-all font-medium text-link underline-offset-4 hover:underline"
                 data-testid="fleet-dashboard-active-link"
-              >{{ job.feature }}</NuxtLink>
+              >{{ jobFeatureLabel(job, t) }}</NuxtLink>
               <Badge v-if="job.pendingApprovals > 0" variant="destructive" class="ml-2" data-testid="fleet-dashboard-active-approvals">
                 {{ t('fleet.dashboard.active.approvals', { n: job.pendingApprovals }) }}
               </Badge>

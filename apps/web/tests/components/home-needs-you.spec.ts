@@ -21,7 +21,7 @@ const fixture = (over: Partial<HomeNeedsYou> = {}): HomeNeedsYou => ({
   }],
   approvalsTotal: 1,
   jobs: [{
-    id: 'j1', projectId: 'p1', projectSlug: 'acme', feature: 'feat-a', command: 'RUN', state: 'FAILED',
+    id: 'j1', projectId: 'p1', projectSlug: 'acme', feature: 'feat-a', threadTitle: null, command: 'RUN', state: 'FAILED',
     stateReason: null, pendingApprovals: 0, costSpentUsd: '1.5', resultPrUrl: null,
     queuedAt: '2026-10-06T09:00:00Z', finishedAt: '2026-10-06T10:30:00Z', reason: 'failed',
   }],
@@ -54,6 +54,18 @@ function mount(data: HomeNeedsYou, globals: Record<string, unknown> = {}) {
 }
 
 describe('HomeNeedsYou', () => {
+  test("AC-7: shows the THREAD title instead of its feature id", () => {
+    const app = mount(fixture({ jobs: [{ ...fixture().jobs[0], command: 'THREAD', feature: 'thread-abc', threadTitle: 'Fix login' }] }))
+    expect(app.text()).toContain('Fix login')
+    expect(app.text()).not.toContain('thread-abc')
+    app.unmount()
+  })
+
+  test("AC-8: keeps the feature name on a RUN job", () => {
+    const app = mount(fixture({ jobs: [{ ...fixture().jobs[0], feature: 'add-auth' }] }))
+    expect(app.text()).toContain('add-auth')
+    app.unmount()
+  })
   test('renders the three lists with exact totals and deep links into the owning project', () => {
     const app = mount(fixture())
     const links = app.find('[data-stub="nuxt-link"]').map((n) => String(n.props.to))
@@ -119,7 +131,7 @@ describe('HomeNeedsYou', () => {
   test('a blocked job carries the needs-approval chip with its pending count', () => {
     const app = mount(fixture({
       jobs: [{
-        id: 'j2', projectId: 'p1', projectSlug: 'acme', feature: 'feat-b', command: 'RUN', state: 'QUEUED',
+        id: 'j2', projectId: 'p1', projectSlug: 'acme', feature: 'feat-b', threadTitle: null, command: 'RUN', state: 'QUEUED',
         stateReason: null, pendingApprovals: 2, costSpentUsd: '0', resultPrUrl: null,
         queuedAt: '2026-10-06T08:00:00Z', finishedAt: null, reason: 'blocked',
       }],

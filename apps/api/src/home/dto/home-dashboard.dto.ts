@@ -35,6 +35,7 @@ export class HomeJobDto implements HomeJobView {
   @ApiProperty() projectId: string;
   @ApiProperty() projectSlug: string;
   @ApiProperty() feature: string;
+  @ApiProperty({ type: String, nullable: true }) threadTitle: string | null;
   @ApiProperty({ enum: ['RUN', 'PLAN'] }) command: string;
   @ApiProperty({ enum: ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] }) state: string;
   @ApiProperty(NULLABLE_STRING) stateReason: string | null;

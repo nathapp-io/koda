@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
+import { useBrowserApprovalNotificationPreference } from '~/composables/useBrowserApprovalNotificationPreference'
 import { useNotificationPreferences } from '~/composables/useNotificationPreferences'
 import { NOTIFICATION_CATEGORIES } from '~/lib/notification-types'
 import type { NotificationCategory } from '~/lib/notification-types'
@@ -11,6 +12,9 @@ definePageMeta({ layout: 'default' })
 const { t } = useI18n()
 const toast = useAppToast()
 const { view, pending, load, setInApp, setEmail, setEmailEnabled } = useNotificationPreferences()
+// US-004: the browser-approval preference is local to this browser and shared with the header's
+// notices, so it is read outside the server-preference load below.
+const browser = useBrowserApprovalNotificationPreference()
 
 const rows = computed(() => NOTIFICATION_CATEGORIES.map((category) => {
   const item = view.value.items.find((i) => i.category === category)
@@ -67,6 +71,13 @@ async function onEmailEnabledToggle(event: Event): Promise<void> {
 }
 
 onMounted(() => { void reload() })
+
+/** The box must end up showing the shared value: a refused permission leaves the preference off. */
+async function onBrowserApprovalToggle(event: Event): Promise<void> {
+  const box = event.target as HTMLInputElement
+  await browser.toggle()
+  box.checked = browser.enabled.value
+}
 </script>
 
 <template>
@@ -121,5 +132,28 @@ onMounted(() => { void reload() })
       </li>
     </ul>
     </div>
+    <!-- US-004: a local browser preference, so it renders whatever the server preferences above do. -->
+    <section
+      data-testid="settings-browser-approval-notifications"
+      class="space-y-2 rounded-md border border-border px-4 py-3"
+    >
+      <h2 class="text-sm font-semibold">{{ t('notifications.browser.title') }}</h2>
+      <label
+        v-if="browser.supported.value"
+        for="settings-browser-approvals"
+        class="flex items-center justify-between gap-4 text-sm"
+      >
+        <span>{{ t('notifications.browser.approvals') }}</span>
+        <input
+          id="settings-browser-approvals"
+          type="checkbox"
+          class="h-5 w-5 shrink-0 accent-primary"
+          :checked="browser.enabled.value"
+          @change="onBrowserApprovalToggle($event)"
+        >
+      </label>
+      <p v-else class="text-sm text-muted-foreground">{{ t('notifications.browser.unsupported') }}</p>
+      <p v-if="browser.permissionDenied.value" class="text-sm text-muted-foreground">{{ t('notifications.browser.denied') }}</p>
+    </section>
   </div>
 </template>

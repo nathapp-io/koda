@@ -2,6 +2,19 @@ import { describe, test, expect } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { mountSfc } from './helpers/mount-sfc'
+
+// US-005 AC-1: inspect the props passed by the real app shell.
+test('AC-1 app shell positions three toasts at bottom-right', () => {
+  const mounted = mountSfc('app.vue', {
+    alias: { 'vue-sonner': { Toaster: { props: ['position', 'visibleToasts', 'richColors'], template: '<div data-testid="toaster" :data-position="position" :data-visible-toasts="visibleToasts" />' } } },
+    components: { NuxtLayout: { template: '<div><slot /></div>' }, NuxtPage: { template: '<div />' }, ConfirmDialogHost: { template: '<div />' } },
+  })
+  const toaster = mounted.one('[data-testid="toaster"]')
+  expect(toaster?.props['data-position']).toBe('bottom-right')
+  expect(toaster?.props['data-visible-toasts']).toBe(3)
+  mounted.unmount()
+})
 
 const webDir = join(__dirname, '..')
 const appPath = join(webDir, 'app.vue')

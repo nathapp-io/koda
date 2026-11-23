@@ -29,6 +29,7 @@
       "email": "电子邮箱",
       "submit": "发送重置链接",
       "checkEmail": "如果此邮箱对应的账户存在，请查看收件箱中的重置链接。",
+      "backToSignIn": "返回登录",
       "link": "忘记密码？"
     },
     "reset": {
@@ -52,7 +53,7 @@
     },
     "login": {
       "title": "Koda",
-      "subtitle": "开发工单追踪器",
+      "subtitle": "工单、会话与智能体运行",
       "email": "邮箱",
       "emailPlaceholder": "you{'@'}example.com",
       "password": "密码",
@@ -383,6 +384,10 @@
     "filter": { "search": "按编号或标题筛选…", "priority": "优先级", "clear": "清除筛选", "showing": "显示 {n} / {total}" },
     "newTicket": "新建工单",
     "loadMore": "加载更多",
+    "board": {
+      "scrollRight": "显示更多列",
+      "scrollLeft": "显示前面的列"
+    },
     "live": { "deleted": "此工单已被删除。" },
     "status": {
       "CREATED": "已创建",
@@ -451,6 +456,12 @@
         "open": "打开",
         "draft": "草稿",
         "closed": "关闭"
+      },
+      "chip": {
+        "merged": "PR 已合并",
+        "open": "PR 已打开",
+        "draft": "PR 草稿",
+        "closed": "PR 已关闭"
       },
       "mergedActivity": "PR 已合并：{repo}#{number}，合并者：{author}"
     },
@@ -2374,7 +2385,9 @@
       "add": "添加",
       "remove": "移除 {item}",
       "maxCost": "费用上限（美元）",
-      "maxCostHint": "最多计费到该金额。测试运行通常花费 $1-2。",
+      "maxCostHint": "运行最多计费到该金额。",
+      "profileGroupOther": "其他",
+      "ticketsMore": "还有 {count} 个匹配，继续输入以缩小范围。",
       "prefilled": "已从 PLAN 任务预填。派发前请检查引用分支。",
       "prefilledReview": "已从 PR 审查预填。派发前请检查详情。",
       "prefilledTicket": "已根据工单预填。派发前请选择仓库；PLAN 还需填写规格文件路径。",
@@ -2824,6 +2837,12 @@
     "next": "下一页",
     "filter": { "all": "全部", "unread": "未读" },
     "bell": { "label": "通知，{count} 条未读", "title": "通知" },
+    "browser": {
+      "title": "浏览器通知",
+      "approvals": "有待我处理的审批时显示浏览器通知",
+      "unsupported": "此浏览器不支持通知。",
+      "denied": "此网站的通知已被阻止。请在浏览器的网站设置中允许。"
+    },
     "kinds": {
       "ticket_assigned": "{actorName} 将 {ref} 分配给你：{ticketTitle}",
       "ticket_mentioned": "{actorName} 在 {ref} 中提到了你",
@@ -3035,6 +3054,7 @@
     },
     "policies": {
       "title": "审批策略",
+      "tableRegion": "审批策略",
       "subtitle": "哪些操作需要等待决策，以及谁可以做出决策。",
       "project": { "title": "项目审批策略", "inherited": "继承" },
       "create": "新建策略",

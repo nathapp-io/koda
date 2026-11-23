@@ -308,6 +308,15 @@ describe('fleet OpenAPI contract', () => {
     expect(spendParams('/api/fleet/analytics/spend')).toContain('top');
   });
 
+  it('AC-10 and AC-11: dashboard job schemas document nullable thread titles', () => {
+    const active = spec.components.schemas['DashboardActiveJobDto'];
+    const recent = spec.components.schemas['DashboardRecentJobDto'];
+    expect(active?.required).toContain('threadTitle');
+    expect(active?.properties?.['threadTitle']).toMatchObject({ type: 'string', nullable: true });
+    expect(recent?.required).toContain('threadTitle');
+    expect(recent?.properties?.['threadTitle']).toMatchObject({ type: 'string', nullable: true });
+  });
+
   it('exposes the dashboard routes and schemas (S2b (c) §1-§2)', () => {
     expect(spec.paths['/api/fleet/dashboard']?.['get']).toBeDefined();
     expect(spec.paths['/api/projects/{slug}/fleet/dashboard']?.['get']).toBeDefined();

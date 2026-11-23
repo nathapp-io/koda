@@ -50,6 +50,7 @@ export class DashboardActiveJobDto implements DashboardActiveJobView {
   @ApiProperty() projectSlug: string;
   @ApiProperty({ example: 'acme/app' }) repo: string;
   @ApiProperty() feature: string;
+  @ApiProperty({ type: String, nullable: true }) threadTitle: string | null;
   @ApiProperty({ enum: ['RUN', 'PLAN'] }) command: string;
   @ApiProperty({ enum: ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING'] }) state: string;
   @ApiProperty(NULLABLE_STRING) runnerId: string | null;
@@ -71,6 +72,7 @@ export class DashboardRecentJobDto implements DashboardRecentJobView {
   @ApiProperty() projectSlug: string;
   @ApiProperty({ example: 'acme/app' }) repo: string;
   @ApiProperty() feature: string;
+  @ApiProperty({ type: String, nullable: true }) threadTitle: string | null;
   @ApiProperty({ enum: ['RUN', 'PLAN'] }) command: string;
   @ApiProperty({ enum: ['COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] }) state: string;
   @ApiProperty(NULLABLE_STRING) stateReason: string | null;

@@ -163,23 +163,23 @@ const submit = handleSubmit(async (formValues: WorkspaceThreadCreateFormValues) 
     <form v-else class="space-y-5" data-testid="workspace-thread-create-form" @submit="submit">
       <FormField v-slot="{ componentField }" name="homeProject">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.workspace.homeProject') }}</FormLabel>
-          <FormControl><FleetNativeSelect v-bind="componentField" :options="homeProjectOptions" testid="thread-new-home-project" /></FormControl>
+          <FormLabel for="thread-new-home-project">{{ t('fleet.threads.workspace.homeProject') }}</FormLabel>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="homeProjectOptions" id="thread-new-home-project" testid="thread-new-home-project" /></FormControl>
           <p v-if="values.homeProject === ''" class="text-sm text-muted-foreground">{{ t('fleet.threads.workspace.homeProjectAutoHint') }}</p>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="title">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.threadTitle') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" data-testid="thread-new-title" /></FormControl>
+          <FormLabel for="thread-new-title">{{ t('fleet.threads.new.threadTitle') }}</FormLabel>
+          <FormControl><Input v-bind="componentField" id="thread-new-title" data-testid="thread-new-title" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="maxCostUsd">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.maxCost') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" type="number" min="0.0001" max="10000" step="0.0001" data-testid="thread-new-cap" /></FormControl>
+          <FormLabel for="thread-new-cap">{{ t('fleet.threads.new.maxCost') }}</FormLabel>
+          <FormControl><Input v-bind="componentField" id="thread-new-cap" type="number" min="0.0001" max="10000" step="0.0001" data-testid="thread-new-cap" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>

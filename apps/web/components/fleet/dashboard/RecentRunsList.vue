@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import { usd } from '~/lib/fleet-analytics-format'
 import { durationParts, jobPath, safeHttpUrl } from '~/lib/fleet-dashboard'
+import { jobFeatureLabel } from '~/lib/fleet-job-labels'
 import type { DashboardRecentJob, ScopeKind } from '~/lib/fleet-dashboard-types'
 
 /** Spec §4.2, B6: jobs finished in the last 24 h (newest first, at most 20), with a link to the Analytics page. */
@@ -44,7 +45,7 @@ const rows = computed(() =>
                 :to="jobPath(row.job.projectSlug, row.job.id)"
                 class="break-all font-medium text-link underline-offset-4 hover:underline"
                 data-testid="fleet-dashboard-recent-link"
-              >{{ row.job.feature }}</NuxtLink>
+              >{{ jobFeatureLabel(row.job, t) }}</NuxtLink>
             </TableCell>
             <TableCell v-if="scope === 'global'">{{ row.job.projectSlug }}</TableCell>
             <TableCell>

@@ -57,7 +57,6 @@ function mount(get: jest.Mock, opts: MountOpts = {}) {
     decided: jest.fn(),
     enabled: ref(false),
     supported: ref(opts.notificationsSupported === true),
-    toggleBrowserNotifications: jest.fn(async (): Promise<void> => undefined),
   }
   let head: { titleTemplate?: (title?: string) => string } = {}
   const state = new Map<string, Vue.Ref>()
@@ -369,15 +368,13 @@ describe('us-006: lifecycle and failure handling', () => {
     m.app.unmount()
   })
 
-  test('the opt-in toggle is offered when the browser supports notifications, and toggles them', async () => {
+  test('AC-10: the header no longer offers a browser-notification toggle', async () => {
     const m = mount(jest.fn(async () => counts(1)), { notificationsSupported: true })
     await m.settle()
 
-    const button = m.app.one('[data-testid="fleet-approval-notifications"]')
-    if (!button) throw new Error('missing the notification opt-in toggle')
-    expect(button.props['aria-pressed']).toBe(false)
-    await (button.props.onClick as () => Promise<void>)()
-    expect(m.notifications.toggleBrowserNotifications).toHaveBeenCalledTimes(1)
+    expect(m.app.find('[data-testid="fleet-approval-notifications"]')).toHaveLength(0)
+    // The named preference lives on the settings page now (US-004); the badge is a count and a link.
+    expect(m.el()).toHaveLength(1)
     m.app.unmount()
   })
 

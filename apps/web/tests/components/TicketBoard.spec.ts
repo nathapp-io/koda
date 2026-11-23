@@ -1,6 +1,9 @@
-import { describe, test, expect } from '@jest/globals'
+import { afterEach, describe, test, expect, jest } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { nextTick } from 'vue'
+import { mountSfc, webFile, type FakeNode } from '../helpers/mount-sfc'
+import { enI18n, uiStubs } from '../helpers/fleet-harness'
 
 const webDir = join(__dirname, '../..')
 const boardPath = join(webDir, 'components', 'TicketBoard.vue')
@@ -250,5 +253,122 @@ describe('US-004-2: TicketBoard.vue has no console.log statements', () => {
   test('source does not contain console.log', () => {
     const source = readFileSync(boardPath, 'utf-8')
     expect(source).not.toContain('console.log')
+  })
+})
+
+const board = webFile('components', 'TicketBoard.vue')
+type LayoutNode = FakeNode & { scrollLeft: number; clientWidth: number; scrollWidth: number; scrollBy: (options: { left: number; behavior: 'smooth' }) => void }
+let fakeWindow: { addEventListener: jest.Mock; removeEventListener: jest.Mock } | undefined
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis, 'window')
+  fakeWindow = undefined
+})
+
+function mountMeasuredBoard() {
+  fakeWindow = { addEventListener: jest.fn(), removeEventListener: jest.fn() }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: fakeWindow })
+  return mountSfc(board, {
+    props: { tickets: [] },
+    globals: { useI18n: () => enI18n() },
+    components: { ...uiStubs, Button: uiStubs.Button, TicketCard: { template: '<div />' } },
+  })
+}
+
+function layoutNode(app: ReturnType<typeof mountMeasuredBoard>): LayoutNode {
+  const node = app.one('[data-testid="board-scroll-container"]')
+  if (!node) throw new Error('board scroll container not found')
+  return Object.assign(node, { scrollLeft: 0, clientWidth: 0, scrollWidth: 0, scrollBy: jest.fn() })
+}
+
+function fireScroll(node: LayoutNode): void {
+  const handler = node.props.onScroll
+  if (typeof handler !== 'function') throw new Error('scroll handler not found')
+  handler()
+}
+
+describe('US-007 board scroll hints', () => {
+  test('AC-4, AC-5, AC-6: right hint renders, has localized label and advances smoothly', async () => {
+    const app = mountMeasuredBoard()
+    const container = layoutNode(app)
+    container.clientWidth = 1168
+    container.scrollWidth = 1800
+    fireScroll(container)
+    await nextTick()
+    const hint = app.one('[data-testid="board-scroll-right"]')
+    expect(hint).toBeDefined()
+    expect(app.one('[data-testid="board-scroll-left"]')).toBeUndefined()
+    const button = app.find('[data-stub="button"]').find(candidate => candidate.props['aria-label'] === 'Show more columns')
+    expect(button).toBeDefined()
+    ;(button?.props.onClick as (() => void) | undefined)?.()
+    expect(container.scrollBy).toHaveBeenCalledTimes(1)
+    expect(container.scrollBy).toHaveBeenCalledWith({ left: 300, behavior: 'smooth' })
+    app.unmount()
+  })
+
+  test('AC-7: resize remeasures and hides the right hint when all columns fit', async () => {
+    const app = mountMeasuredBoard()
+    const container = layoutNode(app)
+    container.clientWidth = 1168
+    container.scrollWidth = 1800
+    fireScroll(container)
+    const listener = fakeWindow?.addEventListener.mock.calls.find(([event]) => event === 'resize')?.[1] as (() => void) | undefined
+    expect(listener).toBeDefined()
+    container.clientWidth = 1800
+    listener?.()
+    await nextTick()
+    expect(app.one('[data-testid="board-scroll-right"]')).toBeUndefined()
+    app.unmount()
+  })
+
+  test('AC-8: unmount removes the same resize listener', () => {
+    const app = mountMeasuredBoard()
+    const addCall = fakeWindow?.addEventListener.mock.calls.find(([event]) => event === 'resize')
+    expect(addCall).toBeDefined()
+    app.unmount()
+    expect(fakeWindow?.removeEventListener).toHaveBeenCalledWith('resize', addCall?.[1])
+  })
+
+  test('regression: hint overlays sit beside the scroller, not inside it, so they do not scroll away', async () => {
+    const app = mountMeasuredBoard()
+    const container = layoutNode(app)
+    container.scrollLeft = 300
+    container.clientWidth = 1168
+    container.scrollWidth = 1800
+    fireScroll(container)
+    await nextTick()
+
+    const containerAncestors = new Set<FakeNode>()
+    for (let parent = container.parent; parent; parent = parent.parent) containerAncestors.add(parent)
+
+    for (const testId of ['board-scroll-left', 'board-scroll-right']) {
+      const hint = app.one(`[data-testid="${testId}"]`)
+      expect(hint).toBeDefined()
+      // An absolutely positioned child of the overflow element is positioned against its content box:
+      // it scrolls with the cards, so after scrolling right the left control is clipped off-screen.
+      expect(hint?.parent).toBe(container.parent)
+      expect(containerAncestors.has(hint as FakeNode)).toBe(false)
+      expect(String(container.props.class)).toContain('overflow-x-auto')
+      expect(String(hint?.parent?.props.class ?? '')).not.toMatch(/overflow/)
+    }
+    app.unmount()
+  })
+
+  test('AC-9, AC-10: left hint has localized label and scrolls earlier smoothly', async () => {
+    const app = mountMeasuredBoard()
+    const container = layoutNode(app)
+    container.scrollLeft = 632
+    container.clientWidth = 1168
+    container.scrollWidth = 1800
+    fireScroll(container)
+    await nextTick()
+    const hint = app.one('[data-testid="board-scroll-left"]')
+    expect(hint).toBeDefined()
+    const button = app.find('[data-stub="button"]').find(candidate => candidate.props['aria-label'] === 'Show earlier columns')
+    expect(button).toBeDefined()
+    ;(button?.props.onClick as (() => void) | undefined)?.()
+    expect(container.scrollBy).toHaveBeenCalledTimes(1)
+    expect(container.scrollBy).toHaveBeenCalledWith({ left: -300, behavior: 'smooth' })
+    app.unmount()
   })
 })

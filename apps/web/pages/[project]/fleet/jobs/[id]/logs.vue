@@ -8,6 +8,7 @@ import { LOG_STREAMS, type FleetJobLogListDto, type LogStream } from '~/lib/flee
 import { createLogViewer, type LogViewer, type LogViewerState } from '~/lib/fleet-log-viewer'
 import { formatBytes, isNearBottom, logNotices } from '~/lib/fleet-log-view'
 import { isActiveJobState, isTerminalJobState } from '~/lib/fleet-jobs'
+import { jobFeatureLabel } from '~/lib/fleet-job-labels'
 import type { FleetJobDto } from '~/lib/fleet-types'
 import FleetLogFilters from '~/components/fleet/FleetLogFilters.vue'
 import FleetLogNotices from '~/components/fleet/FleetLogNotices.vue'
@@ -180,7 +181,7 @@ useProjectEvents(slug, {
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed || !job" @retry="load()" />
     <template v-else>
-      <PageHeader :title="t('fleet.logs.title')" :subtitle="`${job.feature} | ${job.command}`">
+      <PageHeader :title="t('fleet.logs.title')" :subtitle="`${jobFeatureLabel(job, t)} | ${job.command}`">
         <template #actions>
           <span v-if="downloadError" class="text-sm text-status-rejected" data-testid="fleet-log-download-error">{{ downloadError }}</span>
           <a
