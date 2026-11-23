@@ -384,6 +384,10 @@
     "filter": { "search": "Filter by ref or title…", "priority": "Priority", "clear": "Clear filters", "showing": "Showing {n} of {total}" },
     "newTicket": "New Ticket",
     "loadMore": "Load more",
+    "board": {
+      "scrollRight": "Show more columns",
+      "scrollLeft": "Show earlier columns"
+    },
     "live": { "deleted": "This ticket was deleted." },
     "status": {
       "CREATED": "Created",
@@ -452,6 +456,12 @@
         "open": "Open",
         "draft": "Draft",
         "closed": "Closed"
+      },
+      "chip": {
+        "merged": "PR merged",
+        "open": "PR open",
+        "draft": "PR draft",
+        "closed": "PR closed"
       },
       "mergedActivity": "PR merged: {repo}#{number} by {author}"
     },

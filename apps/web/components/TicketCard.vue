@@ -56,7 +56,7 @@ function prStateVariant(state: string): string {
   if (state === 'merged') return 'bg-status-done'
   if (state === 'open') return 'bg-status-active'
   if (state === 'draft') return 'bg-status-todo'
-  if (state === 'closed') return 'bg-status-rejected'
+  if (state === 'closed') return 'bg-muted-foreground'
   return 'bg-status-todo'
 }
 </script>
@@ -87,7 +87,7 @@ function prStateVariant(state: string): string {
             </Badge>
             <Badge v-if="githubPrWithState" variant="outline" class="gap-1">
               <span class="w-2 h-2 rounded-full" :class="prStateVariant(githubPrWithState.prState!)"></span>
-              {{ t(`tickets.pr.status.${githubPrWithState.prState}`) }}
+              {{ t(`tickets.pr.chip.${githubPrWithState.prState}`) }}
             </Badge>
           </div>
         </div>

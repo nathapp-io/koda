@@ -1,6 +1,8 @@
 import { describe, test, expect } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { enI18n, uiStubs } from '../helpers/fleet-harness'
 
 const webDir = join(__dirname, '../..')
 const cardPath = join(webDir, 'components', 'TicketCard.vue')
@@ -266,5 +268,42 @@ describe('US-004-1: TicketCard.vue has no console.log statements', () => {
   test('source does not contain console.log', () => {
     const source = readFileSync(cardPath, 'utf-8')
     expect(source).not.toContain('console.log')
+  })
+})
+
+const card = webFile('components', 'TicketCard.vue')
+const prTicket = (prState: string) => ({
+  id: 'ticket-1', ref: 'APP-1', title: 'Ticket', type: 'BUG' as const,
+  priority: 'HIGH' as const,
+  links: [{ id: 'link-1', url: 'https://github.com/acme/app/pull/1', provider: 'github', externalRef: '1', prState }],
+})
+
+function mountPrCard(prState: string) {
+  return mountSfc(card, {
+    props: { ticket: prTicket(prState) },
+    globals: { useI18n: () => enI18n() },
+    components: {
+      ...uiStubs,
+      Card: { template: '<div><slot /></div>' },
+      CardContent: { template: '<div><slot /></div>' },
+    },
+  })
+}
+
+describe('US-007 PR chip wording and closed state', () => {
+  test("AC-11, AC-12: closed GitHub PR renders distinct wording with a neutral dot", () => {
+    const app = mountPrCard('closed')
+    expect(app.text()).toContain('PR closed')
+    const dot = app.find('span').find(span => String(span.props.class).includes('w-2 h-2 rounded-full'))
+    expect(dot).toBeDefined()
+    expect(String(dot?.props.class)).toContain('bg-muted-foreground')
+    expect(String(dot?.props.class)).not.toContain('bg-status-rejected')
+    app.unmount()
+  })
+
+  test('AC-13: merged GitHub PR renders distinct wording', () => {
+    const app = mountPrCard('merged')
+    expect(app.text()).toContain('PR merged')
+    app.unmount()
   })
 })

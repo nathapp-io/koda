@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import TicketCard from '~/components/TicketCard.vue'
+import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { TICKET_DOT_CLASS, statusDotClass } from '~/lib/ticket-chips'
+import { boardScrollHints } from '~/lib/ticket-board-scroll'
 
 interface Assignee {
   kind: 'user' | 'agent'
@@ -27,6 +29,32 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+const scrollContainer = ref<HTMLDivElement | null>(null)
+const scrollHints = ref({ left: false, right: false })
+
+function measure(): void {
+  const element = scrollContainer.value
+  if (!element) return
+  scrollHints.value = boardScrollHints({
+    scrollLeft: element.scrollLeft,
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  })
+}
+
+function scrollBy(left: number): void {
+  scrollContainer.value?.scrollBy({ left, behavior: 'smooth' })
+}
+
+onMounted(() => {
+  measure()
+  if (typeof window !== 'undefined') window.addEventListener('resize', measure)
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', measure)
+})
+
 const COLUMNS: Ticket['status'][] = [
   'CREATED',
   'VERIFIED',
@@ -42,7 +70,12 @@ function ticketsForStatus(status: string): Ticket[] {
 </script>
 
 <template>
-  <div class="overflow-x-auto">
+  <div
+    ref="scrollContainer"
+    data-testid="board-scroll-container"
+    class="relative overflow-x-auto"
+    @scroll="measure"
+  >
     <div class="flex gap-3 min-w-max pb-4">
       <div
         v-for="status in COLUMNS"
@@ -73,6 +106,28 @@ function ticketsForStatus(status: string): Ticket[] {
           @open="emit('open-ticket', ticket)"
         />
       </div>
+    </div>
+    <div v-if="scrollHints.left" data-testid="board-scroll-left" class="pointer-events-none absolute inset-y-0 left-0 flex items-center bg-gradient-to-r from-background to-transparent pl-2">
+      <Button
+        variant="outline"
+        size="icon"
+        class="pointer-events-auto"
+        :aria-label="t('tickets.board.scrollLeft')"
+        @click="scrollBy(-300)"
+      >
+        <ChevronLeft aria-hidden="true" />
+      </Button>
+    </div>
+    <div v-if="scrollHints.right" data-testid="board-scroll-right" class="pointer-events-none absolute inset-y-0 right-0 flex items-center bg-gradient-to-l from-background to-transparent pr-2">
+      <Button
+        variant="outline"
+        size="icon"
+        class="pointer-events-auto"
+        :aria-label="t('tickets.board.scrollRight')"
+        @click="scrollBy(300)"
+      >
+        <ChevronRight aria-hidden="true" />
+      </Button>
     </div>
   </div>
 </template>

@@ -384,6 +384,10 @@
     "filter": { "search": "按编号或标题筛选…", "priority": "优先级", "clear": "清除筛选", "showing": "显示 {n} / {total}" },
     "newTicket": "新建工单",
     "loadMore": "加载更多",
+    "board": {
+      "scrollRight": "显示更多列",
+      "scrollLeft": "显示前面的列"
+    },
     "live": { "deleted": "此工单已被删除。" },
     "status": {
       "CREATED": "已创建",
@@ -452,6 +456,12 @@
         "open": "打开",
         "draft": "草稿",
         "closed": "关闭"
+      },
+      "chip": {
+        "merged": "PR 已合并",
+        "open": "PR 已打开",
+        "draft": "PR 草稿",
+        "closed": "PR 已关闭"
       },
       "mergedActivity": "PR 已合并：{repo}#{number}，合并者：{author}"
     },
