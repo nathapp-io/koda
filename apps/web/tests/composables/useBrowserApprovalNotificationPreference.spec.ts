@@ -205,6 +205,26 @@ describe('US-004 AC-5: storage is optional', () => {
     expect(m.preference.enabled.value).toBe(true)
     m.host.unmount()
   })
+
+  // Fix round 1 (F1): the storage read happens once per tab. A caller that mounts later must not
+  // reread a storage that never accepted the choice and turn the tab's opt-in back off.
+  test('AC-5 (fix round 1): a caller mounting later in the tab keeps the tab-only choice', async () => {
+    const state = new Map<string, unknown>()
+    const user = ref<{ id: string } | null>({ id: 'u1' })
+    const storage = fakeStorage()
+    storage.setItem.mockImplementation(() => { throw new Error('quota') })
+    const first = await mountPreference({ state, user, storage, permission: 'granted' })
+    await first.preference.toggle()
+    expect(first.preference.enabled.value).toBe(true)
+
+    // The badge mounts after the settings page, in the same tab, with nothing in storage.
+    const second = await mountPreference({ state, user, storage, permission: 'granted' })
+
+    expect(second.preference.enabled.value).toBe(true)
+    expect(storage.getItem).toHaveBeenCalledTimes(1)
+    second.host.unmount()
+    first.host.unmount()
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

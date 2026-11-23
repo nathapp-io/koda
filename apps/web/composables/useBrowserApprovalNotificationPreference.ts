@@ -67,6 +67,10 @@ export function useBrowserApprovalNotificationPreference() {
   }
 
   onMounted(() => {
+    // The storage read happens once per tab. A caller that mounts later (the badge after the settings
+    // page, say) must not reread it: storage that refused the write holds nothing, and rereading would
+    // silently turn this tab's own choice back off.
+    if (state.value.mounted) return
     state.value.mounted = true
     state.value.supported = typeof Notification !== 'undefined'
     readPermission()
