@@ -3,7 +3,7 @@
   "feature": "e2e-1121-polish",
   "branchName": "feat/e2e-1121-polish",
   "createdAt": "2026-11-23T03:31:31.594Z",
-  "updatedAt": "2026-11-23T04:52:31.621Z",
+  "updatedAt": "2026-11-23T04:59:24.147Z",
   "userStories": [
     {
       "id": "US-001",
@@ -505,14 +505,17 @@
         "ux"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Bounded pure scroll math and standard Vue event-listener lifecycle plus localized chip presentation; no business-rule or persistence change. SSR and fake-layout edge cases are explicit."
+        "reasoning": "Bounded pure scroll math and standard Vue event-listener lifecycle plus localized chip presentation; no business-rule or persistence change. SSR and fake-layout edge cases are explicit.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/TicketBoard.vue",
@@ -556,7 +559,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "061c331254af9b6a986b706eab458a60f4d750d6"
     },
     {
       "id": "US-008",
