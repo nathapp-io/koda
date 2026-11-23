@@ -99,6 +99,12 @@ function verifyMoment(run: ScriptRun): VerifyMoment | undefined {
  *
  * The listing is taken while the shim is still the pipeline's decompressor, so a plaintext copy a downstream
  * command writes outside `backups/` is on record even when a later command deletes it before the script exits.
+ *
+ * This covers the deployment directory only. A copy the verifier writes somewhere else — `mktemp`,
+ * `${TMPDIR:-/tmp}`, which is where a temporary file normally goes — is what `tempDirEntries` reads; a
+ * hard-coded path elsewhere on the host (a literal `/tmp/...`, `~`) is out of reach of any listing probe, so
+ * the guarantee these cases give is "the deployment directory and the script's own temp directory stay
+ * clean", not "no plaintext copy anywhere on the machine" (koda #497).
  */
 function verifyTree(run: ScriptRun): string[] | undefined {
   const file = join(run.dir, '.harness', 'verify-tree');
@@ -113,6 +119,29 @@ function verifyTree(run: ScriptRun): string[] | undefined {
 
 /** The entries the harness itself puts beside the scripts: the deployment a run starts from, and nothing else. */
 const DEPLOYMENT_ENTRIES = ['.', 'backup-db.sh', 'deploy.sh', 'docker-compose.yml', 'rollback.sh'];
+
+/**
+ * What the temp directory the script was given (`run.tmpDir`) held while the verifier decompressed the dump:
+ * the `gzip` shim lists it at the same moment it lists the deployment directory. `undefined` when the probe
+ * never ran, `[]` when it ran and the directory was clean.
+ *
+ * A copy written here is outside the deployment directory, so `verifyTree` cannot see it; `mktemp` and
+ * `${TMPDIR:-/tmp}` both land here because the harness owns the script's `TMPDIR`. Several decompressions
+ * each append their own block, and the union is what the directory held at any point while the verifier ran.
+ */
+function tempDirEntries(run: ScriptRun): string[] | undefined {
+  const file = join(run.dir, '.harness', 'verify-tmp');
+  if (!existsSync(file)) return undefined;
+  const lines = readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '');
+  // The marker keeps "the probe ran and saw nothing" apart from "the probe never ran".
+  if (lines[0] !== 'listing') return undefined;
+  return lines
+    .slice(1)
+    .filter((line) => line !== 'listing')
+    .map((line) => (line.startsWith('./') ? line.slice('./'.length) : line));
+}
 
 /** Entries in the deployment directory that no run put there: a file the script created beside its backups. */
 function entriesCreatedBesideBackups(run: ScriptRun): string[] {
@@ -231,6 +260,41 @@ describe('backup-db.sh', () => {
     expect(existsSync(join(run.dir, 'verifier-plaintext.sql'))).toBe(false);
     expect(only(dumpFiles(run))).toMatch(/^koda-db-.+\.sql\.gz$/);
     expect(entriesCreatedBesideBackups(run)).toEqual(['verifier-plaintext.sql']);
+  });
+
+  it('AC-2: writes nothing in the temp directory it was given while it verifies the dump', () => {
+    // The deployment directory is not the only place a verifier could keep the plaintext: a temporary copy
+    // normally goes to `mktemp` or `${TMPDIR:-/tmp}`, both of which the harness owns for this run, so the same
+    // probe lists that directory too (koda #497).
+    const run = runDeployScript('backup-db.sh', [], { umask: OPERATOR_UMASK });
+
+    expect(run.status).toBe(0);
+    // The probe ran (it listed the deployment) and the temp directory stayed empty: the decompressed dump went
+    // through the pipe and into no scratch file at all.
+    expect(verifyTree(run)).toEqual(DEPLOYMENT_ENTRIES);
+    expect(tempDirEntries(run)).toEqual([]);
+    expect(readdirSync(run.tmpDir)).toEqual([]);
+  });
+
+  it('AC-2: the verify probe catches a plaintext copy written in the temp directory and deleted again', () => {
+    // The gap #497 reported: the same mutation as the case above, one directory further out. Listing the
+    // deployment directory alone sees nothing here, because the copy never exists there, and the run ends with
+    // nothing on disk either — so only the temp directory listed while the pipeline runs catches it.
+    const run = runDeployScript('backup-db.sh', [], {
+      umask: OPERATOR_UMASK,
+      editScript: (source) =>
+        source.replace(
+          'gzip -dc "$DB_BACKUP_FILE" | grep -F -x -- "$DUMP_COMPLETE_LINE" >/dev/null || report_failed_dump',
+          'gzip -dc "$DB_BACKUP_FILE" | tee "${TMPDIR:-/tmp}/verifier-plaintext.sql" | grep -F -x -- "$DUMP_COMPLETE_LINE" >/dev/null || report_failed_dump\nrm -f "${TMPDIR:-/tmp}/verifier-plaintext.sql"',
+        ),
+    });
+
+    expect(run.status).toBe(0);
+    // Nothing survives the script, and nothing was ever beside it: the earlier cases cannot see this copy.
+    expect(existsSync(join(run.tmpDir, 'verifier-plaintext.sql'))).toBe(false);
+    expect(entriesCreatedBesideBackups(run)).toEqual([]);
+    // The temp directory the script was handed is where it landed, and the probe caught it while it existed.
+    expect(tempDirEntries(run)).toEqual(['verifier-plaintext.sql']);
   });
 
   it('AC-3: fails before any pg_dump when a regular file sits where the backups directory belongs', () => {
