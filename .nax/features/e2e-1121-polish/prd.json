@@ -3,7 +3,7 @@
   "feature": "e2e-1121-polish",
   "branchName": "feat/e2e-1121-polish",
   "createdAt": "2026-11-23T03:31:31.594Z",
-  "updatedAt": "2026-11-23T04:06:57.648Z",
+  "updatedAt": "2026-11-23T04:17:17.122Z",
   "userStories": [
     {
       "id": "US-001",
@@ -182,14 +182,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Low-risk structural input widening and consistent use of an existing label algorithm across four consumers; only the upstream nullable-field contract is new."
+        "reasoning": "Low-risk structural input widening and consistent use of an existing label algorithm across four consumers; only the upstream nullable-field contract is new.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/fleet-job-labels.ts",
@@ -220,7 +223,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5546b0d5624fe442ef137701e6b192b770cd6f14"
     },
     {
       "id": "US-004",
