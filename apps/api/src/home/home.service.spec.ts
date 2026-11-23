@@ -18,7 +18,7 @@ const approval = (over: Partial<HomeApprovalRow> = {}): HomeApprovalRow => ({
 });
 
 const job = (over: Partial<HomeJobRow> = {}): HomeJobRow => ({
-  id: 'j1', projectId: 'p1', feature: 'f', command: 'RUN', state: 'FAILED', stateReason: null, costSpentUsd: '0',
+  id: 'j1', projectId: 'p1', feature: 'f', command: 'RUN', state: 'FAILED', stateReason: null, threadTitle: null, costSpentUsd: '0',
   resultPrUrl: null, queuedAt: NOW, finishedAt: NOW, project: { slug: 'web' }, ...over,
 });
 

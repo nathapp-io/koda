@@ -60,6 +60,7 @@ export interface DashboardJobRow {
   repoName: string;
   provider: 'github' | 'gitlab';
   feature: string;
+  threadTitle: string | null;
   command: FleetJobKind;
   state: FleetJobState;
   runnerId: string | null;
@@ -93,6 +94,7 @@ export interface DashboardRecentRow {
   repoOwner: string;
   repoName: string;
   feature: string;
+  threadTitle: string | null;
   command: FleetJobKind;
   state: FleetJobState;
   stateReason: string | null;

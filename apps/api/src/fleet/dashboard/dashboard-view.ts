@@ -35,6 +35,7 @@ export interface DashboardActiveJobView {
   projectSlug: string;
   repo: string;
   feature: string;
+  threadTitle: string | null;
   command: string;
   state: string;
   runnerId: string | null;
@@ -56,6 +57,7 @@ export interface DashboardRecentJobView {
   projectSlug: string;
   repo: string;
   feature: string;
+  threadTitle: string | null;
   command: string;
   state: string;
   stateReason: string | null;
@@ -131,7 +133,7 @@ function runnerView(r: DashboardRunnerRow, input: ViewInput): DashboardRunnerVie
 function activeView(j: DashboardJobRow, input: ViewInput, names: ReadonlyMap<string, string>): DashboardActiveJobView {
   const stories = j.stories && !j.storiesTruncated ? j.stories : null;
   return {
-    id: j.id, projectSlug: j.projectSlug, repo: `${j.repoOwner}/${j.repoName}`, feature: j.feature, command: j.command, state: j.state,
+    id: j.id, projectSlug: j.projectSlug, repo: `${j.repoOwner}/${j.repoName}`, feature: j.feature, threadTitle: j.threadTitle, command: j.command, state: j.state,
     runnerId: j.runnerId, runnerName: j.runnerId ? (names.get(j.runnerId) ?? null) : null,
     currentStoryId: j.currentStoryId, currentPhase: j.currentPhase,
     storiesDone: stories ? stories.filter((s) => s.status === 'passed').length : null, storiesTotal: stories ? stories.length : null,
@@ -141,7 +143,7 @@ function activeView(j: DashboardJobRow, input: ViewInput, names: ReadonlyMap<str
 }
 
 const recentView = (r: DashboardRecentRow): DashboardRecentJobView => ({
-  id: r.id, projectSlug: r.projectSlug, repo: `${r.repoOwner}/${r.repoName}`, feature: r.feature, command: r.command, state: r.state,
+  id: r.id, projectSlug: r.projectSlug, repo: `${r.repoOwner}/${r.repoName}`, feature: r.feature, threadTitle: r.threadTitle, command: r.command, state: r.state,
   stateReason: r.stateReason, runnerName: r.runnerName, costSpentUsd: r.costSpentUsd, startedAt: iso(r.startedAt),
   finishedAt: r.finishedAt.toISOString(), resultPrUrl: r.resultPrUrl,
 });

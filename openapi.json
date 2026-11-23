@@ -24214,6 +24214,10 @@
           "feature": {
             "type": "string"
           },
+          "threadTitle": {
+            "type": "string",
+            "nullable": true
+          },
           "command": {
             "type": "string",
             "enum": [
@@ -24288,6 +24292,7 @@
           "projectSlug",
           "repo",
           "feature",
+          "threadTitle",
           "command",
           "state",
           "runnerId",
@@ -24319,6 +24324,10 @@
           },
           "feature": {
             "type": "string"
+          },
+          "threadTitle": {
+            "type": "string",
+            "nullable": true
           },
           "command": {
             "type": "string",
@@ -24369,6 +24378,7 @@
           "projectSlug",
           "repo",
           "feature",
+          "threadTitle",
           "command",
           "state",
           "stateReason",
@@ -27465,6 +27475,10 @@
           "feature": {
             "type": "string"
           },
+          "threadTitle": {
+            "type": "string",
+            "nullable": true
+          },
           "command": {
             "type": "string",
             "enum": [
@@ -27526,6 +27540,7 @@
           "projectId",
           "projectSlug",
           "feature",
+          "threadTitle",
           "command",
           "state",
           "stateReason",

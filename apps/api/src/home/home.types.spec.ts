@@ -19,7 +19,7 @@ const approval = (over: Partial<HomeSnapshotInput['approvals'][number]> = {}): H
 });
 
 const job = (over: Partial<HomeJobRow> = {}): HomeJobRow => ({
-  id: 'j1', projectId: 'p1', feature: 'f', command: 'RUN', state: 'FAILED', stateReason: null, costSpentUsd: '1.5',
+  id: 'j1', projectId: 'p1', feature: 'f', command: 'RUN', state: 'FAILED', stateReason: null, threadTitle: null, costSpentUsd: '1.5',
   resultPrUrl: null, queuedAt: daysAgo(2), finishedAt: daysAgo(1), project: { slug: 'web' }, ...over,
 });
 
@@ -88,6 +88,11 @@ describe('buildHomeView', () => {
       ['j-block', 'blocked', 2],
       ['j-fail', 'failed', 0],
     ]);
+  });
+
+  it('AC-7: copies the thread title into a failed job in needs-you', () => {
+    const v = buildHomeView(input({ failedJobs: [job({ threadTitle: 'Fix login' })], failedJobsTotal: 1 }));
+    expect(v.needsYou.jobs[0].threadTitle).toBe('Fix login');
   });
 
   it('sorts failed jobs without a finishedAt last', () => {

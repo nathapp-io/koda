@@ -98,8 +98,11 @@ export class PrismaHomeRepository {
   private static toJobRow = (r: {
     id: string; projectId: string; feature: string; command: string; state: string; stateReason: string | null;
     costSpentUsd: { toString(): string }; resultPrUrl: string | null; queuedAt: Date; finishedAt: Date | null;
-    project: { slug: string };
-  }): HomeJobRow => ({ ...r, costSpentUsd: r.costSpentUsd.toString() });
+    project: { slug: string }; thread: { title: string } | null;
+  }): HomeJobRow => {
+    const { thread, ...row } = r;
+    return { ...row, threadTitle: thread?.title ?? null, costSpentUsd: r.costSpentUsd.toString() };
+  };
 
   async findFailedJobs(projectIds: string[], since: Date, take: number): Promise<HomeJobRow[]> {
     const rows = await this.prisma.client.fleetJob.findMany({
@@ -108,6 +111,7 @@ export class PrismaHomeRepository {
         id: true, projectId: true, feature: true, command: true, state: true, stateReason: true, costSpentUsd: true,
         resultPrUrl: true, queuedAt: true, finishedAt: true,
         project: { select: { slug: true } },
+        thread: { select: { title: true } },
       },
       orderBy: JOB_NEWEST('finishedAt'),
       take,
@@ -127,6 +131,7 @@ export class PrismaHomeRepository {
         id: true, projectId: true, feature: true, command: true, state: true, stateReason: true, costSpentUsd: true,
         resultPrUrl: true, queuedAt: true, finishedAt: true,
         project: { select: { slug: true } },
+        thread: { select: { title: true } },
       },
       orderBy: JOB_NEWEST('queuedAt'),
       take,
