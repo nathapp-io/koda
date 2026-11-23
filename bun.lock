@@ -116,8 +116,8 @@
       "version": "0.1.0",
       "dependencies": {
         "@nathapp/fleet-protocol": "workspace:*",
-        "@nathapp/nax-agent": "0.92.0",
-        "@nathapp/nax-agent-acp": "0.92.0",
+        "@nathapp/nax-agent": "0.92.15",
+        "@nathapp/nax-agent-acp": "0.92.15",
         "commander": "^12.0.0",
       },
       "devDependencies": {
@@ -833,11 +833,11 @@
 
     "@nathapp/koda-web": ["@nathapp/koda-web@workspace:apps/web"],
 
-    "@nathapp/nax-agent": ["@nathapp/nax-agent@0.92.0", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.92.0", "zod": "^4.6.6" } }, "sha512-BecM7GgLQEIBZj7DSA35lYuSiiHz+QDlCA4UglYLonZe9LxRvxCgyVsxBkwfXbf4JSc7wIJ5CuJYzWckO6KxsA=="],
+    "@nathapp/nax-agent": ["@nathapp/nax-agent@0.92.15", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.92.15", "zod": "^4.6.6" } }, "sha512-vblNzblblKiuw22zta9xgTiG3JanMemuxIHJD272eMIzNh9GFuZqSpdwrhcvQhH5yO2dZ5E6b4gSYDyhwhgZ4Q=="],
 
-    "@nathapp/nax-agent-acp": ["@nathapp/nax-agent-acp@0.92.0", "", { "dependencies": { "@agentclientprotocol/sdk": "~1.7.0", "@modelcontextprotocol/sdk": "^1.32.1", "zod": "^4.6.6" }, "peerDependencies": { "@nathapp/nax-agent": "^0.92.0" }, "bin": { "nax-agent": "bin/nax-agent.js" } }, "sha512-XCOksIyixp2QR8Zy6dRzriGvDtaUumrZlpPinn1alwkFB8Cyxswa3xjOK3HkbpU8j11f2YdaadKxZZKYqGDtZQ=="],
+    "@nathapp/nax-agent-acp": ["@nathapp/nax-agent-acp@0.92.15", "", { "dependencies": { "@agentclientprotocol/sdk": "~1.7.0", "@modelcontextprotocol/sdk": "^1.32.1", "zod": "^4.6.6" }, "peerDependencies": { "@nathapp/nax-agent": "^0.92.15" }, "bin": { "nax-agent": "bin/nax-agent.js" } }, "sha512-B0yC//w97yDU2mCelBakVxgyo7x2q0Hx5oYPeHHF3Sx7t3TFzME4VEvYKLuSWCPn43PlzcDNsEpvklZW92NPAA=="],
 
-    "@nathapp/nax-ai": ["@nathapp/nax-ai@0.92.0", "", { "dependencies": { "@earendil-works/pi-ai": "1.5.0", "proper-lockfile": "4.1.2" } }, "sha512-DcEAlhox6594Gh2XTJt/LK9IihikolsHTnDf4y0FUngPoQC9tDKBal+T7JEIgXekVe3lvmadn1T+ZVf+uQvJGA=="],
+    "@nathapp/nax-ai": ["@nathapp/nax-ai@0.92.15", "", { "dependencies": { "@earendil-works/pi-ai": "1.5.0", "proper-lockfile": "4.1.2" } }, "sha512-zuJYvUUJBh5oal99BbpQaNX+d6Bmz707GR59USJWp6g14oIev1tsuVNhw/EQdIHZq87ab7sxJMThqAe0o2a1HQ=="],
 
     "@nathapp/nestjs-app": ["@nathapp/nestjs-app@4.2.4", "", { "dependencies": { "@nathapp/nestjs-auth": "^4.2.4", "@nathapp/nestjs-common": "^4.2.4", "nestjs-i18n": "^10.5.1" }, "peerDependencies": { "@fastify/helmet": "*", "@nathapp/auth": "^1.0.2", "@nathapp/nestjs-cache": "^4.0.0-rc.0", "@nathapp/nestjs-microservices": "^4.0.0-rc.0", "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/config": "^3.0.0 || ^4.0.0 || ^12.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/microservices": "*", "@nestjs/passport": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/platform-express": "*", "@nestjs/platform-fastify": "*", "@nestjs/swagger": "^7.1.1 || ^8.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/websockets": "*", "cache-manager": ">=6", "class-transformer": "*", "class-validator": "*", "helmet": "*", "rxjs": "*" }, "optionalPeers": ["@fastify/helmet", "@nathapp/nestjs-cache", "@nathapp/nestjs-microservices", "@nestjs/microservices", "@nestjs/platform-express", "@nestjs/platform-fastify", "@nestjs/websockets", "cache-manager", "helmet"] }, "sha512-LcrvmA4yGU5UQL2t53Erle91HGwqhjQ95ZEE50WOHn+6hLlPRI6AVPYlbJIyQch0gcHaRbFPKYcdXuZYbyLKbg=="],
 
