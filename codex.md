@@ -68,7 +68,7 @@ The detailed architecture reference lives in `docs/architecture.md`.
 
 | Layer | Choice |
 |:------|:-------|
-| Runtime | Node.js 22.22.3+ and Bun 1.4.5 workspaces |
+| Runtime | Node.js 24+ and Bun 1.4.5 workspaces |
 | Language | TypeScript strict |
 | Monorepo | Turborepo |
 | API | NestJS 12 + Fastify + Prisma |
@@ -79,6 +79,11 @@ The detailed architecture reference lives in `docs/architecture.md`.
 | Test | Vitest in api; Jest in cli and web; Playwright in web |
 | Lint | oxlint in api; ESLint in cli, web, runner |
 | i18n | API and web maintain separate translation systems |
+
+The Node.js 24 floor comes from the `@nathapp/nestjs-*` packages: 4.5 declares `engines.node`
+`>=24`, because the Prisma transaction manager's `AsyncLocalStorage` context costs per promise
+below Node 24. CI uses Node 24; the API container itself runs Bun, so Bun is what executes the
+compiled API in production.
 
 ## Workspace Responsibilities
 

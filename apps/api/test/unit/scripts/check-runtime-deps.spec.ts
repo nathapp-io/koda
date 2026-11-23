@@ -1,7 +1,7 @@
 /**
  * The production image installs runtime deps with its own `bun install --production`,
  * which resolves `~` ranges fresh. When a package pins a sibling exactly (nestjs-notify
- * 1.3.1 depends on nestjs-tenant "1.3.1") and koda pins another version, a second copy
+ * 1.5.0 depends on nestjs-tenant "1.5.0") and koda pins another version, a second copy
  * is nested. Nest DI tokens are classes, so the API cannot boot (#437). The build
  * guard must find every DI-relevant package installed more than once: Nest tells
  * providers apart by class object, so even two copies of the same version break DI.

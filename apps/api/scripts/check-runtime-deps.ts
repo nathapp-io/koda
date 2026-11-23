@@ -1,8 +1,8 @@
 /**
  * Build guard: fail when a DI-relevant package is installed more than once.
  *
- * A package that pins a sibling exactly (nestjs-notify 1.3.1 depends on nestjs-tenant
- * "1.3.1") gets a nested second copy when koda pins another version; the image once
+ * A package that pins a sibling exactly (nestjs-notify 1.5.0 depends on nestjs-tenant
+ * "1.5.0") gets a nested second copy when koda pins another version; the image once
  * shipped that from an install that ignored the lockfile. The lockfile itself can also
  * carry a second copy (a nested entry, or one version under two Bun peer hashes), and a
  * hoisted install nests one for a peer range that excludes ours. Nest DI tokens are
