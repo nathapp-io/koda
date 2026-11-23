@@ -3,7 +3,7 @@
   "feature": "e2e-1121-polish",
   "branchName": "feat/e2e-1121-polish",
   "createdAt": "2026-11-23T03:31:31.594Z",
-  "updatedAt": "2026-11-23T04:17:17.122Z",
+  "updatedAt": "2026-11-23T04:32:28.848Z",
   "userStories": [
     {
       "id": "US-001",
@@ -253,14 +253,17 @@
         "user-state"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extracts shared lifecycle-aware state across concurrent callers, optional persistence and async browser permission. Strict isolation applies to identity-dependent opt-in and user-switch fencing, while approval access-control rules remain unchanged."
+        "reasoning": "Extracts shared lifecycle-aware state across concurrent callers, optional persistence and async browser permission. Strict isolation applies to identity-dependent opt-in and user-switch fencing, while approval access-control rules remain unchanged.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/composables/useApprovalRequestNotifications.ts",
@@ -314,7 +317,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "47d92489011a7eee5e1d6ee4d7a5ee24b0a57c91"
     },
     {
       "id": "US-005",
