@@ -174,6 +174,27 @@ export function dispatchFeatureOf(values: DispatchFormValues): string {
   return values.feature.trim()
 }
 
+/** Filters suggestions by a case-insensitive substring of the trimmed draft. */
+export function filterSuggestions(names: readonly string[], draft: string): string[] {
+  const query = draft.trim().toLowerCase()
+  return query ? names.filter(name => name.toLowerCase().includes(query)) : [...names]
+}
+
+/** Groups names by their non-empty first-hyphen prefix; unprefixed names are returned last. */
+export function groupSuggestionsByPrefix(names: readonly string[]): Array<{ prefix: string; names: string[] }> {
+  const groups = new Map<string, string[]>()
+  for (const name of names) {
+    const separator = name.indexOf('-')
+    const prefix = separator > 0 && separator < name.length - 1 ? name.slice(0, separator) : ''
+    const group = groups.get(prefix)
+    if (group) group.push(name)
+    else groups.set(prefix, [name])
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a === '' ? 1 : b === '' ? -1 : a < b ? -1 : a > b ? 1 : 0)
+    .map(([prefix, groupedNames]) => ({ prefix, names: groupedNames }))
+}
+
 /** Adds a token to a chain once, trimmed; the list is never mutated. */
 export function addToken(list: readonly string[], token: string): string[] {
   const value = token.trim()

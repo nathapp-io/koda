@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals'
 import {
-  addTicketRef, affectsRuns, isLinkableTicket, matchTicketOptions, MAX_DISPATCH_TICKETS, normalizeTicketRef, runPrState,
+  addTicketRef, affectsRuns, countTicketMatches, isLinkableTicket, matchTicketOptions, MAX_DISPATCH_TICKETS, normalizeTicketRef, runPrState,
   runReason, shortSha, ticketDispatchQuery, ticketFeatureSlug, ticketRefsFromQuery, ticketsQueryValue,
 } from '~/lib/fleet-ticket-links'
 import { FEATURE_RE } from '~/lib/fleet-dispatch'
@@ -67,6 +67,11 @@ describe('picker matching (P1)', () => {
     expect(matchTicketOptions(options, [], 'web-1').map(o => o.ref)).toEqual(['WEB-12', 'WEB-1'])
     expect(matchTicketOptions(options, ['WEB-12'], '').map(o => o.ref)).toEqual(['WEB-1'])
     expect(matchTicketOptions(options, [], '', 1)).toHaveLength(1)
+  })
+
+  test('counts all matching linkable tickets before the suggestion limit', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ ref: `WEB-${i + 1}`, title: `Fix issue ${i + 1}`, status: 'CREATED' }))
+    expect(countTicketMatches(many, [], 'fix')).toBe(12)
   })
 
   test('CLOSED and REJECTED are not linkable (D450)', () => {

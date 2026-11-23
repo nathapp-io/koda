@@ -1,4 +1,5 @@
 import { describe, test, expect, afterEach, jest } from '@jest/globals'
+import { readFileSync } from 'node:fs'
 import * as Vue from 'vue'
 import { ref, computed, watch, nextTick } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
@@ -64,6 +65,12 @@ const testids = (app: ReturnType<typeof mountDialog>): string[] =>
 afterEach(() => { delete (globalThis as Record<string, unknown>).useApi })
 
 describe('FleetScheduleEditDialog (behaviour)', () => {
+  test('profile suggestions opt into prefix groups while label suggestions stay flat', () => {
+    const source = readFileSync(dialog, 'utf-8')
+    expect(source).toMatch(/test-id="fleet-schedule-profiles"\s+group-by-prefix/)
+    expect(source).not.toMatch(/test-id="fleet-schedule-labels"\s+group-by-prefix/)
+  })
+
   test('edit of a pinned schedule patches every editable field, keeps the pin, then emits saved and closes', async () => {
     const { api, toasts, flush } = harness()
     const app = mountDialog({ open: true, schedule: schedule() }, api, toasts)

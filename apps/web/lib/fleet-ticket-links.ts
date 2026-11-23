@@ -45,6 +45,12 @@ export function matchTicketOptions(options: readonly TicketOption[], chosen: rea
     .slice(0, limit)
 }
 
+/** Counts all options that match the picker filters, before its display limit. */
+export function countTicketMatches(options: readonly TicketOption[], chosen: readonly string[], query: string): number {
+  const q = query.trim().toLowerCase()
+  return options.filter(o => isLinkableTicket(o.status) && !chosen.includes(o.ref) && (!q || `${o.ref} ${o.title}`.toLowerCase().includes(q))).length
+}
+
 /** D461: `WEB-12` + `Fix login` -> `web-12-fix-login`; `[a-z0-9-]`, at most 48 chars, never ending with `-`. */
 export function ticketFeatureSlug(ref: string, title: string): string {
   const slug = `${ref}-${title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')

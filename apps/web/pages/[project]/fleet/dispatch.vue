@@ -238,6 +238,7 @@ async function confirmPrConflict(): Promise<void> {
             :suggestions="options.profileOptions.value"
             :placeholder="t('fleet.dispatch.profilePlaceholder')"
             test-id="dispatch-profiles"
+            group-by-prefix
             @update:model-value="setFieldValue('profiles', $event)"
           />
           <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.profilesHint') }}</p>

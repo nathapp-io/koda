@@ -54,9 +54,19 @@ describe('dispatch page', () => {
     expect(dispatch).toContain("t('fleet.dispatch.prefilled')")
   })
 
-  test('max cost carries a visible hint instead of a silent prefill (#205)', () => {
+  test('profile suggestions opt into prefix groups while label suggestions stay flat', () => {
+    expect(dispatch).toMatch(/test-id="dispatch-profiles"\s+group-by-prefix/)
+    expect(dispatch).toMatch(/test-id="dispatch-labels"[\s\S]*?@update:model-value/)
+    expect(dispatch).not.toMatch(/test-id="dispatch-labels"\s+group-by-prefix/)
+  })
+
+  test('max cost carries the translated hint instead of a silent prefill (#205)', () => {
     expect(dispatch).toContain("t('fleet.dispatch.maxCostHint')")
+    expect(dispatch).toContain('id="dispatch-max-cost-hint"')
     expect(dispatch).toContain('data-testid="dispatch-max-cost"')
+    // The en locale is pinned here to the user-visible copy, not merely a translation key.
+    const en = read('i18n', 'locales', 'en.json')
+    expect(en).toContain('"maxCostHint": "The run is billed up to this amount."')
   })
 
   test('bash mode select and timeout only for RUN; the timeout only for gated/escalate (D299)', () => {

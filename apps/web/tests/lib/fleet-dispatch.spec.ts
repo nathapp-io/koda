@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { addToken, buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, prefillNotice, removeToken, toDispatchBody, type DispatchFormValues } from '~/lib/fleet-dispatch'
+import { addToken, buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, filterSuggestions, groupSuggestionsByPrefix, prefillNotice, removeToken, toDispatchBody, type DispatchFormValues } from '~/lib/fleet-dispatch'
 
 const t = (key: string): string => key
 const schema = buildDispatchSchema(t)
@@ -133,6 +133,28 @@ describe('dispatchPrefillFromQuery (#205)', () => {
   test('tolerates a missing query (route without query in tests)', () => {
     expect(dispatchPrefillFromQuery(undefined)).toEqual({})
     expect(dispatchPrefillFromQuery(null)).toEqual({})
+  })
+})
+
+describe('token suggestions', () => {
+  test('filters case-insensitive substrings against the trimmed draft', () => {
+    expect(filterSuggestions(['native-ds', 'codex-review', 'fast'], 'COD')).toEqual(['codex-review'])
+  })
+
+  test('an empty trimmed draft matches everything', () => {
+    expect(filterSuggestions(['native-ds', 'fast'], '  ')).toEqual(['native-ds', 'fast'])
+  })
+
+  test('groups by prefix in sorted order and preserves names within groups', () => {
+    expect(groupSuggestionsByPrefix(['native-ds', 'codex-review', 'native-codex', 'fast'])).toEqual([
+      { prefix: 'codex', names: ['codex-review'] },
+      { prefix: 'native', names: ['native-ds', 'native-codex'] },
+      { prefix: '', names: ['fast'] },
+    ])
+  })
+
+  test('names with an empty side of the hyphen have no prefix', () => {
+    expect(groupSuggestionsByPrefix(['-x', 'native-'])).toEqual([{ prefix: '', names: ['-x', 'native-'] }])
   })
 })
 
