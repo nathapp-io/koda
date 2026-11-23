@@ -329,6 +329,31 @@ describe('US-007 board scroll hints', () => {
     expect(fakeWindow?.removeEventListener).toHaveBeenCalledWith('resize', addCall?.[1])
   })
 
+  test('regression: hint overlays sit beside the scroller, not inside it, so they do not scroll away', async () => {
+    const app = mountMeasuredBoard()
+    const container = layoutNode(app)
+    container.scrollLeft = 300
+    container.clientWidth = 1168
+    container.scrollWidth = 1800
+    fireScroll(container)
+    await nextTick()
+
+    const containerAncestors = new Set<FakeNode>()
+    for (let parent = container.parent; parent; parent = parent.parent) containerAncestors.add(parent)
+
+    for (const testId of ['board-scroll-left', 'board-scroll-right']) {
+      const hint = app.one(`[data-testid="${testId}"]`)
+      expect(hint).toBeDefined()
+      // An absolutely positioned child of the overflow element is positioned against its content box:
+      // it scrolls with the cards, so after scrolling right the left control is clipped off-screen.
+      expect(hint?.parent).toBe(container.parent)
+      expect(containerAncestors.has(hint as FakeNode)).toBe(false)
+      expect(String(container.props.class)).toContain('overflow-x-auto')
+      expect(String(hint?.parent?.props.class ?? '')).not.toMatch(/overflow/)
+    }
+    app.unmount()
+  })
+
   test('AC-9, AC-10: left hint has localized label and scrolls earlier smoothly', async () => {
     const app = mountMeasuredBoard()
     const container = layoutNode(app)
