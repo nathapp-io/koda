@@ -17,6 +17,10 @@ const t = (key: string): string => ({
 }[key] ?? key)
 
 describe('jobFeatureLabel', () => {
+  it("AC-1: accepts the minimal label input and uses a THREAD title", () => {
+    expect(jobFeatureLabel({ command: 'THREAD', feature: 'thread-abc', threadTitle: 'Fix login' }, t)).toBe('Fix login')
+  })
+
   it('AC-1: uses the title of a THREAD job', () => {
     expect(jobFeatureLabel(job({ command: 'THREAD', threadTitle: 'Fix login flow', feature: 'thread-cm1' }), t)).toBe('Fix login flow')
   })

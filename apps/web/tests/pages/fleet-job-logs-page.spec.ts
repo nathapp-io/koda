@@ -55,7 +55,7 @@ function installDocument(): RecordedAnchor[] {
   return anchors
 }
 
-function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Array<FleetJobLogListDto | Promise<FleetJobLogListDto>>; entries?: Array<FleetJobLogEntriesDto | Error>; query?: Record<string, string> } = {}) {
+function mountPage(opts: { state?: string; command?: string; feature?: string; threadTitle?: string | null; list?: FleetJobLogListDto; lists?: Array<FleetJobLogListDto | Promise<FleetJobLogListDto>>; entries?: Array<FleetJobLogEntriesDto | Error>; query?: Record<string, string> } = {}) {
   const route = reactive({ params: { project: 'koda', id: 'j1' }, query: { ...(opts.query ?? {}) } as Record<string, string>, fullPath: '/koda/fleet/jobs/j1/logs' })
   const replace = jest.fn(async ({ query }: { query: Record<string, string> }) => {
     route.query = query
@@ -82,7 +82,7 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Ar
     return opts.list ?? list()
   })
   let handlers: ProjectEventHandlers | null = null
-  const job = { id: 'j1', feature: 'login', command: 'RUN', state: opts.state ?? 'RUNNING', leaseEpoch: 1, stories: [{ id: 'US-001' }, { id: 'US-002' }] }
+  const job = { id: 'j1', feature: opts.feature ?? 'login', threadTitle: opts.threadTitle ?? null, command: opts.command ?? 'RUN', state: opts.state ?? 'RUNNING', leaseEpoch: 1, stories: [{ id: 'US-001' }, { id: 'US-002' }] }
   const app = mountSfc(pageFile, {
     components: uiStubs,
     alias: { '~/composables/useApi': apiModule },
@@ -123,6 +123,12 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: Ar
 afterEach(() => { jest.useRealTimers(); delete g.document })
 
 describe('Job logs page (spec §4.1)', () => {
+  test("AC-9: labels a THREAD subtitle with its title", async () => {
+    const p = mountPage({ command: 'THREAD', feature: 'thread-abc', threadTitle: 'Fix login' })
+    await p.settle()
+    expect(p.app.find('[data-stub="page-header"]')[0].props.subtitle).toBe('Fix login | THREAD')
+    p.app.unmount()
+  })
   test('opens the latest attempt backward from the end and follows a running job', async () => {
     const p = mountPage()
     await p.settle()

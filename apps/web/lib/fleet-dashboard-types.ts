@@ -62,6 +62,7 @@ export interface DashboardActiveJob {
   /** "owner/name". */
   repo: string
   feature: string
+  threadTitle: string | null
   command: string
   state: string
   runnerId: string | null
@@ -85,6 +86,7 @@ export interface DashboardRecentJob {
   projectSlug: string
   repo: string
   feature: string
+  threadTitle: string | null
   command: string
   state: string
   stateReason: string | null

@@ -13,19 +13,35 @@ const texts = (app: ReturnType<typeof mountSfc>, id: string) => byId(app, id).ma
 const NOW = new Date('2026-10-05T12:00:00.000Z')
 
 const active = (id: string, over: Partial<DashboardActiveJob> = {}): DashboardActiveJob => ({
-  id, projectSlug: 'koda', repo: 'acme/app', feature: `feat-${id}`, command: 'RUN', state: 'RUNNING', runnerId: 'r1', runnerName: 'wk-mac',
+  id, projectSlug: 'koda', repo: 'acme/app', feature: `feat-${id}`, threadTitle: null, command: 'RUN', state: 'RUNNING', runnerId: 'r1', runnerName: 'wk-mac',
   currentStoryId: 'US-002', currentPhase: 'review', storiesDone: 3, storiesTotal: 5, costSpentUsd: '0.0664', maxCostUsd: '5.0000',
   queuedAt: '2026-10-05T11:00:00.000Z', startedAt: '2026-10-05T11:01:00.000Z', lastHeartbeatAt: '2026-10-05T11:58:00.000Z',
   pendingApprovals: 0, ...over,
 })
 
 const recent = (id: string, over: Partial<DashboardRecentJob> = {}): DashboardRecentJob => ({
-  id, projectSlug: 'koda', repo: 'acme/app', feature: `feat-${id}`, command: 'RUN', state: 'COMPLETED', stateReason: null,
+  id, projectSlug: 'koda', repo: 'acme/app', feature: `feat-${id}`, threadTitle: null, command: 'RUN', state: 'COMPLETED', stateReason: null,
   runnerName: 'wk-mac', costSpentUsd: '0.1395', startedAt: '2026-10-05T11:40:00.000Z', finishedAt: '2026-10-05T11:55:00.000Z',
   resultPrUrl: 'https://github.com/acme/app/pull/2', ...over,
 })
 
 describe('FleetDashboardActiveRunsTable (spec §4.2)', () => {
+  it("AC-2: shows the THREAD title instead of its feature id", () => {
+    const app = mount('ActiveRunsTable.vue', { jobs: [active('thread', { command: 'THREAD', feature: 'thread-abc', threadTitle: 'Fix login' })], now: NOW, scope: 'project', truncated: false })
+    const row = app.textOf(byId(app, 'fleet-dashboard-active-row')[0])
+    expect(row).toContain('Fix login')
+    expect(row).not.toContain('thread-abc')
+  })
+
+  it("AC-3: uses the translated fallback for a THREAD job without a title", () => {
+    const app = mount('ActiveRunsTable.vue', { jobs: [active('thread', { command: 'THREAD', feature: 'thread-abc', threadTitle: null })], now: NOW, scope: 'project', truncated: false })
+    expect(app.textOf(byId(app, 'fleet-dashboard-active-row')[0])).toContain('Thread')
+  })
+
+  it("AC-4: keeps the feature name on a RUN job", () => {
+    const app = mount('ActiveRunsTable.vue', { jobs: [active('run', { feature: 'add-auth' })], now: NOW, scope: 'project', truncated: false })
+    expect(app.textOf(byId(app, 'fleet-dashboard-active-row')[0])).toContain('add-auth')
+  })
   it('one row per job in API order, the feature linking to the job page', () => {
     const app = mount('ActiveRunsTable.vue', { jobs: [active('a'), active('b')], now: NOW, scope: 'project', truncated: false })
     expect(byId(app, 'fleet-dashboard-active-row').map((r) => r.props['data-job'])).toEqual(['a', 'b'])
@@ -89,6 +105,17 @@ describe('FleetDashboardActiveRunsTable (spec §4.2)', () => {
 })
 
 describe('FleetDashboardRecentRunsList (spec §4.2, B6, D419)', () => {
+  it("AC-5: shows the THREAD title instead of its feature id", () => {
+    const app = mount('RecentRunsList.vue', { jobs: [recent('thread', { command: 'THREAD', feature: 'thread-abc', threadTitle: 'Fix login' })], now: NOW, scope: 'project', truncated: false, analyticsTo: '/koda/fleet/analytics' })
+    const row = app.textOf(byId(app, 'fleet-dashboard-recent-row')[0])
+    expect(row).toContain('Fix login')
+    expect(row).not.toContain('thread-abc')
+  })
+
+  it("AC-6: keeps the feature name on a RUN job", () => {
+    const app = mount('RecentRunsList.vue', { jobs: [recent('run', { feature: 'add-auth' })], now: NOW, scope: 'project', truncated: false, analyticsTo: '/koda/fleet/analytics' })
+    expect(app.textOf(byId(app, 'fleet-dashboard-recent-row')[0])).toContain('add-auth')
+  })
   const props = (jobs: DashboardRecentJob[], over: Record<string, unknown> = {}) =>
     ({ jobs, now: NOW, scope: 'project', truncated: false, analyticsTo: '/koda/fleet/analytics', ...over })
 

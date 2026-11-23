@@ -2,9 +2,10 @@ import { isConfigJob, reviewPrNumber } from '~/lib/fleet-jobs'
 import type { FleetJobDto } from '~/lib/fleet-types'
 
 type Translate = (key: string) => string
+export type JobLabelInput = { command: string; feature: string; threadTitle: string | null }
 
 /** The feature cell and page title of a job. */
-export function jobFeatureLabel(job: FleetJobDto, t: Translate): string {
+export function jobFeatureLabel(job: JobLabelInput, t: Translate): string {
   if (isConfigJob(job)) return t('fleet.jobs.configFeature')
 
   if (job.command === 'THREAD') {

@@ -2,6 +2,7 @@
 import { AlertTriangle, ClipboardList, ShieldCheck } from 'lucide-vue-next'
 import { inboxHref, requestKeyLabel } from '~/lib/approval-requests'
 import { formatUsd } from '~/lib/fleet-jobs'
+import { jobFeatureLabel } from '~/lib/fleet-job-labels'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, priorityDotClass, statusDotClass } from '~/lib/ticket-chips'
 import type { HomeNeedsYou } from '~/lib/home-types'
 
@@ -94,7 +95,7 @@ function approvalLabel(a: HomeNeedsYou['approvals'][number]): string {
         <ul v-else class="divide-y divide-border">
           <li v-for="job in needsYou.jobs" :key="job.id">
             <NuxtLink :to="`/${job.projectSlug}/fleet/jobs/${job.id}`" class="flex items-center gap-2 px-6 py-2.5 text-sm hover:bg-accent/40">
-              <span class="min-w-0 flex-1 truncate font-mono text-xs">{{ job.feature }}</span>
+              <span class="min-w-0 flex-1 truncate font-mono text-xs">{{ jobFeatureLabel(job, t) }}</span>
               <FleetJobStateBadge :state="job.state" />
               <span
                 v-if="job.pendingApprovals > 0"

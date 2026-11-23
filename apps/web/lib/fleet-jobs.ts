@@ -252,7 +252,7 @@ export const CONFIG_JOB_FEATURE = 'nax-config'
 const CONFIG_KINDS: readonly string[] = ['CONFIG_EDIT', 'CONFIG_DRIFT']
 
 /** S3 §6: config jobs replace the nax sections of the job page with the config panel. */
-export const isConfigJob = (job: Pick<FleetJobDto, 'command'>): boolean => CONFIG_KINDS.includes(job.command)
+export const isConfigJob = (job: { command: string }): boolean => CONFIG_KINDS.includes(job.command)
 
 /** Translation key for a job kind; codeLabel falls back to the raw code for an unknown one. */
 export const jobCommandLabelKey = (command: string): string => `fleet.command.${command}`
