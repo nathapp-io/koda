@@ -158,45 +158,45 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
     <form v-else class="space-y-5" data-testid="thread-create-form" @submit="submit">
       <FormField v-slot="{ componentField }" name="kind">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.scope') }}</FormLabel>
-          <FormControl><FleetNativeSelect v-bind="componentField" :options="scopeOptions" testid="thread-new-scope" /></FormControl>
+          <FormLabel for="thread-new-scope">{{ t('fleet.threads.new.scope') }}</FormLabel>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="scopeOptions" id="thread-new-scope" testid="thread-new-scope" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-if="!isProject" v-slot="{ componentField }" name="repoId">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.repo') }} <span aria-hidden="true">*</span></FormLabel>
-          <FormControl><FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.threads.new.repoPlaceholder')" testid="thread-new-repo" /></FormControl>
+          <FormLabel for="thread-new-repo">{{ t('fleet.threads.new.repo') }} <span aria-hidden="true">*</span></FormLabel>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.threads.new.repoPlaceholder')" id="thread-new-repo" testid="thread-new-repo" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-if="!isProject" v-slot="{ componentField }" name="baseRef">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.baseRef') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="thread-new-baseRef" /></FormControl>
+          <FormLabel for="thread-new-baseRef">{{ t('fleet.threads.new.baseRef') }}</FormLabel>
+          <FormControl><Input v-bind="componentField" id="thread-new-baseRef" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="thread-new-baseRef" /></FormControl>
           <p v-if="selectedRepo" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.baseRefHint', { branch: selectedRepo.defaultBranch }) }}</p>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-if="!isProject" v-slot="{ componentField }" name="feature">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.feature') }} <span aria-hidden="true">*</span></FormLabel>
-          <FormControl><Input v-bind="componentField" aria-required="true" data-testid="thread-new-feature" /></FormControl>
+          <FormLabel for="thread-new-feature">{{ t('fleet.threads.new.feature') }} <span aria-hidden="true">*</span></FormLabel>
+          <FormControl><Input v-bind="componentField" id="thread-new-feature" aria-required="true" data-testid="thread-new-feature" /></FormControl>
           <p class="text-sm text-muted-foreground">{{ t('fleet.threads.new.featureHint') }}</p>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="title">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.threadTitle') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" data-testid="thread-new-title" /></FormControl>
+          <FormLabel for="thread-new-title">{{ t('fleet.threads.new.threadTitle') }}</FormLabel>
+          <FormControl><Input v-bind="componentField" id="thread-new-title" data-testid="thread-new-title" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="maxCostUsd">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.maxCost') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" type="number" min="0.0001" max="10000" step="0.0001" data-testid="thread-new-cap" /></FormControl>
+          <FormLabel for="thread-new-cap">{{ t('fleet.threads.new.maxCost') }}</FormLabel>
+          <FormControl><Input v-bind="componentField" id="thread-new-cap" type="number" min="0.0001" max="10000" step="0.0001" data-testid="thread-new-cap" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
@@ -227,8 +227,8 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
       />
       <FormField v-if="!isProject" v-slot="{ componentField }" name="mode">
         <FormItem>
-          <FormLabel>{{ t('fleet.threads.new.mode.label') }}</FormLabel>
-          <FormControl><FleetNativeSelect v-bind="componentField" :options="modeOptions" testid="thread-new-mode" /></FormControl>
+          <FormLabel for="thread-new-mode">{{ t('fleet.threads.new.mode.label') }}</FormLabel>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="modeOptions" id="thread-new-mode" testid="thread-new-mode" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>

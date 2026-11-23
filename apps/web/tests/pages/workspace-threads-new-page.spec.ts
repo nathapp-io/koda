@@ -186,6 +186,28 @@ afterEach(() => {
 })
 
 describe('US-005 AC-6..AC-11: pages/threads/new.vue', () => {
+  const expectAccessibleField = async (field: string, id: string, labelText: string): Promise<void> => {
+    const m = mountPage()
+    await m.settle()
+    const control = selectIn(m.app, field) ?? inputIn(m.app, field)
+    expect(control?.props.id).toBe(id)
+    const labels = m.app.find('[data-stub="form-label"]').filter((label) => m.app.textOf(label).includes(labelText))
+    expect(labels).toHaveLength(1)
+    expect(labels[0]?.props.for).toBe(id)
+    m.app.unmount()
+  }
+
+  test('US-008 AC-3: the home project select has its matching label', async () => {
+    await expectAccessibleField('homeProject', 'thread-new-home-project', 'fleet.threads.workspace.homeProject')
+  })
+
+  test('US-008 AC-4: the title input has its matching label', async () => {
+    await expectAccessibleField('title', 'thread-new-title', 'fleet.threads.new.threadTitle')
+  })
+
+  test('US-008 AC-5: the cap input has its matching label', async () => {
+    await expectAccessibleField('maxCostUsd', 'thread-new-cap', 'fleet.threads.new.maxCost')
+  })
   test('US-004 AC-8: Automatic hint appears only while home project is Automatic', async () => {
     const m = mountPage()
     await m.settle()

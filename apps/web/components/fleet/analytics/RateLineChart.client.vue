@@ -24,7 +24,7 @@ const template = (d: RateRow): string => rateHtml(d, props.bucket, props.seriesL
       <VisLine :x="x" :y="y" color="var(--chart-1)" />
       <VisAxis type="x" :tick-format="xTick" :num-ticks="6" :grid-line="false" />
       <VisAxis type="y" :tick-format="yTick" :num-ticks="3" />
-      <VisCrosshair :template="template" color="var(--chart-1)" />
+      <VisCrosshair :x="x" :y="y" :template="template" color="var(--chart-1)" />
       <VisTooltip />
     </VisXYContainer>
   </div>

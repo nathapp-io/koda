@@ -229,6 +229,22 @@ async function fillAndSubmit(app: Mounted): Promise<void> {
 }
 
 describe('US-005 AC11-AC15: pages/[project]/threads/new.vue', () => {
+  test('US-008 AC-6: each repo-scope control has one matching accessible label', async () => {
+    const m = mountPage({ models: ['m1'] })
+    await m.settle()
+    const expected = [
+      ['kind', 'thread-new-scope'], ['repoId', 'thread-new-repo'],
+      ['baseRef', 'thread-new-baseRef'], ['feature', 'thread-new-feature'],
+      ['title', 'thread-new-title'], ['maxCostUsd', 'thread-new-cap'], ['mode', 'thread-new-mode'],
+    ] as const
+    for (const [field, id] of expected) {
+      const control = selectIn(m.app, field) ?? inputIn(m.app, field)
+      expect(control?.props.id).toBe(id)
+      const labels = m.app.find('[data-stub="form-label"]').filter((label) => label.props.for === id)
+      expect(labels).toHaveLength(1)
+    }
+    m.app.unmount()
+  })
   test('AC11: the submit button stays disabled when no runner offers a model', async () => {
     const m = mountPage({})
     await m.settle()

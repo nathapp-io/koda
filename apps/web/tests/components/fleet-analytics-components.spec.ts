@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals'
+import { defineComponent, h } from 'vue'
 import { readdirSync, readFileSync } from 'node:fs'
 import { nextTick } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
@@ -10,6 +11,47 @@ const file = (name: string): string => webFile('components', 'fleet', 'analytics
 const globals = { useI18n: () => enI18n() }
 const mount = (name: string, props: Record<string, unknown>) => mountSfc(file(name), { props, components: uiStubs, globals })
 const byId = (app: ReturnType<typeof mountSfc>, id: string) => app.find(`[data-testid="${id}"]`)
+
+describe('analytics crosshair accessors (US-008)', () => {
+  const captured: Array<Record<string, unknown>> = []
+  const VisCrosshair = defineComponent({
+    name: 'VisCrosshair',
+    props: ['x', 'y', 'yStacked', 'template', 'color'],
+    setup(props) {
+      captured.push(props)
+      return () => h('div')
+    },
+  })
+  const VisXYContainer = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.()) })
+  const inert = defineComponent({ render: () => h('div') })
+
+  it('AC-1: RateLineChart passes its x and y functions to VisCrosshair', () => {
+    captured.length = 0
+    mountSfc(file('RateLineChart.client.vue'), {
+      props: { rows: [{ t: 1, rate: 0.5 }], bucket: 'day', label: 'Rate', seriesLabel: 'Series' },
+      components: { VisCrosshair }, globals,
+      alias: { '@unovis/vue': { VisAxis: inert, VisCrosshair, VisLine: inert, VisTooltip: inert, VisXYContainer } },
+    })
+    expect(typeof captured[0]?.x).toBe('function')
+    expect(typeof captured[0]?.y).toBe('function')
+  })
+
+  it('AC-2: SpendAreaChart passes its x function and stacked per-series y accessor array', () => {
+    captured.length = 0
+    mountSfc(file('SpendAreaChart.client.vue'), {
+      props: {
+        rows: [{ t: 1, values: [2] }], series: [{ key: 'run', label: 'Run', color: 'red' }],
+        bucket: 'day', label: 'Spend',
+      },
+      components: { VisCrosshair }, globals,
+      alias: { '@unovis/vue': { VisArea: inert, VisAxis: inert, VisCrosshair, VisTooltip: inert, VisXYContainer } },
+    })
+    expect(typeof captured[0]?.x).toBe('function')
+    expect(Array.isArray(captured[0]?.yStacked)).toBe(true)
+    expect((captured[0]?.yStacked as unknown[])).toHaveLength(1)
+    expect(typeof (captured[0]?.yStacked as unknown[])[0]).toBe('function')
+  })
+})
 
 describe('analytics components never render HTML from data (D398)', () => {
   it('no component in components/fleet/analytics uses v-html', () => {
