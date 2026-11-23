@@ -14,11 +14,15 @@ const byId = (app: ReturnType<typeof mountSfc>, id: string) => app.find(`[data-t
 
 describe('analytics crosshair accessors (US-008)', () => {
   const captured: Array<Record<string, unknown>> = []
+  // Mirrors @unovis/vue 1.7.1 VisCrosshair: it declares only `data` and forwards every other
+  // attribute to the Unovis config under the name the template wrote. Declaring `yStacked` here
+  // would let Vue normalise `:y-stacked` and hide the F29 bug, so the stub reads raw attrs.
   const VisCrosshair = defineComponent({
     name: 'VisCrosshair',
-    props: ['x', 'y', 'yStacked', 'template', 'color'],
-    setup(props) {
-      captured.push(props)
+    inheritAttrs: false,
+    props: ['data'],
+    setup(_, { attrs }) {
+      captured.push({ ...attrs })
       return () => h('div')
     },
   })
