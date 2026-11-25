@@ -200,6 +200,17 @@ class HomeWorker {
     return text === null ? null : (JSON.parse(text) as WorkerState);
   }
 
+  /**
+   * The state file appears once the process reports its outcome. A sync record can be written *before* it (the sync
+   * loop starts inside `startDaemon`), so every read that follows another signal waits for the file.
+   */
+  async waitForState(timeoutMs = 20_000): Promise<WorkerState> {
+    await this.waitFor('state.json', timeoutMs, 'never reported its outcome');
+    const state = await this.state();
+    if (state === null) throw new Error(`worker (${this.spec.mode}, ${this.spec.home}): state.json is unreadable`);
+    return state;
+  }
+
   /** The exit code, or null while the process is still alive. */
   async exitWithin(timeoutMs: number): Promise<number | null> {
     const code = await Promise.race([this.exit, Bun.sleep(timeoutMs).then(() => null)]);
@@ -356,7 +367,7 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       await owner.ready();
       await owner.release();
       await owner.waitForRecord<SyncEntry>('syncs', 20_000);
-      const ownerState = await owner.state();
+      const ownerState = await owner.waitForState();
       expect(ownerState).toMatchObject({ ok: true });
       // A runner.log the contender's own threshold (10 bytes) would rotate, and that the owner never touches.
       await writeFile(join(home.dir, 'runner.log'), 'x'.repeat(200));
@@ -372,7 +383,7 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
         await contender.ready();
         await contender.release();
         expect(await contender.exitWithin(20_000)).toBe(1);
-        expect((await contender.state())?.error ?? '').toContain(occupied(join(home.base, 'home-alias')));
+        expect((await contender.waitForState()).error ?? '').toContain(occupied(join(home.base, 'home-alias')));
         // The protected startup event log, recorded by the contender itself: nothing was attempted.
         expect(await contender.records<AttemptEntry>('attempts')).toEqual([]);
         expect(existsSync(join(contenderWorkspace, '.jobs'))).toBe(false);
@@ -414,7 +425,7 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       await b.ready();
       await b.release();                          // B needs no sync or preparation barrier
       expect(await b.exitWithin(20_000)).toBe(1);
-      expect((await b.state())?.ok).toBe(false);
+      expect((await b.waitForState()).ok).toBe(false);
       await a.write('prepare-release', '');       // release A's preparation directly,
       await a.write('acked.json', [assign.commandId]);   // and its held acknowledgement
       await a.waitForRecord<LaunchEntry>('launches', 20_000);
@@ -441,8 +452,8 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       ]);
       expect(a.gone).toBe(false);
       expect(b.gone).toBe(false);
-      expect((await a.state())?.ok).toBe(true);
-      expect((await b.state())?.ok).toBe(true);
+      expect((await a.waitForState()).ok).toBe(true);
+      expect((await b.waitForState()).ok).toBe(true);
       // The new path: each independent home holds its own ownership interval.
       expect([existsSync(join(one.dir, RUNNER_HOME_LOCK_FILE)), existsSync(join(two.dir, RUNNER_HOME_LOCK_FILE))]).toEqual([true, true]);
     } finally {
@@ -546,7 +557,7 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       await replacement.ready();
       await replacement.release();
       await replacement.waitForRecord<SyncEntry>('syncs', 20_000, (entry) => entry.path === '/api/fleet/runner/sync');
-      expect((await replacement.state())?.ok).toBe(true);
+      expect((await replacement.waitForState()).ok).toBe(true);
       expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
       await owner.kill();
@@ -567,13 +578,12 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
     try {
       await failing.ready();
       await failing.release();
-      await failing.waitFor('state.json', 20_000, 'never reported its failed start');
-      expect(await failing.state()).toMatchObject({ ok: false });
+      expect(await failing.waitForState()).toMatchObject({ ok: false });
       expect(failing.gone).toBe(false);        // the original caller process is still alive
       await fresh.ready();
       await fresh.release();
       await fresh.waitForRecord<SyncEntry>('syncs', 20_000, (entry) => entry.path === '/api/fleet/runner/sync');
-      expect((await fresh.state())?.ok).toBe(true);
+      expect((await fresh.waitForState()).ok).toBe(true);
       // The failed start had acquired the home (it writes the lock database) and handed it back.
       expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
@@ -613,6 +623,42 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       expect(replacement.journal.getMeta('boot_id')).toBe(replacement.bootId);
       // Only the crash stand-in's release lets this replacement own the home.
       expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
+    } finally {
+      await replacement.stop();
+    }
+  }, 30_000);
+
+  test('F1: a startup failure after the writable journal opens closes it, then hands the home back', async () => {
+    const home = await enrolledHome('f1');
+    // A failure after Journal.open: sweeping an orphan job profile that is a directory cannot remove it.
+    await mkdir(join(home.naxHome, 'profiles', 'koda-job-orphan.json'), { recursive: true });
+    const opened: Journal[] = [];
+    const transport = recordingTransport();
+    const realOpen = Journal.open;
+    Journal.open = ((path: string, now?: Parameters<typeof Journal.open>[1]) => {
+      const journal = realOpen(path, now);
+      opened.push(journal);
+      return journal;
+    }) as typeof Journal.open;
+    let failure: unknown;
+    try {
+      failure = await startDaemon(await daemonOptions(home, transport, new FakeExecutor()))
+        .then(() => null, (error: unknown) => error);
+    } finally {
+      Journal.open = realOpen;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/EISDIR|is a directory/i);
+    // The attempt had opened the writable journal before it failed: the entry point retires that connection before it
+    // releases the home, so no resource of the failed start is still open on the home a replacement takes.
+    expect(opened).toHaveLength(1);
+    expect(() => opened[0]?.getJob('j1', 1)).toThrow();
+    expect(transport.syncs).toEqual([]);   // it never reached sync either
+    await rm(join(home.naxHome, 'profiles', 'koda-job-orphan.json'), { recursive: true, force: true });
+    const replacement = await startDaemon(await daemonOptions(home, recordingTransport(), new FakeExecutor()));
+    try {
+      expect(replacement.bootId).toBeTruthy();
+      expect(replacement.journal.getMeta('boot_id')).toBe(replacement.bootId);
     } finally {
       await replacement.stop();
     }

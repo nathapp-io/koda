@@ -194,6 +194,23 @@ async function acquireHomeOwnership(homeDir: string, log: Logger): Promise<HomeO
   };
 }
 
+/** US-001: how a start lets go of one resource it opened; it never throws at the caller. */
+type StartupResource = () => Promise<void> | void;
+
+/**
+ * US-001: retire what a failed start opened, newest first, so the journal (opened first) closes last. Every entry is
+ * attempted: one resource that cannot be released must not leave the others open on a home another daemon will take.
+ */
+async function retireStartup(opened: readonly StartupResource[], log: Logger): Promise<void> {
+  for (const retire of [...opened].reverse()) {
+    try {
+      await retire();
+    } catch (error) {
+      log.warn('could not retire a resource of the failed start', { error: errorMessage(error) });
+    }
+  }
+}
+
 export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const { home } = options;
   const tuning: Tuning = { ...TUNING, ...options.tuning };
@@ -210,9 +227,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // before every daemon-owned startup side effect: workspace preparation, log rotation, socket preparation, the
   // writable journal and sync. A failure below relinquishes it once what this attempt opened has been retired.
   const ownership = await acquireHomeOwnership(home.dir, log);
+  const opened: StartupResource[] = [];
   try {
-    return await startOwnedDaemon(options, ownership, { tuning, log, now, sleep, git });
+    return await startOwnedDaemon(options, ownership, { tuning, log, now, sleep, git }, opened);
   } catch (error) {
+    // US-001: partial startup cleanup happens here, before the home is handed back: a start that failed after the
+    // journal opened must not leave that connection (or a relay, a socket, an upload or the sync loop) open on a home
+    // the replacement is about to take. The order is the entry point's: retire, then release.
+    await retireStartup(opened, log);
     ownership.release();
     throw error;
   }
@@ -223,6 +245,8 @@ async function startOwnedDaemon(
   options: DaemonOptions,
   ownership: HomeOwnership,
   runner: { readonly tuning: Tuning; readonly log: Logger; readonly now: Now; readonly sleep: Sleep; readonly git: Git },
+  /** What this attempt opens, in the order it opens it: the entry point's cleanup retires them if it fails. */
+  opened: StartupResource[],
 ): Promise<DaemonHandle> {
   const { config, identity, home } = options;
   const { tuning, log, now, sleep, git } = runner;
@@ -243,7 +267,9 @@ async function startOwnedDaemon(
   await ensureSocketDir(socketDir, uid);
 
   const journal = Journal.open(home.journalPath, now);
+  opened.push(() => { journal.close(); });   // pushed first: the journal retires last
   const approvals = new ApprovalRelay({ journal, log, now });
+  opened.push(() => { approvals.stopAll(); });
   const bootId = options.bootId ?? newBootId();
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
@@ -258,13 +284,9 @@ async function startOwnedDaemon(
   const reporter = new CapabilityReporter(
     createCapabilityProbe(config, now, nax, options.acpProbe, () => vaultHelperEnabled(config.naxHome, self)), journal, log,
   );
-  try {
-    await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
-    if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
-  } catch (error) {
-    journal.close();
-    throw error;
-  }
+  // US-001: no cleanup of its own — a probe or trust failure is retired with everything else by the entry point.
+  await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
+  if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
   if (!naxMode) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   approvals.sweepOrphans(journal.activeJobs());
@@ -314,6 +336,7 @@ async function startOwnedDaemon(
     timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs, providerKeyWaitMs: tuning.providerKeyServeWaitMs },
     uid,
   });
+  opened.push(() => broker.closeAll());
 
   // C10 US-009: `providerKey` resolves a provider through the job's own provider-key socket, so the post-checkout check
   // does not refuse a vault-only job for a key koda holds (branch review B1).
@@ -346,6 +369,7 @@ async function startOwnedDaemon(
     log, nowMs: () => now().getTime(), sleep, random: Math.random,
     tuning: { chunkBytes: tuning.logChunkBytes, maxInFlight: tuning.logMaxInFlight, putTimeoutMs: tuning.logPutTimeoutMs, backoffMaxMs: tuning.logBackoffMaxMs },
   });
+  opened.push(() => shipper.close());
   // Fleet S5a §3: the thread host. `threadSessions` is the session factory (or a test's fake); the native
   // models a session may name come from the nax home, filtered by the last capability report.
   const threads: ThreadRunSetup | undefined = naxMode ? {
@@ -378,6 +402,7 @@ async function startOwnedDaemon(
     // threadBackends, so its THREAD rows fail `backend_unavailable` in the supervisor.
     ...(threads ? { threads } : {}),
   });
+  opened.push(() => { supervisor.shutdown(); });
   /**
    * US-001: an ABANDON's ack is offered when its retirement's outcome is durable. The loop is wired once it exists,
    * so the ack rides a later request instead of being lost.
@@ -433,6 +458,12 @@ async function startOwnedDaemon(
   const stopNeedListener = tokens.onNeed(() => loop.wake());
   const stopProviderKeyNeedListener = providerKeys.onNeed(() => loop.wake());   // US-008: a new request wakes the poll
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
+  opened.push(async () => {
+    stopNeedListener();
+    stopProviderKeyNeedListener();
+    loop.stop();
+    await running;
+  });
 
   const timers = [
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),
@@ -441,6 +472,7 @@ async function startOwnedDaemon(
     setInterval(() => { void rotateLog(); }, tuning.runnerLogCheckMs),
   ];
   for (const timer of timers) timer.unref();
+  opened.push(() => { for (const timer of timers) clearInterval(timer); });
 
   let stopping: Promise<void> | null = null;
   let crashed = false;
