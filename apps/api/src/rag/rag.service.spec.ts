@@ -184,6 +184,26 @@ describe('RagService.importGraphify (US-002)', () => {
     return new RagService(vectorStore);
   }
 
+  it('records one refresh after the shared import succeeds, including an empty import', async () => {
+    const vectorStore = { validateProjectId: vi.fn() };
+    const repository = { updateGraphifyLastImportedAt: vi.fn() };
+    const diff = { diffAndApply: vi.fn().mockResolvedValue({ removed: 3 }) };
+    const outbox = { record: vi.fn() };
+    const service = new RagService(vectorStore as never, repository as never, undefined, undefined, diff as never, outbox as never);
+
+    await expect(service.importGraphify('proj-1', [], [])).resolves.toEqual({ imported: 0, cleared: 3 });
+    expect(outbox.record).toHaveBeenCalledExactlyOnceWith({
+      type: 'graphify_import',
+      payload: { projectId: 'proj-1', nodeCount: 0, linkCount: 0 },
+      metadata: { projectId: 'proj-1' },
+    });
+    expect(outbox.record).toHaveBeenCalledAfter(diff.diffAndApply);
+
+    diff.diffAndApply.mockRejectedValueOnce(new Error('import failed'));
+    await expect(service.importGraphify('proj-1', [], [])).rejects.toThrow('import failed');
+    expect(outbox.record).toHaveBeenCalledTimes(1);
+  });
+
   it('AC3: calls deleteAllBySourceType before indexing any nodes', async () => {
     const ragService = makeRagService();
     const callOrder: string[] = [];

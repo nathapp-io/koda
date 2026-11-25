@@ -3,6 +3,9 @@ import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { RagService } from '../../../src/rag/rag.service';
+import { EntityStore } from '../../../src/rag/entity-store';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { outboxRecord } from '../../helpers/outbox-record';
 import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -17,7 +20,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
   let nodeId: string;
   let serial = 0;
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
-  const graph = () => ({ nodes: [{ id: nodeId, label: `Node ${nodeId}` }], links: [] });
+  const graph = () => ({ nodes: [{ id: nodeId, label: `Node ${nodeId}`, type: 'code_module' }], links: [] });
   const post = (route: string, token = agent.apiKey) => request(app.getHttpServer()).post(`/api/projects/web/kb/${route}`).set(auth(token)).send(route === 'import/graphify' ? graph() : {});
   const open = async (route = 'import/graphify') => {
     const res = await post(route);
@@ -43,6 +46,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await db.approvalDecision.deleteMany(); await db.approvalRequest.deleteMany(); await db.approvalPolicy.deleteMany();
     await db.project.update({ where: { id: world.projectId }, data: { graphifyEnabled: true } });
     await db.auditEntry.deleteMany({ where: { projectId: world.projectId, key: { in: ['kb.graphify.import', 'kb.optimize'] } } });
+    await db.outboxEvent.deleteMany({ where: { projectId: world.projectId, type: 'graphify_import' } });
     await seedWaitPolicy(db, 'kb.graphify.import', world.projectId);
     await seedWaitPolicy(db, 'kb.optimize', world.projectId);
   });
@@ -55,6 +59,12 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect(await approve(id)).toMatchObject({ status: 'executed', result: { imported: 1 } });
     expect(await db.approvalRequest.findUnique({ where: { id } })).toMatchObject({ status: 'executed', result: { imported: 1 } });
     expect(await app.get(RagService).listDocuments(world.projectId)).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: nodeId, source: 'code' })]));
+    const events = await db.outboxEvent.findMany({ where: { type: 'graphify_import', projectId: world.projectId } });
+    expect(events).toHaveLength(1);
+    await app.get(FanOutPublisher).publish(outboxRecord('graphify_import', JSON.parse(events[0].payload)));
+    expect(app.get(EntityStore).getAllEntities(world.projectId)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: nodeId, source: 'code_module' })]),
+    );
   });
   it('AC-3: approval records exactly one graphify audit', async () => {
     const id = await open(); expect(await approve(id)).toMatchObject({ status: 'executed' });

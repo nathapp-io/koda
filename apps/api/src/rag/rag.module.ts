@@ -60,14 +60,18 @@ class EntityStoreWarmup implements OnModuleInit {
 
     if (this.ragRepository) {
       try {
-        const projects = await this.ragRepository.findAllActiveProjectIds();
-        const projectIds = projects.map(p => p.id);
-        if (projectIds.length > 0) {
-          for (const projectId of projectIds) {
-            await this.entityStore.indexGraphifyEntitiesForProject(projectId);
+        let after: string | undefined;
+        let count = 0;
+        for (;;) {
+          const projects = await this.ragRepository.findActiveProjectIdsPage(after);
+          if (projects.length === 0) break;
+          for (const project of projects) {
+            await this.entityStore.indexGraphifyEntitiesForProject(project.id);
+            count++;
           }
-          this.logger.log(`EntityStore warmup completed for ${projectIds.length} projects`);
+          after = projects[projects.length - 1].id;
         }
+        if (count > 0) this.logger.log(`EntityStore warmup completed for ${count} projects`);
       } catch (err) {
         this.logger.warn(`EntityStore warmup skipped: ${(err as Error).message}`);
       }

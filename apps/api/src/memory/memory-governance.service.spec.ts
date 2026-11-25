@@ -5,6 +5,7 @@ import { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
 
 const createMockRepository = () => ({
   findByProject: vi.fn(),
+  downrankStaleLowConfidence: vi.fn(),
   findByProjectMemory: vi.fn(),
   findById: vi.fn(),
   findActiveAfterId: vi.fn(),
@@ -242,69 +243,23 @@ describe('MemoryGovernanceService', () => {
     });
   });
 
-  describe('AC-4: downrankStaleLowConfidence() sets confidence=0.1', () => {
-    it('should set confidence=0.1 for memories older than 90 days with confidence < 0.3', async () => {
-      const projectId = 'project-123';
-      const now = new Date();
-      const oldDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
+  it('downranks stale low-confidence items in one operation and returns the changed count', async () => {
+    const projectId = 'project-123';
+    const now = new Date('2026-11-25T00:00:00Z');
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      mockRepository.downrankStaleLowConfidence.mockResolvedValue({ count: 2 });
 
-      const staleItems: MemoryItem[] = [
-        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.2, createdAt: oldDate, updatedAt: oldDate },
-        { id: 'mem-2', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:2', predicate: 'status', status: 'active', confidence: 0.15, createdAt: oldDate, updatedAt: oldDate },
-      ];
+      await expect(service.downrankStaleLowConfidence(projectId)).resolves.toEqual({ count: 2 });
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: staleItems, total: 2, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 2, current: 2, size: 100, hasNext: false, hasPrev: false });
-      mockRepository.updateDirect.mockResolvedValue(undefined);
-
-      const result = await service.downrankStaleLowConfidence(projectId);
-
-      expect(result.count).toBe(2);
-      expect(mockRepository.updateDirect).toHaveBeenCalledTimes(2);
-      expect(mockRepository.updateDirect).toHaveBeenCalledWith('mem-1', expect.objectContaining({ confidence: 0.1 }));
-      expect(mockRepository.updateDirect).toHaveBeenCalledWith('mem-2', expect.objectContaining({ confidence: 0.1 }));
-    });
-
-    it('should not modify memories younger than 90 days', async () => {
-      const projectId = 'project-123';
-      const now = new Date();
-      const recentDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-      mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.2, createdAt: recentDate, updatedAt: recentDate }],
-        total: 1,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
-
-      const result = await service.downrankStaleLowConfidence(projectId);
-
-      expect(result.count).toBe(0);
+      const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      expect(mockRepository.downrankStaleLowConfidence).toHaveBeenCalledExactlyOnceWith(projectId, cutoff);
+      expect(mockRepository.findByProject).not.toHaveBeenCalled();
       expect(mockRepository.updateDirect).not.toHaveBeenCalled();
-    });
-
-    it('should not modify memories with confidence >= 0.3', async () => {
-      const projectId = 'project-123';
-      const now = new Date();
-      const oldDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
-
-      mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.5, createdAt: oldDate, updatedAt: oldDate }],
-        total: 1,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
-
-      const result = await service.downrankStaleLowConfidence(projectId);
-
-      expect(result.count).toBe(0);
-      expect(mockRepository.updateDirect).not.toHaveBeenCalled();
-    });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   describe('AC-5: deduplicate() keeps highest confidence, marks others as superseded', () => {

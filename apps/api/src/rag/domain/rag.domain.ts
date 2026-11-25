@@ -11,7 +11,6 @@ export interface RagProjectRecord {
 export interface IRagRepository {
   findProjectGraphifyEnabled(projectId: string): Promise<{ graphifyEnabled: boolean } | null>;
   findProjectById(projectId: string): Promise<{ id: string; deletedAt: Date | null } | null>;
-  findAllActiveProjectIds(): Promise<{ id: string }[]>;
   getStoredGraphNodes(projectId: string): Promise<
     { nodeId: string; label: string; type: string | null; sourceFile: string | null; community: number | null }[]
   >;

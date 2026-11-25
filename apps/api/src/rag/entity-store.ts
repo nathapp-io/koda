@@ -6,6 +6,7 @@
  */
 import { Injectable, Optional } from '@nestjs/common';
 import { PrismaRagRepository } from './prisma-rag.repository';
+import { KeyedMutex } from '../common/utils/keyed-mutex';
 
 export interface Entity {
   id: string;
@@ -21,32 +22,37 @@ export interface ScoredEntity extends Entity {
 
 @Injectable()
 export class EntityStore {
-  private entities = new Map<string, Map<string, Entity>>();
+  private readonly entities = new Map<string, Map<string, Entity>>();
+  private readonly moduleEntities = new Map<string, Map<string, Entity>>();
+  private readonly refreshLock = new KeyedMutex();
+  private readonly pendingRefreshes = new Map<string, symbol>();
 
   constructor(
     @Optional() private readonly ragRepository?: PrismaRagRepository,
-    @Optional() private readonly getProjectCodeDocuments?: (projectId: string) => Promise<Array<{ id: string; label: string; type: string; source_file?: string }>>,
   ) {}
 
   indexEntity(projectId: string, entity: Entity): void {
-    let projectEntities = this.entities.get(projectId);
+    const index = entity.source === 'code_module' ? this.moduleEntities : this.entities;
+    let projectEntities = index.get(projectId);
     if (!projectEntities) {
       projectEntities = new Map();
-      this.entities.set(projectId, projectEntities);
+      index.set(projectId, projectEntities);
     }
     projectEntities.set(entity.id, { ...entity });
   }
 
-  searchEntities(projectId: string, query: string): ScoredEntity[] {
-    const projectEntities = this.entities.get(projectId);
-    if (!projectEntities) return [];
+  private *projectEntities(projectId: string): IterableIterator<Entity> {
+    yield* this.entities.get(projectId)?.values() ?? [];
+    yield* this.moduleEntities.get(projectId)?.values() ?? [];
+  }
 
+  searchEntities(projectId: string, query: string): ScoredEntity[] {
     const queryLower = query.toLowerCase();
     const queryTerms = queryLower.split(/\s+/).filter(Boolean);
 
     const results: ScoredEntity[] = [];
 
-    for (const entity of projectEntities.values()) {
+    for (const entity of this.projectEntities(projectId)) {
       const labelLower = entity.label.toLowerCase();
       const labelMatch = labelLower.includes(queryLower);
       const tagMatch = queryTerms.length > 0 && entity.tags.some(t =>
@@ -63,12 +69,9 @@ export class EntityStore {
   }
 
   getByTag(projectId: string, tag: string): ScoredEntity[] {
-    const projectEntities = this.entities.get(projectId);
-    if (!projectEntities) return [];
-
     const normalizedTag = tag.toLowerCase();
 
-    return Array.from(projectEntities.values())
+    return Array.from(this.projectEntities(projectId))
       .filter((entity) =>
         entity.tags.some((t) => t.toLowerCase() === normalizedTag),
       )
@@ -76,9 +79,7 @@ export class EntityStore {
   }
 
   getAllEntities(projectId: string): ScoredEntity[] {
-    const projectEntities = this.entities.get(projectId);
-    if (!projectEntities) return [];
-    return Array.from(projectEntities.values()).map((e) => ({ ...e, score: 0 }));
+    return Array.from(this.projectEntities(projectId)).map((e) => ({ ...e, score: 0 }));
   }
 
   computeEntityScore(query: string, entityTags: string[]): number {
@@ -96,7 +97,9 @@ export class EntityStore {
   }
 
   clear(projectId: string): void {
+    this.pendingRefreshes.delete(projectId);
     this.entities.delete(projectId);
+    this.moduleEntities.delete(projectId);
   }
 
   async handleOutboxEvent(event: {
@@ -104,21 +107,20 @@ export class EntityStore {
     payload: unknown;
   }): Promise<void> {
     if (event.eventType === 'graphify_import') {
-      const payload = event.payload as { projectId: string; nodeCount?: number; linkCount?: number; nodes?: Array<{ id: string; label: string; type: string; source_file?: string }> };
-      if (payload.nodes && payload.nodes.length > 0) {
-        for (const node of payload.nodes) {
-          if (node.type === 'code_module') {
-            this.indexEntity(payload.projectId, {
-              id: node.id,
-              label: node.label,
-              tags: this.extractTagsFromLabel(node.label),
-              source: 'code_module',
-              sourceId: node.id,
-            });
-          }
-        }
-      } else {
+      const payload = event.payload as {
+        projectId: string;
+        nodes?: Array<{ id: string; label: string; type: string }>;
+      };
+      if (this.ragRepository) {
         await this.indexGraphifyEntitiesForProject(payload.projectId);
+      } else {
+        // Standalone stores may be hydrated from a complete payload.
+        if (!payload.nodes) return;
+        const modules = new Map<string, Entity>();
+        for (const node of payload.nodes) {
+          if (node.type === 'code_module') modules.set(node.id, this.codeModule(node.id, node.label));
+        }
+        this.replaceCodeModules(payload.projectId, modules);
       }
     } else if (event.eventType === 'ticket_event') {
       const payload = event.payload as {
@@ -143,27 +145,35 @@ export class EntityStore {
   }
 
   async indexGraphifyEntitiesForProject(projectId: string): Promise<void> {
-    if (!this.ragRepository) return;
+    const repository = this.ragRepository;
+    if (!repository) return;
 
-    let nodes: Array<{ id: string; label: string; type: string; source_file?: string }> = [];
-
-    if (this.getProjectCodeDocuments) {
-      nodes = await this.getProjectCodeDocuments(projectId);
-    } else {
-      nodes = await this.ragRepository.getProjectCodeDocuments(projectId);
-    }
-
-    for (const node of nodes) {
-      if (node.type === 'code_module') {
-        this.indexEntity(projectId, {
-          id: node.id,
-          label: node.label,
-          tags: this.extractTagsFromLabel(node.label),
-          source: 'code_module',
-          sourceId: node.id,
+    const refresh = Symbol();
+    this.pendingRefreshes.set(projectId, refresh);
+    // A clear or a newer refresh invalidates any pending snapshot for this project.
+    await this.refreshLock.run(projectId, async () => {
+      if (this.pendingRefreshes.get(projectId) !== refresh) return;
+      try {
+        const modules = new Map<string, Entity>();
+        await repository.scanCodeModules(projectId, (page) => {
+          for (const node of page) {
+            modules.set(node.nodeId, this.codeModule(node.nodeId, node.label));
+          }
         });
+        if (this.pendingRefreshes.get(projectId) === refresh) this.replaceCodeModules(projectId, modules);
+      } finally {
+        if (this.pendingRefreshes.get(projectId) === refresh) this.pendingRefreshes.delete(projectId);
       }
-    }
+    });
+  }
+
+  private codeModule(id: string, label: string): Entity {
+    return { id, label, tags: this.extractTagsFromLabel(label), source: 'code_module', sourceId: id };
+  }
+
+  private replaceCodeModules(projectId: string, modules: Map<string, Entity>): void {
+    if (modules.size === 0) this.moduleEntities.delete(projectId);
+    else this.moduleEntities.set(projectId, modules);
   }
 
   private async indexTicketEntity(ticketId: string, projectId: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PageOption, ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
@@ -153,39 +153,8 @@ export class MemoryGovernanceService {
   }
 
   async downrankStaleLowConfidence(projectId: string): Promise<{ count: number }> {
-    const now = new Date();
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-    let page = 1;
-    let downrankedCount = 0;
-    let hasMore = true;
-
-    do {
-      if (page > MAX_PAGES) {
-        this.logger.warn(`downrankStaleLowConfidence: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
-        break;
-      }
-      const result = await this.repository.findByProject(
-        { projectId, status: 'active' },
-        PageOption.from(page, PAGE_SIZE),
-      );
-
-      hasMore = result.records.length >= PAGE_SIZE;
-
-      const staleItems = result.records.filter(
-        (item) =>
-          item.createdAt < ninetyDaysAgo &&
-          item.confidence < 0.3,
-      );
-
-      for (const item of staleItems) {
-        await this.repository.updateDirect(item.id, { confidence: 0.1 });
-        downrankedCount++;
-      }
-
-      page++;
-    } while (hasMore);
-
-    return { count: downrankedCount };
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    return this.repository.downrankStaleLowConfidence(projectId, ninetyDaysAgo);
   }
 
   async deduplicate(projectId: string): Promise<{ count: number }> {

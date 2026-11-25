@@ -217,14 +217,6 @@ export class KodaDomainWriter {
 
     const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links);
 
-    // The import spans the vector store and Prisma, which cannot share one Prisma
-    // transaction; the event is recorded once the import has succeeded.
-    await this.outbox.record({
-      type: 'graphify_import',
-      payload: { projectId: data.projectId, nodeCount: data.nodes.length, linkCount: data.links.length },
-      metadata: { projectId: data.projectId, eventId: `${data.projectId}:${Date.now()}` },
-    });
-
     return {
       metadata: { imported: result.imported, cleared: result.cleared },
       provenance: this.buildProvenance(data.actorId, data.projectId, 'IMPORT_GRAPHIFY', 'api'),

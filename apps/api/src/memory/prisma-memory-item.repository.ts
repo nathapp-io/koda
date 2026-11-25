@@ -353,6 +353,20 @@ export class PrismaMemoryItemRepository
     return models.map((m) => this.toDomain(m));
   }
 
+  async downrankStaleLowConfidence(projectId: string, createdBefore: Date): Promise<{ count: number }> {
+    const confidence = 0.1;
+    return this.prisma.client.memoryItem.updateMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        status: 'active',
+        createdAt: { lt: createdBefore },
+        confidence: { lt: 0.3, not: confidence },
+      },
+      data: { confidence },
+    });
+  }
+
   /** M21: dedup keys with more than one active row, found in SQL instead of per page. */
   async findDuplicateActiveKeys(projectId: string, kind?: string): Promise<MemoryDedupKey[]> {
     const groups = await this.prisma.client.memoryItem.groupBy({

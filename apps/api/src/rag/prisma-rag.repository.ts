@@ -9,12 +9,12 @@ export interface RagProjectSlugRecord {
   deletedAt: Date | null;
 }
 
-export interface RagCodeDocumentRow {
-  id: string;
+interface CodeModuleRow {
+  nodeId: string;
   label: string;
-  type: string;
-  source_file?: string;
 }
+
+const ENTITY_PAGE_SIZE = 500;
 
 export interface RagTicketRecord {
   id: string;
@@ -27,8 +27,8 @@ export interface GraphDiffWrite {
   links: Array<{ sourceId: string; targetId: string; relation?: string }>;
 }
 
-/** Large graphify imports run hundreds of statements in one interactive transaction. */
-const GRAPH_DIFF_TX_TIMEOUT_MS = 120_000;
+/** Large Graphify writes and snapshot scans may outlast Prisma’s default transaction timeout. */
+const GRAPH_TX_TIMEOUT_MS = 120_000;
 
 /**
  * In-memory dedup before createMany: Postgres treats NULLs as distinct in the
@@ -81,10 +81,12 @@ export class PrismaRagRepository implements IRagRepository {
     });
   }
 
-  async findAllActiveProjectIds(): Promise<{ id: string }[]> {
+  async findActiveProjectIdsPage(after?: string): Promise<{ id: string }[]> {
     return this.prisma.client.project.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, id: after === undefined ? undefined : { gt: after } },
       select: { id: true },
+      orderBy: { id: 'asc' },
+      take: ENTITY_PAGE_SIZE,
     });
   }
 
@@ -120,7 +122,7 @@ export class PrismaRagRepository implements IRagRepository {
           await db.graphNode.deleteMany({ where: { projectId, nodeId: { in: diff.removedNodeIds } } });
         }
         for (const node of diff.nodes) {
-          const fields = { label: node.label, type: node.type, sourceFile: node.sourceFile, community: node.community, vectorStale: true };
+          const fields = { label: node.label, type: node.type ?? null, sourceFile: node.sourceFile, community: node.community, vectorStale: true };
           await db.graphNode.upsert({
             where: { projectId_nodeId: { projectId, nodeId: node.nodeId } },
             create: { projectId, nodeId: node.nodeId, ...fields },
@@ -138,7 +140,7 @@ export class PrismaRagRepository implements IRagRepository {
           }
         }
       },
-      { timeout: GRAPH_DIFF_TX_TIMEOUT_MS },
+      { timeout: GRAPH_TX_TIMEOUT_MS },
     );
   }
 
@@ -180,19 +182,22 @@ export class PrismaRagRepository implements IRagRepository {
     });
   }
 
-  async getProjectCodeDocuments(projectId: string): Promise<RagCodeDocumentRow[]> {
-    // M14: graphify nodes live in GraphNode; the code_document table never existed.
-    const nodes = await this.prisma.client.graphNode.findMany({
-      where: { projectId },
-      select: { nodeId: true, label: true, type: true, sourceFile: true },
-      orderBy: { nodeId: 'asc' },
-    });
-    return nodes.map((node) => ({
-      id: node.nodeId,
-      label: node.label,
-      type: node.type ?? '',
-      source_file: node.sourceFile ?? undefined,
-    }));
+  async scanCodeModules(projectId: string, consume: (page: CodeModuleRow[]) => void): Promise<void> {
+    // Keep all pages on the same committed graph even if an import commits during the scan.
+    await this.prisma.client.$transaction(async (db) => {
+      let after: string | undefined;
+      for (;;) {
+        const page: CodeModuleRow[] = await db.graphNode.findMany({
+          where: { projectId, project: { deletedAt: null }, type: 'code_module', nodeId: after === undefined ? undefined : { gt: after } },
+          select: { nodeId: true, label: true },
+          orderBy: { nodeId: 'asc' },
+          take: ENTITY_PAGE_SIZE,
+        });
+        consume(page);
+        if (page.length < ENTITY_PAGE_SIZE) break;
+        after = page[page.length - 1].nodeId;
+      }
+    }, { isolationLevel: 'RepeatableRead', timeout: GRAPH_TX_TIMEOUT_MS });
   }
 
   async findTicketById(ticketId: string): Promise<RagTicketRecord | null> {

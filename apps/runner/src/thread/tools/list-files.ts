@@ -1,7 +1,8 @@
+import { runGitRecords } from '../../executor/git-records';
 import { firstLine } from '../../errors';
 import { assertRelativePath } from '../../paths/safe-segment';
-import { allowedUntrackedPaths, pathspecFor } from './untracked-docs';
-import { checkGlob, fieldOf, joinCapped, refused, refuseInvalidInput } from './shared';
+import { pathspecFor, visitAllowedUntrackedPaths } from './untracked-docs';
+import { checkGlob, fieldOf, FileListing, refused, refuseInvalidInput } from './shared';
 import type { ThreadTool, ThreadToolContext, ThreadToolResult } from './types';
 
 const MAX_ENTRIES = 2_000;
@@ -14,16 +15,26 @@ async function list(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolR
   const glob = rawGlob === undefined ? undefined : checkGlob(rawGlob);
   const pathspec = pathspecFor(dir, glob);
   const args = pathspec === undefined ? ['ls-files', '-z'] : ['ls-files', '-z', '--', pathspec];
-  const result = await ctx.git.run(args, { cwd: ctx.worktree, timeoutMs: ctx.searchTimeoutMs });
+  const listing = new FileListing(MAX_ENTRIES, MAX_BYTES);
+  let previous: string | null = null;
+  const result = await runGitRecords(ctx.git, args, { cwd: ctx.worktree, timeoutMs: ctx.searchTimeoutMs }, {
+    delimiter: '\0',
+    maxRecordBytes: MAX_BYTES,
+    onRecord(path) {
+      // Git lists index stages for the same path consecutively.
+      if (path === null || (path.length > 0 && path !== previous)) listing.add(path);
+      previous = path;
+      return true;
+    },
+  });
   if (result.code !== 0) return refused(firstLine(result.stderr) || `git ls-files exited ${result.code}`);
 
-  const tracked = result.stdout.split('\0').filter((entry) => entry.length > 0);
-  const untracked = await allowedUntrackedPaths(ctx, pathspec);
-  if (!Array.isArray(untracked)) return untracked;
-  const entries = [...new Set([...tracked, ...untracked])];
-  const lines = entries.slice(0, MAX_ENTRIES);
-  if (entries.length > MAX_ENTRIES) lines.push(`[truncated: ${entries.length - MAX_ENTRIES} more]`);
-  return { content: joinCapped(lines, MAX_BYTES, false) };
+  // ls-files --others excludes all tracked entries, so it cannot repeat a path from the index.
+  const failure = await visitAllowedUntrackedPaths(ctx, pathspec, (path) => {
+    listing.add(path);
+    return true;
+  });
+  return failure ?? { content: listing.content() };
 }
 
 /**

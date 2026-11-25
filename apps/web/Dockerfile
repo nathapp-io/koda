@@ -85,13 +85,14 @@ RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
 COPY --from=builder --chown=nuxt:nodejs /app/packages ./packages
 COPY --from=builder --chown=nuxt:nodejs /app/apps/${BUILD_APP}/.output ./apps/runtime/.output
 
+ENV NODE_ENV=production
 ENV PORT=3101
 
 # Replace root package.json with runtime one for version metadata
 COPY --chown=nuxt:nodejs ./apps/${BUILD_APP}/package.json ./package.json
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
-  CMD wget -qO- http://127.0.0.1:3101/ || exit 1
+  CMD wget -qO- http://127.0.0.1:3101/healthz || exit 1
 
 USER nuxt
 

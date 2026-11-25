@@ -1,7 +1,6 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
- * M14 — getProjectCodeDocuments must read GraphNode rows (the code_document
- * table never existed).
+ * The entity warmup must page through only the project’s GraphNode modules.
  *
  * Run: cd apps/api && bun run test:integration -- test/integration/rag/project-code-documents.integration.spec.ts
  */
@@ -16,7 +15,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
-describeIntegration('PrismaRagRepository.getProjectCodeDocuments (M14)', () => {
+describeIntegration('PrismaRagRepository.scanCodeModules', () => {
   let module: TestingModule;
   let prisma: PrismaService<PrismaClient>;
   let repo: PrismaRagRepository;
@@ -42,22 +41,26 @@ describeIntegration('PrismaRagRepository.getProjectCodeDocuments (M14)', () => {
     await module?.close();
   });
 
-  it('maps GraphNode rows of the project, including null type/sourceFile', async () => {
+  it('reads ordered, bounded pages of projected code modules for one project', async () => {
     const a = await prisma.client.project.create({ data: { name: 'A', slug: 'gn-a', key: 'GNA' } });
     const b = await prisma.client.project.create({ data: { name: 'B', slug: 'gn-b', key: 'GNB' } });
     await prisma.client.graphNode.createMany({
       data: [
-        { projectId: a.id, nodeId: 'mod:auth', label: 'auth module', type: 'code_module', sourceFile: 'src/auth.ts' },
+        ...Array.from({ length: 501 }, (_, index) => {
+          const nodeId = `mod:${String(index).padStart(3, '0')}`;
+          return { projectId: a.id, nodeId, label: nodeId, type: 'code_module', sourceFile: 'src/auth.ts' };
+        }),
         { projectId: a.id, nodeId: 'note:1', label: 'loose node', type: null, sourceFile: null },
         { projectId: b.id, nodeId: 'mod:other', label: 'other', type: 'code_module', sourceFile: 'x.ts' },
       ],
     });
 
-    const rows = await repo.getProjectCodeDocuments(a.id);
-    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    const pages: Array<Array<{ nodeId: string; label: string }>> = [];
+    await repo.scanCodeModules(a.id, page => { pages.push(page); });
 
-    expect(rows).toHaveLength(2);
-    expect(byId['mod:auth']).toEqual({ id: 'mod:auth', label: 'auth module', type: 'code_module', source_file: 'src/auth.ts' });
-    expect(byId['note:1']).toEqual({ id: 'note:1', label: 'loose node', type: '', source_file: undefined });
+    expect(pages.map(page => page.length)).toEqual([500, 1]);
+    expect(pages[0][0]).toEqual({ nodeId: 'mod:000', label: 'mod:000' });
+    expect(pages[0][499]).toEqual({ nodeId: 'mod:499', label: 'mod:499' });
+    expect(pages[1][0]).toEqual({ nodeId: 'mod:500', label: 'mod:500' });
   });
 });

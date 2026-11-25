@@ -275,7 +275,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       const hasLexical = ftsScoreMap.has(id);
       const lexicalScore = hasLexical ? ftsScoreMap.get(id) ?? 0 : 0;
 
-      const docEntity = matchedEntities.find((e) => e.sourceId === (record.source_id as string));
+      const entitySource = record.source === 'code' ? 'code_module' : record.source;
+      const docEntity = matchedEntities.find((e) => e.source === entitySource && e.sourceId === record.source_id);
       const entityScore = docEntity ? this.entityStore.computeEntityScore(query.query, docEntity.tags) : 0;
 
       const rawRecencyScore = this.calcRawRecencyScore(record.created_at);

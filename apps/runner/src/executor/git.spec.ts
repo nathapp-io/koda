@@ -64,6 +64,33 @@ describe('createGit', () => {
     const bad = await git.run(['rev-parse', '--verify', 'nope^{commit}'], { cwd: process.cwd() });
     expect(bad.code).not.toBe(0);
   });
+  test('bounds stderr while draining it and preserves the actual exit code', async () => {
+    const cwd = await initRepo();
+    const result = await git.run(['-c', 'alias.noisy=!{ printf "diagnostic "; yes x | head -c 300000; } >&2; exit 23', 'noisy'], { cwd, onStdout: () => true });
+    expect(result.code).toBe(23);
+    expect(result.stderr).toStartWith('diagnostic ');
+    expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(65_536);
+  });
+
+  test('stops a streaming child before it waits on stdout or stderr held by a descendant', async () => {
+    const cwd = await initRepo();
+    const result = await git.run(['-c', 'alias.waiter=!printf ready; sleep 30 & wait', 'waiter'], {
+      cwd, onStdout: () => false, timeoutMs: 2_000,
+    });
+    expect(result.stdoutStopped).toBe(true);
+    expect(result.timedOut).toBeUndefined();
+    expect(result.code).toBe(0);
+  });
+
+  test('reports a streaming subprocess timeout even if a descendant holds its pipes open', async () => {
+    const cwd = await initRepo();
+    const result = await git.run(['-c', 'alias.waiter=!sleep 30 & wait', 'waiter'], {
+      cwd, onStdout: () => true, timeoutMs: 100,
+    });
+    expect(result.timedOut).toBe(true);
+    expect(result.code).not.toBe(0);
+  });
+
   test('ok throws a GitError naming the command and the first stderr line', async () => {
     const error = await git.ok(['rev-parse', '--verify', 'definitely-not-a-ref'], { cwd: process.cwd() }).catch((e) => e);
     expect(error).toBeInstanceOf(GitError);
