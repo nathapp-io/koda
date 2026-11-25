@@ -3,7 +3,7 @@
   "feature": "review-1125-remediation",
   "branchName": "feat/review-1125-remediation",
   "createdAt": "2026-11-25T15:05:00.807Z",
-  "updatedAt": "2026-11-25T16:38:30.429Z",
+  "updatedAt": "2026-11-25T17:07:43.824Z",
   "userStories": [
     {
       "id": "US-001",
@@ -457,14 +457,17 @@
         "finding-8"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module command replay, durable state and asynchronous drain require concurrency regressions; no authentication or credential behavior is changed."
+        "reasoning": "Cross-module command replay, durable state and asynchronous drain require concurrency regressions; no authentication or credential behavior is changed.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "docs/review-evidence/20261125/runner-lifecycle.ts",
@@ -503,7 +506,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "44e4461cfa431967f023f974d2304728cc3a979f"
     },
     {
       "id": "US-007",
