@@ -518,6 +518,7 @@
     },
     "toast": {
       "created": "Ticket created successfully",
+      "createPendingApproval": "Ticket pending approval: {id}",
       "createFailed": "Failed to create ticket",
       "updated": "Ticket updated successfully",
       "updateFailed": "Failed to update ticket",
@@ -1260,7 +1261,8 @@
         "placeholder": "Message the thread…",
         "send": "Send",
         "stop": "Stop",
-        "readOnly": "You can read this thread, but only the creator can send messages."
+        "readOnly": "You can read this thread, but only the creator can send messages.",
+        "pendingApproval": "Message pending approval: {id}"
       },
       "controls": {
         "endSession": "End session",
@@ -2314,6 +2316,7 @@
       },
       "toast": {
         "cancelRequested": "Cancel requested",
+        "cancelPendingApproval": "Cancel pending approval: {id}",
         "requeued": "Job requeued"
       },
       "requeuePlacement": "Requeue placement",

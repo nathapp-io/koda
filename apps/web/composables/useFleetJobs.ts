@@ -75,7 +75,8 @@ export function useFleetJobs(slug: string) {
   const dispatch = (body: DispatchBody): Promise<DispatchResponse> =>
     $api.post<DispatchResponse>(base, { ...body })
 
-  const cancel = (id: string): Promise<FleetJobDto> => $api.post<FleetJobDto>(apiPath`/projects/${slug}/fleet/jobs/${id}/cancel`)
+  const cancel = (id: string): Promise<FleetJobDto | ApprovalRequestSummary> =>
+    $api.post<FleetJobDto | ApprovalRequestSummary>(apiPath`/projects/${slug}/fleet/jobs/${id}/cancel`)
 
   const requeue = (id: string): Promise<DispatchResultDto> =>
     $api.post<DispatchResultDto>(apiPath`/projects/${slug}/fleet/jobs/${id}/requeue`)

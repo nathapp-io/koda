@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import { ApiError } from '~/composables/useApi'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 import type { ThreadEventHandlers } from '~/lib/thread-event-stream'
 import { createThreadController, type ThreadController } from '~/lib/thread-controller'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
@@ -49,6 +50,31 @@ const thread = (overrides: Record<string, unknown> = {}): ThreadDetailDto => ({
   activeJob: null,
   sendRefusal: null,
   ...overrides,
+})
+
+/**
+ * US-001: the body `ApprovalPendingFilter` answers a gated write with (HTTP 202), already unwrapped by
+ * `useApi` — the real `ApprovalRequestSummaryDto` shape, not a marker made up for the test.
+ */
+const pendingApproval = (permissionKey: string): ApprovalRequestSummary => ({
+  id: `approval-${permissionKey}`,
+  permissionKey,
+  projectId: 'p1',
+  actorType: 'USER',
+  actorId: 'u1',
+  onBehalfOfType: null,
+  onBehalfOfId: null,
+  origin: 'rest',
+  redeem: false,
+  requiredMode: 'human',
+  status: 'pending',
+  satisfiedBy: null,
+  approverType: null,
+  approverId: null,
+  expiresAt: '2026-11-25T00:10:00.000Z',
+  decidedAt: null,
+  settledAt: null,
+  createdAt: '2026-11-25T00:00:00.000Z',
 })
 
 /** A full page of messages is exactly this many items; any shorter page ends the load loop. */
@@ -451,6 +477,55 @@ describe('US-003 thread-controller', () => {
     h.advance(2000)
     await settle()
     expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  test('US-001 AC-10: a send answered with a pending approval makes exactly one post and resolves its request id', async () => {
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) return thread()
+      if (path === MESSAGES_PATH) return { items: [] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const post = jest.fn(async () => pendingApproval('thread.message.send'))
+    const h = makeHarness({ get, post })
+    await h.ctl.load()
+    h.ctl.start()
+    h.handlers.onLiveChange(true)
+
+    const out = await h.ctl.send('Wait for approval')
+
+    // The approval summary is not an executed message and not a transport failure: it is neither `ok`
+    // nor carrying an `error`, and the request it waits on is what the caller needs.
+    expect(out).toEqual({ ok: false, pendingApproval: 'approval-thread.message.send' })
+    expect('error' in out).toBe(false)
+    // Exactly one POST: a pending approval is never retried like a closing refusal.
+    expect(post).toHaveBeenCalledTimes(1)
+    h.advance(2000)
+    await settle()
+    expect(post).toHaveBeenCalledTimes(1)
+    // AC-9: the optimistic echo is the only thing to remove, so the transcript is back where it was.
+    expect(h.ctl.messages.value).toHaveLength(0)
+  })
+
+  test('US-001 AC-15: a non-409 transport error still resolves { ok: false, error } with the original error', async () => {
+    const error = new ApiError(-1, 'network down')
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) return thread()
+      if (path === MESSAGES_PATH) return { items: [] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const post = jest.fn(async () => { throw error })
+    const h = makeHarness({ get, post })
+    await h.ctl.load()
+    h.ctl.start()
+    h.handlers.onLiveChange(true)
+
+    const out = await h.ctl.send('hi')
+
+    expect(out).toEqual({ ok: false, error })
+    expect(out.error).toBe(error)
+    expect('pendingApproval' in out).toBe(false)
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(h.ctl.messages.value).toHaveLength(0)
   })
 
   test('US-003 AC13: answer posts { requestId, text } to the answer route and reloads the thread on success', async () => {

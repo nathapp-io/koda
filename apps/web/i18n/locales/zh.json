@@ -518,6 +518,7 @@
     },
     "toast": {
       "created": "工单创建成功",
+      "createPendingApproval": "工单等待审批：{id}",
       "createFailed": "创建工单失败",
       "updated": "工单已更新",
       "updateFailed": "更新工单失败",
@@ -1260,7 +1261,8 @@
         "placeholder": "给线程发消息…",
         "send": "发送",
         "stop": "停止",
-        "readOnly": "你可以阅读该线程，但只有创建者可以发送消息。"
+        "readOnly": "你可以阅读该线程，但只有创建者可以发送消息。",
+        "pendingApproval": "消息等待审批：{id}"
       },
       "controls": {
         "endSession": "结束会话",
@@ -2314,6 +2316,7 @@
       },
       "toast": {
         "cancelRequested": "已请求取消",
+        "cancelPendingApproval": "取消请求等待审批：{id}",
         "requeued": "任务已重新排队"
       },
       "requeuePlacement": "重新排队的调度结果",

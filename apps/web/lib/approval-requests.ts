@@ -200,6 +200,23 @@ export function inboxHref(slug: string | null, id?: string): string {
 }
 
 /**
+ * Is this the approval request a gated write answered with, rather than that write's result?
+ *
+ * `ApprovalPendingFilter` answers HTTP 202 with `ApprovalRequestSummaryDto`, and `useApi` unwraps it like
+ * any other envelope, so a caller holds either the result or this summary and cannot tell them apart by
+ * status: a queued reindex also answers 202 (`{ queued: true }`), and a transcript message is `pending`
+ * too. The summary is recognised by its own shape — the three fields the fleet dispatch UI reads: the
+ * operation's `permissionKey`, a `pending` status and the returned `id`.
+ */
+export function pendingApproval(result: unknown, permissionKey: string): result is ApprovalRequestSummary {
+  if (result === null || typeof result !== 'object') return false
+  const summary = result as Partial<ApprovalRequestSummary>
+  if (summary.permissionKey !== permissionKey) return false
+  if (summary.status !== 'pending') return false
+  return typeof summary.id === 'string' && summary.id.length > 0
+}
+
+/**
  * The label of a permission key: `approvals.keys.<key with '.' replaced by '_'>` when the locale
  * knows it, else a readable humanization of the raw key.
  */

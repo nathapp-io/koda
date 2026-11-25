@@ -74,9 +74,13 @@ async function runAction(action: () => Promise<ThreadActionResult>): Promise<voi
   if (!result.ok) toast.error(extractApiError(result.error))
 }
 
+/**
+ * US-001: the send route is approval-gated, so `{ ok: false, pendingApproval }` means nothing was written
+ * and nothing failed — the composer names the returned request itself, so no error is toasted here.
+ */
 const onSend = async (text: string): Promise<ThreadActionResult> => {
   const result = await controller.send(text)
-  if (!result.ok) toast.error(extractApiError(result.error))
+  if (!result.ok && result.pendingApproval === undefined) toast.error(extractApiError(result.error))
   return result
 }
 const onStop = (): Promise<void> => runAction(() => controller.stopTurn())

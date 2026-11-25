@@ -9,6 +9,8 @@
  */
 import { ref, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { pendingApproval } from '~/lib/approval-requests'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 import type { ThreadEventHandlers } from '~/lib/thread-event-stream'
 import type { ThreadHandoffBody } from '~/lib/thread-handoff-form'
 import type { ChatMessageDto, ThreadApprovalDecision, ThreadDetailDto, ThreadMode } from '~/lib/thread-types'
@@ -47,6 +49,11 @@ export interface ThreadActionResult {
   ok: boolean
   /** Present exactly when `ok` is false; the page toasts `extractApiError(error)`. */
   error?: unknown
+  /**
+   * US-001: the send waits for this approval request and wrote nothing yet. Neither an executed success
+   * nor a transport failure, so the page words it and the composer keeps its draft.
+   */
+  pendingApproval?: string
 }
 
 export interface ThreadController {
@@ -224,6 +231,10 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
    * server message on success. A 409 reloads the thread; while it answers `closing` (and under
    * `CLOSING_RETRY_WINDOW_MS` since the first attempt) the same `clientMessageId` is retried after
    * `POLL_INTERVAL_MS`, otherwise the echo is dropped and `{ ok: false, error }` resolved.
+   *
+   * US-001: the route is approval-gated, so a 202 answer carries `ApprovalRequestSummary` instead of the
+   * message. Nothing was written, so the echo goes and the send resolves `{ ok: false, pendingApproval }`
+   * — the caller shows the request id and keeps the draft.
    */
   const send = async (text: string): Promise<ThreadActionResult> => {
     const cid = newClientMessageId()
@@ -248,7 +259,13 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     const firstAttemptAt = deps.now()
     for (;;) {
       try {
-        const { message } = await deps.api.post<{ message: ChatMessageDto }>(messagesPath, { text, clientMessageId: cid })
+        const answer = await deps.api.post<{ message: ChatMessageDto } | ApprovalRequestSummary>(messagesPath, { text, clientMessageId: cid })
+        if (pendingApproval(answer, 'thread.message.send')) {
+          dropOptimistic(cid)
+          syncPolling()
+          return { ok: false, pendingApproval: answer.id }
+        }
+        const { message } = answer
         messages.value = mergeMessages(messages.value, [message])
         syncPolling()
         return { ok: true }

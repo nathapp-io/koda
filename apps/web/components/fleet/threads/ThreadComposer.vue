@@ -61,8 +61,13 @@ function handleKeydown(event: KeyboardEvent): void {
  * schema validates or while the POST is in flight must not cancel the send the user already asked
  * for. The equality check afterwards only guards the *reset*, so a success for the older text can
  * never discard a newer draft.
+ *
+ * US-001: the send route is approval-gated, so `{ ok: false, pendingApproval }` is not a failure —
+ * nothing was written. The draft stays exactly as the user left it and the returned request is
+ * named beside it.
  */
 const sending = ref(false)
+const pendingApprovalId = ref<string | null>(null)
 
 async function sendDraft(): Promise<void> {
   if (!props.composerState.canSend || sending.value) return
@@ -73,6 +78,7 @@ async function sendDraft(): Promise<void> {
     const { valid } = await validate()
     if (!valid) return
     const result = await props.send(text)
+    pendingApprovalId.value = result.pendingApproval ?? null
     if (result.ok && String(draft.value ?? '') === submittedDraft) resetField({ value: '' })
   } catch {
     // The page owns error presentation; keep the draft and release the in-flight guard.
@@ -109,6 +115,9 @@ function stop(): void {
         @keydown="handleKeydown"
       />
       <p v-if="errorMessage" class="text-xs text-status-rejected" role="alert" data-testid="thread-composer-error">{{ errorMessage }}</p>
+      <p v-if="pendingApprovalId" class="text-sm text-muted-foreground" role="status" data-testid="thread-composer-pending">
+        {{ t('fleet.threads.composer.pendingApproval', { id: pendingApprovalId }) }}
+      </p>
       <div class="flex justify-end gap-2">
         <Button
           v-if="props.turnRunning"

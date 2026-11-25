@@ -20,7 +20,7 @@ import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
 import type { JobApprovalRow } from '~/composables/useApprovalInbox'
-import { inboxHref, sortPendingRequests } from '~/lib/approval-requests'
+import { inboxHref, pendingApproval, sortPendingRequests } from '~/lib/approval-requests'
 import { bashSummary } from '~/lib/fleet-bash-mode'
 import { codeLabel } from '~/lib/fleet-i18n'
 import ConfigJobPanel from '~/components/fleet/config/ConfigJobPanel.vue'
@@ -242,8 +242,15 @@ function applyJobResponse(next: FleetJobDto): void {
 }
 
 const cancelJob = (): Promise<void> => act(async () => {
-  applyJobResponse(await jobsApi.cancel(jobId))
+  const answer = await jobsApi.cancel(jobId)
   confirmCancel.value = false
+  // US-001: the route is approval-gated, so a 202 answers the approval request instead of the job. Nothing
+  // was cancelled: name the request and keep the job on screen rather than applying the summary as one.
+  if (pendingApproval(answer, 'fleet.job.cancel')) {
+    toast.success(t('fleet.jobs.toast.cancelPendingApproval', { id: answer.id }))
+    return
+  }
+  applyJobResponse(answer)
   toast.success(t('fleet.jobs.toast.cancelRequested'))
 })
 

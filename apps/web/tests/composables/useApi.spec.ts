@@ -669,3 +669,81 @@ describe('B1: the API locale resolves with and without a component instance', ()
     expect((options?.headers ?? {}) as Record<string, string>).toEqual({})
   })
 })
+
+/**
+ * US-001 AC-14: three approval-gated writes now read the `ApprovalRequestSummary` a 202 carries, so the
+ * request/response path must stay status-agnostic — another route answers 202 with `{ queued: true }` and
+ * nothing else in the shape of an approval request. This pins the adapter's part of that contract.
+ */
+describe('US-001 AC-14: a 202 is delivered whatever its body is', () => {
+  const g = globalThis as Record<string, unknown>
+
+  /**
+   * ofetch's contract in one function: a 2xx response resolves with its parsed body, a non-2xx throws an
+   * error carrying `status` and `data`. The `Response` is real, so the status under test is the wire one.
+   */
+  function fetchAnswering(status: number, body: unknown) {
+    return jest.fn(async () => {
+      const response = new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+      if (!response.ok) {
+        throw Object.assign(new Error(response.statusText), { status: response.status, data: body })
+      }
+      return body
+    })
+  }
+
+  /** The queue acknowledgement the knowledge reindex route answers with (HTTP 202). */
+  const QUEUED = { queued: true }
+
+  /** The other 202 body: what the approval filter serializes for a gated write. */
+  const APPROVAL_SUMMARY = {
+    id: 'approval-ticket.create',
+    permissionKey: 'ticket.create',
+    projectId: 'p1',
+    actorType: 'USER',
+    actorId: 'u1',
+    onBehalfOfType: null,
+    onBehalfOfId: null,
+    origin: 'rest',
+    redeem: false,
+    requiredMode: 'human',
+    status: 'pending',
+    satisfiedBy: null,
+    approverType: null,
+    approverId: null,
+    expiresAt: '2026-11-25T00:10:00.000Z',
+    decidedAt: null,
+    settledAt: null,
+    createdAt: '2026-11-25T00:00:00.000Z',
+  }
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    delete g.$fetch
+    delete g.useNuxtApp
+    delete g.useRuntimeConfig
+  })
+
+  test('AC-14: a queued-reindex 202 still delivers { queued: true } to its caller', async () => {
+    g.$fetch = fetchAnswering(202, { ret: 0, data: QUEUED })
+    const mod = await import(`${composablePath}`)
+
+    await expect(mod.useApi().$api.post('/projects/web/knowledge/repos/r1/reindex')).resolves.toEqual({ queued: true })
+  })
+
+  test('AC-14 (control): the same 202 carrying an approval summary arrives as that summary, unwrapped', async () => {
+    g.$fetch = fetchAnswering(202, { ret: 0, data: APPROVAL_SUMMARY })
+    const mod = await import(`${composablePath}`)
+
+    await expect(mod.useApi().$api.post('/projects/web/tickets', { title: 'Proof ticket' })).resolves.toEqual(APPROVAL_SUMMARY)
+  })
+})
