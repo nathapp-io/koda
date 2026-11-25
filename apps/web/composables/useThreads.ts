@@ -15,10 +15,16 @@ import type { Ref } from 'vue'
 
 type ThreadStatus = 'ACTIVE' | 'ARCHIVED'
 
+const PAGE_SIZE = 100
+
 export interface ThreadList {
   threads: Ref<ThreadDto[]>
   threadsEnabled: Ref<boolean>
   status: Ref<ThreadStatus>
+  current: Ref<number>
+  hasNext: Ref<boolean>
+  loadingMore: Ref<boolean>
+  loadMore: () => Promise<void>
   /** Resolves `true` when this read filled the list, `false` when a newer `load()` overtook it. */
   load: (status?: ThreadStatus) => Promise<boolean>
 }
@@ -29,6 +35,9 @@ export function useThreads(slug: string): ThreadList {
   const threads = ref<ThreadDto[]>([])
   const threadsEnabled = ref(true)
   const status = ref<ThreadStatus>('ACTIVE')
+  const current = ref(1)
+  const hasNext = ref(false)
+  const loadingMore = ref(false)
 
   /** Bumped by every `load()`: the read that started last is the one whose answer counts. */
   let generation = 0
@@ -42,15 +51,37 @@ export function useThreads(slug: string): ThreadList {
     const mine = ++generation
     const response = await $api.get<{ items: ThreadDto[]; threadsEnabled: boolean }>(
       apiPath`/projects/${slug}/threads`,
-      { query: { status: next, size: '100' } },
+      { query: { status: next, size: String(PAGE_SIZE) } },
     )
     // A newer load() owns the list now: its answer is the one on screen.
     if (generation !== mine) return false
     threads.value = response.items
     threadsEnabled.value = response.threadsEnabled
     status.value = next
+    current.value = 1
+    hasNext.value = response.items.length === PAGE_SIZE
     return true
   }
 
-  return { threads, threadsEnabled, status, load }
+  const loadMore = async (): Promise<void> => {
+    if (loadingMore.value || !hasNext.value) return
+    const next = current.value + 1
+    const mine = generation
+    loadingMore.value = true
+    try {
+      const response = await $api.get<{ items: ThreadDto[]; threadsEnabled: boolean }>(
+        apiPath`/projects/${slug}/threads`,
+        { query: { status: status.value, size: String(PAGE_SIZE), page: String(next) } },
+      )
+      if (generation !== mine) return
+      threads.value = [...threads.value, ...response.items]
+      threadsEnabled.value = response.threadsEnabled
+      current.value = next
+      hasNext.value = response.items.length === PAGE_SIZE
+    } finally {
+      loadingMore.value = false
+    }
+  }
+
+  return { threads, threadsEnabled, status, current, hasNext, loadingMore, load, loadMore }
 }

@@ -149,6 +149,13 @@ export interface IFleetRepoRepository {
    */
   disableAutoReviewIf(id: string, expectedEnablerId: string): Promise<boolean>;
   delete(id: string): Promise<void>;
+  /**
+   * US-009 (finding 5): copies the stored-file targets of the repo's terminal jobs — job id, highest lease
+   * epoch, finish time and the exact bundle keys — into the independent cleanup records. Must run inside the
+   * deletion's own transaction and before the cascade, because the cascade is what erases them. Answers how
+   * many jobs were captured.
+   */
+  captureCleanupTargets(repoId: string): Promise<number>;
   /** Number of the repo's jobs in an active state (plan D15). */
   countUnfinishedJobs(repoId: string): Promise<number>;
   /** SELECT ... FOR UPDATE on the repo row, so the delete decision sees a stable row (review m6). */

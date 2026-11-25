@@ -2,11 +2,35 @@
 // US-003 AC06 fixture: mounts a component whose setup calls useThread the way the
 // thread detail page will, so the test can observe the production openStream side
 // effect (one EventSource on the thread events route) through mount-sfc.
+//
+// US-002: it also renders what the page renders from the same controller state — one node per
+// message (its status as an attribute) and the composer element the page's
+// `FleetThreadsThreadComposer` receives (`canSend` bound to `disabled`, the creator's view) — so a
+// spec can see the transcript and the composer heal without mounting the whole page.
 import { useThread } from '~/composables/useThread'
+import { composerState } from '~/lib/thread-view'
 
-useThread('web', 'th1')
+const controller = useThread('web', 'th1')
 </script>
 
 <template>
-  <div data-testid="thread-client-probe"></div>
+  <div data-testid="thread-client-probe">
+    <p v-if="controller.loadFailed.value && !controller.unavailable.value" data-testid="thread-load-failed">Failed</p>
+    <p v-if="controller.unavailable.value" data-testid="thread-unavailable">Unavailable</p>
+    <button v-if="controller.loadFailed.value && !controller.unavailable.value" data-testid="thread-retry" @click="controller.loadThread()">Retry</button>
+    <p v-if="controller.thread.value">{{ controller.thread.value.title }}</p>
+    <p
+      v-for="message in controller.messages.value"
+      :key="message.id"
+      :data-message="message.id"
+      :data-status="message.status"
+    >
+      {{ message.content }}
+    </p>
+    <input
+      v-if="controller.thread.value"
+      data-testid="composer"
+      :disabled="!composerState(controller.thread.value, controller.messages.value, { canSend: true }).canSend"
+    >
+  </div>
 </template>

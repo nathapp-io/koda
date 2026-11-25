@@ -247,6 +247,7 @@ describe('fleet jobs service dispatch audit key', () => {
   const service = (): FleetJobsService => new FleetJobsService(
     {
       findRepo: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', provider: 'github', defaultBranch: 'main' }),
+      lockLiveProject: vi.fn().mockResolvedValue(true),
       createJob: vi.fn().mockResolvedValue(queued),
       appendEvent: vi.fn(),
       findById: vi.fn().mockResolvedValue(queued),
@@ -349,6 +350,7 @@ describe('review decisions dispatch snapshot', () => {
   const setup = () => {
     const repo = {
       findRepo: vi.fn().mockResolvedValue({ id: 'r', projectId: 'p', provider: 'github', defaultBranch: 'main' }),
+      lockLiveProject: vi.fn().mockResolvedValue(true),
       createJob: vi.fn().mockImplementation(async (input: NewFleetJob) => ({ ...input, id: 'j', state: 'QUEUED', queuedAt: new Date() })),
       appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(null),
     };
@@ -423,6 +425,7 @@ describe('handoff record on a dispatched job (US-006)', () => {
   const setup = () => {
     const repo = {
       findRepo: vi.fn().mockResolvedValue({ id: 'r', projectId: 'p', provider: 'github', defaultBranch: 'main' }),
+      lockLiveProject: vi.fn().mockResolvedValue(true),
       createJob: vi.fn().mockImplementation(async (input: NewFleetJob) => ({ ...input, id: 'j', state: 'QUEUED', queuedAt: new Date() })),
       appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(null),
     };
@@ -447,5 +450,52 @@ describe('handoff record on a dispatched job (US-006)', () => {
     const { service, repo } = setup();
     await service.dispatch('u', 'p', { repoId: 'r', command: 'RUN', feature: 'f', maxCostUsd: 1 }, { handoff: record });
     expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({ handoff: record }));
+  });
+});
+
+/**
+ * US-008 (review finding 4): the insertion transaction decides the project's liveness under its row lock.
+ * A tick that was authorized before a soft delete therefore cannot insert into the deleted project.
+ */
+describe('live-project fence on the insertion transaction (US-008)', () => {
+  const dto = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
+  const queued: FleetJobRecord = {
+    id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+    maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
+    runnerId: null, runnerBootId: null, leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u1',
+    queuedAt: new Date('2026-10-01T00:00:00.000Z'), assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
+    naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
+    costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null,
+    coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null, finishResult: null, escalationReason: null,
+    exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null,
+    stories: null, storiesTruncated: false, postRun: null, configResult: null, workflow: null, eventSeq: 0,
+    ackedRunnerSeq: 0, attributedAt: null, threadId: null, updatedAt: new Date('2026-10-01T00:00:00.000Z'),
+  } as FleetJobRecord;
+
+  const setup = (liveProject: boolean) => {
+    const repo = {
+      findRepo: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', provider: 'github', defaultBranch: 'main' }),
+      lockLiveProject: vi.fn().mockResolvedValue(liveProject),
+      createJob: vi.fn().mockResolvedValue(queued), appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(queued),
+    };
+    const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
+    const service = new FleetJobsService(repo as never,
+      { placeJob: vi.fn().mockResolvedValue({ assigned: false, runnerId: null, misfits: [] }) } as never,
+      { record: vi.fn() } as never, { publish: vi.fn(), event: vi.fn() } as never,
+      {} as never, {} as never, { assertNotPaused: vi.fn() } as never, tx as never,
+      {} as never, { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn() } as never,
+      {} as never, {} as never, mockAuditRecorder,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never);
+    return { service, repo, tx };
+  };
+
+  it('AC-6: refuses the job when the locked project is missing or deleted, writing nothing', async () => {
+    const { service, repo } = setup(false);
+
+    await expect(service.dispatch('u1', 'p1', dto)).rejects.toMatchObject({ code: 404, prefix: 'projects' });
+
+    expect(repo.lockLiveProject).toHaveBeenCalledWith('p1');
+    expect(repo.createJob).not.toHaveBeenCalled();
+    expect(repo.appendEvent).not.toHaveBeenCalled();
   });
 });

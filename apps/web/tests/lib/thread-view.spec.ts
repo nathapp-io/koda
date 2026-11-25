@@ -123,14 +123,16 @@ describe('US-002 thread-view', () => {
 
   test('US-002 AC7: composerState marks a non-creator as read-only even when no turn runs', () => {
     const t = thread({ sendRefusal: null })
-    expect(composerState(t, [], { isCreator: false })).toEqual({ canSend: false, reason: 'readOnly' })
+    expect(composerState(t, [], { canSend: false })).toEqual({ canSend: false, reason: 'readOnly' })
   })
 
-  test('US-002 AC8: composerState reports a running turn while a message streams', () => {
-    const t = thread({ sendRefusal: null })
-    const messages: ChatMessageDto[] = [message({ id: 'm1', seq: 1, role: 'assistant', status: 'streaming', content: '' })]
+  test('US-005 AC-6: resolved send permission preserves the server refusal reason', () => {
+    expect(composerState(thread({ sendRefusal: 'costCap' }), [], { canSend: true })).toEqual({ canSend: false, reason: 'costCap' })
+  })
 
-    expect(composerState(t, messages, { isCreator: true })).toEqual({ canSend: false, reason: 'turnRunning' })
+  test('US-005 AC-7: resolved send permission is disabled while a turn is running', () => {
+    const messages: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming' })]
+    expect(composerState(thread({ sendRefusal: null }), messages, { canSend: true })).toEqual({ canSend: false, reason: 'turnRunning' })
   })
 
   test('US-002 AC9: toolChipState reports unfinished for a tool entry that never resolved', () => {
@@ -138,14 +140,14 @@ describe('US-002 thread-view', () => {
   })
 
   test('US-002: composerState lets the creator send when the API refusal is null and no turn runs', () => {
-    expect(composerState(thread({ sendRefusal: null }), [], { isCreator: true })).toEqual({ canSend: true, reason: null })
+    expect(composerState(thread({ sendRefusal: null }), [], { canSend: true })).toEqual({ canSend: true, reason: null })
   })
 
   test('US-002: composerState puts the API refusal ahead of a running turn', () => {
     const t = thread({ sendRefusal: 'costCap' })
     const messages: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming' })]
 
-    expect(composerState(t, messages, { isCreator: true })).toEqual({ canSend: false, reason: 'costCap' })
+    expect(composerState(t, messages, { canSend: true })).toEqual({ canSend: false, reason: 'costCap' })
   })
 
   test('US-002: sessionLabel falls through to none when there is no session and no active job', () => {
@@ -170,6 +172,32 @@ describe('US-002 thread-view', () => {
     const result = mergeMessages(current, incoming)
     expect(result).toHaveLength(1)
     expect(result[0].content).toBe('Hello world')
+  })
+
+  test('US-002: a stale page adds messages the transcript does not hold yet', () => {
+    const current: ChatMessageDto[] = [message({ id: 'm2', seq: 2, status: 'complete', content: 'Final response' })]
+    const incoming: ChatMessageDto[] = [
+      message({ id: 'm1', seq: 1, status: 'complete', content: 'Intro' }),
+      message({ id: 'm2', seq: 2, status: 'streaming', content: 'Partial response' }),
+    ]
+
+    const result = mergeMessages(current, incoming, { stale: true })
+
+    expect(result.map(item => item.id)).toEqual(['m1', 'm2'])
+    expect(result.find(item => item.id === 'm2')).toEqual(current[0])
+  })
+
+  test('US-002: a stale page keeps the text applied through deltas for a message it repeats', () => {
+    const current: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'Hello' })]
+    const incoming: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'He' })]
+
+    expect(mergeMessages(current, incoming, { stale: true })[0].content).toBe('Hello')
+  })
+
+  test('US-002: a stale page still replaces the optimistic echo the server has recorded', () => {
+    const sent = message({ id: 'm5', seq: 5, clientMessageId: 'c1', status: 'pending', role: 'user' })
+
+    expect(mergeMessages([optimistic('c1')], [sent], { stale: true })).toEqual([sent])
   })
 
   test('US-002: isTurnRunning is true while any message is pending or streaming', () => {

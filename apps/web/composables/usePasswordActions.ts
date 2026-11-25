@@ -4,8 +4,9 @@ import { extractErrorStatus } from '~/composables/useApi'
  * The API `ret` behind `auth.currentPasswordWrong`
  * (`apps/api/src/i18n/{en,zh}/auth.json`): `AuthService.changePassword` throws a
  * ForbiddenAppException, so the auth catalog renders that message under 40003.
- * `useApi` unwraps the envelope into an `ApiError` carrying only the ret, while an
- * error that never reached the envelope keeps its HTTP status — hence both checks below.
+ * `useApi` unwraps the envelope into an `ApiError` carrying that ret (and, since the
+ * US-003 fix, the HTTP status it came with), while an error that never reached the
+ * envelope keeps only its status — hence both checks below.
  */
 export const CURRENT_PASSWORD_WRONG_CODE = 40003
 

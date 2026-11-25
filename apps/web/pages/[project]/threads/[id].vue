@@ -25,6 +25,7 @@ import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
+const { t } = useI18n()
 const slug = route.params.project as string
 const threadId = route.params.id as string
 const controller = useThread(slug, threadId)
@@ -47,6 +48,8 @@ const toast = useAppToast()
 
 const isCreator = computed(() => controller.thread.value !== null && controller.thread.value.createdById === auth.user.value?.id)
 const canManage = computed(() => permissions.value.has('thread.archive'))
+const canSend = computed(() => permissions.value.has('thread.message.send')
+  || (isCreator.value && permissions.value.hasOwn('thread.message.send')))
 
 /**
  * US-012 (F1): the modes this viewer may switch to. Mirrors the API — the target key counts in its own-or-any-row form
@@ -94,9 +97,13 @@ async function runAction(action: () => Promise<ThreadActionResult>): Promise<voi
   if (!result.ok) toast.error(extractApiError(result.error))
 }
 
+/**
+ * US-001: the send route is approval-gated, so `{ ok: false, pendingApproval }` means nothing was written
+ * and nothing failed — the composer names the returned request itself, so no error is toasted here.
+ */
 const onSend = async (text: string): Promise<ThreadActionResult> => {
   const result = await controller.send(text)
-  if (!result.ok) toast.error(extractApiError(result.error))
+  if (!result.ok && result.pendingApproval === undefined) toast.error(extractApiError(result.error))
   return result
 }
 const onStop = (): Promise<void> => runAction(() => controller.stopTurn())
@@ -172,7 +179,7 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         />
       </div>
       <FleetThreadsThreadComposer
-        :composer-state="composerState(controller.thread.value, controller.messages.value, { isCreator })"
+        :composer-state="composerState(controller.thread.value, controller.messages.value, { canSend })"
         :turn-running="isTurnRunning(controller.messages.value)"
         :send="onSend"
         @stop="onStop"
@@ -181,5 +188,10 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
       <FleetThreadsThreadStartFlow :slug="slug" :thread="controller.thread.value" />
       <FleetThreadsThreadPreApprovalCard :slug="slug" :thread="controller.thread.value" @changed="controller.reloadThread()" />
     </template>
+    <p v-else-if="controller.unavailable.value" role="status" class="text-sm text-muted-foreground">
+      {{ t('fleet.threads.detail.unavailable') }}
+    </p>
+    <ErrorState v-else-if="controller.loadFailed.value" @retry="controller.loadThread()" />
+    <LoadingState v-else-if="controller.loading.value" />
   </div>
 </template>

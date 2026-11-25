@@ -311,6 +311,201 @@ describe('KnowledgeSearchService source filter on LanceDB (US-005)', () => {
 });
 
 /**
+ * review-1125-remediation US-011 (finding 7): the project registry fences both legs *before* their row cap, on a
+ * real LanceDB. A repository the project no longer owns can otherwise fill a leg's 50-row candidate pool with its
+ * own higher-ranked chunks and push the live document out of the answer entirely — the reproduction is
+ * `docs/review-evidence/20261125/search-ranking.ts`, where the live row ranks 51st in both legs and a project-wide
+ * search answered nothing. Each describe below places exactly that shape: one live chunk, 50 retired chunks above it.
+ */
+describe('KnowledgeSearchService registry fence, lexical leg on LanceDB (US-011)', () => {
+  const PROJECT = 'proj_registry_lexical';
+  const QUERY = 'orchard';
+  const LIVE_ID = 'repo:current:docs/gardening.md';
+  const RETIRED_ID = 'repo:retired:docs/gardening.md';
+  const RETIRED_CHUNKS = 50;
+
+  let root: string;
+  let manager: LanceTableManager;
+  let store: KnowledgeChunkStore;
+  let service: KnowledgeSearchService;
+
+  /** The failing-embedding provider: the search then answers from the lexical leg alone, which this case is about. */
+  const unavailableEmbedding = { embed: async (): Promise<number[]> => { throw new Error('embedding provider is down'); } };
+
+  /** A one-hot vector of the table's dimensions: `at` decides the direction, so the distance is controlled. */
+  function oneHot(dims: number, at: number): number[] {
+    return Array.from({ length: dims }, (_, index) => (index === at ? 1 : 0));
+  }
+
+  /** One `repo` chunk row whose searchable text is `content` (1c-c-D4 metadata, `provider: 'fixture'`). */
+  function record(sourceId: string, repoId: string, chunkIndex: number, chunkCount: number, content: string, vector: number[]): LanceRecord {
+    return {
+      id: `${sourceId}#${chunkIndex}`,
+      source: 'repo',
+      source_id: sourceId,
+      content,
+      vector,
+      metadata: JSON.stringify({
+        repoId, owner: 'o', name: repoId, path: 'docs/gardening.md', sha: 'sha-1', blobSha: 'blob-1',
+        title: 'Gardening', headingPath: 'Gardening', anchor: 'gardening', chunkIndex, chunkCount,
+        abstract: content, text: content,
+      }),
+      created_at: '2026-11-25T00:00:00.000Z',
+      provider: 'fixture',
+      model: 'fixture-v1',
+    };
+  }
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'koda-knowledge-registry-lexical-'));
+    const ragConfig = { lancedbPath: root, inMemoryOnly: false } as IRagConfig;
+    const embedding = new EmbeddingService({ ...ragConfig, embeddingProvider: 'fake', embeddingModel: 'fake-v1' } as IRagConfig);
+    manager = new LanceTableManager(ragConfig, embedding);
+    manager.ensureStorage();
+    store = new KnowledgeChunkStore(manager);
+    // Two registered repositories, so the fence is the multi-repository form; only `current` holds a chunk.
+    const registered = ['current', 'second'];
+    const index = {
+      listProjectRepos: async (_projectId: string) => registered.map((id) => ({
+        id, projectId: PROJECT, provider: 'github', owner: 'o', name: id, defaultBranch: 'main', githubInstallationId: null,
+      })),
+      describeJobs: async () => [],
+    };
+    service = new KnowledgeSearchService(
+      store, unavailableEmbedding as unknown as EmbeddingService, index as unknown as KnowledgeIndexService,
+    );
+
+    // 50 retired chunks repeat the query term three times; the live chunk repeats it once, so it ranks below all 50.
+    const dims = embedding.dimensions;
+    await store.replaceFile(PROJECT, RETIRED_ID, Array.from({ length: RETIRED_CHUNKS }, (_, chunkIndex) =>
+      record(RETIRED_ID, 'retired', chunkIndex, RETIRED_CHUNKS, 'orchard orchard orchard', oneHot(dims, 0))));
+    await store.replaceFile(PROJECT, LIVE_ID, [
+      record(LIVE_ID, 'current', 0, 1, `orchard ${'planting '.repeat(45)}`, oneHot(dims, 1)),
+    ]);
+    // The indexer's end state: one `optimize` after writing (1c-c-D5); the lexical leg repairs the full-text
+    // index the writes dropped, exactly as the AC-8 case above relies on.
+    const table = await manager.getOrCreateTable(`project_${PROJECT}`);
+    await manager.exclusive(`project_${PROJECT}`, () => table.optimize());
+  });
+
+  afterAll(async () => {
+    await manager.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('AC-1: the live document below 50 higher-ranked retired chunks is answered by a project-wide lexical search', async () => {
+    // The precondition the fence exists for: the live chunk is the 51st lexical row, outside the leg's 50-row cap.
+    const legRows = await store.lexical(PROJECT, QUERY, "source = 'repo'", RETIRED_CHUNKS + 1);
+    expect(legRows.findIndex((row) => row.id === `${LIVE_ID}#0`) + 1).toBe(RETIRED_CHUNKS + 1);
+    expect(legRows.slice(0, RETIRED_CHUNKS).some((row) => row.repoId === 'current')).toBe(false);
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    expect(result.lexicalOnly).toBe(true);
+    expect(result.empty).toBe(false);
+    expect(result.hits.map((hit) => `${hit.repoId}:${hit.path}`)).toEqual(['current:docs/gardening.md']);
+  });
+
+  it('AC-2: the same project-wide lexical search answers no retired hit', async () => {
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    // Not vacuous: the retired chunks do match the query, so an empty answer is the bug this case names.
+    expect(result.hits).not.toEqual([]);
+    expect(result.hits.filter((hit) => hit.repoId === 'retired')).toEqual([]);
+    expect(result.hits.every((hit) => hit.repoId === 'current')).toBe(true);
+  });
+});
+
+/**
+ * US-011 AC-3: the same shape on the vector leg — the query text matches no stored content at all, so only the
+ * vector leg can answer, and 50 retired chunks sit closer to the controlled query embedding than the live one.
+ */
+describe('KnowledgeSearchService registry fence, vector leg on LanceDB (US-011)', () => {
+  const PROJECT = 'proj_registry_vector';
+  const QUERY = 'orchard';
+  const LIVE_ID = 'repo:current:docs/gardening.md';
+  const RETIRED_ID = 'repo:retired:docs/gardening.md';
+  const RETIRED_CHUNKS = 50;
+
+  let root: string;
+  let manager: LanceTableManager;
+  let store: KnowledgeChunkStore;
+  let service: KnowledgeSearchService;
+  /** The controlled query embedding: the retired chunks' own vector, orthogonal to the live chunk's. */
+  let queryVector: number[];
+
+  function oneHot(dims: number, at: number): number[] {
+    return Array.from({ length: dims }, (_, index) => (index === at ? 1 : 0));
+  }
+
+  /** One `repo` chunk row: `content` never carries the query term, the vector is what places it. */
+  function record(sourceId: string, repoId: string, chunkIndex: number, chunkCount: number, vector: number[]): LanceRecord {
+    const content = 'planting calendar for spring';
+    return {
+      id: `${sourceId}#${chunkIndex}`,
+      source: 'repo',
+      source_id: sourceId,
+      content,
+      vector,
+      metadata: JSON.stringify({
+        repoId, owner: 'o', name: repoId, path: 'docs/gardening.md', sha: 'sha-1', blobSha: 'blob-1',
+        title: 'Gardening', headingPath: 'Gardening', anchor: 'gardening', chunkIndex, chunkCount,
+        abstract: content, text: content,
+      }),
+      created_at: '2026-11-25T00:00:00.000Z',
+      provider: 'fixture',
+      model: 'fixture-v1',
+    };
+  }
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'koda-knowledge-registry-vector-'));
+    const ragConfig = { lancedbPath: root, inMemoryOnly: false } as IRagConfig;
+    const embedding = new EmbeddingService({ ...ragConfig, embeddingProvider: 'fake', embeddingModel: 'fake-v1' } as IRagConfig);
+    manager = new LanceTableManager(ragConfig, embedding);
+    manager.ensureStorage();
+    store = new KnowledgeChunkStore(manager);
+    // One registered repository: the single-repository form of the fence.
+    const index = {
+      listProjectRepos: async (_projectId: string) => [{
+        id: 'current', projectId: PROJECT, provider: 'github', owner: 'o', name: 'current', defaultBranch: 'main', githubInstallationId: null,
+      }],
+      describeJobs: async () => [],
+    };
+    queryVector = oneHot(embedding.dimensions, 0);
+    service = new KnowledgeSearchService(
+      store, { embed: async () => queryVector } as unknown as EmbeddingService, index as unknown as KnowledgeIndexService,
+    );
+
+    // 50 retired chunks sit at distance 0 from the query embedding; the live chunk is orthogonal, so it ranks 51st.
+    await store.replaceFile(PROJECT, RETIRED_ID, Array.from({ length: RETIRED_CHUNKS }, (_, chunkIndex) =>
+      record(RETIRED_ID, 'retired', chunkIndex, RETIRED_CHUNKS, queryVector)));
+    await store.replaceFile(PROJECT, LIVE_ID, [record(LIVE_ID, 'current', 0, 1, oneHot(embedding.dimensions, 1))]);
+    const table = await manager.getOrCreateTable(`project_${PROJECT}`);
+    await manager.exclusive(`project_${PROJECT}`, () => table.optimize());
+  });
+
+  afterAll(async () => {
+    await manager.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('AC-3: with no lexical match, the live vector candidate below the retired ones is answered', async () => {
+    // Precondition: the query text matches nothing lexically and the live chunk is the 51st vector row.
+    expect(await store.lexical(PROJECT, QUERY, "source = 'repo'", RETIRED_CHUNKS + 1)).toEqual([]);
+    const vectorRows = await store.vector(PROJECT, queryVector, "source = 'repo' AND provider != 'none'", RETIRED_CHUNKS + 1);
+    expect(vectorRows.findIndex((row) => row.id === `${LIVE_ID}#0`) + 1).toBe(RETIRED_CHUNKS + 1);
+    expect(vectorRows.slice(0, RETIRED_CHUNKS).some((row) => row.repoId === 'current')).toBe(false);
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    expect(result.lexicalOnly).toBe(false);
+    expect(result.empty).toBe(false);
+    expect(result.hits.map((hit) => `${hit.repoId}:${hit.path}`)).toEqual(['current:docs/gardening.md']);
+  });
+});
+
+/**
  * 1c-c-R6: repository chunks share the project's LanceDB table with ticket documents, and 3c-2-D6 puts run
  * outcomes in the same table, so a pass that indexes hundreds of matching chunks of either knowledge source must
  * not be able to crowd ticket search out of its bounded candidate pools. The review reproduced the opposite on a

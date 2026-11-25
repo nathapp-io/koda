@@ -1,24 +1,37 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
+import { ref } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { EventSourceLike } from '~/lib/project-event-stream'
-import type { ThreadDetailDto } from '~/lib/thread-types'
+import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 
 const THREAD_PATH = '/projects/web/threads/th1'
 const MESSAGES_PATH = '/projects/web/threads/th1/messages'
 
-/** Global EventSource stub: records every URL it was constructed with. */
+/**
+ * Global EventSource stub: records every URL it was constructed with, and every frame the test asks
+ * the stream to deliver (US-002 drives `ready` through it).
+ */
 class StubEventSource implements EventSourceLike {
   static instances: StubEventSource[] = []
   readyState = 0
   onopen: ((ev: unknown) => void) | null = null
   onerror: ((ev: unknown) => void) | null = null
+  private listeners = new Map<string, (ev: { data: string }) => void>()
 
   constructor(readonly url: string) {
     StubEventSource.instances.push(this)
   }
 
-  addEventListener(): void {}
+  addEventListener(type: string, listener: (ev: { data: string }) => void): void {
+    this.listeners.set(type, listener)
+  }
+
   close(): void {}
+
+  /** Deliver one SSE frame of `type` (the browser's dispatch), as the API's stream would. */
+  emit(type: string, data: unknown = {}): void {
+    this.listeners.get(type)?.({ data: JSON.stringify(data) })
+  }
 }
 
 const thread = (overrides: Record<string, unknown> = {}): ThreadDetailDto => ({
@@ -45,6 +58,43 @@ const thread = (overrides: Record<string, unknown> = {}): ThreadDetailDto => ({
   sendRefusal: null,
   ...overrides,
 })
+
+/** One transcript message (the API's ChatMessageDto shape the probe renders). */
+const chatMessage = (overrides: Record<string, unknown> = {}): ChatMessageDto => ({
+  id: 'm1',
+  seq: 1,
+  jobId: 'j1',
+  turnId: 't1',
+  role: 'assistant',
+  authorUserId: 'u1',
+  clientMessageId: null,
+  content: 'Partial response',
+  toolSummary: null,
+  status: 'streaming',
+  errorReason: null,
+  usage: null,
+  costUsd: null,
+  costSource: null,
+  createdAt: '2026-10-14T00:00:00.000Z',
+  ...overrides,
+})
+
+/**
+ * The review's delayed-subscription server (finding 11): the thread and its messages answer from state
+ * the test can move, so the turn can finish *after* the initial GET and *before* the subscription.
+ */
+function threadServer(
+  initial: ChatMessageDto[],
+  finished: ChatMessageDto[],
+): { get: jest.Mock; finishTurn: () => void } {
+  let items = initial
+  const get = jest.fn(async (path: string) => {
+    if (path === THREAD_PATH) return thread()
+    if (path === MESSAGES_PATH) return { items }
+    throw new Error(`unexpected path ${path}`)
+  })
+  return { get, finishTurn: () => { items = finished } }
+}
 
 const g = globalThis as Record<string, unknown>
 
@@ -120,5 +170,239 @@ describe('useThread (US-003)', () => {
     expect(StubEventSource.instances).toHaveLength(1)
 
     app.unmount()
+  })
+})
+
+describe('useThread (US-003): failed loads recover without another stream', () => {
+  afterEach(() => {
+    StubEventSource.instances = []
+    delete g.EventSource
+    delete g.useApi
+    delete g.useAuth
+  })
+
+  test.each([403, 404])('AC-1/AC-2: HTTP %i is classified as unavailable without exposing a detail', async (status) => {
+    const get = jest.fn(async () => { throw Object.assign(new Error('forbidden'), { statusCode: status }) })
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeDefined()
+    expect(app.one('[data-testid="thread-retry"]')).toBeUndefined()
+    expect(app.text()).not.toContain('Plan the auth flow')
+    expect(StubEventSource.instances).toHaveLength(1)
+    app.unmount()
+  })
+
+  test('AC-5: retrying failed initial detail uses one subscription', async () => {
+    let detailReads = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) {
+        detailReads += 1
+        if (detailReads === 1) throw Object.assign(new Error('unavailable'), { statusCode: 503 })
+        return thread({ title: 'Recovered thread' })
+      }
+      if (path === MESSAGES_PATH) return { items: [] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeDefined()
+    expect(StubEventSource.instances).toHaveLength(1)
+
+    const retry = app.one('[data-testid="thread-retry"]')
+    expect(retry).toBeDefined()
+    if (retry?.props.onClick) (retry.props.onClick as () => void)()
+    await settle()
+    expect(app.text()).toContain('Recovered thread')
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
+    expect(StubEventSource.instances).toHaveLength(1)
+    app.unmount()
+  })
+
+  test('AC-6: a valid live thread reload clears the error from the failed initial load', async () => {
+    let detailReads = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) {
+        detailReads += 1
+        if (detailReads === 1) throw Object.assign(new Error('unavailable'), { statusCode: 503 })
+        return thread({ title: 'Live recovery' })
+      }
+      if (path === MESSAGES_PATH) return { items: [] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeDefined()
+    StubEventSource.instances[0].emit('thread', { id: 'event-1', threadId: 'th1', type: 'thread', at: '2026-10-14T00:00:00.000Z' })
+    await settle()
+    expect(app.text()).toContain('Live recovery')
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
+    app.unmount()
+  })
+})
+
+describe('useThread (US-003): the adapter’s own failure shapes are classified', () => {
+  /**
+   * ofetch's non-2xx contract: an error carrying `status` and the parsed envelope under `data`. This is the
+   * shape the page really receives — the earlier fixtures hand-made `{ statusCode }`, which is neither what
+   * `useApi` throws nor what it throws *for* an enveloped answer (an `ApiError` whose `code` is the envelope
+   * `ret`: a refused permission is `40003`, not 403).
+   */
+  function failingFetch(status: number, body: unknown) {
+    return jest.fn(async () => {
+      throw Object.assign(new Error('Request failed'), { status, data: body })
+    })
+  }
+
+  async function mountOverRealAdapter(): Promise<ReturnType<typeof mountSfc>> {
+    const useApiModule = await import(webFile('composables', 'useApi.ts'))
+    // The real adapter reads the locale and the fetch instance from the Nuxt auto-import scope.
+    g.useI18n = () => ({ locale: ref('en') })
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+    g.EventSource = StubEventSource
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    return mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: useApiModule.useApi, useAuth: g.useAuth },
+    })
+  }
+
+  afterEach(() => {
+    StubEventSource.instances = []
+    delete g.EventSource
+    delete g.useApi
+    delete g.useAuth
+    delete g.useI18n
+    delete g.useRuntimeConfig
+    delete g.$fetch
+  })
+
+  test.each([
+    [403, { ret: 40003, message: 'permissions' }],
+    [404, { ret: 404, message: 'threads.notFound' }],
+  ])('AC-1/AC-2: an enveloped %i answered through useApi is unavailable, not retryable', async (status, body) => {
+    g.$fetch = failingFetch(status, body)
+    const app = await mountOverRealAdapter()
+    await settle()
+
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeDefined()
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
+    expect(app.one('[data-testid="thread-retry"]')).toBeUndefined()
+    expect(app.text()).not.toContain('Plan the auth flow')
+    // The failed initial read must still leave the one live subscription (US-002/US-003 seam).
+    expect(StubEventSource.instances).toHaveLength(1)
+    app.unmount()
+  })
+
+  test('AC-3: a transient 503 through useApi is retryable rather than unavailable', async () => {
+    g.$fetch = failingFetch(503, { ret: 50000, message: 'downstream down' })
+    const app = await mountOverRealAdapter()
+    await settle()
+
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeDefined()
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeUndefined()
+    expect(app.one('[data-testid="thread-retry"]')).toBeDefined()
+    app.unmount()
+  })
+
+  test.each([
+    ['a normalized forbidden ApiError', 40003],
+    ['an HTTP-status forbidden ApiError', 403],
+    ['a normalized missing ApiError', 404],
+    ['the mirrored missing code', 40004],
+  ])('AC-1/AC-2: %s is unavailable', async (_label, code) => {
+    const useApiModule = await import(webFile('composables', 'useApi.ts'))
+    const get = jest.fn(async () => { throw new useApiModule.ApiError(code, 'refused') })
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeDefined()
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
+    app.unmount()
+  })
+})
+
+describe('useThread (US-002): the ready frame catches up the initial GET-to-subscription gap', () => {
+  afterEach(() => {
+    StubEventSource.instances = []
+    delete g.EventSource
+    delete g.useApi
+    delete g.useAuth
+  })
+
+  /** Mounts the project probe over `finishTurn()`-able server state (the review's delayed-subscription case). */
+  async function mountDelayedSubscription(): Promise<{
+    app: ReturnType<typeof mountSfc>
+    server: ReturnType<typeof threadServer>
+  }> {
+    const server = threadServer(
+      [chatMessage()],
+      [chatMessage({ status: 'complete', content: 'Final response' })],
+    )
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get: server.get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+    return { app, server }
+  }
+
+  test('US-002 AC-1: a turn that finished between the initial GET and the subscription is reconciled when ready arrives', async () => {
+    const { app, server } = await mountDelayedSubscription()
+    try {
+      // The initial GET saw the turn mid-stream; the composer is waiting on it.
+      expect(app.one('[data-message="m1"]')?.props['data-status']).toBe('streaming')
+      expect(app.text()).toContain('Partial response')
+      expect(server.get.mock.calls.filter(([path]) => path === MESSAGES_PATH)).toHaveLength(1)
+
+      // The runner finishes after the snapshot and before the server accepts the subscription.
+      server.finishTurn()
+      const source = StubEventSource.instances[0]
+      expect(source.url).toBe('/api/projects/web/threads/th1/events')
+      source.emit('ready')
+      await settle()
+
+      // The ready frame itself reconciled the thread and its messages: no reconnect needed.
+      expect(server.get.mock.calls.filter(([path]) => path === MESSAGES_PATH)).toHaveLength(2)
+      expect(app.one('[data-message="m1"]')?.props['data-status']).toBe('complete')
+      expect(app.text()).toContain('Final response')
+    } finally {
+      app.unmount()
+    }
+  })
+
+  test('US-002 AC-2: the mounted composer becomes available once ready reconciles the finished turn', async () => {
+    const { app, server } = await mountDelayedSubscription()
+    try {
+      expect(app.one('[data-testid="composer"]')?.props.disabled).toBe(true)
+
+      server.finishTurn()
+      StubEventSource.instances[0].emit('ready')
+      await settle()
+
+      expect(app.one('[data-testid="composer"]')?.props.disabled).toBe(false)
+    } finally {
+      app.unmount()
+    }
   })
 })

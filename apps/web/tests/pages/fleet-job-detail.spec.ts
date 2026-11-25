@@ -6,6 +6,7 @@ import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
+import type { ToastRecorder } from '../helpers/fleet-harness'
 import { projectPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 import type { ApprovalRequestDetail, ApprovalRequestSummary } from '../../lib/approval-requests'
@@ -108,7 +109,7 @@ describe('job detail', () => {
 
   test('S1.5 2b / P3b US-007: callout, shell approvals line and approvals section read the engine', () => {
     expect(detail).toContain("import { useApprovalInbox } from '~/composables/useApprovalInbox'")
-    expect(detail).toContain("import { inboxHref, sortPendingRequests } from '~/lib/approval-requests'")
+    expect(detail).toContain("import { inboxHref, pendingApproval, sortPendingRequests } from '~/lib/approval-requests'")
     expect(detail).toContain("import type { JobApprovalRow } from '~/composables/useApprovalInbox'")
     expect(detail).not.toContain('useFleetApprovals')
     expect(detail).toContain("import { useApprovalCountdown } from '~/composables/useApprovalCountdown'")
@@ -174,7 +175,11 @@ describe('job detail', () => {
   test('C9: cancel and requeue render the job from the response, which now carries tickets (Task 1)', () => {
     // B1: the response is applied as-is (tickets, state) but through preserveJobLabels, because the
     // cancel/requeue routes send requesterName and threadTitle as null.
-    expect(detail).toContain('applyJobResponse(await jobsApi.cancel(jobId))')
+    // US-001: a gated cancellation answers the approval summary instead, so the job is applied only
+    // after that answer has been told apart from the returned job.
+    expect(detail).toContain('const answer = await jobsApi.cancel(jobId)')
+    expect(detail).toContain("if (pendingApproval(answer, 'fleet.job.cancel'))")
+    expect(detail).toContain('applyJobResponse(answer)')
     expect(detail).toContain('applyJobResponse(result.job)')
     expect(detail).toContain('job.value = preserveJobLabels(next, job.value)')
   })
@@ -311,10 +316,15 @@ export interface EnginePageOver {
   resolvedRepoName?: string
   /** Project permission keys the page's gates read; the cancel and requeue buttons need theirs. */
   permissions?: readonly string[]
-  /** The cancel route's answer: the same job with `requesterName`/`threadTitle` null, as the API sends it. */
-  cancelResponse?: () => Promise<FleetJobDto>
+  /**
+   * The cancel route's answer: the same job with `requesterName`/`threadTitle` null, as the API sends it,
+   * or — US-001 — the `ApprovalRequestSummary` a gated cancellation answers with instead.
+   */
+  cancelResponse?: () => Promise<FleetJobDto | ApprovalRequestSummary>
   /** The requeue route's answer, same null labels. */
   requeueResponse?: () => Promise<DispatchResultDto>
+  /** The toast recorder the page under test reports to; defaults to a fresh one. */
+  toasts?: ToastRecorder
 }
 
 /**
@@ -323,6 +333,7 @@ export interface EnginePageOver {
  */
 export function mountEnginePage(over: EnginePageOver) {
   const job = over.job ?? jobFixture()
+  const toasts = over.toasts ?? toastRecorder()
   const get = jest.fn(async (path: string) => {
     if (path === '/approvals') return approvalsPage(over.records)
     const id = path.slice('/approvals/'.length)
@@ -376,7 +387,7 @@ export function mountEnginePage(over: EnginePageOver) {
       definePageMeta: () => undefined,
       useRoute: () => ({ params: { project: 'koda', id: job.id } }),
       useI18n: () => enI18n(),
-      useAppToast: () => toastRecorder(),
+      useAppToast: () => toasts,
       useApi: () => ({ $api: { get } }),
       useAuth: () => ({ user: ref({ id: 'u2' }) }),
       useProjectPermissions: () => projectPermissionsStub(over.permissions ?? []),
@@ -404,7 +415,7 @@ export function mountEnginePage(over: EnginePageOver) {
       await nextTick()
     }
   }
-  return { app, get, settle, live: () => live, byId: (id: string) => app.find(`[data-testid="${id}"]`) }
+  return { app, get, settle, toasts, live: () => live, byId: (id: string) => app.find(`[data-testid="${id}"]`) }
 }
 
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
@@ -698,6 +709,88 @@ describe('job page approvals on the engine (P3b US-007)', () => {
     expect(m.app.textOf(loaded)).toContain(COMMAND)
     expect(m.app.textOf(failed)).toContain('fleet.job.shell.escalate')
     expect(m.app.textOf(failed)).not.toContain(COMMAND)
+    m.app.unmount()
+  })
+})
+
+/**
+ * US-001: the cancel route is approval-gated, so it answers 202 with the `ApprovalRequestSummary` the
+ * approval filter serializes instead of the job. Nothing was cancelled, so the page must keep the job it
+ * shows, name the request and stay silent about a cancellation that did not happen.
+ */
+describe('US-001: a cancellation that waits for approval', () => {
+  const REQUEST_ID = 'approval-fleet.job.cancel'
+  const pendingCancel = (): ApprovalRequestSummary => request(REQUEST_ID, { permissionKey: 'fleet.job.cancel' })
+
+  /** Opens the confirm dialog and submits it, the way the page's own buttons do. */
+  async function confirmCancellation(m: ReturnType<typeof mountEnginePage>): Promise<void> {
+    await (m.byId('fleet-job-cancel')[0].props.onClick as () => void)()
+    await m.settle()
+    await (m.byId('fleet-job-cancel-confirm')[0].props.onClick as () => Promise<void>)()
+    await m.settle()
+  }
+
+  test('AC-2 and AC-6: pending feedback names the request id and no execution-success toast is shown', async () => {
+    const toasts = toastRecorder()
+    const cancelResponse = jest.fn(async () => pendingCancel())
+    const m = mountEnginePage({
+      job: jobFixture({ stateReason: 'runnerWorking' }),
+      records: [],
+      permissions: ['fleet.job.cancel'],
+      cancelResponse,
+      toasts,
+    })
+    await m.settle()
+
+    await confirmCancellation(m)
+
+    expect(cancelResponse).toHaveBeenCalledTimes(1)
+    expect(toasts.successes).toHaveLength(1)
+    expect(toasts.successes[0]).toContain(REQUEST_ID)
+    // AC-6: the executed cancellation's success toast is not among them.
+    expect(toasts.successes).not.toContain('Cancel requested')
+    expect(toasts.errors).toEqual([])
+    m.app.unmount()
+  })
+
+  test('AC-7: the page keeps rendering the original job', async () => {
+    const m = mountEnginePage({
+      job: jobFixture({ stateReason: 'runnerWorking' }),
+      records: [],
+      permissions: ['fleet.job.cancel'],
+      cancelResponse: jest.fn(async () => pendingCancel()),
+    })
+    await m.settle()
+    expect(m.app.text()).toContain('runnerWorking')
+
+    await confirmCancellation(m)
+
+    // The job the page held is still the one on screen, and still cancellable: the job view was not
+    // replaced by the approval summary.
+    expect(m.app.text()).toContain('runnerWorking')
+    expect(m.byId('fleet-job-cancel')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('AC-12: an executed cancellation renders the returned job', async () => {
+    const toasts = toastRecorder()
+    const cancelled = jobFixture({ state: 'CANCELLED', cancelRequestedAt: '2026-11-25T00:00:00.000Z' })
+    const m = mountEnginePage({
+      job: jobFixture({ stateReason: 'runnerWorking' }),
+      records: [],
+      permissions: ['fleet.job.cancel'],
+      cancelResponse: jest.fn(async () => cancelled),
+      toasts,
+    })
+    await m.settle()
+    expect(m.byId('fleet-job-cancel')).toHaveLength(1)
+
+    await confirmCancellation(m)
+
+    // The returned job is applied: CANCELLED is terminal, so its cancel control is gone, and the
+    // executed answer keeps its own success toast.
+    expect(m.byId('fleet-job-cancel')).toHaveLength(0)
+    expect(toasts.successes).toEqual(['Cancel requested'])
     m.app.unmount()
   })
 })

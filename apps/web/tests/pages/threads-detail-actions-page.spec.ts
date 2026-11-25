@@ -1,11 +1,14 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { defineComponent, h, ref } from 'vue'
+import type { Ref } from 'vue'
 import { loadSfc, mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
-import { i18nStub, toastRecorder, uiStubs, type ToastRecorder } from '../helpers/fleet-harness'
+import { enI18n, i18nStub, toastRecorder, uiStubs, type ToastRecorder } from '../helpers/fleet-harness'
 import { ApiError, extractApiError } from '../../composables/useApi'
 import { projectPermissionsStub } from '../helpers/permission-nav'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+import { createThreadController } from '~/lib/thread-controller'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 
 /**
@@ -67,9 +70,9 @@ const inertThreadStub = defineComponent({
  * `send` with the typed text (Shift+Enter never sends, whitespace never sends) and a Stop
  * control while `turnRunning`.
  */
-const Composer = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), {
-  useI18n: () => i18nStub(),
-})
+/** The real composer, instantiated with the mounting test's translator so rendered copy can be asserted. */
+const composerFor = (i18n: () => { t: (key: string, named?: Record<string, unknown>) => string; te: (key: string) => boolean }) =>
+  loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), { useI18n: i18n })
 
 /** A ThreadControls double: buttons that emit the three actions. */
 const ActionBarStub = defineComponent({
@@ -96,6 +99,7 @@ const ControlsStub = defineComponent({
 
 interface MountedPage {
   app: ReturnType<typeof mountSfc>
+  messages: Ref<ChatMessageDto[]>
   send: jest.Mock
   plan: jest.Mock
   publish: jest.Mock
@@ -104,9 +108,19 @@ interface MountedPage {
   settle: () => Promise<void>
 }
 
-function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mock } = {}): MountedPage {
+function mountPage(over: {
+  send?: jest.Mock
+  plan?: jest.Mock
+  publish?: jest.Mock
+  /** The transcript ref the page renders; the real controller writes into it when a test drives one. */
+  messages?: Ref<ChatMessageDto[]>
+  /** The translator the page and its children read; `i18nStub` unless a test asserts rendered copy. */
+  i18n?: () => { t: (key: string, named?: Record<string, unknown>) => string; te: (key: string) => boolean }
+} = {}): MountedPage {
   const thread = ref<ThreadDetailDto | null>(threadDetail())
-  const messages = ref<ChatMessageDto[]>([])
+  const messages = over.messages ?? ref<ChatMessageDto[]>([])
+  const i18n = over.i18n ?? ((): ReturnType<typeof i18nStub> => i18nStub())
+  const Composer = composerFor(i18n)
   const toasts = toastRecorder()
   const send = over.send ?? jest.fn(async () => ({ ok: true }))
   const endSession = jest.fn(async () => ({ ok: true }))
@@ -138,7 +152,7 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
     },
     globals: {
       definePageMeta: () => undefined,
-      useI18n: () => i18nStub(),
+      useI18n: i18n,
       useAppToast: () => toasts,
       useRoute: () => ({ params: { project: 'web', id: 'th1' } }),
       useAuth: () => ({ user: ref({ id: 'u1', email: 'owner@k.t', role: 'MEMBER' }) }),
@@ -175,7 +189,7 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
         runnerName: (id: string | null) => id,
       }),
       // Permissions P1 US-007: ThreadControls' canManage prop follows the project `thread.archive` key.
-      useProjectPermissions: () => projectPermissionsStub(['thread.archive']),
+      useProjectPermissions: () => projectPermissionsStub(['thread.archive', 'thread.message.send.own']),
     },
   })
   const settle = async (): Promise<void> => {
@@ -184,7 +198,7 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
       await Vue.nextTick()
     }
   }
-  return { app, send, plan, publish, endSession, toasts, settle }
+  return { app, messages, send, plan, publish, endSession, toasts, settle }
 }
 
 /** Types into the page's composer textarea and presses Enter, exactly as a user would. */
@@ -267,6 +281,125 @@ describe('US-007 AC5, AC12, AC15: pages/[project]/threads/[id].vue', () => {
     if (button?.props.onClick) (button.props.onClick as () => void)()
     await m.settle()
     expect(m.toasts.errors).toEqual([extractApiError(error)])
+    m.app.unmount()
+  })
+})
+/**
+ * US-001: the message route is approval-gated, so a send can answer 202 with the approval request instead
+ * of the message. These mounts run the REAL composer over the REAL thread controller, so the summary is
+ * classified on the path the browser takes and the transcript is the controller's.
+ */
+describe('US-001: a thread send that waits for approval', () => {
+  const REQUEST_ID = 'approval-thread.message.send'
+
+  /** The body `ApprovalPendingFilter` answers a gated send with (HTTP 202), already unwrapped by `useApi`. */
+  const pendingSummary = (): ApprovalRequestSummary => ({
+    id: REQUEST_ID,
+    permissionKey: 'thread.message.send',
+    projectId: 'p1',
+    actorType: 'USER',
+    actorId: 'u1',
+    onBehalfOfType: null,
+    onBehalfOfId: null,
+    origin: 'rest',
+    redeem: false,
+    requiredMode: 'human',
+    status: 'pending',
+    satisfiedBy: null,
+    approverType: null,
+    approverId: null,
+    expiresAt: '2026-11-25T00:10:00.000Z',
+    decidedAt: null,
+    settledAt: null,
+    createdAt: '2026-11-25T00:00:00.000Z',
+  })
+
+  /** A real controller over a fake API: only the messages route matters to these tests. */
+  function controllerFor(post: jest.Mock) {
+    return createThreadController({
+      api: { get: jest.fn(async () => threadDetail()), post, patch: jest.fn() },
+      slug: 'web',
+      threadId: 'th1',
+      openStream: () => ({ close: () => undefined }),
+      setTimer: () => null,
+      clearTimer: () => undefined,
+      now: () => Date.parse('2026-11-25T00:00:00.000Z'),
+    })
+  }
+
+  const sentMessage = (body: { clientMessageId: string; text: string }): ChatMessageDto => ({
+    id: 'srv-1',
+    seq: 1,
+    jobId: null,
+    turnId: null,
+    role: 'user',
+    authorUserId: 'u1',
+    clientMessageId: body.clientMessageId,
+    content: body.text,
+    toolSummary: null,
+    status: 'pending',
+    errorReason: null,
+    usage: null,
+    costUsd: null,
+    costSource: null,
+    createdAt: '2026-11-25T00:00:00.000Z',
+  })
+
+  test('AC-3: the composer names the returned request id and no refusal is toasted', async () => {
+    const controller = controllerFor(jest.fn(async () => pendingSummary()))
+    const m = mountPage({ send: jest.fn(controller.send), messages: controller.messages, i18n: () => enI18n() })
+    await m.settle()
+
+    expect(typeAndEnter(m.app, 'hello')).toBe(true)
+    await m.settle()
+
+    const note = m.app.one('[data-testid="thread-composer-pending"]')
+    expect(note).toBeDefined()
+    expect(note ? m.app.textOf(note) : '').toContain(REQUEST_ID)
+    // A pending approval is not a send refusal: the page shows no error for it.
+    expect(m.toasts.errors).toEqual([])
+    m.app.unmount()
+  })
+
+  test('AC-9: the transcript returns to its pre-submit messages', async () => {
+    let answer: (value: unknown) => void = () => undefined
+    const post = jest.fn(() => new Promise<unknown>((resolve) => { answer = resolve }))
+    const controller = controllerFor(post)
+    const m = mountPage({ send: jest.fn(controller.send), messages: controller.messages })
+    await m.settle()
+    const before = [...controller.messages.value]
+    expect(before).toEqual([])
+
+    expect(typeAndEnter(m.app, 'hello')).toBe(true)
+    await m.settle()
+    // While the POST is in flight the optimistic echo is held…
+    expect(controller.messages.value.map(message => message.id)).toEqual([`local:${controller.messages.value[0].clientMessageId}`])
+    expect(controller.messages.value[0].content).toBe('hello')
+
+    answer(pendingSummary())
+    await m.settle()
+
+    // …and the pending answer leaves the transcript exactly as it was.
+    expect(controller.messages.value).toEqual(before)
+    m.app.unmount()
+  })
+
+  test('AC-13: an executed answer replaces the optimistic message and clears the draft', async () => {
+    const post = jest.fn(async (_path: string, body: { clientMessageId: string; text: string }) => ({
+      message: sentMessage(body),
+      jobId: null,
+    }))
+    const controller = controllerFor(post)
+    const m = mountPage({ send: jest.fn(controller.send), messages: controller.messages })
+    await m.settle()
+
+    expect(typeAndEnter(m.app, 'hello')).toBe(true)
+    await m.settle()
+
+    expect(controller.messages.value.map(message => message.id)).toEqual(['srv-1'])
+    expect(controller.messages.value.some(message => message.id.startsWith('local:'))).toBe(false)
+    expect(m.app.one('[data-testid="thread-composer-input"]')?.props['model-value']).toBe('')
+    expect(m.app.one('[data-testid="thread-composer-pending"]')).toBeUndefined()
     m.app.unmount()
   })
 })

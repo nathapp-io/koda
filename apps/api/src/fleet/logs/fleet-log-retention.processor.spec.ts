@@ -13,6 +13,9 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
       calls.push('rows');
       return { events: 1, logs: 1, artifacts: 1 };
     }),
+    /** US-009: the cleanup records a repository deletion captured before its cascade. */
+    findRetiredCleanups: vi.fn(),
+    deleteRetiredCleanup: vi.fn(async (id: string) => { calls.push(`ack:${id}`); }),
   };
   const jobs = { lockById: vi.fn(async (id: string): Promise<{ id: string } | null> => {
     calls.push(`lock:${id}`);
@@ -24,6 +27,22 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
   const make = (days: number | null = 30) =>
     new FleetLogRetentionProcessor(repo as never, jobs as never, tx as never, logStore, artifacts, testFleetConfig({ logRetentionDays: days }), mockAuditRecorder);
   const candidate = (id: string, leaseEpoch = 1) => ({ id, leaseEpoch, finishedAt: new Date('2026-08-01T00:00:00.000Z') });
+  /** US-009: one cleanup record a repository deletion captured before its cascade erased the job. */
+  const retired = (jobId: string, over: { leaseEpoch?: number; bundleKeys?: string[] } = {}) => ({
+    id: `c-${jobId}`,
+    jobId,
+    leaseEpoch: 1,
+    finishedAt: new Date('2026-08-01T00:00:00.000Z'),
+    bundleKeys: [`jobs/${jobId}/1/b.tar.gz`],
+    ...over,
+  });
+  const before = new Date('2026-10-01T04:45:00.000Z');
+
+  beforeEach(() => {
+    // Neither pass has work unless a test says so.
+    repo.findCandidates.mockResolvedValue([]);
+    repo.findRetiredCleanups.mockResolvedValue([]);
+  });
 
   afterEach(() => {
     vi.clearAllMocks();
@@ -87,5 +106,79 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'log' });
+  });
+
+  /**
+   * US-009 (finding 5): a repository deletion hands the stored files of its terminal jobs to the
+   * retention pass as cleanup records, so the pass drains them in the same nightly run — with the
+   * same cutoff, the same batch bound and the same tolerate-and-retry rule as the live jobs.
+   */
+  describe('US-009 retired cleanup records', () => {
+    it('US-009 AC-9: keeps the record pending when a later store deletion fails', async () => {
+      repo.findRetiredCleanups.mockResolvedValueOnce([retired('j9')]);
+      artifacts.delete.mockRejectedValueOnce(new Error('EACCES'));
+
+      const out = await make().purge(before, new Date('2026-10-31T04:45:00.000Z'));
+
+      expect(out).toEqual({ expired: 0, failed: 1 });
+      // The unused cutoff is the pass's own, and the record's files were the ones targeted.
+      expect(repo.findRetiredCleanups).toHaveBeenCalledWith(before, null, RETENTION_BATCH);
+      expect(logStore.deletePrefix.mock.calls.map(([prefix]) => prefix)).toEqual(['logs/j9/0/', 'logs/j9/1/']);
+      // Nothing is acknowledged and nothing is audited while a target may still be there.
+      expect(repo.deleteRetiredCleanup).not.toHaveBeenCalled();
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('US-009 AC-10: completes the remaining work when the retry finds the first target already gone', async () => {
+      repo.findRetiredCleanups.mockResolvedValueOnce([retired('j10')]).mockResolvedValueOnce([retired('j10')]);
+      artifacts.delete.mockRejectedValueOnce(new Error('EACCES'));
+      const worker = make();
+
+      expect(await worker.purge(before, before)).toEqual({ expired: 0, failed: 1 });
+      // The log prefix the first run already removed is deleted again (the store tolerates an absent
+      // target) and the bundle that failed is the work the retry finishes.
+      expect(await worker.purge(before, before)).toEqual({ expired: 1, failed: 0 });
+
+      expect(logStore.deletePrefix.mock.calls.filter(([prefix]) => prefix === 'logs/j10/1/')).toHaveLength(2);
+      expect(repo.deleteRetiredCleanup).toHaveBeenCalledExactlyOnceWith('c-j10');
+      expect(mockAuditRecorder.record).toHaveBeenCalledWith(
+        expect.objectContaining({ key: 'system.log.retention', resourceType: 'fleet-job', resourceId: 'j10' }),
+      );
+    });
+
+    it('US-009 AC-11: a third purge makes no further change once the record is acknowledged', async () => {
+      repo.findRetiredCleanups.mockResolvedValueOnce([retired('j11')]).mockResolvedValueOnce([retired('j11')]);
+      artifacts.delete.mockRejectedValueOnce(new Error('EACCES'));
+      const worker = make();
+
+      await worker.purge(before, before);
+      await worker.purge(before, before);
+      expect(repo.deleteRetiredCleanup).toHaveBeenCalledTimes(1);
+
+      expect(await worker.purge(before, before)).toEqual({ expired: 0, failed: 0 });
+      expect(repo.deleteRetiredCleanup).toHaveBeenCalledTimes(1);
+      expect(logStore.deletePrefix).toHaveBeenCalledTimes(4);
+    });
+
+    it('US-009 AC-12: bounded purge still reaches later eligible records past a persistently failing target', async () => {
+      const full = Array.from({ length: RETENTION_BATCH }, (_, i) => retired(`r${String(i).padStart(3, '0')}`));
+      repo.findRetiredCleanups.mockResolvedValueOnce(full).mockResolvedValueOnce([retired('later')]);
+      // The first record's bundle never deletes: it fails on every pass.
+      artifacts.delete.mockImplementation(async (key: string) => {
+        if (key === 'jobs/r000/1/b.tar.gz') throw new Error('EACCES');
+      });
+
+      const out = await make().purge(before, before);
+
+      expect(out).toEqual({ expired: RETENTION_BATCH, failed: 1 });
+      // The cursor is the last record of the page, never the last one that succeeded: a record that
+      // keeps failing cannot pin the pass on the same page.
+      expect(repo.findRetiredCleanups).toHaveBeenNthCalledWith(
+        2, before, { finishedAt: full[RETENTION_BATCH - 1].finishedAt, id: full[RETENTION_BATCH - 1].id }, RETENTION_BATCH,
+      );
+      expect(repo.findRetiredCleanups).toHaveBeenCalledTimes(2);
+      expect(repo.deleteRetiredCleanup).toHaveBeenCalledWith('c-later');
+      expect(repo.deleteRetiredCleanup).not.toHaveBeenCalledWith('c-r000');
+    });
   });
 });

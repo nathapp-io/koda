@@ -1,22 +1,27 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { CommandAck, FleetCommandOut } from '@nathapp/fleet-protocol';
+import type { CommandAck, FleetCommandOut, StateEventPayload } from '@nathapp/fleet-protocol';
+import type { UploadOutcome } from '../bundle/upload-bundle';
 import { Journal } from '../journal/journal';
 import type { JobRow } from '../journal/types';
 import { createMemoryLogger } from '../logger';
+import type { LogShipping } from '../logs/types';
 import { assignFor } from '../../test/helpers/assign';
 import { FakeExecutor } from '../../test/helpers/fake-executor';
 import { fakeTime } from '../../test/helpers/fake-time';
 import { waitFor } from '../../test/helpers/wait';
-import { NO_LOG_SHIPPING } from '../../test/helpers/fake-log-shipping';
+import { FakeLogShipping, NO_LOG_SHIPPING } from '../../test/helpers/fake-log-shipping';
 import { CommandHandler } from './command-handler';
 import { RepoMutex } from './repo-mutex';
 import { Supervisor } from './supervisor';
+import { TERMINAL_STATES } from './transitions';
 
 /**
  * US-001: `over.journal` reuses an existing journal, so a test can build a second handler and supervisor over the
  * same rows — the runner's restart. `acks` collects the acks whose command retired after its sync.
+ * US-006: `over.logs` and `over.upload` let a test hold the log drain and the bundle upload, the two points the
+ * cancellation cutoff is decided at.
  */
-function build(over: { journal?: Journal } = {}) {
+function build(over: { journal?: Journal; logs?: LogShipping; upload?: () => Promise<UploadOutcome> } = {}) {
   const time = fakeTime();
   const journal = over.journal ?? Journal.open(':memory:', time.now);
   const ex = new FakeExecutor();
@@ -25,8 +30,8 @@ function build(over: { journal?: Journal } = {}) {
   const mutex = new RepoMutex();
   const supervisor = new Supervisor({
     journal, executor: ex, mutex, log, now: time.now, sleep: time.sleep,
-    uploader: { upload: async () => ({ kind: 'ok' }) }, tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
-    logs: NO_LOG_SHIPPING,
+    uploader: { upload: over.upload ?? (async () => ({ kind: 'ok' })) }, tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
+    logs: over.logs ?? NO_LOG_SHIPPING,
   });
   const approvals = { answer: mock(async (): Promise<{ result: 'ok' | 'rejected'; detail?: string }> => ({ result: 'ok' })) };
   const acks: CommandAck[] = [];
@@ -467,6 +472,120 @@ describe('CANCEL, ABANDON, READOPT and unknown types', () => {
     const acks = await b.handler.handle([{ ...other('CANCEL', 'u1'), type: 1 as never }]);
     expect(acks[0]).toMatchObject({ result: 'rejected', detail: 'unknown command type' });
     expect(b.journal.getCommand('u1')).toMatchObject({ type: 'unknown', result: 'rejected', detail: 'unknown command type' });
+  });
+});
+
+/**
+ * Finding 8 (US-006): the cancellation cutoff. `JobRun.finish` judges the run, then waits for the log drain; a CANCEL
+ * delivered while that drain is held must still win, and one delivered after the row reached UPLOADING must be
+ * refused. Driven through the real handler, supervisor and SQLite journal.
+ */
+describe('RUN cancellation through the log drain (US-006 finding 8)', () => {
+  const cancelCmd = (id = 'k1'): FleetCommandOut => ({ commandId: id, type: 'CANCEL', jobId: 'j1', leaseEpoch: 1, payload: {} });
+  const stateNames = (b: ReturnType<typeof build>, jobId = 'j1'): string[] =>
+    b.journal.pendingEvents(jobId, 1, 1_000).filter((e) => e.type === 'state').map((e) => (e.payload as StateEventPayload).to);
+  const terminalNames = (b: ReturnType<typeof build>): string[] =>
+    stateNames(b).filter((to) => TERMINAL_STATES.includes(to as StateEventPayload['to']));
+
+  /** A successful RUN held at the log drain its finish path is waiting on; the verdict is already computed. */
+  async function heldAtDrain() {
+    const logs = new FakeLogShipping();
+    logs.holdDrain();
+    const b = build({ logs });
+    b.ex.dieAfterTicks(1);
+    await b.handler.handle([assignCmd()]);
+    await waitFor(() => b.ex.calls.includes('readFinishLedger:j1'));   // judging is done, the drain is still held
+    return { b, logs };
+  }
+
+  /** The same RUN held inside the bundle upload: the row has passed the cutoff and is UPLOADING. */
+  async function heldAtUpload() {
+    const gate = Promise.withResolvers<void>();
+    let uploading = false;
+    const b = build({ upload: async () => { uploading = true; await gate.promise; return { kind: 'ok' }; } });
+    b.ex.dieAfterTicks(1);
+    await b.handler.handle([assignCmd()]);
+    await waitFor(() => uploading);
+    return { b, release: () => gate.resolve() };
+  }
+
+  test('AC-1: a CANCEL delivered while the log drain is held is acked ok', async () => {
+    const { b, logs } = await heldAtDrain();
+    try {
+      expect(b.journal.getJob('j1', 1)?.state).toBe('RUNNING');
+      expect(await b.handler.handle([cancelCmd()])).toEqual([{ commandId: 'k1', leaseEpoch: 1, result: 'ok' }]);
+    } finally {
+      logs.releaseDrain();
+      await b.supervisor.idle();
+    }
+  });
+
+  test('AC-2: the accepted CANCEL is durable in the journal while the drain is still held', async () => {
+    const { b, logs } = await heldAtDrain();
+    try {
+      expect((await b.handler.handle([cancelCmd()]))[0].result).toBe('ok');
+      const accepted = b.journal.getJob('j1', 1);
+      expect(accepted?.cancelRequestedAt).not.toBeNull();
+      expect(accepted?.state).toBe('RUNNING');                       // the cutoff had not been committed yet
+      expect(b.journal.getCommand('k1')).toMatchObject({ type: 'CANCEL', result: 'ok' });
+    } finally {
+      logs.releaseDrain();
+      await b.supervisor.idle();
+    }
+  });
+
+  test('AC-3: releasing the drain publishes exactly one CANCELLED terminal event for the accepted CANCEL', async () => {
+    const { b, logs } = await heldAtDrain();
+    expect((await b.handler.handle([cancelCmd()]))[0].result).toBe('ok');
+    const uploadedDuringHold = b.ex.calls.filter((c) => c === 'collectBundle:j1').length;
+    expect(uploadedDuringHold).toBe(0);                              // the drain really is held before the bundle
+    logs.releaseDrain();
+    await b.supervisor.idle();
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    expect(terminalNames(b)).toEqual(['CANCELLED']);
+  });
+
+  test('AC-4: replaying the accepted CANCEL command id after completion returns its original acknowledgement', async () => {
+    const { b, logs } = await heldAtDrain();
+    const first = await b.handler.handle([cancelCmd()]);
+    logs.releaseDrain();
+    await b.supervisor.idle();
+    expect(b.journal.getJob('j1', 1)?.state).toBe('CANCELLED');
+    expect(await b.handler.handle([cancelCmd()])).toEqual(first);
+  });
+
+  test('AC-5: the replayed CANCEL command adds no second terminal event', async () => {
+    const { b, logs } = await heldAtDrain();
+    await b.handler.handle([cancelCmd()]);
+    logs.releaseDrain();
+    await b.supervisor.idle();
+    const before = b.journal.pendingEvents('j1', 1, 1_000).length;
+    expect((await b.handler.handle([cancelCmd()]))[0].result).toBe('ok');
+    expect(b.journal.pendingEvents('j1', 1, 1_000)).toHaveLength(before);
+    expect(terminalNames(b)).toEqual(['CANCELLED']);
+  });
+
+  test('AC-6: a distinct CANCEL first delivered while the RUN is UPLOADING is refused', async () => {
+    const { b, release } = await heldAtUpload();
+    try {
+      expect(b.journal.getJob('j1', 1)?.state).toBe('UPLOADING');
+      expect(await b.handler.handle([cancelCmd('late')]))
+        .toEqual([{ commandId: 'late', leaseEpoch: 1, result: 'rejected', detail: 'cancel cutoff passed' }]);
+      expect(b.journal.getCommand('late')).toMatchObject({ type: 'CANCEL', result: 'rejected' });
+    } finally {
+      release();
+      await b.supervisor.idle();
+    }
+  });
+
+  test('AC-7: the refused late CANCEL leaves cancelRequestedAt unset and the run finishes on its own verdict', async () => {
+    const { b, release } = await heldAtUpload();
+    expect((await b.handler.handle([cancelCmd('late')]))[0].result).toBe('rejected');
+    expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).toBeNull();
+    release();
+    await b.supervisor.idle();
+    expect(b.journal.getJob('j1', 1)?.state).toBe('COMPLETED');
+    expect(terminalNames(b)).toEqual(['COMPLETED']);
   });
 });
 

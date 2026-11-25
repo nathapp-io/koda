@@ -9,6 +9,8 @@
  */
 import { ref, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { pendingApproval } from '~/lib/approval-requests'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 import type { ThreadEventHandlers } from '~/lib/thread-event-stream'
 import type { ThreadHandoffBody } from '~/lib/thread-handoff-form'
 import type { ChatMessageDto, ThreadApprovalDecision, ThreadDetailDto, ThreadMode } from '~/lib/thread-types'
@@ -47,6 +49,11 @@ export interface ThreadActionResult {
   ok: boolean
   /** Present exactly when `ok` is false; the page toasts `extractApiError(error)`. */
   error?: unknown
+  /**
+   * US-001: the send waits for this approval request and wrote nothing yet. Neither an executed success
+   * nor a transport failure, so the page words it and the composer keeps its draft.
+   */
+  pendingApproval?: string
 }
 
 export interface ThreadController {
@@ -100,16 +107,87 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   let retryTimer: unknown = null
   let started = false
 
+  /**
+   * US-002 (finding 11): the order of the reads against the state they write.
+   *
+   * A read answers from the server as it was when the read started, so a held catch-up GET can resolve
+   * after a newer read or a live text delta already moved the state. Reads are therefore ordered by when
+   * they **started**, not by which response arrives first: a read carries the sequence number it was given
+   * when it started, and the freshest news is the one from the highest number that has landed.
+   *
+   * - `detailReadSeq`: the last detail read started. A detail answer is applied only while no read started
+   *   after it; an older-started answer that arrives late is dropped rather than overwriting a fresher one.
+   * - `transcriptReadSeq` / `newestCommittedRead`: the same ordering for transcript pages, plus
+   *   `transcriptMutationSeq`, which a non-read change (a delta, an optimistic echo, a send result) bumps.
+   *   A page is a stale snapshot when something else changed the transcript after it started — a non-read
+   *   change, or a read that started later and already committed — and a stale page may only add messages,
+   *   never overwrite one the transcript already holds.
+   */
+  let detailReadSeq = 0
+  let transcriptReadSeq = 0
+  let newestCommittedRead = 0
+  let transcriptMutationSeq = 0
+  /**
+   * Bumped by `stop()`. A read still in flight when the page was torn down must not resume its live
+   * machinery (a reopened stream or a restarted poll) once it finishes.
+   */
+  let epoch = 0
+
   const messagesPage = (afterSeq: number) => ({ query: { afterSeq: String(afterSeq), limit: String(MESSAGES_PAGE_SIZE) } })
 
+  /**
+   * US-002 (finding 11): a read the page is not awaiting. Its rejection is handled here instead of escaping
+   * as an unhandled rejection — the transcript keeps the state it had, the polling fallback covers a turn
+   * that is still running, and the next ready frame (a reconnect) catches the page up again.
+   */
+  const inBackground = (run: () => Promise<void>): void => {
+    void run().catch(() => undefined)
+  }
+
+  /**
+   * The one write path for a change the controller makes itself (a delta, the optimistic echo, a send
+   * result). Bumping `transcriptMutationSeq` is what makes every transcript read already in flight stale.
+   */
+  const mutateMessages = (next: ChatMessageDto[]): void => {
+    messages.value = next
+    transcriptMutationSeq += 1
+  }
+
+  /** The one write path for the thread detail (`reloadThread` decides whether an answer still qualifies). */
+  const commitThread = (next: ThreadDetailDto): void => {
+    thread.value = next
+  }
+
   const reloadThread = async (): Promise<void> => {
-    thread.value = await deps.api.get<ThreadDetailDto>(threadPath)
+    const readSeq = ++detailReadSeq
+    const next = await deps.api.get<ThreadDetailDto>(threadPath)
+    // A read that started later holds fresher detail, whether it answered before or after this one: this
+    // answer is older news, and applying it would undo the newer snapshot.
+    if (readSeq !== detailReadSeq) return
+    commitThread(next)
+  }
+
+  /**
+   * One transcript page, plus whether anything newer than it already landed while it was in flight: a
+   * non-read change after it started, or a read that started later and already committed its rows.
+   */
+  const readMessages = async (afterSeq: number): Promise<{ items: ChatMessageDto[]; readSeq: number; stale: boolean }> => {
+    const readSeq = ++transcriptReadSeq
+    const mutatedAt = transcriptMutationSeq
+    const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(afterSeq))
+    return { items, readSeq, stale: transcriptMutationSeq !== mutatedAt || newestCommittedRead > readSeq }
+  }
+
+  /** Commit one page: a stale page adds the rows the transcript does not hold and overwrites none of them. */
+  const applyRead = (items: ChatMessageDto[], readSeq: number, stale: boolean): void => {
+    newestCommittedRead = Math.max(newestCommittedRead, readSeq)
+    messages.value = mergeMessages(messages.value, items, { stale })
   }
 
   /** GET messages after the refetch cursor (`refetchAfterSeq`), merged so optimistic messages survive. */
   const refreshMessages = async (): Promise<void> => {
-    const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(refetchAfterSeq(messages.value)))
-    messages.value = mergeMessages(messages.value, items)
+    const { items, readSeq, stale } = await readMessages(refetchAfterSeq(messages.value))
+    applyRead(items, readSeq, stale)
     syncPolling()
   }
 
@@ -118,11 +196,11 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
    * page returns a full 200 items (at most `MAX_PAGES` pages).
    */
   const load = async (): Promise<void> => {
-    thread.value = await deps.api.get<ThreadDetailDto>(threadPath)
+    await reloadThread()
     let afterSeq = 0
     for (let page = 0; page < MAX_PAGES; page += 1) {
-      const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(afterSeq))
-      messages.value = mergeMessages(messages.value, items)
+      const { items, readSeq, stale } = await readMessages(afterSeq)
+      applyRead(items, readSeq, stale)
       if (items.length < MESSAGES_PAGE_SIZE) break
       afterSeq = Math.max(...items.map(item => item.seq))
     }
@@ -136,8 +214,8 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   const pollOnce = (): void => {
     pollTimer = null
     if (!started || live.value || !isTurnRunning(messages.value)) return
-    void refreshMessages()
-    void reloadThread()
+    inBackground(refreshMessages)
+    inBackground(reloadThread)
     armPoll()
   }
 
@@ -166,25 +244,27 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
       const next = applyDelta(messages.value, event.messageId, event.text)
       if (next === null) {
         // A delta for a message we do not hold: the load raced the stream, refetch the gap.
-        void refreshMessages()
+        inBackground(refreshMessages)
       } else {
-        messages.value = next
+        mutateMessages(next)
       }
     },
     onMessage: () => {
-      void refreshMessages()
+      inBackground(refreshMessages)
     },
     onQuestion: () => {
-      void reloadThread()
+      inBackground(reloadThread)
     },
     onThread: () => {
-      void reloadThread()
+      inBackground(reloadThread)
       // A thread event can mean the session or its job ended (#264), so a running turn also refetches
       // its messages; the refetch cursor starts at the first in-flight one.
-      if (isTurnRunning(messages.value)) void refreshMessages()
+      if (isTurnRunning(messages.value)) inBackground(refreshMessages)
     },
     onResync: () => {
-      void load()
+      // US-002: the stream asks for this at every connection's ready frame, so the page collects what it
+      // missed between its load and its subscription.
+      inBackground(recover)
     },
     onLiveChange: (liveNow) => {
       live.value = liveNow
@@ -192,15 +272,20 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     },
   }
 
+  /**
+   * Ensure the page's live machinery: one stream, and the polling fallback while a turn runs without a
+   * live stream. Idempotent — the catch-up asks again on a page that is already subscribed.
+   */
   const start = (): void => {
-    if (stream !== null) return
     started = true
-    stream = deps.openStream(handlers)
+    if (stream === null) stream = deps.openStream(handlers)
     syncPolling()
   }
 
   const stop = (): void => {
     started = false
+    // A read still in flight finishes after this: its completion must not resume what the teardown closed.
+    epoch += 1
     stream?.close()
     stream = null
     stopPolling()
@@ -210,13 +295,26 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     }
   }
 
+  /**
+   * US-002 (finding 11): the catch-up a ready frame asks for. It reloads the thread detail and the
+   * transcript — the two things a completion published between the page's GET and its subscription would
+   * leave stale — and then confirms the live machinery is in place. A controller torn down while the read
+   * was held stays torn down: nothing reopens its stream or restarts its poll after `stop()`.
+   */
+  const recover = async (): Promise<void> => {
+    const session = epoch
+    await load()
+    if (session !== epoch) return
+    start()
+  }
+
   /** Arm a send-retry through the injected timer; the retry continues once it fires. `stop()` clears it. */
   const wait = (ms: number): Promise<void> => new Promise((resolve) => {
     retryTimer = deps.setTimer(() => { retryTimer = null; resolve() }, ms)
   })
 
   const dropOptimistic = (cid: string): void => {
-    messages.value = messages.value.filter(message => message.id !== `local:${cid}`)
+    mutateMessages(messages.value.filter(message => message.id !== `local:${cid}`))
   }
 
   /**
@@ -224,10 +322,14 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
    * server message on success. A 409 reloads the thread; while it answers `closing` (and under
    * `CLOSING_RETRY_WINDOW_MS` since the first attempt) the same `clientMessageId` is retried after
    * `POLL_INTERVAL_MS`, otherwise the echo is dropped and `{ ok: false, error }` resolved.
+   *
+   * US-001: the route is approval-gated, so a 202 answer carries `ApprovalRequestSummary` instead of the
+   * message. Nothing was written, so the echo goes and the send resolves `{ ok: false, pendingApproval }`
+   * — the caller shows the request id and keeps the draft.
    */
   const send = async (text: string): Promise<ThreadActionResult> => {
     const cid = newClientMessageId()
-    messages.value = [...messages.value, {
+    mutateMessages([...messages.value, {
       id: `local:${cid}`,
       seq: 0,
       jobId: null,
@@ -243,13 +345,19 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
       costUsd: null,
       costSource: null,
       createdAt: new Date(deps.now()).toISOString(),
-    }]
+    }])
     syncPolling()
     const firstAttemptAt = deps.now()
     for (;;) {
       try {
-        const { message } = await deps.api.post<{ message: ChatMessageDto }>(messagesPath, { text, clientMessageId: cid })
-        messages.value = mergeMessages(messages.value, [message])
+        const answer = await deps.api.post<{ message: ChatMessageDto } | ApprovalRequestSummary>(messagesPath, { text, clientMessageId: cid })
+        if (pendingApproval(answer, 'thread.message.send')) {
+          dropOptimistic(cid)
+          syncPolling()
+          return { ok: false, pendingApproval: answer.id }
+        }
+        const { message } = answer
+        mutateMessages(mergeMessages(messages.value, [message]))
         syncPolling()
         return { ok: true }
       } catch (error: unknown) {

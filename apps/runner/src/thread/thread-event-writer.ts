@@ -157,6 +157,12 @@ export class ThreadEventWriter {
 
   /** Raw delta text not yet written, keyed by (turnId, round). */
   private readonly held = new Map<string, HeldDelta>();
+  /**
+   * Review-1125 finding 9: the terminal line (`session_closed` / `session_failed`) has been written, so nothing may
+   * follow it. The seal lives on the writer, not on the run's reference to it: a turn that is still finalizing holds
+   * its own reference, and a cleared field on the run would not stop it.
+   */
+  private sealed = false;
   private written: number;
   private capped = false;
   private lastWakeAt: number | null = null;
@@ -184,6 +190,7 @@ export class ThreadEventWriter {
   }
 
   event(e: ThreadSessionEvent): void {
+    if (this.sealed) return;
     if (typeof e !== 'object' || e === null) {
       // A session iterator that yields junk must not take the job down with it.
       this.onWarn('dropped a malformed session event');
@@ -202,6 +209,7 @@ export class ThreadEventWriter {
   }
 
   started(start: ThreadSessionStart): void {
+    if (this.sealed) return;
     this.releaseAll();
     // `stale` is written only when true: a fresh start keeps the B3b line exactly as it was.
     const stale = start.stale === true ? { stale: true } : {};
@@ -209,31 +217,39 @@ export class ThreadEventWriter {
   }
 
   inputConsumed(messageId: string): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'input_consumed', at: this.now().toISOString(), messageId });
   }
 
   closed(reason: string): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'session_closed', at: this.now().toISOString(), reason });
+    this.sealed = true;
   }
 
   failed(reason: string): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'session_failed', at: this.now().toISOString(), reason });
+    this.sealed = true;
   }
 
   /** A `write_doc` call wrote `bytes` to `path`; the file stays uncommitted until Publish. */
   docWritten(path: string, bytes: number): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'write_doc', at: this.now().toISOString(), path, bytes });
   }
 
   /**
    * A Publish committed (or found nothing to commit): the commit's sha, the paths it took and the ones it skipped.
-   * Returns the line type actually written, since an oversized result is persisted as `publish_failed`.
+   * Returns the line type actually written, since an oversized result is persisted as `publish_failed`. A sealed
+   * stream cannot carry the line at all, so a result that arrives after the terminal marker is `publish_failed`.
    */
   published(result: ThreadPublishedLine): 'published' | 'publish_failed' {
+    if (this.sealed) return 'publish_failed';
     this.releaseAll();
     const line = {
       type: 'published',
@@ -256,24 +272,28 @@ export class ThreadEventWriter {
 
   /** A Publish failed; `reason` is one of the `ThreadPublishFailReason` values the runner produces. */
   publishFailed(reason: string): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'publish_failed', at: this.now().toISOString(), reason });
   }
 
   /** A Discard re-detached the worktree at `tipSha`, the branch tip. */
   discarded(tipSha: string): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'discarded', at: this.now().toISOString(), tipSha });
   }
 
   /** A Discard failed; `reason` is one of the `ThreadDiscardFailReason` values the runner produces. */
   discardFailed(reason: string): void {
+    if (this.sealed) return;
     this.releaseAll();
     this.appendRunner({ type: 'discard_failed', at: this.now().toISOString(), reason });
   }
 
   /** Writes every held delta, so nothing raw is lost when the session ends. */
   flush(): void {
+    if (this.sealed) return;
     const held = this.held.size > 0;
     this.releaseAll();
     if (held) this.paceWake();

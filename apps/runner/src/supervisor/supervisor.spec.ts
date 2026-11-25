@@ -59,13 +59,46 @@ describe('cancel', () => {
     expect(other.journal.getJob('idle', 1)?.cancelRequestedAt).not.toBeNull();
     expect(other.ex.killed).toEqual([]);
   });
-  test('cancelling a finished job is ok and changes nothing', async () => {
+  test('cancelling a finished job is refused and changes nothing (US-006: the cutoff has passed)', async () => {
     const b = build();
     b.add();
     b.journal.updateJob('j1', 1, { state: 'COMPLETED' });
     b.journal.markDone('j1', 1);
-    expect(b.supervisor.cancel('j1', 1)).toBe('ok');
+    expect(b.supervisor.cancel('j1', 1)).toBe('refused');
     expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).toBeNull();
+  });
+
+  test('AC-10: a journal-only RUNNING RUN (restart before readopt) records a fresh CANCEL in the journal', async () => {
+    const b = build();
+    b.add();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    expect(b.supervisor.cancel('j1', 1)).toBe('ok');
+    expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).not.toBeNull();
+    expect(b.journal.getJob('j1', 1)?.state).toBe('RUNNING');        // the durable request is read back by READOPT
+    expect(b.journal.pendingEvents('j1', 1, 10)).toEqual([]);        // nothing is signalled and no event is written
+  });
+
+  test('AC-11: a journal-only UPLOADING or terminal RUN refuses a fresh CANCEL without changing the journal', async () => {
+    for (const state of ['UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED'] as const) {
+      const b = build();
+      b.add();
+      b.journal.updateJob('j1', 1, { state, pid: 4242, pgid: 4242 });
+      expect(b.supervisor.cancel('j1', 1)).toBe('refused');
+      expect(b.journal.getJob('j1', 1)).toMatchObject({ state, cancelRequestedAt: null });
+      expect(b.journal.pendingEvents('j1', 1, 10)).toEqual([]);
+    }
+  });
+
+  test('the cutoff is a RUN rule: a journal-only non-RUN job in UPLOADING still accepts a fresh CANCEL (F1)', async () => {
+    for (const command of ['PLAN', 'AGENT', 'REVIEW', 'THREAD', 'CONFIG_EDIT'] as const) {
+      const b = build();
+      b.add({}, 1, command);
+      b.journal.updateJob('j1', 1, { state: 'UPLOADING', pid: 4242, pgid: 4242 });
+      expect(b.supervisor.cancel('j1', 1)).toBe('ok');
+      expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).not.toBeNull();
+      expect(b.journal.getJob('j1', 1)?.state).toBe('UPLOADING');
+      expect(b.journal.pendingEvents('j1', 1, 10)).toEqual([]);
+    }
   });
 });
 

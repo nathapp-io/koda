@@ -1128,6 +1128,40 @@ describe('resume (readopt)', () => {
     expect(stateNames(b)).toEqual(['COMPLETED']);
     expect(events(b).some((e) => e.type === 'lifecycle')).toBe(false);
   });
+  test('AC-8: a resumed finish of a persisted RUN with an accepted cancellation ends CANCELLED, once', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', pid: 4242, pgid: 4242, cancelRequestedAt: '2026-10-01T00:00:00.000Z' });
+    await b.run.start('finish');
+    expect(stateNames(b)).toEqual(['CANCELLED']);
+    expect(b.uploads).toHaveLength(1);                               // the resumed finish still uploads its bundle
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+  test('AC-9: the same resumed finish without a cancellation ends COMPLETED, once', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', pid: 4242, pgid: 4242 });
+    await b.run.start('finish');
+    expect(stateNames(b)).toEqual(['COMPLETED']);
+    expect(b.uploads).toHaveLength(1);
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+  test('AC-8: a resumed finish from RUNNING reads the persisted cancellation through the upload cutoff', async () => {
+    const b = build();
+    b.logs.holdDrain();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, cancelRequestedAt: '2026-10-01T00:00:00.000Z' });
+    const started = b.run.start('finish');
+    await waitFor(() => b.logs.calls.includes('logs.drain:j1'));
+    expect(b.journal.getJob('j1', 1)?.state).toBe('RUNNING');        // nothing is published while the drain is held
+    b.logs.releaseDrain();
+    await started;
+    expect(stateNames(b)).toEqual(['UPLOADING', 'CANCELLED']);       // one cutoff step, then one terminal event
+  });
+  test.each(['PLAN', 'AGENT', 'REVIEW'] as const)('F1: the UPLOADING cutoff is a RUN rule: a live %s run still accepts a cancel', async (command) => {
+    const b = build(command);
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', pid: 4242, pgid: 4242 });
+    expect(b.run.requestCancel()).toBe(true);
+    expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).not.toBeNull();
+    expect(b.journal.getJob('j1', 1)?.state).toBe('UPLOADING');
+  });
   test('a job whose terminal event was journaled before the crash is only cleaned up', async () => {
     const b = build();
     b.journal.updateJob('j1', 1, { state: 'COMPLETED' });

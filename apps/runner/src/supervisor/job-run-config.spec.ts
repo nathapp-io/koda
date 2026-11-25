@@ -181,6 +181,24 @@ describe('config job cancel and halt', () => {
     await b.run.start('prepare');
     expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
   });
+  test.each([
+    ['ok', 'COMPLETED'],
+    ['no_changes', 'COMPLETED'],
+    ['drift', 'COMPLETED'],
+    ['conflict', 'FAILED'],
+    ['invalid', 'FAILED'],
+    ['push_failed', 'FAILED'],
+    ['pr_failed', 'FAILED'],
+    ['timeout', 'FAILED'],
+  ] as const)('AC-12: a late cancel leaves the authoritative CONFIG result %s as %s with reason = outcome', async (outcome, state) => {
+    const b = build();
+    b.ex.configRun = { kind: 'result', result: { outcome, files: ['.nax/rules/a.md'] }, resultBranch: 'nax-config/j1', resultSha: 'd'.repeat(40) };
+    b.ex.onConfigRun = async () => { b.run.requestCancel(); };
+    await b.run.start('prepare');
+    expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).not.toBeNull();   // the cancel was accepted ...
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', state]);       // ... and the result still decides
+    expect(states(b).at(-1)).toEqual({ to: state, reason: outcome });     // reason is the outcome, never CANCELLED
+  });
   test('a halt during the run reports nothing more', async () => {
     const b = build();
     b.ex.onConfigRun = async () => { b.run.halt(); };

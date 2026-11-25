@@ -1591,6 +1591,23 @@ model FleetJobLog {
   @@index([jobId])
 }
 
+/// US-009 (finding 5): the file cleanup work a repository deletion hands to the retention pass. The delete
+/// cascades away the job, log and artifact rows — the only lookup for the job's stored log prefixes and
+/// bundle keys — so the targets are copied here in the delete's own transaction, before the cascade. There is
+/// no foreign key on purpose: the parents are gone by design, and the record outlives them until every one of
+/// its targets is deleted. `finishedAt` is the deleted job's finish time, so the retention pass still decides
+/// eligibility with its own cutoff; `leaseEpoch` is the highest epoch whose log prefixes are targets.
+model FleetRetiredJobCleanup {
+  id         String   @id @default(cuid())
+  jobId      String   @unique // stable identity of the deleted job; never reused
+  leaseEpoch Int // the highest attempt whose files are targets
+  finishedAt DateTime // the deleted job's finish time; the retention cutoff compares it
+  bundleKeys String[] // the exact storage keys of the deleted job's bundles
+  createdAt  DateTime @default(now())
+
+  @@index([finishedAt, id]) // the retention pass pages by (finishedAt, id)
+}
+
 /// Fleet S2b (d) §1.1: one row per bundle artifact; the ingest queue and its outcome.
 model FleetBundleIngest {
   id            String    @id @default(cuid())

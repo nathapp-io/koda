@@ -2,7 +2,8 @@ import { describe, expect, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
-import { i18nStub, uiStubs } from '../helpers/fleet-harness'
+import { enI18n, i18nStub, uiStubs } from '../helpers/fleet-harness'
+import type { ThreadActionResult } from '~/lib/thread-controller'
 import type { ComposerReason } from '~/lib/thread-types'
 
 /**
@@ -32,11 +33,17 @@ interface ComposerState {
 
 const composerFile = webFile('components', 'fleet', 'threads', 'ThreadComposer.vue')
 
-const mountComposer = (composerState: ComposerState, send: (text: string) => Promise<{ ok: boolean }> = async () => ({ ok: true }), turnRunning = false, toastError = jest.fn()): Mounted =>
+const mountComposer = (
+  composerState: ComposerState,
+  send: (text: string) => Promise<ThreadActionResult> = async () => ({ ok: true }),
+  turnRunning = false,
+  toastError = jest.fn(),
+  i18n: () => { t: (key: string, named?: Record<string, unknown>) => string; te: () => boolean } = () => i18nStub(),
+): Mounted =>
   mountSfc(composerFile, {
     props: { composerState, send, turnRunning },
     components: uiStubs,
-    globals: { useI18n: () => i18nStub(), useAppToast: () => ({ error: toastError }) },
+    globals: { useI18n: i18n, useAppToast: () => ({ error: toastError }) },
   })
 
 const settle = async (): Promise<void> => {
@@ -269,6 +276,60 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     await settle()
 
     expect(app.emitted('stop')).toEqual([[]])
+    app.unmount()
+  })
+})
+describe('US-001 AC-3, AC-8: a send that waits for approval', () => {
+  const REQUEST_ID = 'approval-thread.message.send'
+  const pending = async (): Promise<ThreadActionResult> => ({ ok: false, pendingApproval: REQUEST_ID })
+
+  test('AC-3: the composer shows the returned request id', async () => {
+    const app = mountComposer({ canSend: true, reason: null }, jest.fn(pending), false, jest.fn(), () => enI18n())
+
+    typeText(app, 'hello')
+    pressEnter(app)
+    await settle()
+
+    const note = app.one('[data-testid="thread-composer-pending"]')
+    expect(note).toBeDefined()
+    expect(note ? app.textOf(note) : '').toContain(REQUEST_ID)
+    // Nothing was written, so no refusal or error is shown for it.
+    expect(app.one('[data-testid="thread-composer-error"]')).toBeUndefined()
+    app.unmount()
+  })
+
+  test('AC-8: the draft stays editable and Send is available again', async () => {
+    const send = jest.fn(pending)
+    const app = mountComposer({ canSend: true, reason: null }, send)
+
+    typeText(app, 'hello')
+    pressEnter(app)
+    await settle()
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(textarea(app)?.props['model-value']).toBe('hello')
+    expect(textarea(app)?.props.disabled).toBe(false)
+    expect(app.one('[data-testid="thread-send"]')?.props.disabled).toBe(false)
+    app.unmount()
+  })
+
+  test('the pending note is not left behind by the next executed send', async () => {
+    let answer: ThreadActionResult = { ok: false, pendingApproval: REQUEST_ID }
+    const send = jest.fn(async () => answer)
+    const app = mountComposer({ canSend: true, reason: null }, send)
+
+    typeText(app, 'first')
+    pressEnter(app)
+    await settle()
+    expect(app.one('[data-testid="thread-composer-pending"]')).toBeDefined()
+
+    answer = { ok: true }
+    typeText(app, 'second')
+    pressEnter(app)
+    await settle()
+
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(app.one('[data-testid="thread-composer-pending"]')).toBeUndefined()
     app.unmount()
   })
 })

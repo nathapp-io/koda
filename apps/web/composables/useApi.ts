@@ -19,14 +19,24 @@ interface JsonResponse<T = unknown> {
  * or when $fetch throws on non-2xx HTTP status.
  */
 export class ApiError extends Error {
+  /**
+   * The envelope `ret` — the API's own error code, not the HTTP status (a refused permission is
+   * `40003`, which the filter answers with HTTP 403).
+   */
   public readonly code: number
+  /**
+   * The HTTP status the API answered with, when the failure came off the wire. `code` alone cannot
+   * answer "forbidden or missing" (a 403 is `ret: 40003`), so the status travels with the error.
+   */
+  public readonly status?: number
   public readonly errors?: Record<string, string[]>
 
-  constructor(code: number, message: string, errors?: Record<string, string[]>) {
+  constructor(code: number, message: string, errors?: Record<string, string[]>, status?: number) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.errors = errors
+    this.status = status
   }
 
   /** First non-empty field-level validation error, or the top-level message */
@@ -119,6 +129,33 @@ export function extractErrorStatus(err: unknown): number | undefined {
   return undefined
 }
 
+/**
+ * The envelope `ret` codes that mean "you may not" and "it is not there".
+ *
+ * `@nathapp/nestjs-common` maps `FORBIDDEN` to `ret: 40003` with HTTP 403, and `NOT_FOUND` to
+ * `ret: 404`; `40004` is the mirrored code the rest of this app already checks (`lib/not-found`,
+ * the fleet pages). A caller that must treat both the same — so it never discloses whether a
+ * forbidden row exists — has to look at these *and* the HTTP status, because an error that never
+ * reached the envelope carries only the status.
+ */
+const UNAVAILABLE_CODES: readonly number[] = [403, 40003, 404, 40004]
+
+/**
+ * True when the failure says the resource is unavailable to this caller: refused (403 / `ret`
+ * 40003) or missing (404 / `ret` 404 or 40004).
+ *
+ * Accepts every shape the app actually receives: a raw `$fetch`/Nuxt error (`status`,
+ * `statusCode` or `response.status`), the normalized {@link ApiError} this adapter throws for an
+ * enveloped answer (its `code` is the envelope `ret` and its `status` the HTTP status), and a
+ * `status`-carrying plain error. Pure and exported for unit testing.
+ */
+export function isUnavailableError(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  const e = err as { code?: unknown; statusCode?: unknown; status?: unknown; response?: { status?: unknown } }
+  const candidates = [e.status, e.statusCode, e.response?.status, e.code]
+  return candidates.some(value => typeof value === 'number' && UNAVAILABLE_CODES.includes(value))
+}
+
 /** The first non-empty message a field-keyed error map carries for `field`. */
 function fieldMessage(errors: unknown, field: string): string | undefined {
   if (errors === null || typeof errors !== 'object') return undefined
@@ -169,7 +206,7 @@ export async function blobErrorToApiError(err: unknown): Promise<unknown> {
   if (!(data instanceof Blob)) return err
   try {
     const body = JSON.parse(await data.text()) as JsonResponse | null
-    if (body && typeof body.ret === 'number') return new ApiError(body.ret, body.message || 'Request failed', body.errors)
+    if (body && typeof body.ret === 'number') return new ApiError(body.ret, body.message || 'Request failed', body.errors, extractErrorStatus(err))
   }
   catch {
     // Not a JSON body: surface the original fetch error.
@@ -297,7 +334,9 @@ export const useApi = () => {
       ) {
         const data = (err as { data?: JsonResponse }).data
         if (data && typeof data.ret === 'number') {
-          throw new ApiError(data.ret, data.message || 'Request failed', data.errors)
+          // The envelope carries the API's `ret`, never the HTTP status: keep the status alongside it,
+          // so a caller can still tell a refused (403) answer from a missing (404) one.
+          throw new ApiError(data.ret, data.message || 'Request failed', data.errors, extractErrorStatus(err))
         }
       }
       throw err

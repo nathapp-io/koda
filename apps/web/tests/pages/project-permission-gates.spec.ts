@@ -453,14 +453,21 @@ function linkTo(app: Mounted, to: string): FakeNode | undefined {
   return found[0]
 }
 
-function mountThreadsIndex(over: { project?: readonly string[]; threadsEnabled?: boolean } = {}): Mounted {
+function mountThreadsIndex(over: { project?: readonly string[]; threadsEnabled?: boolean; hasNext?: boolean } = {}): Mounted {
   const get = permissionsApi({ project: over.project ?? [] })
   installPermissionsRuntime(get)
+  // The whole `useThreads` contract (US-004 paging): the page reads `hasNext`/`loadingMore` in its
+  // template and calls `loadMore`, so a fixture missing one of them throws while rendering instead of
+  // exercising the permission gate this spec is about.
   const threadsList = {
     threads: ref([]),
     threadsEnabled: ref(over.threadsEnabled ?? true),
     status: ref<'ACTIVE' | 'ARCHIVED'>('ACTIVE'),
+    current: ref(1),
+    hasNext: ref(over.hasNext ?? false),
+    loadingMore: ref(false),
     load: jest.fn(async () => true),
+    loadMore: jest.fn(async () => undefined),
   }
   return mountSfc(webFile('pages', '[project]', 'threads', 'index.vue'), {
     components: {

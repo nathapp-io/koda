@@ -178,7 +178,13 @@ export class CommandHandler {
     switch (command.type) {
       case 'ASSIGN': return this.assign(command);
       case 'CANCEL': {
-        const outcome: Outcome = supervisor.cancel(command.jobId, command.leaseEpoch) === 'ok' ? { result: 'ok' } : { result: 'rejected', detail: 'does not hold job' };
+        // Finding 8 (US-006): the supervisor's decision says whether the cancel was accepted, or refused because the
+        // job has passed the upload cutoff — a refused cancellation is never acked ok for a job that then finishes on
+        // its own verdict. A replay is answered from the record above, before this path.
+        const decision = supervisor.cancel(command.jobId, command.leaseEpoch);
+        const outcome: Outcome = decision === 'ok'
+          ? { result: 'ok' }
+          : { result: 'rejected', detail: decision === 'refused' ? 'cancel cutoff passed' : 'does not hold job' };
         this.record(command, outcome);
         return outcome;
       }

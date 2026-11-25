@@ -90,6 +90,11 @@ export class BundleService {
         summary: `bundle ${previous ? 'replaced' : 'uploaded'} at epoch ${leaseEpoch}`,
       });
       return { ok: true as const, replacedKey: previous?.storageKey ?? null };
+    }).catch(async (error: unknown) => {
+      // The transaction may have committed even though its acknowledgement was lost.
+      // Leave its scope before deciding whether this attempt is an orphan.
+      await this.reconcileAttempt(u.jobId, leaseEpoch, key);
+      throw error;
     });
     if (!recorded.ok) {
       await this.store.delete(key); // only this attempt's file; the recorded bundle is untouched
@@ -118,6 +123,32 @@ export class BundleService {
       }
     }
     return { jobId: u.jobId, leaseEpoch, sizeBytes: String(stored.sizeBytes), sha256: stored.sha256 };
+  }
+
+  /** Request-time recovery only: never delete a committed or uncertain attempt. */
+  private async reconcileAttempt(jobId: string, leaseEpoch: number, key: string): Promise<void> {
+    let referenced: boolean;
+    try {
+      referenced = await this.txManager.run(async () => {
+        // The primary's job lock serializes this read behind any still-running COMMIT.
+        // READ COMMITTED takes the pointer snapshot after the lock wait, not before it.
+        await this.repo.lockById(jobId);
+        const artifact = await this.repo.findArtifact(jobId, 'bundle', leaseEpoch);
+        return artifact?.storageKey === key;
+      }, { propagation: 'requiresNew', isolationLevel: 'ReadCommitted' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Bundle reconciliation deferred for ${key} (job ${jobId}, epoch ${leaseEpoch}): verification failed; bytes retained for recovery: ${message}`);
+      return;
+    }
+    if (referenced) return;
+    // Attempt keys are never reused. A concurrent retry cannot claim this confirmed orphan.
+    try {
+      await this.store.delete(key);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Bundle reconciliation deferred for ${key} (job ${jobId}, epoch ${leaseEpoch}): orphan deletion failed; retry cleanup: ${message}`);
+    }
   }
 
   async download(projectId: string, jobId: string): Promise<{ stream: Readable; leaseEpoch: number; sizeBytes: bigint }> {

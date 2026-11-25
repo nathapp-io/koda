@@ -200,6 +200,30 @@ describe('ThreadEventWriter (US-007)', () => {
     expect({ bytes: (await readFile(setup.path)).byteLength, caps }).toEqual({ bytes: 4200, caps: 1 });
   });
 
+  test('review-1125 US-007 AC-6: a sealed writer refuses every late write a retained reference can make', async () => {
+    const setup = await makeWriter();
+    if (!setup) return;
+    setup.writer.event(textEvent('transcript before the end'));
+    setup.writer.closed('idle');
+    const sealedLines = await readLines(setup.path);
+    const sealedBytes = (await readFile(setup.path)).byteLength;
+    expect(sealedLines.at(-1)).toMatchObject({ type: 'session_closed', reason: 'idle' });
+    // A retained reference: late events, a late flush, a late callback and a second end all write nothing.
+    setup.writer.event(textEvent('late text'));
+    setup.writer.event({ type: 'turn_end', ...base, round: 1, output: 'late output' });
+    setup.writer.flush();
+    setup.writer.docWritten('docs/late.md', 10);
+    setup.writer.started({ resumed: true, backend: { kind: 'native' }, skillShas: [] });
+    setup.writer.inputConsumed('message-late');
+    setup.writer.discarded('f'.repeat(40));
+    setup.writer.closed('closed');
+    setup.writer.failed('session_error');
+    // A publication that could not be written is reported as one, never as a written line.
+    expect(setup.writer.published({ sha: 'a'.repeat(40), paths: [], ignored: [], specPresent: false })).toBe('publish_failed');
+    expect((await readFile(setup.path)).byteLength).toBe(sealedBytes);
+    expect(await readLines(setup.path)).toEqual(sealedLines);
+  });
+
   test('US-007 AC-15: always writes a runner close line after the session cap', async () => {
     const path = join(testRoot, crypto.randomUUID());
     await writeFile(path, 'x'.repeat(4200), { mode: 0o600 });

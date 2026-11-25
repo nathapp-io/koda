@@ -1,6 +1,6 @@
 import { isConfigKind, isThreadKind, type FleetCommandOut, type ThreadCommandType } from '@nathapp/fleet-protocol';
 import { isFinalStatus, type StatusView } from '../verdict/status-view';
-import { JobRun, type JobRunDeps, type RunStart } from './job-run';
+import { canAcceptCancel, JobRun, type JobRunDeps, type RunStart } from './job-run';
 import { JobEvents } from './job-events';
 import { killIfOurs } from './kill-if-ours';
 import { isTerminalState } from './transitions';
@@ -15,6 +15,13 @@ export interface SupervisorDeps extends JobRunDeps {
 }
 
 export type ReadoptResult = { result: 'ok' | 'rejected'; detail?: string };
+
+/**
+ * Finding 8 (US-006): what a CANCEL delivery decided. `refused` means the job has passed the cancellation cutoff
+ * (it is UPLOADING or terminal), so the ack reports a rejection instead of an ok for a run that finishes on its own
+ * verdict. `unknown` stays the "this runner holds no such job" answer.
+ */
+export type CancelDecision = 'ok' | 'unknown' | 'refused';
 
 /**
  * B2: handed the outcome INSIDE the journal transaction that finalizes a rejected row, so the row's `doneAt` and the
@@ -152,16 +159,21 @@ export class Supervisor {
     return run.command(command.type as ThreadCommandType, command.payload);
   }
 
-  cancel(jobId: string, leaseEpoch: number): 'ok' | 'unknown' {
+  cancel(jobId: string, leaseEpoch: number): CancelDecision {
     const run = this.runs.get(this.key(jobId, leaseEpoch));
     if (run) {
-      run.requestCancel();
-      return 'ok';
+      // The run owns the decision: a JobRun refuses once its finish path has committed the upload cutoff, a thread
+      // session run keeps its own rule (US-007).
+      return run.requestCancel() ? 'ok' : 'refused';
     }
     const row = this.deps.journal.getJob(jobId, leaseEpoch);
     if (!row) return 'unknown';
-    // No run yet (the daemon just restarted): record the cancel; READOPT validates the process before anything is signalled.
-    if (!isTerminalState(row.state) && row.cancelRequestedAt === null) {
+    // No run yet (the daemon just restarted): record the cancel; READOPT validates the process before anything is
+    // signalled. Finding 8 (US-006): a RUN past its upload cutoff (UPLOADING, terminal) refuses without mutating the
+    // journal — it is turned into CANCELLED server-side only when the cancellation takes effect. No other command kind
+    // is cut off; a terminal row of any kind refuses.
+    if (!canAcceptCancel(row)) return 'refused';
+    if (row.cancelRequestedAt === null) {
       this.deps.journal.updateJob(jobId, leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
     }
     return 'ok';

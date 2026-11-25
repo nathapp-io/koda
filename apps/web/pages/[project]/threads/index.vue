@@ -13,6 +13,7 @@ const { permissions } = useProjectPermissions(slug)
 const canCreate = computed(() => permissions.value.has('thread.create') && threadsList.threadsEnabled.value)
 const pending = ref(true)
 const loadFailed = ref(false)
+const loadMoreFailed = ref(false)
 
 /**
  * Bumped by every `loadPage()`. Only the newest read may settle `pending` or `loadFailed`: an
@@ -25,6 +26,7 @@ async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value
   const mine = ++pageLoad
   pending.value = true
   loadFailed.value = false
+  loadMoreFailed.value = false
   try {
     // false when a newer selection overtook the thread read: its status is not the one on screen.
     const [applied] = await Promise.all([threadsList.load(status), members.load()])
@@ -37,6 +39,15 @@ async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value
     return false
   } finally {
     if (mine === pageLoad) pending.value = false
+  }
+}
+
+async function loadMore(): Promise<void> {
+  loadMoreFailed.value = false
+  try {
+    await threadsList.loadMore()
+  } catch {
+    loadMoreFailed.value = true
   }
 }
 
@@ -81,6 +92,14 @@ onMounted(() => {
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed" @retry="loadPage()" />
-    <FleetThreadsThreadListTable v-else :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="members.nameOf" :slug="slug" />
+    <template v-else>
+      <FleetThreadsThreadListTable :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="members.nameOf" :slug="slug" />
+      <div v-if="threadsList.hasNext.value || loadMoreFailed" class="flex flex-col items-center gap-2">
+        <p v-if="loadMoreFailed" class="text-sm text-muted-foreground" role="alert">{{ t('fleet.threads.list.loadMoreFailed') }}</p>
+        <Button v-if="threadsList.hasNext.value" variant="outline" data-testid="threads-load-more" :disabled="threadsList.loadingMore.value" @click="loadMore">
+          {{ t('fleet.threads.list.loadMore') }}
+        </Button>
+      </div>
+    </template>
   </div>
 </template>

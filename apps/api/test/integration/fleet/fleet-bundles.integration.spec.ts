@@ -5,7 +5,11 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { createHash } from 'crypto';
-import { mkdtempSync, readdirSync } from 'fs';
+import { mkdtempSync, readdirSync, rmSync } from 'fs';
+import { readFile } from 'fs/promises';
+import { TRANSACTION_MANAGER, type ITransactionManager, type TransactionRunOptions } from '@nathapp/nestjs-data';
+import { ARTIFACT_STORE, type ArtifactStore } from '../../../src/fleet/artifacts/artifact-store';
+import { FLEET_JOB_REPOSITORY, type IFleetJobRepository } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
@@ -34,6 +38,28 @@ describeIntegration('fleet bundles (PG)', () => {
   let world: FleetHttpWorld;
   let runner: { runnerId: string; apiKey: string };
   const saved: Record<string, string | undefined> = {};
+  let artifactDir: string;
+
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  };
+  const within = async <T>(promise: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([promise, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('bundle interleaving timed out')), 4_000);
+      })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const directUpload = (jobId: string, body: Buffer) =>
+    withTestActor({ type: 'RUNNER', id: runner.runnerId }, () => app.get(BundleService).upload({
+      runnerId: runner.runnerId, jobId, leaseEpochRaw: '1', sha256Header: sha(body),
+      contentType: 'application/gzip', contentLength: String(body.length), body: Readable.from([body]),
+    }));
 
   const job = (feature: string, state: string, leaseEpoch = 1) => prisma.fleetJob.create({
     data: {
@@ -51,7 +77,8 @@ describeIntegration('fleet bundles (PG)', () => {
 
   beforeAll(async () => {
     for (const k of ENV) saved[k] = process.env[k];
-    process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-bundles-'));
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-bundles-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     process.env.FLEET_BUNDLE_MAX_BYTES = '4096';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
@@ -62,6 +89,7 @@ describeIntegration('fleet bundles (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+    rmSync(artifactDir, { recursive: true, force: true });
     for (const k of ENV) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
@@ -151,6 +179,164 @@ describeIntegration('fleet bundles (PG)', () => {
     expect(await prisma.fleetActivity.count({ where: { jobId: j.id, action: 'job.bundle_uploaded' } })).toBe(1);
     expect(readdirSync(join(process.env.FLEET_ARTIFACT_DIR as string, 'jobs', j.id, '1'))).toEqual([prior.storageKey.split('/').pop()]);
     expect((await download(j.id, 'dev').expect(200)).body).toEqual(good);
+  });
+
+  it.each([
+    'AC-1: removes a replacement attempt after pre-record rollback',
+    'AC-2: propagates the original pre-record transaction error',
+    'AC-3: preserves the previous row and readable bytes after rollback',
+  ])('%s', async (criterion) => {
+    const j = await job(criterion.slice(0, 4), 'UPLOADING');
+    const good = Buffer.from('previous good bundle');
+    await upload(j.id, good).expect(201);
+    const prior = await prisma.fleetJobArtifact.findFirstOrThrow({ where: { jobId: j.id } });
+    const repo = app.get<IFleetJobRepository>(FLEET_JOB_REPOSITORY);
+    const original = new Error('metadata failed before recording');
+    const fault = vi.spyOn(repo, 'upsertArtifact').mockRejectedValueOnce(original);
+    const reads = vi.spyOn(repo, 'findArtifact');
+    try {
+      await expect(directUpload(j.id, Buffer.from('replacement bytes'))).rejects.toBe(original);
+      // A new read after rollback, not the old transaction's view of the prior pointer.
+      expect(reads).toHaveBeenCalledTimes(2);
+      expect(readdirSync(join(artifactDir, 'jobs', j.id, '1'))).toEqual([prior.storageKey.split('/').pop()]);
+      expect(await prisma.fleetJobArtifact.findFirstOrThrow({ where: { jobId: j.id } })).toEqual(prior);
+      expect(await readFile(join(artifactDir, prior.storageKey))).toEqual(good);
+      expect((await download(j.id, 'dev').expect(200)).body).toEqual(good);
+    } finally {
+      fault.mockRestore();
+      reads.mockRestore();
+    }
+  });
+
+  it.each([
+    'AC-4: verification waits on the recording connection with bytes present',
+    'AC-5: preserves the original error after a lost-ack commit',
+    'AC-6: serves the committed bundle after a lost-ack commit',
+  ])('%s', async (criterion) => {
+    const j = await job(criterion.slice(0, 4), 'UPLOADING');
+    const body = Buffer.from('committed despite lost acknowledgement');
+    const manager = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+    const run = manager.run.bind(manager);
+    const recorded = deferred();
+    const release = deferred();
+    const verifying = deferred();
+    const original = new Error('commit acknowledgement lost');
+    let recordingPid = 0;
+    let verificationPid = 0;
+    let commit: Promise<unknown> | undefined;
+    let calls = 0;
+    const fault = vi.spyOn(manager, 'run').mockImplementation(async <T>(fn: () => Promise<T>, options?: TransactionRunOptions): Promise<T> => {
+      const call = ++calls;
+      if (call === 2) {
+        // Leave the caller's transaction scope while its recording connection still holds the lock.
+        // This models a transport failure before the server's COMMIT acknowledgement arrives.
+        commit = run(async () => {
+          const result = await fn();
+          recordingPid = (await prisma.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`)[0].pid;
+          recorded.resolve();
+          await release.promise;
+          return result;
+        }, { timeout: 15_000 });
+        void commit.catch(() => recorded.resolve());
+        await recorded.promise;
+        throw original;
+      }
+      if (call === 3) {
+        return run(async () => {
+          verificationPid = (await prisma.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`)[0].pid;
+          verifying.resolve();
+          return fn();
+        }, options);
+      }
+      return run(fn, options);
+    });
+    let settled = false;
+    const result = directUpload(j.id, body).then(() => null, (error: unknown) => error)
+      .finally(() => { settled = true; });
+    try {
+      await within(verifying.promise);
+      expect(verificationPid).not.toBe(recordingPid);
+      // The observer is outside both transactions; identify the exact lock waiter and blocker.
+      let waiters: Array<{ pid: number; wait: string; query: string; blockers: number[] }> = [];
+      const deadline = Date.now() + 3_000;
+      do {
+        waiters = await prisma.$queryRaw`
+          SELECT pid, wait_event_type AS wait, query, pg_blocking_pids(pid) AS blockers
+          FROM pg_stat_activity WHERE pid = ${verificationPid}
+          AND ${recordingPid} = ANY(pg_blocking_pids(pid))`;
+        if (waiters.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(waiters).toHaveLength(1);
+      expect(waiters[0]).toMatchObject({ pid: verificationPid, wait: 'Lock', blockers: [recordingPid] });
+      expect(waiters[0].query).toMatch(/FleetJob.*FOR UPDATE/);
+      expect(settled).toBe(false);
+      const files = readdirSync(join(artifactDir, 'jobs', j.id, '1'));
+      expect(files).toHaveLength(1);
+      expect(await readFile(join(artifactDir, 'jobs', j.id, '1', files[0]))).toEqual(body);
+      // The pointer is not visible to a primary observer until we let the recording tx commit.
+      expect(await prisma.fleetJobArtifact.count({ where: { jobId: j.id } })).toBe(0);
+      release.resolve();
+      await commit;
+      expect(await result).toBe(original);
+      const pointer = await prisma.fleetJobArtifact.findFirstOrThrow({ where: { jobId: j.id } });
+      expect(pointer.storageKey).toBe(`jobs/${j.id}/1/${files[0]}`);
+      expect(await readFile(join(artifactDir, pointer.storageKey))).toEqual(body);
+      expect((await download(j.id, 'dev').expect(200)).body).toEqual(body);
+    } finally {
+      release.resolve();
+      try {
+        await commit;
+        await result;
+      } finally {
+        fault.mockRestore();
+      }
+    }
+  });
+
+  it.each([
+    'AC-11: retries with a new durable key and readable bytes',
+    'AC-12: delayed failed-attempt cleanup cannot delete the successful retry key',
+  ])('%s', async (criterion) => {
+    const j = await job(criterion.slice(0, 5), 'UPLOADING');
+    const repo = app.get<IFleetJobRepository>(FLEET_JOB_REPOSITORY);
+    const store = app.get<ArtifactStore>(ARTIFACT_STORE);
+    const remove = store.delete.bind(store);
+    const deleting = deferred();
+    const release = deferred();
+    let failedKey = '';
+    const original = new Error('first attempt metadata failure');
+    const fault = vi.spyOn(repo, 'upsertArtifact').mockRejectedValueOnce(original);
+    const cleanup = vi.spyOn(store, 'delete').mockImplementation(async (key) => {
+      if (!failedKey) {
+        failedKey = key;
+        deleting.resolve();
+        await release.promise;
+      }
+      await remove(key);
+    });
+    const failed = directUpload(j.id, Buffer.from('failed bytes')).then(() => null, (error: unknown) => error);
+    try {
+      await within(deleting.promise);
+      // Retry while reconciliation's deletion of its own orphan is paused.
+      const body = Buffer.from('successful retry bytes');
+      await upload(j.id, body).expect(201);
+      const pointer = await prisma.fleetJobArtifact.findFirstOrThrow({ where: { jobId: j.id } });
+      expect(pointer.storageKey).not.toBe(failedKey);
+      expect(pointer.sha256).toBe(sha(body));
+      expect(await readFile(join(artifactDir, pointer.storageKey))).toEqual(body);
+      release.resolve();
+      expect(await failed).toBe(original);
+      expect(cleanup).toHaveBeenCalledExactlyOnceWith(failedKey);
+      expect(await store.stat(failedKey)).toBeNull();
+      expect(await readFile(join(artifactDir, pointer.storageKey))).toEqual(body);
+      expect((await download(j.id, 'dev').expect(200)).body).toEqual(body);
+    } finally {
+      release.resolve();
+      await failed;
+      fault.mockRestore();
+      cleanup.mockRestore();
+    }
   });
 
   it('enqueues ingest in the upload transaction; a re-upload resets the same row (S2b §2.1, Review Focus 1)', async () => {

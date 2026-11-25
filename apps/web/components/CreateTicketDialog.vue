@@ -78,6 +78,7 @@ import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { apiPath } from '~/lib/api-path'
+import { pendingApproval } from '~/lib/approval-requests'
 
 const props = defineProps<{
   open: boolean
@@ -131,7 +132,13 @@ const { $api } = useApi()
 
 const onSubmit = handleSubmit(async (formValues) => {
   try {
-    await $api.post(apiPath`/projects/${props.projectSlug}/tickets`, formValues as Record<string, unknown>)
+    const answer = await $api.post<unknown>(apiPath`/projects/${props.projectSlug}/tickets`, formValues as Record<string, unknown>)
+    // US-001: the route is approval-gated, so a 202 answers the approval request instead of the ticket.
+    // Nothing was created: name the request and keep the dialog open with what the user typed.
+    if (pendingApproval(answer, 'ticket.create')) {
+      toast.success(t('tickets.toast.createPendingApproval', { id: answer.id }))
+      return
+    }
     toast.success(t('tickets.toast.created'))
     emit('created')
     emit('update:open', false)

@@ -1,6 +1,10 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { ref } from 'vue'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 
 const webDir = join(__dirname, '../..')
 const dialogPath = join(webDir, 'components', 'CreateTicketDialog.vue')
@@ -477,5 +481,126 @@ describe('US-004 AC2: CreateTicketDialog onSubmit catch uses extractApiError', (
       source.includes('extractApiError(') &&
       source.includes('toast.error(')
     expect(hasExtractBeforeToast).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-001 — the create route is approval-gated: a 202 answer is not a created ticket
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The body `ApprovalPendingFilter` answers an approval-gated create with (HTTP 202), already unwrapped by
+ * `useApi`: the real `ApprovalRequestSummaryDto` shape, not a marker made up for the test.
+ */
+const pendingCreate = (id = 'approval-ticket.create'): ApprovalRequestSummary => ({
+  id,
+  permissionKey: 'ticket.create',
+  projectId: 'p1',
+  actorType: 'USER',
+  actorId: 'u1',
+  onBehalfOfType: null,
+  onBehalfOfId: null,
+  origin: 'rest',
+  redeem: false,
+  requiredMode: 'human',
+  status: 'pending',
+  satisfiedBy: null,
+  approverType: null,
+  approverId: null,
+  expiresAt: '2026-11-25T00:10:00.000Z',
+  decidedAt: null,
+  settledAt: null,
+  createdAt: '2026-11-25T00:00:00.000Z',
+})
+
+/** The created ticket the same route answers once policy lets the write through (HTTP 201). */
+const createdTicket = { id: 'ticket-1', ref: 'REVIEW-1', title: 'Proof ticket', type: 'BUG', priority: 'MEDIUM', status: 'CREATED' }
+
+/**
+ * Mounts the real dialog with valid form values (`useForm` is the only double, because the harness cannot
+ * drive vee-validate's field state) and returns a submit that runs the component's own handler.
+ */
+function mountDialog(answer: () => Promise<unknown>) {
+  const toasts = toastRecorder()
+  const post = jest.fn(answer)
+  const resetForm = jest.fn()
+  const app = mountSfc(webFile('components', 'CreateTicketDialog.vue'), {
+    props: { open: true, projectSlug: 'review' },
+    components: uiStubs,
+    globals: {
+      useApi: () => ({ $api: { post } }),
+      useI18n: () => enI18n(),
+      useAppToast: () => toasts,
+    },
+    alias: {
+      '~/components/MarkdownEditor.vue': { __esModule: true, default: { name: 'MarkdownEditorStub', template: '<div data-stub="markdown-editor" />' } },
+      'vee-validate': {
+        useForm: () => ({
+          handleSubmit: (run: (values: unknown) => Promise<void>) => () => run({ title: 'Proof ticket', type: 'BUG', priority: 'MEDIUM' }),
+          isSubmitting: ref(false),
+          resetForm,
+        }),
+      },
+    },
+  })
+  const submit = async (): Promise<void> => {
+    const form = app.one('form')
+    if (form === undefined) throw new Error('the dialog rendered no form')
+    await (form.props.onSubmit as () => Promise<void>)()
+    await Promise.resolve()
+  }
+  return { app, post, toasts, resetForm, submit }
+}
+
+describe('US-001 AC-1, AC-4, AC-5, AC-6: a create that waits for approval', () => {
+  test('AC-1: the pending feedback names the returned request id', async () => {
+    const m = mountDialog(async () => pendingCreate())
+    await m.submit()
+
+    expect(m.post).toHaveBeenCalledTimes(1)
+    expect(m.toasts.successes).toHaveLength(1)
+    expect(m.toasts.successes[0]).toContain('approval-ticket.create')
+    expect(m.toasts.errors).toEqual([])
+    m.app.unmount()
+  })
+
+  test('AC-4: the dialog stays open with its populated form', async () => {
+    const m = mountDialog(async () => pendingCreate())
+    await m.submit()
+
+    // No close request and no form reset: the ticket was not created, so the input is not thrown away.
+    expect(m.app.emitted('update:open')).toEqual([])
+    expect(m.resetForm).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('AC-5: no created event is emitted', async () => {
+    const m = mountDialog(async () => pendingCreate())
+    await m.submit()
+
+    expect(m.app.emitted('created')).toEqual([])
+    m.app.unmount()
+  })
+
+  test('AC-6: the created-ticket success toast is not among the toasts', async () => {
+    const m = mountDialog(async () => pendingCreate())
+    await m.submit()
+
+    expect(m.toasts.successes).not.toContain('Ticket created successfully')
+    m.app.unmount()
+  })
+})
+
+describe('US-001 AC-11: the executed create answer still creates the ticket', () => {
+  test('AC-11: an executed 201 response emits created and closes the dialog', async () => {
+    const m = mountDialog(async () => createdTicket)
+    await m.submit()
+
+    expect(m.app.emitted('created')).toEqual([[]])
+    expect(m.app.emitted('update:open')).toEqual([[false]])
+    expect(m.toasts.successes).toEqual(['Ticket created successfully'])
+    expect(m.toasts.errors).toEqual([])
+    expect(m.resetForm).toHaveBeenCalledTimes(1)
+    m.app.unmount()
   })
 })

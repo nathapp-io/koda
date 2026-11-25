@@ -669,3 +669,167 @@ describe('B1: the API locale resolves with and without a component instance', ()
     expect((options?.headers ?? {}) as Record<string, string>).toEqual({})
   })
 })
+
+/**
+ * US-001 AC-14: three approval-gated writes now read the `ApprovalRequestSummary` a 202 carries, so the
+ * request/response path must stay status-agnostic — another route answers 202 with `{ queued: true }` and
+ * nothing else in the shape of an approval request. This pins the adapter's part of that contract.
+ */
+describe('US-001 AC-14: a 202 is delivered whatever its body is', () => {
+  const g = globalThis as Record<string, unknown>
+
+  /**
+   * ofetch's contract in one function: a 2xx response resolves with its parsed body, a non-2xx throws an
+   * error carrying `status` and `data`. The `Response` is real, so the status under test is the wire one.
+   */
+  function fetchAnswering(status: number, body: unknown) {
+    return jest.fn(async () => {
+      const response = new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+      if (!response.ok) {
+        throw Object.assign(new Error(response.statusText), { status: response.status, data: body })
+      }
+      return body
+    })
+  }
+
+  /** The queue acknowledgement the knowledge reindex route answers with (HTTP 202). */
+  const QUEUED = { queued: true }
+
+  /** The other 202 body: what the approval filter serializes for a gated write. */
+  const APPROVAL_SUMMARY = {
+    id: 'approval-ticket.create',
+    permissionKey: 'ticket.create',
+    projectId: 'p1',
+    actorType: 'USER',
+    actorId: 'u1',
+    onBehalfOfType: null,
+    onBehalfOfId: null,
+    origin: 'rest',
+    redeem: false,
+    requiredMode: 'human',
+    status: 'pending',
+    satisfiedBy: null,
+    approverType: null,
+    approverId: null,
+    expiresAt: '2026-11-25T00:10:00.000Z',
+    decidedAt: null,
+    settledAt: null,
+    createdAt: '2026-11-25T00:00:00.000Z',
+  }
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    delete g.$fetch
+    delete g.useNuxtApp
+    delete g.useRuntimeConfig
+  })
+
+  test('AC-14: a queued-reindex 202 still delivers { queued: true } to its caller', async () => {
+    g.$fetch = fetchAnswering(202, { ret: 0, data: QUEUED })
+    const mod = await import(`${composablePath}`)
+
+    await expect(mod.useApi().$api.post('/projects/web/knowledge/repos/r1/reindex')).resolves.toEqual({ queued: true })
+  })
+
+  test('AC-14 (control): the same 202 carrying an approval summary arrives as that summary, unwrapped', async () => {
+    g.$fetch = fetchAnswering(202, { ret: 0, data: APPROVAL_SUMMARY })
+    const mod = await import(`${composablePath}`)
+
+    await expect(mod.useApi().$api.post('/projects/web/tickets', { title: 'Proof ticket' })).resolves.toEqual(APPROVAL_SUMMARY)
+  })
+})
+
+/**
+ * US-003 branch fix B2: the classifier that decides "unavailable" reads the errors this adapter actually
+ * throws. An enveloped failure is an `ApiError` whose `code` is the API's `ret` (a refused permission is
+ * `40003`, answered with HTTP 403), so the HTTP status has to travel with it — a 403 and a 404 must reach
+ * the same presentation, and neither may be told apart from a retryable 503.
+ */
+describe('US-003 B2: a failed request keeps both the envelope code and the HTTP status', () => {
+  const g = globalThis as Record<string, unknown>
+
+  /** ofetch's contract: a non-2xx throws an error carrying `status` and the parsed body under `data`. */
+  function fetchAnswering(status: number, body: unknown) {
+    return jest.fn(async () => {
+      const response = new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+      if (!response.ok) throw Object.assign(new Error(response.statusText), { status: response.status, data: body })
+      return body
+    })
+  }
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    delete g.$fetch
+    delete g.useNuxtApp
+    delete g.useRuntimeConfig
+  })
+
+  test('an enveloped 403 (ret 40003) is an unavailable ApiError carrying status 403', async () => {
+    g.$fetch = fetchAnswering(403, { ret: 40003, message: 'permissions' })
+    const mod = await import(`${composablePath}`)
+
+    const error = await mod.useApi().$api.get('/projects/web/threads/th1').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(mod.ApiError)
+    expect(error).toMatchObject({ code: 40003, status: 403 })
+    expect(mod.isUnavailableError(error)).toBe(true)
+  })
+
+  test('an enveloped 404 (ret 404) is an unavailable ApiError carrying status 404', async () => {
+    g.$fetch = fetchAnswering(404, { ret: 404, message: 'threads.notFound' })
+    const mod = await import(`${composablePath}`)
+
+    const error = await mod.useApi().$api.get('/projects/web/threads/th1').catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 404, status: 404 })
+    expect(mod.isUnavailableError(error)).toBe(true)
+  })
+
+  test('an enveloped 503 stays retryable, not unavailable', async () => {
+    g.$fetch = fetchAnswering(503, { ret: 50000, message: 'downstream down' })
+    const mod = await import(`${composablePath}`)
+
+    const error = await mod.useApi().$api.get('/projects/web/threads/th1').catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 50000, status: 503 })
+    expect(mod.isUnavailableError(error)).toBe(false)
+  })
+})
+
+describe('US-003 B2: isUnavailableError recognizes every shape a caller receives', () => {
+  test('forbidden and missing envelope codes count, whatever their HTTP status', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.isUnavailableError(new mod.ApiError(40003, 'permissions'))).toBe(true)
+    expect(mod.isUnavailableError(new mod.ApiError(404, 'threads.notFound'))).toBe(true)
+    expect(mod.isUnavailableError(new mod.ApiError(40004, 'projects'))).toBe(true)
+  })
+
+  test('a raw fetch failure is read from status, statusCode or response.status', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.isUnavailableError({ status: 403 })).toBe(true)
+    expect(mod.isUnavailableError({ statusCode: 404 })).toBe(true)
+    expect(mod.isUnavailableError({ response: { status: 403 } })).toBe(true)
+  })
+
+  test('anything else is not unavailable', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.isUnavailableError(new mod.ApiError(503, 'threads.unavailable'))).toBe(false)
+    expect(mod.isUnavailableError({ status: 503 })).toBe(false)
+    expect(mod.isUnavailableError({ status: '403' })).toBe(false)
+    expect(mod.isUnavailableError(new Error('boom'))).toBe(false)
+    expect(mod.isUnavailableError(null)).toBe(false)
+    expect(mod.isUnavailableError('403')).toBe(false)
+  })
+})

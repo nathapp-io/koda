@@ -21,18 +21,38 @@ export function applyDelta(messages: readonly ChatMessageDto[], messageId: strin
   return messages.map((message, i) => (i === index ? { ...message, content: message.content + text } : message))
 }
 
+export interface MergeMessagesOptions {
+  /**
+   * US-002: the page is a snapshot read that started before the transcript last changed — a catch-up GET
+   * held while a newer read or a live delta landed, say. It may add messages the transcript does not hold
+   * yet, but it never rewrites one it does: the held copy already carries the newer news.
+   */
+  stale?: boolean
+}
+
 /**
  * Union by `id`; `incoming` wins, except that a message `streaming` on both sides keeps the longer
  * `content` (an older in-flight GET never shortens streamed text). Real messages sort ascending by
  * `seq`; an optimistic entry is dropped when `incoming` holds a message with its `clientMessageId`,
  * and remaining optimistic entries sort after every real message.
+ *
+ * A `stale` page (US-002) keeps every message the transcript already holds and only contributes the
+ * ones it does not know, so a snapshot taken before a newer read or a text delta cannot undo either.
  */
-export function mergeMessages(current: readonly ChatMessageDto[], incoming: readonly ChatMessageDto[]): ChatMessageDto[] {
+export function mergeMessages(
+  current: readonly ChatMessageDto[],
+  incoming: readonly ChatMessageDto[],
+  options: MergeMessagesOptions = {},
+): ChatMessageDto[] {
   const inComingClientIds = new Set(incoming.map(message => message.clientMessageId).filter((id): id is string => id !== null))
   const byId = new Map<string, ChatMessageDto>()
   for (const message of incoming) byId.set(message.id, message)
   for (const message of current) {
-    if (byId.has(message.id)) continue
+    if (byId.has(message.id)) {
+      // The transcript already holds this sequence: a stale page's copy of it is older than what is held.
+      if (options.stale) byId.set(message.id, message)
+      continue
+    }
     if (isOptimistic(message) && message.clientMessageId !== null && inComingClientIds.has(message.clientMessageId)) continue
     byId.set(message.id, message)
   }
@@ -77,13 +97,12 @@ export function sessionLabel(thread: ThreadDto): SessionLabel {
 }
 
 export interface ComposerViewer {
-  isCreator: boolean
+  canSend: boolean
 }
 
 /**
- * The composer's send state. The web never re-implements the API send checks: the reason is the
- * viewer-only case (not the creator), then `thread.sendRefusal`, then a running turn (the API sends
- * no `thread` event when a turn starts, so `sendRefusal` can lag).
+ * Derive the composer state from resolved scope-specific send access, then preserve server refusal
+ * and running-turn reasons. The API remains authoritative for every send attempt.
  */
 export function composerState(
   thread: ThreadDetailDto,
@@ -91,7 +110,7 @@ export function composerState(
   viewer: ComposerViewer,
 ): { canSend: boolean; reason: ComposerReason | null } {
   let reason: ComposerReason | null = null
-  if (!viewer.isCreator) {
+  if (!viewer.canSend) {
     reason = 'readOnly'
   } else if (thread.sendRefusal !== null) {
     reason = thread.sendRefusal

@@ -5,6 +5,7 @@ import {
   buildCommentSchema,
   buildRequestQuery,
   inboxHref,
+  pendingApproval,
   requestKeyLabel,
   sortPendingRequests,
   viewerActions,
@@ -215,5 +216,48 @@ describe('approval-requests constants', () => {
   test('the detail fetch limit and the engine comment cap are the spec values', () => {
     expect(DETAIL_FETCH_LIMIT).toBe(20)
     expect(MAX_REQUEST_COMMENT).toBe(2000)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review-1125 US-001 — telling a pending approval from the write's own result
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-001: pendingApproval reads the summary by its shape', () => {
+  test('a summary for the operation with a pending status and an id is the approval', () => {
+    const approval = summary({ id: 'approval-ticket.create', permissionKey: 'ticket.create', status: 'pending' })
+    expect(pendingApproval(approval, 'ticket.create')).toBe(true)
+  })
+
+  test('another operation\'s summary is not this operation\'s approval', () => {
+    expect(pendingApproval(summary({ permissionKey: 'fleet.job.cancel' }), 'ticket.create')).toBe(false)
+  })
+
+  test('a settled summary is not a pending approval', () => {
+    expect(pendingApproval(summary({ status: 'approved' }), 'label.create')).toBe(false)
+    expect(pendingApproval(summary({ status: 'executed' }), 'label.create')).toBe(false)
+  })
+
+  test('a summary without a usable id is not an approval', () => {
+    expect(pendingApproval(summary({ id: '' }), 'label.create')).toBe(false)
+    expect(pendingApproval({ ...summary(), id: 7 }, 'label.create')).toBe(false)
+  })
+
+  test('the executed results of the three gated writes are not approvals', () => {
+    // A created ticket, a cancelled job and a sent transcript message all answer 200/201 with their own
+    // shape; a transcript message is `pending` too, which is why status alone cannot decide.
+    expect(pendingApproval({ id: 'ticket-1', ref: 'REVIEW-1', status: 'CREATED' }, 'ticket.create')).toBe(false)
+    expect(pendingApproval({ id: 'job-1', state: 'RUNNING', cancelRequestedAt: '2026-11-25T00:00:00.000Z' }, 'fleet.job.cancel')).toBe(false)
+    expect(pendingApproval({ message: { id: 'm1', status: 'pending' }, jobId: null }, 'thread.message.send')).toBe(false)
+  })
+
+  test('a queued acknowledgement arriving with HTTP 202 is not an approval', () => {
+    expect(pendingApproval({ queued: true }, 'ticket.create')).toBe(false)
+  })
+
+  test('non-objects are never approvals', () => {
+    for (const value of [null, undefined, 'approval', 42, true]) {
+      expect(pendingApproval(value, 'ticket.create')).toBe(false)
+    }
   })
 })

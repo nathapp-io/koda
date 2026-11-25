@@ -233,6 +233,8 @@ function mountPage(over: {
   threadGet?: 'resolve' | 'pending' | 'notFound' | 'notFoundOnce'
   /** The error `POST /threads/t1/messages` rejects with. */
   sendError?: unknown
+  /** The body `POST /threads/t1/messages` answers instead of the created message (US-001: a pending approval). */
+  sendAnswer?: () => unknown
   /** true registers the real thread components (the composer/controls interaction specs). */
   real?: boolean
   /** The keys `GET /me/permissions?project=acme` answers with (US-012 F2: the home project's permission set). */
@@ -269,6 +271,7 @@ function mountPage(over: {
   const post = jest.fn(async (path: string, body?: unknown) => {
     posts.push({ path, body })
     if (path === '/threads/t1/messages' && over.sendError !== undefined) throw over.sendError
+    if (path === '/threads/t1/messages' && over.sendAnswer !== undefined) return over.sendAnswer()
     if (path === '/threads/t1/messages') return { message: message({ content: String((body as { text?: unknown } | undefined)?.text ?? '') }) }
     return {}
   })
@@ -506,6 +509,17 @@ describe('US-006 AC-1..AC-6: pages/threads/[id].vue — the loaded thread', () =
 })
 
 describe('US-006 AC-7..AC-9: pages/threads/[id].vue — send and archive', () => {
+  test('US-005 AC-8: workspace composer remains owner-enabled while project permissions are still pending', async () => {
+    const m = mountPage({ real: true, permissionGet: 'pending' })
+    await m.settle()
+
+    expect(typeAndEnter(m.app, 'hello')).toBe(true)
+    await m.settle()
+    expect(m.posts.map(call => call.path)).toEqual(['/threads/t1/messages'])
+    expect(byTestId(m.app, 'thread-composer-input')?.props['model-value']).toBe('')
+    m.app.unmount()
+  })
+
   test('AC-7: sending from the composer posts to /threads/t1/messages', async () => {
     const m = mountPage({ real: true })
     await m.settle()
@@ -545,6 +559,42 @@ describe('US-006 AC-7..AC-9: pages/threads/[id].vue — send and archive', () =>
     await m.settle()
 
     expect(m.toasts.errors).toEqual([extractApiError(error)])
+    m.app.unmount()
+  })
+
+  test('US-001: a send that waits for approval names the request and toasts no error', async () => {
+    const m = mountPage({
+      real: true,
+      sendAnswer: () => ({
+        id: 'approval-thread.message.send',
+        permissionKey: 'thread.message.send',
+        projectId: 'p1',
+        actorType: 'USER',
+        actorId: 'u1',
+        onBehalfOfType: null,
+        onBehalfOfId: null,
+        origin: 'rest',
+        redeem: false,
+        requiredMode: 'human',
+        status: 'pending',
+        satisfiedBy: null,
+        approverType: null,
+        approverId: null,
+        expiresAt: '2026-11-25T00:10:00.000Z',
+        decidedAt: null,
+        settledAt: null,
+        createdAt: '2026-11-25T00:00:00.000Z',
+      }),
+    })
+    await m.settle()
+
+    expect(typeAndEnter(m.app, 'hello')).toBe(true)
+    await m.settle()
+
+    expect(m.toasts.errors).toEqual([])
+    expect(m.app.one('[data-testid="thread-composer-pending"]')).toBeDefined()
+    // Nothing was written: the draft is still there to send again.
+    expect(byTestId(m.app, 'thread-composer-input')?.props['model-value']).toBe('hello')
     m.app.unmount()
   })
 })
