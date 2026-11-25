@@ -3,7 +3,7 @@
   "feature": "runner-home-ownership",
   "branchName": "feat/runner-home-ownership",
   "createdAt": "2026-11-25T10:47:41.904Z",
-  "updatedAt": "2026-11-25T10:56:17.992Z",
+  "updatedAt": "2026-11-25T11:59:14.783Z",
   "userStories": [
     {
       "id": "US-001",
@@ -34,8 +34,8 @@
         "cli"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
