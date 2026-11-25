@@ -9,7 +9,7 @@ import {
   ragControllerOptimizeTable,
   ragControllerImportGraphify,
 } from '../generated';
-import { error } from '../utils/output';
+import { finishSuccess, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -74,7 +74,7 @@ export function kbCommand(program: Command): void {
           }
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -104,7 +104,7 @@ export function kbCommand(program: Command): void {
           console.log(`\nTotal: ${data.total}`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -149,7 +149,7 @@ export function kbCommand(program: Command): void {
           console.log(`Added ${fileName} to knowledge base. Total documents: ${data.docCount}`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -179,7 +179,7 @@ export function kbCommand(program: Command): void {
           console.log(`Deleted documents for sourceId '${options.sourceId}'.`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -205,7 +205,7 @@ export function kbCommand(program: Command): void {
           console.log('Knowledge base optimization completed.');
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -280,7 +280,7 @@ export function kbCommand(program: Command): void {
           );
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

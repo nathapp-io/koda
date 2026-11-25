@@ -12,7 +12,9 @@ jest.mock('chalk', () => ({
   },
 }));
 
-import { output, table, success, error, warn } from './output';
+import { Writable } from 'node:stream';
+import { once } from 'node:events';
+import { finishSuccess, output, table, success, error, warn } from './output';
 
 describe('output', () => {
   const originalLog = console.log;
@@ -242,5 +244,56 @@ describe('output', () => {
 
       expect(errorOutput.length).toBe(2);
     });
+  });
+});
+
+describe('finishSuccess', () => {
+  let stdout: PropertyDescriptor;
+  let exit: jest.SpyInstance;
+  let stream: Writable;
+  let completeWrite: (error?: Error) => void;
+
+  beforeEach(() => {
+    stream = new Writable({
+      write(chunk, _encoding, callback) {
+        if (chunk.length === 0) callback();
+        else completeWrite = callback;
+      },
+    });
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'stdout');
+    if (!descriptor) throw new Error('Expected process.stdout');
+    stdout = descriptor;
+    Object.defineProperty(process, 'stdout', { configurable: true, value: stream });
+    exit = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'stdout', stdout);
+    jest.restoreAllMocks();
+  });
+
+  it('exits synchronously for idle stdout', () => {
+    finishSuccess();
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('waits for preceding writes before reporting success', async () => {
+    stream.write('pending result');
+    finishSuccess();
+    expect(exit).not.toHaveBeenCalled();
+    completeWrite();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('reports a previous write failure even after its queue emptied', async () => {
+    const failed = once(stream, 'error');
+    stream.write('failed result');
+    completeWrite(new Error('reader disconnected'));
+    await failed;
+    expect(stream.writableLength).toBe(0);
+    finishSuccess();
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });

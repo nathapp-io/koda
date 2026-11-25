@@ -9,7 +9,7 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { escapeControls } from './fleet-job-logs';
 import { ADMIN_TOKEN_HINT, ago, handleFleetValidation } from './fleet-shared';
 
@@ -96,7 +96,7 @@ export function registerFleetStatus(fleet: Command): void {
         const d = await fetchDashboard(o);
         if (o.json) console.log(JSON.stringify(d, null, 2));
         else printStatus(d);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, o.allProjects ? { forbiddenHint: ADMIN_TOKEN_HINT } : undefined);
       }

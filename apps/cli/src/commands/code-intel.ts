@@ -4,7 +4,7 @@ import {
   codeIntelControllerGetCallers,
   codeIntelControllerGetCallees,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -42,7 +42,7 @@ export function codeIntelCommand(program: Command): void {
           ];
           table(['Field', 'Value'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Symbol not found: ${options.symbolId}` });
       }
@@ -73,7 +73,7 @@ export function codeIntelCommand(program: Command): void {
           const rows = items.map((s) => [String(s['symbolId'] ?? s['id'] ?? ''), String(s['name'] ?? ''), String(s['file'] ?? '')]);
           table(['Symbol ID', 'Name', 'File'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -104,7 +104,7 @@ export function codeIntelCommand(program: Command): void {
           const rows = items.map((s) => [String(s['symbolId'] ?? s['id'] ?? ''), String(s['name'] ?? ''), String(s['file'] ?? '')]);
           table(['Symbol ID', 'Name', 'File'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

@@ -11,7 +11,7 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { parseBudgetUsd } from '../utils/parse-usd';
 
@@ -58,7 +58,7 @@ function registerList(approval: Command): void {
           ]));
           if (page.hasNext) console.log(`Next: --page ${options.page + 1}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 }
@@ -80,7 +80,7 @@ function registerShow(approval: Command): void {
             console.log(`${String(d.decidedAt ?? '')} ${String(d.decision ?? '')} by ${String(d.deciderType ?? '')}/${String(d.deciderId ?? '')}${d.comment ? `: ${String(d.comment)}` : ''}`);
           }
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 }
@@ -136,7 +136,7 @@ function registerDecision(approval: Command, decision: 'approve' | 'reject'): vo
       const body: DecideApprovalRequestDto = { decision, ...(params !== undefined ? { params } : {}), ...(options.comment !== undefined ? { comment: options.comment } : {}) };
       const response = unwrap<RecordValue>(await approvalRequestsControllerDecide({ path: { id }, body }));
       if (options.json) console.log(JSON.stringify(response, null, 2)); else console.log(`${id} ${String(response.status ?? '')}`);
-      process.exit(0);
+      return finishSuccess();
     } catch (err: unknown) { handleApiError(err); }
   });
 }
@@ -147,7 +147,7 @@ function registerCancel(approval: Command): void {
         await context();
         const response = unwrap<RecordValue>(await approvalRequestsControllerCancel({ path: { id } }));
         if (options.json) console.log(JSON.stringify(response, null, 2)); else console.log(`${id} ${String(response.status ?? '')}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 }
@@ -170,11 +170,11 @@ function registerPolicies(approval: Command): void {
       await context(); const query = { current: options.page, size: options.size, ...(options.pattern !== undefined ? { permissionPattern: options.pattern } : {}) };
       const page = await routeCall<{ records: RecordValue[]; hasNext?: boolean; current?: number }>(options.project, approvalPoliciesControllerList as never, projectApprovalPoliciesControllerList as never, { query });
       if (options.json) console.log(JSON.stringify(page, null, 2)); else { table(['ID', 'Pattern', 'Applies to', 'Mode', 'Project', 'Timeout'], page.records.map(r => [String(r.id ?? ''), String(r.permissionPattern ?? ''), subjectLabel(r), String(r.mode ?? ''), String(r.projectId ?? 'global'), String(r.timeoutSec ?? '')])); if (page.hasNext) console.log(`Next: --page ${(page.current ?? options.page) + 1}`); }
-      process.exit(0);
+      return finishSuccess();
     } catch (err: unknown) { handleApiError(err); } });
   policy.command('keys').option('--project <slug>').option('--json').action(async (options: { project?: string; json?: boolean }) => { try {
     await context(); const data = await routeCall<RecordValue>(options.project, approvalPoliciesControllerKeys as never, projectApprovalPoliciesControllerKeys as never, {}); const keys = Array.isArray(data.keys) ? data.keys : [];
-    if (options.json) console.log(JSON.stringify(data, null, 2)); else table(['Key', 'Scope', 'Risk', 'Floor', 'Default'], keys.map(k => { const r = record(k); return [String(r.key ?? ''), String(r.scope ?? ''), String(r.risk ?? ''), String(r.floor ?? ''), String(r.default ?? '')]; })); process.exit(0);
+    if (options.json) console.log(JSON.stringify(data, null, 2)); else table(['Key', 'Scope', 'Risk', 'Floor', 'Default'], keys.map(k => { const r = record(k); return [String(r.key ?? ''), String(r.scope ?? ''), String(r.risk ?? ''), String(r.floor ?? ''), String(r.default ?? '')]; })); return finishSuccess();
   } catch (err: unknown) { handleApiError(err); } });
   policy.command('set').requiredOption('--pattern <pattern>').requiredOption('--mode <mode>').option('--project <slug>').option('--type <type>').option('--role <roleId>').option('--user <userId>').option('--agent <agentSlug>').option('--timeout <sec>', 'Timeout in seconds', parsePositiveInt).option('--on-timeout <behavior>').option('--approver-need-not-hold').option('--distinct-approver').option('--json')
     .action(async (options: Record<string, unknown>) => {
@@ -192,14 +192,14 @@ function registerPolicies(approval: Command): void {
         if (options.approverNeedNotHold) body.approverMustHoldAction = false;
         if (options.distinctApprover) body.requireDistinctApprover = true;
         const result = await routeCall<RecordValue>(options.project as string | undefined, approvalPoliciesControllerCreate as never, projectApprovalPoliciesControllerCreate as never, { body });
-        if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Set policy ${String(result.id ?? '')}: ${String(options.pattern)} ${String(options.mode)}`); process.exit(0);
+        if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Set policy ${String(result.id ?? '')}: ${String(options.pattern)} ${String(options.mode)}`); return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
   policy.command('update <id>').option('--project <slug>').option('--mode <mode>').option('--timeout <sec>', 'Timeout in seconds', parsePositiveInt).option('--no-timeout').option('--on-timeout <behavior>').option('--json')
     .action(async (id: string, options: Record<string, unknown>) => {
       const body: RecordValue = {}; if (options.mode !== undefined) body.mode = options.mode; if (options.timeout === false) body.timeoutSec = null; else if (options.timeout !== undefined) body.timeoutSec = options.timeout; if (options.onTimeout !== undefined) body.onTimeout = options.onTimeout;
       if (!Object.keys(body).length) { handleApiError(new Error('Nothing to update'), { validationError: true }); return; }
-      try { await context(); const result = await routeCall<RecordValue>(options.project as string | undefined, approvalPoliciesControllerUpdate as never, projectApprovalPoliciesControllerUpdate as never, { path: { id }, body }); if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Updated policy ${id}`); process.exit(0); } catch (err: unknown) { handleApiError(err); }
+      try { await context(); const result = await routeCall<RecordValue>(options.project as string | undefined, approvalPoliciesControllerUpdate as never, projectApprovalPoliciesControllerUpdate as never, { path: { id }, body }); if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Updated policy ${id}`); return finishSuccess(); } catch (err: unknown) { handleApiError(err); }
     });
   policy.command('delete <id>').option('--project <slug>').option('--json').action(async (id: string, options: { project?: string; json?: boolean }) => {
     try {
@@ -209,7 +209,7 @@ function registerPolicies(approval: Command): void {
       else await projectApprovalPoliciesControllerRemove({ path: { slug: options.project, id } });
       if (options.json) console.log(JSON.stringify({ deleted: id }, null, 2));
       else console.log(`Deleted policy ${id}`);
-      process.exit(0);
+      return finishSuccess();
     } catch (err: unknown) { handleApiError(err); }
   });
 }

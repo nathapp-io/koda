@@ -4,7 +4,7 @@ import {
   meNotificationsControllerMarkAllRead,
   meNotificationsControllerMarkRead,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -55,7 +55,7 @@ export function notificationsCommand(program: Command): void {
           ]));
           if (page.hasNext) console.log(`Next: --page ${page.current + 1}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -80,7 +80,7 @@ export function notificationsCommand(program: Command): void {
           await meNotificationsControllerMarkRead({ path: { id: id as string } });
           console.log(`Marked ${id} read`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `No such notification: ${id}` });
       }

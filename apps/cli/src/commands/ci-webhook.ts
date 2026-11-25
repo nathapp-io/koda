@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { createHmac } from 'node:crypto';
 import { Command } from 'commander';
 import { ciWebhookControllerHandleCiWebhook } from '../generated';
@@ -77,7 +78,7 @@ export function ciWebhookCommand(program: Command): void {
         } else {
           console.log(`CI event '${options.event}' delivered successfully.`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { hint: 'Check the value of KODA_CI_WEBHOOK_SECRET or --signature.' });
       }

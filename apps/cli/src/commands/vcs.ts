@@ -6,7 +6,7 @@
  * See .claude/rules/cli.md for rationale.
  */
 import { Command } from 'commander';
-import { table, error } from '../utils/output';
+import { finishSuccess, table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
@@ -131,7 +131,7 @@ export function vcsCommand(program: Command): void {
           }
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         if (err instanceof SecretInputError) {
           error(err.message);
@@ -161,7 +161,7 @@ export function vcsCommand(program: Command): void {
           table(['Field', 'Value'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         const apiErr = err as { response?: { status?: number } };
 
@@ -187,7 +187,7 @@ export function vcsCommand(program: Command): void {
 
         console.log(VCS_MESSAGES.DISCONNECTED(ctx.projectSlug));
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -228,7 +228,7 @@ export function vcsCommand(program: Command): void {
           console.log(VCS_MESSAGES.WEBHOOK_SECRET_ONCE(data.webhookSecret));
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -257,7 +257,7 @@ export function vcsCommand(program: Command): void {
           return;
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -281,7 +281,7 @@ export function vcsCommand(program: Command): void {
           console.log(VCS_MESSAGES.WEBHOOK_SECRET_ROTATED(ctx.projectSlug, data.webhookSecret));
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -306,7 +306,7 @@ export function vcsCommand(program: Command): void {
           `Sync complete: created ${result.issuesSynced ?? 0}, skipped ${result.issuesSkipped ?? 0}`
         );
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -332,7 +332,7 @@ export function vcsCommand(program: Command): void {
           VCS_MESSAGES.ISSUE_IMPORTED(firstTicket?.ref || `${ctx.projectSlug}-${issueNumber}`),
         );
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -355,7 +355,7 @@ export function vcsCommand(program: Command): void {
 
         console.log(`PR sync complete: ${result.updated} PR(s) updated`);
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

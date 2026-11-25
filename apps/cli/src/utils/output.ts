@@ -1,6 +1,27 @@
 import chalk from 'chalk';
 import util from 'util';
 
+/** Finish a successful action only after stdout has accepted its entire result. */
+export function finishSuccess(): void {
+  const stdout = process.stdout;
+  if (stdout.errored || stdout.destroyed) {
+    console.error('Failed to write CLI output:', stdout.errored?.message ?? 'stdout is closed');
+    return process.exit(1);
+  }
+  if (stdout.writableLength === 0) {
+    return process.exit(0);
+  }
+
+  // This callback is ordered after pending writes and adds no bytes to the result.
+  stdout.write('', (err) => {
+    if (err) {
+      console.error('Failed to write CLI output:', err.message);
+      return process.exit(1);
+    }
+    return process.exit(0);
+  });
+}
+
 interface OutputOptions {
   json?: boolean;
 }

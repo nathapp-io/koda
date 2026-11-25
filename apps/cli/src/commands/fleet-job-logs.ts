@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { Command, InvalidArgumentError } from 'commander';
 import {
   fleetJobLogsControllerEntries,
@@ -164,7 +165,7 @@ export function registerLogs(job: Command, deps: LogsDeps = defaultDeps): void {
         const leaseEpoch = options.leaseEpoch ?? (await latestEpoch(slug, jobId));
         if (options.follow) deps.onInterrupt(() => process.exit(0));
         await streamLogs({ slug, jobId, stream: options.stream, leaseEpoch }, options, deps);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `No such job or attempt: ${jobId}` });
       }

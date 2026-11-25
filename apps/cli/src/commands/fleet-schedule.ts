@@ -18,7 +18,7 @@ import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parseUsd } from '../utils/parse-usd';
 import { type BashMode, type FleetPage, bashFlagProblem, bashModeText, handleFleetConflict, handleFleetValidation, parseApprovalTimeout, parseBashMode, repoNamesOrEmpty, resolveRepo, resolveRunner } from './fleet-shared';
 
@@ -65,7 +65,7 @@ function registerList(schedule: Command): void {
             s.enabled ? (s.nextFireAt ?? '-') : scheduleState(s), s.lastJobId ?? '-',
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -94,7 +94,7 @@ function registerShow(schedule: Command): void {
             j.id, j.state, passedOf(j), `$${j.costSpentUsd}`, String(j.coalescedCount), j.wipPush ?? '-', j.stateReason ?? '-',
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Schedule not found: ${scheduleId}` });
       }
@@ -150,7 +150,7 @@ function registerAdd(schedule: Command): void {
         const created = unwrap<ScheduleDto>(await projectFleetSchedulesControllerCreate({ path: { slug }, body }));
         if (o.json) console.log(JSON.stringify(created, null, 2));
         else printSchedule('Created', created);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -223,7 +223,7 @@ function registerEdit(schedule: Command): void {
         const updated = unwrap<ScheduleDto>(await projectFleetSchedulesControllerUpdate({ path: { slug, id: scheduleId }, body }));
         if (o.json) console.log(JSON.stringify(updated, null, 2));
         else printSchedule('Updated', updated);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Schedule not found: ${scheduleId}` });
       }
@@ -247,7 +247,7 @@ function registerToggle(schedule: Command, verb: 'enable' | 'disable'): void {
           : await projectFleetSchedulesControllerDisable({ path }));
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else printSchedule(verb === 'enable' ? 'Enabled' : 'Disabled', result);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         // Enable answers 409 when the owner can no longer dispatch (plan D211): exit 1 with the API's message.
         if (verb === 'enable' && apiErrorCode(err) === 409) return handleFleetConflict(`${(err as { message?: string }).message ?? 'Conflict'}`);
@@ -268,7 +268,7 @@ function registerRemove(schedule: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
         await projectFleetSchedulesControllerRemove({ path: { slug: ctx.projectSlug, id: scheduleId } });
         console.log(`Removed schedule ${scheduleId}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Schedule not found: ${scheduleId}` });
       }

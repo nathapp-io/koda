@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { Command } from 'commander';
 import {
   fleetJobsControllerDispatch,
@@ -122,7 +123,7 @@ export function registerFleetDispatch(fleet: Command): void {
         const result = unwrap<DispatchResultDto>(await fleetJobsControllerDispatch({ path: { slug }, body }));
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else printPlacement(result, result.placement.assigned ? await runnerNamesOrEmpty(slug) : new Map());
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         if (body) {
           const feature = body.prNumber !== undefined ? `review-pr-${body.prNumber}` : body.feature;

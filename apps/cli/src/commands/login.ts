@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { setConfig } from '../config';
 import { configureApiClient } from '../utils/api-client';
 import { agentsControllerFindMe } from '../generated';
@@ -52,7 +53,7 @@ export async function loginAction(options: { apiKey?: string | boolean; apiUrl?:
     }
     const result = await loginCommand(apiKey, options.apiUrl, {});
     console.log(result.message);
-    process.exit(0);
+    return finishSuccess();
   } catch (error) {
     loginCommandFailure(error);
   }

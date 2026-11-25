@@ -5,7 +5,7 @@ import {
   labelsControllerDeleteFromHttp,
   labelsControllerUpdateFromHttp,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -43,7 +43,7 @@ export function labelCommand(program: Command): void {
           table(['Field', 'Value'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -71,7 +71,7 @@ export function labelCommand(program: Command): void {
           table(['ID', 'Name', 'Color'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -90,7 +90,7 @@ export function labelCommand(program: Command): void {
         await labelsControllerDeleteFromHttp({ path: { slug: ctx.projectSlug, id: options.id }});
 
         console.log(`Label '${options.id}' deleted.`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Label not found: ${options.id}` });
       }
@@ -133,7 +133,7 @@ export function labelCommand(program: Command): void {
           table(['Field', 'Value'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Label not found: ${options.id}` });
       }

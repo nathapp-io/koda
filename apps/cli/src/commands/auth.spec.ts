@@ -37,6 +37,7 @@ jest.mock('../generated/client.gen', () => ({
 }));
 
 jest.mock('../utils/output', () => ({
+  finishSuccess: jest.requireActual('../utils/output').finishSuccess,
   table: jest.fn(),
   error: jest.fn(),
 }));

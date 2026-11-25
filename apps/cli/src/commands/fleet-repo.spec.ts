@@ -15,6 +15,7 @@ jest.mock('../config', () => ({ resolveContext: jest.fn() }));
 jest.mock('node:fs/promises', () => ({ readFile: jest.fn() }));
 
 import { Command } from 'commander';
+import * as output from '../utils/output';
 import { fleetCommand } from './fleet';
 import {
   fleetReposControllerCheck,
@@ -49,6 +50,7 @@ describe('koda fleet repo', () => {
 
   afterEach(() => {
     setJsonMode(false);
+    jest.restoreAllMocks();
     jest.clearAllMocks();
   });
 
@@ -165,6 +167,13 @@ describe('koda fleet repo', () => {
     await run('rm', 'fr1', '--force');
     expect(fleetReposControllerRemove).toHaveBeenCalledWith({ path: { id: 'fr1' } });
     expect(exitSpy).toHaveBeenLastCalledWith(0);
+  });
+
+  it('completes a reachable JSON check through the shared output helper', async () => {
+    const finish = jest.spyOn(output, 'finishSuccess').mockImplementation(() => {});
+    (fleetReposControllerCheck as jest.Mock).mockResolvedValue({ ret: 0, data: { repoId: 'fr1', reachable: true } });
+    await run('check', 'fr1', '--json');
+    expect(finish.mock.calls).toEqual([[]]);
   });
 
   it('check prints reachable, or the reason and exits 1 when unreachable', async () => {

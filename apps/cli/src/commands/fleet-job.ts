@@ -12,7 +12,7 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { error, table } from '../utils/output';
+import { finishSuccess, error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { registerLogs } from './fleet-job-logs';
 import { registerJobAnalytics } from './fleet-analytics';
@@ -74,7 +74,7 @@ function registerList(job: Command): void {
           const hint = pageHint(page);
           if (hint) console.log(hint);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -114,7 +114,7 @@ function registerShow(job: Command): void {
           const runner = j.runnerId ? (await runnerNames(slug)).get(j.runnerId) ?? j.runnerId : '-';
           table(['Field', 'Value'], showRows(j, runner));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
@@ -133,7 +133,7 @@ function registerCancel(job: Command): void {
         const j = unwrap<FleetJobDto>(await fleetJobsControllerCancel({ path: { slug, id: jobId } }));
         if (options.json) console.log(JSON.stringify(j, null, 2));
         else console.log(`Cancel requested: job ${j.id} is ${j.state}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
@@ -152,7 +152,7 @@ function registerRequeue(job: Command): void {
         const result = unwrap<DispatchResultDto>(await fleetJobsControllerRequeue({ path: { slug, id: jobId } }));
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else printPlacement(result, result.placement.assigned ? await runnerNamesOrEmpty(slug) : new Map());
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
@@ -176,7 +176,7 @@ function registerBundle(job: Command): void {
         const data = new Uint8Array(bytes);
         await writeFile(out, data, { flag: options.force ? 'w' : 'wx' });
         console.log(`Wrote ${out} (${data.byteLength} bytes)`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         if ((err as { code?: unknown } | null)?.code === 'EEXIST') {
           error(`${out} exists; pass --force to overwrite or --out <path>`);

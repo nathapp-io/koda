@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { Command } from 'commander';
 import { resolveContext } from '../config';
 import { handleApiError } from '../utils/error';
@@ -49,7 +50,7 @@ export function evaluateCommand(program: Command): void {
 
         if (opts.json) {
           console.log(JSON.stringify(summary, null, 2));
-          process.exit(0);
+          return finishSuccess();
         }
 
         console.log('\n=== Retrieval Evaluation Results ===\n');
@@ -82,7 +83,7 @@ export function evaluateCommand(program: Command): void {
           process.exit(1);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err) {
         handleApiError(err);
       }

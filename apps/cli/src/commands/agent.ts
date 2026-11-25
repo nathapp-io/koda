@@ -8,7 +8,7 @@ import {
   agentsControllerRemove,
   agentsControllerRotateApiKey,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -43,7 +43,7 @@ const response = await agentsControllerFindMe();
           console.log(`API Key: ${apiKeyOutput}`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -66,12 +66,12 @@ const response = await agentsControllerFindMe();
 
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
-          process.exit(0);
+          return finishSuccess();
         }
 
         if (result === null) {
           console.log('No suitable tickets found for pickup.');
-          process.exit(0);
+          return finishSuccess();
         }
 
         const { ticket, matchScore, matchedCapabilities } = result as {
@@ -82,7 +82,7 @@ const response = await agentsControllerFindMe();
         console.log(`Suggested ticket: #${ticket.number} — ${ticket.title}`);
         console.log(`Priority: ${ticket.priority} | Status: ${ticket.status}`);
         console.log(`Match score: ${matchScore} | Matched capabilities: ${matchedCapabilities.join(', ')}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -112,7 +112,7 @@ const response = await agentsControllerFindAll();
           ]);
           table(['Name', 'Slug', 'Status', 'Max Tickets'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -146,7 +146,7 @@ const response = await agentsControllerGenerateApiKey({
             console.log('Store this key now — it will not be shown again.');
           }
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -178,7 +178,7 @@ const response = await agentsControllerUpdate({
         } else {
           console.log(`Agent '${slug}' updated.`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Agent not found: ${slug}` });
       }
@@ -204,7 +204,7 @@ const response = await agentsControllerRotateApiKey({ path: { slug }});
             console.log('Store this key now — it will not be shown again.');
           }
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Agent not found: ${slug}` });
       }
@@ -219,7 +219,7 @@ const response = await agentsControllerRotateApiKey({ path: { slug }});
         await withContext({}, { requireProject: false });
 await agentsControllerRemove({ path: { slug }});
         console.log(`Agent '${slug}' deleted.`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Agent not found: ${slug}` });
       }

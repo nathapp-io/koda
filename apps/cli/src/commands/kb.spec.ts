@@ -62,6 +62,7 @@ jest.mock('fs', () => ({
 }));
 
 import { Command } from 'commander';
+import * as output from '../utils/output';
 import { kbCommand } from './kb';
 import {
   ragControllerSearch,
@@ -343,6 +344,13 @@ describe('kbCommand', () => {
         total: 2,
       },
     };
+
+    it('completes a JSON list through the shared output helper', async () => {
+      const finish = jest.spyOn(output, 'finishSuccess').mockImplementation(() => {});
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue({ ret: 0, data: [] });
+      await program.parseAsync(['node', 'koda', 'kb', 'list', '--json']);
+      expect(finish.mock.calls).toEqual([[]]);
+    });
 
     it('exits 0 and prints document table', async () => {
       (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);

@@ -1,3 +1,5 @@
+jest.mock('chalk', () => ({}));
+
 // Mock conf before importing anything
 const mockData: Record<string, string> = {};
 

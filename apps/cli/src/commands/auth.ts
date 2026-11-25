@@ -5,7 +5,7 @@ import {
   authControllerRegister,
   authControllerLogout,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { configureApiClient } from '../utils/api-client';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -36,7 +36,7 @@ export function authCommand(program: Command): void {
           ];
           table(['Field', 'Value'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -68,7 +68,7 @@ export function authCommand(program: Command): void {
         } else {
           console.log(`User registered: ${String(data['email'] ?? options.email)}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -95,7 +95,7 @@ export function authCommand(program: Command): void {
               : 'No saved credential was cleared.';
           console.log(`Logout request accepted. ${action}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

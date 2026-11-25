@@ -10,7 +10,7 @@ import {
   type ProjectAgentListDto,
 } from '../generated';
 import { configureApiClient } from '../utils/api-client';
-import { table, error } from '../utils/output';
+import { finishSuccess, table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
@@ -35,7 +35,7 @@ export function projectCommand(program: Command): void {
             item.slug, item.name, item.status, String(item.openTicketCount),
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -69,7 +69,7 @@ export function projectCommand(program: Command): void {
           table(['Name', 'Key', 'Slug'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -105,7 +105,7 @@ export function projectCommand(program: Command): void {
           table(['Field', 'Value'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
       }
@@ -164,7 +164,7 @@ export function projectCommand(program: Command): void {
           table(['Field', 'Value'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -190,7 +190,7 @@ export function projectCommand(program: Command): void {
         await projectsControllerRemove({ path: { slug }});
 
         console.log(`Project '${slug}' deleted.`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
       }
@@ -245,7 +245,7 @@ export function projectCommand(program: Command): void {
           table(['Field', 'Value'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
       }
