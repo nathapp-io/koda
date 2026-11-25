@@ -8,12 +8,22 @@
  * Fleet S5b knowledge outcomes US-005 adds the source filter, the outcome-hit enrichment and its
  * project fence (3c-2-D9) and `readOutcome` (3c-2-D9). Every 3c-1 case that pins a predicate or the
  * table read now says `source: 'docs'`: without it the default is the union of both sources.
+ *
+ * review-1125-remediation US-011 (finding 7) reads the project registry *before* either leg and puts
+ * the eligible repository ids inside both storage predicates, so every predicate a leg is asked for
+ * now carries the registry fence as well as the source clause.
  */
+import type { ConfigType } from '@nestjs/config';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import type { fleetConfig } from '../../config/fleet.config';
+import type { ProjectContext } from '../../projects/project-context';
 import type { EmbeddingService } from '../../rag/embedding.service';
 import type { KnowledgeChunkRow, KnowledgeChunkStore } from './knowledge-chunk-store';
 import type { KnowledgeJobInfo } from './knowledge-index.domain';
 import type { KnowledgeIndexService } from './knowledge-index.service';
-import { KnowledgeSearchService, parseKnowledgeSearchInput } from './knowledge-search.service';
+import { KnowledgeSearchService, parseKnowledgeSearchInput, type KnowledgeSource } from './knowledge-search.service';
+import { ProjectKnowledgeController } from './project-knowledge.controller';
 
 const PROJECT = 'p1';
 const QUERY = 'broker';
@@ -113,6 +123,16 @@ function harness(
   return { service, store, embedding, index };
 }
 
+/** The error a call throws, so a case can assert on the exception the route maps to a status. */
+async function rejectionOf(run: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await run();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to fail');
+}
+
 describe('KnowledgeSearchService', () => {
   it('AC-1: fuses lexical [a, b] and vector [b, c] into b, a, c with b scored 1/61 + 1/62', async () => {
     const { service } = harness({ lexical: [row('a'), row('b')], vector: [row('b'), row('c')] });
@@ -130,18 +150,21 @@ describe('KnowledgeSearchService', () => {
 
     await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo'", 50);
-    expect(store.vector).toHaveBeenCalledWith(PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none'", 50);
+    // US-011: the registry fence is part of both predicates, here for the harness's one registered repository.
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo' AND (source_id LIKE 'repo:r1:%')", 50);
+    expect(store.vector).toHaveBeenCalledWith(
+      PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%')", 50,
+    );
   });
 
-  it("AC-3: both predicates end with the repo clause when repoId is given", async () => {
+  it('AC-3: both predicates end with the repo clause when repoId is given', async () => {
     const { service, store } = harness();
 
     await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', repoId: 'r1', limit: 20 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo' AND source_id LIKE 'repo:r1:%'", 50);
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo' AND (source_id LIKE 'repo:r1:%')", 50);
     expect(store.vector).toHaveBeenCalledWith(
-      PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none' AND source_id LIKE 'repo:r1:%'", 50,
+      PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%')", 50,
     );
   });
 
@@ -189,8 +212,10 @@ describe('KnowledgeSearchService', () => {
 
     const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', pathPrefix: 'docs/adr/', limit: 1 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo'", 200);
-    expect(store.vector).toHaveBeenCalledWith(PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none'", 200);
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo' AND (source_id LIKE 'repo:r1:%')", 200);
+    expect(store.vector).toHaveBeenCalledWith(
+      PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%')", 200,
+    );
     // The higher ranked `x` is dropped by the prefix; the cut to `limit` happens after it.
     expect(result.hits.map((hit) => hit.path)).toEqual(['docs/adr/y.md']);
   });
@@ -311,8 +336,10 @@ describe('KnowledgeSearchService', () => {
 
     await service.search({ projectId: PROJECT, query: QUERY, source: 'outcomes', limit: 20 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'outcome'", 50);
-    expect(store.vector).toHaveBeenCalledWith(PROJECT, EMBEDDING, "source = 'outcome' AND provider != 'none'", 50);
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'outcome' AND (source_id LIKE 'outcome:r1:%')", 50);
+    expect(store.vector).toHaveBeenCalledWith(
+      PROJECT, EMBEDDING, "source = 'outcome' AND provider != 'none' AND (source_id LIKE 'outcome:r1:%')", 50,
+    );
   });
 
   it('US-005 AC-2: no source asks both legs for the union of the two sources', async () => {
@@ -320,9 +347,16 @@ describe('KnowledgeSearchService', () => {
 
     await service.search({ projectId: PROJECT, query: QUERY, limit: 20 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "(source = 'repo') OR (source = 'outcome')", 50);
+    expect(store.lexical).toHaveBeenCalledWith(
+      PROJECT, QUERY,
+      "(source = 'repo' AND (source_id LIKE 'repo:r1:%')) OR (source = 'outcome' AND (source_id LIKE 'outcome:r1:%'))",
+      50,
+    );
     expect(store.vector).toHaveBeenCalledWith(
-      PROJECT, EMBEDDING, "(source = 'repo' AND provider != 'none') OR (source = 'outcome' AND provider != 'none')", 50,
+      PROJECT, EMBEDDING,
+      "(source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%'))"
+        + " OR (source = 'outcome' AND provider != 'none' AND (source_id LIKE 'outcome:r1:%'))",
+      50,
     );
   });
 
@@ -331,9 +365,16 @@ describe('KnowledgeSearchService', () => {
 
     await service.search({ projectId: PROJECT, query: QUERY, source: 'all', limit: 20 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "(source = 'repo') OR (source = 'outcome')", 50);
+    expect(store.lexical).toHaveBeenCalledWith(
+      PROJECT, QUERY,
+      "(source = 'repo' AND (source_id LIKE 'repo:r1:%')) OR (source = 'outcome' AND (source_id LIKE 'outcome:r1:%'))",
+      50,
+    );
     expect(store.vector).toHaveBeenCalledWith(
-      PROJECT, EMBEDDING, "(source = 'repo' AND provider != 'none') OR (source = 'outcome' AND provider != 'none')", 50,
+      PROJECT, EMBEDDING,
+      "(source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%'))"
+        + " OR (source = 'outcome' AND provider != 'none' AND (source_id LIKE 'outcome:r1:%'))",
+      50,
     );
   });
 
@@ -342,9 +383,9 @@ describe('KnowledgeSearchService', () => {
 
     await service.search({ projectId: PROJECT, query: QUERY, source: 'outcomes', repoId: 'r1', limit: 20 });
 
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'outcome' AND source_id LIKE 'outcome:r1:%'", 50);
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'outcome' AND (source_id LIKE 'outcome:r1:%')", 50);
     expect(store.vector).toHaveBeenCalledWith(
-      PROJECT, EMBEDDING, "source = 'outcome' AND provider != 'none' AND source_id LIKE 'outcome:r1:%'", 50,
+      PROJECT, EMBEDDING, "source = 'outcome' AND provider != 'none' AND (source_id LIKE 'outcome:r1:%')", 50,
     );
   });
 
@@ -410,7 +451,11 @@ describe('KnowledgeSearchService', () => {
     expect(result.hits.every((hit) => hit.source === 'repo')).toBe(true);
     // The outcome hits are dropped before the fence, so no job is described for a prefixed search.
     expect(index.describeJobs).not.toHaveBeenCalled();
-    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "(source = 'repo') OR (source = 'outcome')", 200);
+    expect(store.lexical).toHaveBeenCalledWith(
+      PROJECT, QUERY,
+      "(source = 'repo' AND (source_id LIKE 'repo:r1:%')) OR (source = 'outcome' AND (source_id LIKE 'outcome:r1:%'))",
+      200,
+    );
   });
 
   it("US-005 AC-9: source 'outcomes' on a table with no outcome row is empty and asks only the outcome table", async () => {
@@ -458,6 +503,225 @@ describe('KnowledgeSearchService', () => {
     const result = await service.search({ projectId: PROJECT, query: QUERY, limit: 1 });
 
     expect(result.hits.map((hit) => hit.path)).toEqual(['a.md']);
+  });
+});
+
+/**
+ * review-1125-remediation US-011 (finding 7): the project registry is read *before* either leg, and the
+ * eligible repository ids go inside both storage predicates, so a repository the project no longer owns can
+ * never spend a leg's row cap. The store double answers whatever it is handed (it does not evaluate a
+ * predicate), so each case pins the predicate a leg is asked for *and* the hits that survive the fence the
+ * service applies to the rows a leg answered.
+ */
+describe('KnowledgeSearchService registry fence (US-011)', () => {
+  it('AC-4: an empty project registry answers zero eligible hits and asks no leg', async () => {
+    const { service, store } = harness({ repos: [], lexical: [row('a')], vector: [row('b')] });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    expect(result.hits).toEqual([]);
+    // Nothing is eligible, so there is no predicate to widen: neither leg is asked at all.
+    expect(store.lexical).not.toHaveBeenCalled();
+    expect(store.vector).not.toHaveBeenCalled();
+  });
+
+  it('AC-5: an explicit retired repoId answers zero eligible hits and asks no leg', async () => {
+    const { service, store } = harness({ repos: ['r1'], lexical: [row('a')] });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', repoId: 'retired', limit: 20 });
+
+    expect(result.hits).toEqual([]);
+    expect(store.lexical).not.toHaveBeenCalled();
+    expect(store.vector).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: an explicit repoId of another project answers zero eligible hits and asks no leg', async () => {
+    // The store would answer a row of that repository; the fence is what keeps it out.
+    const foreign = row('foreign', { repoId: 'other-project-repo', sourceId: 'repo:other-project-repo:foreign.md' });
+    const { service, store } = harness({ repos: ['r1'], lexical: [row('a'), foreign] });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', repoId: 'other-project-repo', limit: 20 });
+
+    expect(result.hits).toEqual([]);
+    expect(store.lexical).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: an explicit live registered repoId restricts both legs to that repository', async () => {
+    const { service, store } = harness({
+      repos: ['r1', 'r2'],
+      lexical: [row('a'), row('b', { repoId: 'r2', sourceId: 'repo:r2:b.md' })],
+    });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', repoId: 'r1', limit: 20 });
+
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo' AND (source_id LIKE 'repo:r1:%')", 50);
+    expect(store.vector).toHaveBeenCalledWith(
+      PROJECT, EMBEDDING, "source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%')", 50,
+    );
+    expect(result.hits.map((hit) => hit.repoId)).toEqual(['r1']);
+  });
+
+  it('AC-7: a project-wide search fences both legs to every registered repository', async () => {
+    const { service, store } = harness({ repos: ['r1', 'r2'] });
+
+    await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    expect(store.lexical).toHaveBeenCalledWith(
+      PROJECT, QUERY, "source = 'repo' AND (source_id LIKE 'repo:r1:%' OR source_id LIKE 'repo:r2:%')", 50,
+    );
+    expect(store.vector).toHaveBeenCalledWith(
+      PROJECT, EMBEDDING,
+      "source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%' OR source_id LIKE 'repo:r2:%')", 50,
+    );
+  });
+
+  it.each([
+    [
+      'docs', [row('a')], ['repo'],
+      "source = 'repo' AND (source_id LIKE 'repo:r1:%')",
+      "source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%')",
+    ],
+    [
+      'outcomes', [outcomeRow('j1', 'o1')], ['outcome'],
+      "source = 'outcome' AND (source_id LIKE 'outcome:r1:%')",
+      "source = 'outcome' AND provider != 'none' AND (source_id LIKE 'outcome:r1:%')",
+    ],
+    [
+      'all', [row('a'), outcomeRow('j1', 'o1')], ['repo', 'outcome'],
+      "(source = 'repo' AND (source_id LIKE 'repo:r1:%')) OR (source = 'outcome' AND (source_id LIKE 'outcome:r1:%'))",
+      "(source = 'repo' AND provider != 'none' AND (source_id LIKE 'repo:r1:%'))"
+        + " OR (source = 'outcome' AND provider != 'none' AND (source_id LIKE 'outcome:r1:%'))",
+    ],
+  ] as Array<[KnowledgeSource, KnowledgeChunkRow[], string[], string, string]>)(
+    'AC-9: source %s answers only the source families its legs were asked for on registered repositories',
+    async (source, rows, expected, lexicalPredicate, vectorPredicate) => {
+      const { service, store } = harness({ repos: ['r1'], lexical: rows, vector: rows });
+
+      const result = await service.search({ projectId: PROJECT, query: QUERY, source, limit: 20 });
+
+      expect(result.hits.map((hit) => hit.source)).toEqual(expected);
+      // The legs carry the source clause and the registry fence together, never one without the other.
+      expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, lexicalPredicate, 50);
+      expect(store.vector).toHaveBeenCalledWith(PROJECT, EMBEDDING, vectorPredicate, 50);
+    },
+  );
+
+  it.each(['docs', 'outcomes', 'all'] as KnowledgeSource[])(
+    'AC-10: source %s with a pathPrefix answers only the repository-document hits under the prefix and no outcome hit',
+    async (source) => {
+      const { service, store, index } = harness({
+        repos: ['r1'],
+        lexical: [
+          outcomeRow('j1', 'o1', { path: 'docs/run-notes.md' }),
+          row('a', { path: 'docs/adr/a.md' }),
+          row('b', { path: 'other/b.md' }),
+        ],
+      });
+
+      const result = await service.search({ projectId: PROJECT, query: QUERY, source, pathPrefix: 'docs/adr/', limit: 20 });
+
+      expect(result.hits.map((hit) => `${hit.source}:${hit.path}`)).toEqual(['repo:docs/adr/a.md']);
+      // The wider page is still asked for, with the registry fence on it.
+      const namespace = source === 'outcomes' ? 'outcome' : 'repo';
+      expect(store.lexical).toHaveBeenCalledWith(
+        PROJECT, QUERY, expect.stringContaining(`source_id LIKE '${namespace}:r1:%'`), 200,
+      );
+      expect(index.describeJobs).not.toHaveBeenCalled();
+    },
+  );
+
+  it('AC-11: no outcome hit survives for a job describeJobs omits, and the reachable job keeps its hit', async () => {
+    const { service, index } = harness({
+      repos: ['r1', 'r2'],
+      lexical: [outcomeRow('j1', 'o1'), outcomeRow('gone', 'o2'), row('a', { repoId: 'r2', sourceId: 'repo:r2:a.md' })],
+      jobs: [job('j1')],
+    });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'all', limit: 20 });
+
+    expect(index.describeJobs).toHaveBeenCalledWith(PROJECT, ['j1', 'gone']);
+    expect(result.hits.map((hit) => `${hit.source}:${hit.path}`).sort()).toEqual([
+      'outcome:feature-report.md', 'repo:a.md',
+    ]);
+    expect(result.hits.filter((hit) => hit.source === 'outcome').map((hit) => hit.jobId)).toEqual(['j1']);
+  });
+
+  it('AC-12: an embedding failure answers the registered repositories’ lexical hits with lexicalOnly', async () => {
+    const { service, store, embedding } = harness({
+      repos: ['r1'],
+      lexical: [row('a'), row('b', { repoId: 'retired', sourceId: 'repo:retired:b.md' })],
+    });
+    embedding.embed.mockRejectedValue(new Error('ollama is down'));
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    expect(store.vector).not.toHaveBeenCalled();
+    // The surviving leg is asked the same fenced query, so the fallback cannot answer a retired repository.
+    expect(store.lexical).toHaveBeenCalledWith(PROJECT, QUERY, "source = 'repo' AND (source_id LIKE 'repo:r1:%')", 50);
+    expect(result.lexicalOnly).toBe(true);
+    expect(result.hits.map((hit) => hit.path)).toEqual(['a.md']);
+  });
+
+  it.each([
+    ['docs', { repoRows: false, outcomeRows: false }, true],
+    ['docs', { repoRows: true, outcomeRows: false }, false],
+    ['outcomes', { repoRows: false, outcomeRows: false }, true],
+    ['outcomes', { repoRows: true, outcomeRows: true }, false],
+    ['all', { repoRows: false, outcomeRows: false }, true],
+    ['all', { repoRows: true, outcomeRows: false }, false],
+    ['all', { repoRows: false, outcomeRows: true }, false],
+  ] as Array<[KnowledgeSource, { repoRows: boolean; outcomeRows: boolean }, boolean]>)(
+    'AC-13: source %s answers empty=%s off the stored rows of that source family when no leg matches',
+    async (source, rows, expected) => {
+      const { service } = harness({ repos: ['r1'], lexical: [], vector: [], ...rows });
+
+      const result = await service.search({ projectId: PROJECT, query: QUERY, source, limit: 20 });
+
+      expect(result.hits).toEqual([]);
+      expect(result.empty).toBe(expected);
+    },
+  );
+
+  it('AC-13: an empty registry over a table with stored rows is not empty — empty counts rows, not eligible hits', async () => {
+    const { service, store } = harness({ repos: [], lexical: [row('a')], vector: [], repoRows: true });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, source: 'docs', limit: 20 });
+
+    // The row the store would have answered belongs to no registered repository, so it is never asked for …
+    expect(store.lexical).not.toHaveBeenCalled();
+    // … and the project's table still holds a repository row, so the answer is "no eligible hit", not "empty".
+    expect(result).toEqual({ lexicalOnly: false, empty: false, hits: [] });
+  });
+});
+
+/**
+ * US-011 AC-8: the REST caller keeps its not-found response. The route resolves `owner/name` through the index
+ * service before the search runs, so an unknown — or retired, or foreign — repository is `knowledge.repoNotFound`
+ * (404) and no leg is ever asked. Driven over the *real* service, because the fence the route now relies on is the
+ * service's own.
+ */
+describe('ProjectKnowledgeController.search over the real service (US-011)', () => {
+  const CTX: ProjectContext = { project: { id: PROJECT, slug: 'koda' } };
+
+  function controller(service: KnowledgeSearchService, resolve: unknown): ProjectKnowledgeController {
+    return new ProjectKnowledgeController(
+      service,
+      { resolveProjectRepo: vi.fn(async () => resolve) } as unknown as KnowledgeIndexService,
+      { knowledgeIndexEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      { run: vi.fn() } as unknown as ApprovalRouteGate,
+    );
+  }
+
+  it('AC-8: an unknown owner/name throws knowledge.repoNotFound and never searches', async () => {
+    const { service, store } = harness({ repos: ['r1'], lexical: [row('a')] });
+
+    const error = await rejectionOf(() => controller(service, null).search({ query: QUERY, repo: 'o/missing', limit: 20 }, CTX));
+
+    expect(error).toBeInstanceOf(NotFoundAppException);
+    expect((error as NotFoundAppException).getStatus()).toBe(404);
+    expect((error as NotFoundAppException).prefix).toBe('knowledge.repoNotFound');
+    expect(store.lexical).not.toHaveBeenCalled();
+    expect(store.vector).not.toHaveBeenCalled();
   });
 });
 

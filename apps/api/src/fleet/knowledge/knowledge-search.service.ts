@@ -73,7 +73,10 @@ export interface KnowledgeSearchQuery {
   query: string;
   /** Which sources to search: repository docs, run outcomes, or both. Defaults to `all` (S5b 3c-2-D9). */
   source?: KnowledgeSource;
-  /** Restricts the search to one of the project's repositories (1c-c-D7 repo clause). */
+  /**
+   * Restricts the search to one of the project's repositories (1c-c-D7 repo clause). US-011: it is intersected
+   * with the project registry first, so an id the project no longer holds answers no hit at all.
+   */
   repoId?: string;
   pathPrefix?: string;
   limit: number;
@@ -165,29 +168,43 @@ function snippetOf(text: string | undefined): string {
 }
 
 /** The two predicates of one source family, each in its lexical and its vector form (S5b 3c-2-D9). */
-function sourcePredicates(sourceValue: string, repoId: string | undefined): { lexical: string; vector: string } {
-  // The repo clause is the 1c-c-1 form: the ids of that repository's own chunks, whose namespace is its source.
-  const repoClause = repoId === undefined ? '' : ` AND source_id LIKE '${sourceValue}:${repoId}:%'`;
+function sourcePredicates(sourceValue: string, repoIds: readonly string[]): { lexical: string; vector: string } {
+  // US-011: the fence is the eligible repositories' own chunks, whose namespace is their source (1c-c-1). It is
+  // always parenthesised, so it stays one AND term of the predicate beside `source` and `provider`.
+  const fence = `(${repoIds.map((repoId) => `source_id LIKE '${sourceValue}:${repoId}:%'`).join(' OR ')})`;
   return {
-    lexical: `source = '${sourceValue}'${repoClause}`,
-    vector: `source = '${sourceValue}' AND provider != 'none'${repoClause}`,
+    lexical: `source = '${sourceValue}' AND ${fence}`,
+    vector: `source = '${sourceValue}' AND provider != 'none' AND ${fence}`,
   };
 }
 
 /**
  * The lexical predicate of the asked sources: the doc form for `docs`, the outcome form for `outcomes`, and the
- * union of both for `all`. The vector predicate is the same shape with the 1c-c-D6 unembedded clause added.
+ * union of both for `all`. The vector predicate is the same shape with the 1c-c-D6 unembedded clause added. Both
+ * carry the eligible repositories' fence, so neither leg spends its row cap on a repository the project lost
+ * (US-011); `repoIds` is never empty here, because a search with no eligible repository asks no leg at all.
  */
-function lexicalPredicate(source: KnowledgeSource, repoId: string | undefined): string {
-  const doc = sourcePredicates(REPO_SOURCE, repoId).lexical;
-  const outcome = sourcePredicates(OUTCOME_SOURCE, repoId).lexical;
+function lexicalPredicate(source: KnowledgeSource, repoIds: readonly string[]): string {
+  const doc = sourcePredicates(REPO_SOURCE, repoIds).lexical;
+  const outcome = sourcePredicates(OUTCOME_SOURCE, repoIds).lexical;
   return source === 'docs' ? doc : source === 'outcomes' ? outcome : `(${doc}) OR (${outcome})`;
 }
 
-function vectorPredicate(source: KnowledgeSource, repoId: string | undefined): string {
-  const doc = sourcePredicates(REPO_SOURCE, repoId).vector;
-  const outcome = sourcePredicates(OUTCOME_SOURCE, repoId).vector;
+function vectorPredicate(source: KnowledgeSource, repoIds: readonly string[]): string {
+  const doc = sourcePredicates(REPO_SOURCE, repoIds).vector;
+  const outcome = sourcePredicates(OUTCOME_SOURCE, repoIds).vector;
   return source === 'docs' ? doc : source === 'outcomes' ? outcome : `(${doc}) OR (${outcome})`;
+}
+
+/**
+ * review-1125-remediation US-011 (finding 7): the repositories a search may read — the project's registered
+ * repository ids, intersected with the one repository the caller asked for. An id the registry does not hold (a
+ * retired repository, or one of another project) leaves nothing to read, and the empty set is what the caller is
+ * answered with: it must never be read as "no repository clause", which would widen the query instead.
+ */
+function eligibleRepoIds(registered: readonly string[], requested: string | undefined): string[] {
+  if (requested === undefined) return [...registered];
+  return registered.includes(requested) ? [requested] : [];
 }
 
 /** One fused row and its score. */
@@ -230,7 +247,8 @@ function outcomeWindow(entries: FusedEntry[]): OutcomeWindow {
 /**
  * Hybrid search over the project's indexed chunks (1c-c-D7, S5b 3c-2-D9). Repository and outcome chunks share
  * the project's LanceDB table with ticket documents, so every leg is restricted to the asked knowledge sources
- * and ticket search and its weighted fusion are untouched (1c-c-R6). The module exports this service;
+ * and ticket search and its weighted fusion are untouched (1c-c-R6). US-011 adds the project registry to that
+ * restriction: only the chunks of a registered repository are read at all. The module exports this service;
  * `koda_kb_search` and the search route read through it.
  */
 @Injectable()
@@ -262,18 +280,32 @@ export class KnowledgeSearchService {
 
   async search(input: KnowledgeSearchQuery): Promise<KnowledgeSearchResult> {
     const source = input.source ?? 'all';
+    // review-1125-remediation US-011 (finding 7): the project's registry is read *before* either leg, so the
+    // eligible repositories are part of the storage predicates and each leg's row cap is spent on rows the project
+    // may read. An empty intersection is answered without asking a leg: dropping the fence instead would widen the
+    // query to every repository the table still holds chunks of.
+    const repoIds = eligibleRepoIds(
+      (await this.index.listProjectRepos(input.projectId)).map((repo) => repo.id),
+      input.repoId,
+    );
+    if (repoIds.length === 0) {
+      // No leg is asked, so none failed: `lexicalOnly` stays false while `empty` keeps its meaning below.
+      return { lexicalOnly: false, empty: !(await this.hasRows(input.projectId, source)), hits: [] };
+    }
+
     const askRows = input.pathPrefix === undefined ? LEG_ROWS : PREFIXED_LEG_ROWS;
-    // Both predicates carry the asked sources and the repo clause, so a narrowed search shortens the legs
+    // Both predicates carry the asked sources and the registry fence, so a narrowed search shortens the legs
     // instead of filtering afterwards. The vector leg skips chunks stored without an embedding (1c-c-D6).
     const [lexicalRows, vectorLeg] = await Promise.all([
-      this.store.lexical(input.projectId, input.query, lexicalPredicate(source, input.repoId), askRows),
-      this.vectorLeg(input.projectId, input.query, vectorPredicate(source, input.repoId), askRows),
+      this.store.lexical(input.projectId, input.query, lexicalPredicate(source, repoIds), askRows),
+      this.vectorLeg(input.projectId, input.query, vectorPredicate(source, repoIds), askRows),
     ]);
 
-    const projectRepoIds = new Set((await this.index.listProjectRepos(input.projectId)).map((repo) => repo.id));
+    const eligible = new Set(repoIds);
     const candidates = this.fuse(lexicalRows, vectorLeg.rows)
-      // A deleted fleet repository's chunks stay in the table; the project's repositories decide what is readable.
-      .filter((entry) => projectRepoIds.has(entry.row.repoId))
+      // The fence again, on the rows themselves: a store that ignores the predicate (the in-memory fallback has no
+      // `where`) must not be able to answer a deleted repository's chunk, exactly as before US-011.
+      .filter((entry) => eligible.has(entry.row.repoId))
       // S5b 3c-2-D9: a path prefix names a document path, so it drops the outcome hits and keeps the doc hits
       // under it (3c-1). The cut to `limit` comes later, so a dropped hit frees its slot.
       .filter((entry) => input.pathPrefix === undefined
