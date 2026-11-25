@@ -24,6 +24,10 @@ const store = new Conf({
   schema,
 });
 
+export function getGlobalConfigPath(): string {
+  return store.path;
+}
+
 // SEC-2: `conf` writes with default mode 0o666 (umask → 0o644), which puts the
 // API key at ~/.koda/config.json within reach of every local user on
 // multi-user workstations. Force 0600 after every write and defensively on read.
