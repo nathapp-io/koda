@@ -3,7 +3,7 @@
   "feature": "review-1125-remediation",
   "branchName": "feat/review-1125-remediation",
   "createdAt": "2026-11-25T15:05:00.807Z",
-  "updatedAt": "2026-11-25T18:10:31.978Z",
+  "updatedAt": "2026-11-25T18:20:12.244Z",
   "userStories": [
     {
       "id": "US-001",
@@ -785,14 +785,17 @@
         "finding-6"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Ambiguous commit reconciliation crosses database and disk durability; an incorrect primary-read or lock boundary can irreversibly delete committed bytes."
+        "reasoning": "Ambiguous commit reconciliation crosses database and disk durability; an incorrect primary-read or lock boundary can irreversibly delete committed bytes.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
@@ -819,7 +822,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "244c82340ab7e01af9001f780af0da5bfe074431"
     },
     {
       "id": "US-011",
