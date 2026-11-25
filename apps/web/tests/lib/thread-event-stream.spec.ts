@@ -122,7 +122,7 @@ describe('US-002 thread-event-stream', () => {
     expect(s.handlers.onLiveChange).toHaveBeenCalledWith(false)
   })
 
-  test('US-002 AC14: resyncs once when the connection that replaces a failed one opens', async () => {
+  test('US-002 AC14: the replacing connection catches up once, when its ready frame arrives', async () => {
     s.latest().open()
     s.latest().terminalError()
     await flush()
@@ -133,8 +133,31 @@ describe('US-002 thread-event-stream', () => {
     await flush()
     expect(s.sources).toHaveLength(2)
     s.latest().open()
+    // Opening is not readiness: the catch-up belongs to the ready frame (AC-3).
+    expect(s.handlers.onResync).not.toHaveBeenCalled()
+
+    s.latest().emit('ready', {})
 
     expect(s.handlers.onResync).toHaveBeenCalledTimes(1)
+  })
+
+  test('US-002 AC-3: one catch-up per ready connection, duplicates and reconnects included', () => {
+    const first = s.latest()
+    first.open()
+    first.emit('ready', {})
+    first.emit('ready', {})
+
+    // One connection, one catch-up: a duplicate ready frame reconciles nothing new.
+    expect(s.handlers.onResync).toHaveBeenCalledTimes(1)
+
+    // The native EventSource reconnects the same object after a transient drop: its ready catches up again.
+    first.transientError()
+    first.open()
+    expect(s.handlers.onResync).toHaveBeenCalledTimes(1)
+    s.latest().emit('ready', {})
+    s.latest().emit('ready', {})
+
+    expect(s.handlers.onResync).toHaveBeenCalledTimes(2)
   })
 
   test('US-002: delivers parsed message, question and thread frames', () => {
@@ -156,12 +179,16 @@ describe('US-002 thread-event-stream', () => {
     expect(s.handlers.onLiveChange).toHaveBeenCalledWith(false)
   })
 
-  test('US-002: reopening after a transient drop resyncs once', () => {
+  test('US-002: reopening after a transient drop catches up once, on the reopened connection', () => {
     s.latest().open()
+    s.latest().emit('ready', {})
     s.latest().transientError()
     s.latest().open()
-
+    // A reopened transport has caught nothing up yet; only its ready frame starts the catch-up.
     expect(s.handlers.onResync).toHaveBeenCalledTimes(1)
+    s.latest().emit('ready', {})
+
+    expect(s.handlers.onResync).toHaveBeenCalledTimes(2)
   })
 
   test('US-002: malformed delta frames are ignored', () => {

@@ -96,11 +96,31 @@ interface Harness {
   post: jest.Mock
   patch: jest.Mock
   close: jest.Mock
+  /** The stream opener the controller called; a second call is the controller reopening its stream. */
+  openStream: jest.Mock
+  setTimer: jest.Mock
   /** The handler object openStream captured; valid once start() has run. */
   handlers: ThreadEventHandlers
   advance: (ms: number) => void
   now: jest.Mock
   messageCalls: () => unknown[][]
+}
+
+/** A promise whose settlement the test controls: a held background read. */
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason: unknown) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve: (value: T) => void = () => undefined
+  let reject: (reason: unknown) => void = () => undefined
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 const settle = async (): Promise<void> => {
@@ -149,6 +169,8 @@ function makeHarness(over: { get?: jest.Mock; post?: jest.Mock; patch?: jest.Moc
     post,
     patch,
     close,
+    openStream,
+    setTimer,
     get handlers() {
       if (captured === null) throw new Error('handlers are only captured after start()')
       return captured
@@ -677,5 +699,202 @@ describe('US-004 thread-controller: the threadPath option', () => {
     await ctl.load()
 
     expect(get).toHaveBeenCalledWith('/projects/web/threads/t1')
+  })
+})
+
+/**
+ * US-002 (finding 11): the delayed-subscription server. The transcript answers from `live` state, and the
+ * next messages GET can be held, so a test can settle a newer read or a live delta first and only then
+ * the catch-up snapshot whose rows were taken before it.
+ */
+function heldCatchUpServer() {
+  let holdNext = false
+  let held = deferred<{ items: ChatMessageDto[] }>()
+  let live: ChatMessageDto[] = []
+  const get = jest.fn(async (path: string, options?: { query?: { afterSeq?: string } }) => {
+    if (path === THREAD_PATH) return thread()
+    if (path === MESSAGES_PATH) {
+      if (holdNext) {
+        holdNext = false
+        return held.promise
+      }
+      const after = Number(options?.query?.afterSeq ?? 0)
+      return { items: live.filter(item => item.seq > after) }
+    }
+    throw new Error(`unexpected path ${path}`)
+  })
+  return {
+    get,
+    /** Hold the next messages GET: the ready-triggered catch-up. */
+    hold: (): void => {
+      holdNext = true
+      held = deferred<{ items: ChatMessageDto[] }>()
+    },
+    /** Settle the held snapshot with the rows the API held when that read started. */
+    release: async (items: ChatMessageDto[]): Promise<void> => {
+      held.resolve({ items })
+      await settle()
+    },
+    /** What every unheld read answers from now on. */
+    setLive: (items: ChatMessageDto[]): void => { live = items },
+  }
+}
+
+type HeldCatchUpServer = ReturnType<typeof heldCatchUpServer>
+
+/**
+ * The finding-11 sequence up to the held catch-up: the page's initial load, `start()`, then the ready
+ * frame whose catch-up messages read is held in flight.
+ */
+async function upToHeldCatchUp(initial: ChatMessageDto[]): Promise<{ h: Harness; server: HeldCatchUpServer }> {
+  const server = heldCatchUpServer()
+  server.setLive(initial)
+  const h = makeHarness({ get: server.get })
+  await h.ctl.load()
+  h.ctl.start()
+  server.hold()
+  h.handlers.onResync()
+  await settle()
+  return { h, server }
+}
+
+describe('US-002 thread-controller: a held catch-up snapshot cannot undo newer state', () => {
+  /** What the initial load saw: the turn mid-stream. */
+  const partial = (): ChatMessageDto => message({ id: 'm2', seq: 2, status: 'streaming', content: 'Partial response' })
+  /** What the newer read sees once the runner finished the turn. */
+  const final = (): ChatMessageDto => message({ id: 'm2', seq: 2, status: 'complete', content: 'Final response' })
+  const messageEvent = { id: 'e2', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'message' as const, messageId: 'm2' }
+
+  test('US-002 AC-4: a held catch-up snapshot does not regress the terminal status a newer onMessage read returned', async () => {
+    const { h, server } = await upToHeldCatchUp([partial()])
+
+    // The runner finished and published its message event; the newer refetch already knows.
+    server.setLive([final()])
+    h.handlers.onMessage?.(messageEvent)
+    await settle()
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.status).toBe('complete')
+
+    // The snapshot taken before the finish resolves last: the status it carries is older news.
+    await server.release([partial()])
+
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.status).toBe('complete')
+  })
+
+  test('US-002 AC-4: a held catch-up snapshot does not regress the status a live delta left in place', async () => {
+    const { h, server } = await upToHeldCatchUp([partial()])
+
+    h.handlers.onDelta?.({ id: 'e1', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'delta', messageId: 'm2', text: ' (more)' })
+    await settle()
+
+    await server.release([partial()])
+
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.status).toBe('streaming')
+  })
+
+  test('US-002 AC-5: a held catch-up snapshot does not overwrite the content a newer onMessage read returned', async () => {
+    const { h, server } = await upToHeldCatchUp([partial()])
+
+    server.setLive([final()])
+    h.handlers.onMessage?.(messageEvent)
+    await settle()
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.content).toBe('Final response')
+
+    await server.release([partial()])
+
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.content).toBe('Final response')
+  })
+
+  test('US-002 AC-5: a held catch-up snapshot does not drop the text a live delta appended', async () => {
+    const { h, server } = await upToHeldCatchUp([message({ id: 'm2', seq: 2, status: 'streaming', content: 'He' })])
+
+    h.handlers.onDelta?.({ id: 'e1', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'delta', messageId: 'm2', text: 'llo' })
+    await settle()
+
+    await server.release([message({ id: 'm2', seq: 2, status: 'streaming', content: 'He' })])
+
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.content).toBe('Hello')
+  })
+
+  test('US-002 AC-6: the transcript keeps exactly one copy of the message the stale snapshot repeated', async () => {
+    // The newer-read arm: the refetched terminal message and the snapshot's streaming copy are one message.
+    const read = await upToHeldCatchUp([partial()])
+    read.server.setLive([final()])
+    read.h.handlers.onMessage?.(messageEvent)
+    await settle()
+    await read.server.release([partial()])
+
+    expect(read.h.ctl.messages.value.map(item => item.id)).toEqual(['m2'])
+
+    // The delta arm: the appended text and the snapshot's shorter copy are the same message.
+    const streamed = await upToHeldCatchUp([message({ id: 'm2', seq: 2, status: 'streaming', content: 'He' })])
+    streamed.h.handlers.onDelta?.({ id: 'e1', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'delta', messageId: 'm2', text: 'llo' })
+    await settle()
+    await streamed.server.release([message({ id: 'm2', seq: 2, status: 'streaming', content: 'He' })])
+
+    expect(streamed.h.ctl.messages.value.map(item => item.id)).toEqual(['m2'])
+  })
+
+  test('US-002 AC-7: a rejected ready-triggered read is handled, and a later reconnect recovers the transcript', async () => {
+    const unhandled: unknown[] = []
+    const recordRejection = (reason: unknown): void => { unhandled.push(reason) }
+    process.on('unhandledRejection', recordRejection)
+    try {
+      const recovered = [message({ id: 'm2', seq: 2, status: 'complete', content: 'Final response' })]
+      let messagesCalls = 0
+      const get = jest.fn(async (path: string) => {
+        if (path === THREAD_PATH) return thread()
+        if (path === MESSAGES_PATH) {
+          messagesCalls += 1
+          // 1 = the page's initial load, 2 = the ready-triggered catch-up, 3 = the recovery's read.
+          if (messagesCalls === 1) return { items: [partial()] }
+          if (messagesCalls === 2) throw new ApiError(503, 'threads.unavailable')
+          return { items: recovered }
+        }
+        throw new Error(`unexpected path ${path}`)
+      })
+      const h = makeHarness({ get })
+      await h.ctl.load()
+      h.ctl.start()
+
+      // The ready frame's catch-up read fails: the rejection is handled, never an unhandled rejection.
+      h.handlers.onResync()
+      await settle()
+      expect(unhandled).toEqual([])
+
+      // A later reconnect (its own ready frame) reads again and restores the transcript.
+      h.handlers.onResync()
+      await settle()
+
+      expect(h.ctl.messages.value.map(item => item.id)).toEqual(['m2'])
+      expect(h.ctl.messages.value[0].status).toBe('complete')
+    } finally {
+      process.off('unhandledRejection', recordRejection)
+    }
+  })
+
+  test('US-002 AC-8: a catch-up that resolves after stop() does not reopen the stream', async () => {
+    const { h, server } = await upToHeldCatchUp([partial()])
+    expect(h.openStream).toHaveBeenCalledTimes(1)
+
+    // The page is torn down while the recovery is still in flight.
+    h.ctl.stop()
+    expect(h.close).toHaveBeenCalledTimes(1)
+
+    await server.release([final()])
+
+    expect(h.openStream).toHaveBeenCalledTimes(1)
+  })
+
+  test('US-002 AC-9: a catch-up that resolves after stop() does not restart polling', async () => {
+    const { h, server } = await upToHeldCatchUp([partial()])
+    const timersArmedByStop = h.setTimer.mock.calls.length
+    // The running turn had the fallback poll armed while the controller was live: the guard has teeth.
+    expect(timersArmedByStop).toBeGreaterThan(0)
+    h.ctl.stop()
+
+    await server.release([final()])
+
+    // The recovery would otherwise resume the page's live machinery: the fallback poll included.
+    expect(h.setTimer.mock.calls.length).toBe(timersArmedByStop)
   })
 })

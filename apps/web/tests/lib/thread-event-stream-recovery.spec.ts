@@ -38,6 +38,11 @@ class FakeEventSource implements EventSourceLike {
     this.onopen?.({})
   }
 
+  /** Deliver one SSE frame of `type`, the way the API's stream does after the connection opens. */
+  emit(type: string, data: unknown = {}): void {
+    for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) })
+  }
+
   terminalError(): void {
     this.readyState = EVENT_SOURCE_CLOSED
     this.onerror?.({})
@@ -150,5 +155,32 @@ describe('US-007 AC-13: a thread stream survives an outage', () => {
     expect(s.refreshCalls()).toBe(MAX_TERMINAL_FAILURES)
     expect(s.runTimers()).toEqual([])
     expect(s.sources).toHaveLength(opened)
+  })
+})
+
+/**
+ * US-002 (finding 11): the catch-up is a ready-frame event on every connection, including the one the
+ * auth-refresh recovery opens — a recovered stream must reconcile the gap it missed while it was down.
+ */
+describe('US-002 AC-3: a recovered thread stream catches up at ready', () => {
+  test('AC-3: the reopened connection catches up once, when its ready frame arrives', async () => {
+    const s = setup('ok')
+    s.latest().open()
+    s.latest().emit('ready')
+    expect((s.handlers.onResync as jest.Mock).mock.calls.length).toBe(1)
+
+    await s.fail()
+    expect(s.runTimers()).toEqual([1000])
+    await flush()
+    expect(s.sources).toHaveLength(2)
+    s.latest().open()
+    // Opening is not readiness: nothing catches up until the server says the stream is live.
+    expect((s.handlers.onResync as jest.Mock).mock.calls.length).toBe(1)
+
+    s.latest().emit('ready')
+    s.latest().emit('ready')
+
+    expect((s.handlers.onResync as jest.Mock).mock.calls.length).toBe(2)
+    expect(s.sources).toHaveLength(2)
   })
 })

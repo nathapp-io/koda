@@ -7,8 +7,14 @@
  * US-007: the refresh is tri-state, so only an 'unauthorized' answer stops the stream — an API
  * outage ('unavailable') keeps retrying, capped at BACKOFF_CAP_MS per wait.
  * The stream lives only once a `ready` frame arrives; any stream error (transient or terminal)
- * marks it not live (the US-003 controller contract), and a reconnect after an error resyncs once.
+ * marks it not live (the US-003 controller contract).
  * Malformed SSE event data is ignored.
+ *
+ * US-002 (finding 11): the catch-up belongs to server readiness, not to the transport. The page loads
+ * the thread and only then subscribes, so a turn that finished in between is delivered to nobody; the
+ * first `ready` frame of each connection therefore fires onResync too — one catch-up per connected
+ * stream, the reconnect paths included, and duplicate `ready` frames add none. `onopen` alone never
+ * catches up: the transport is open before the server has accepted the subscription.
  */
 import {
   backoffMs,
@@ -69,7 +75,11 @@ export function createThreadEventStream(
   let source: EventSourceLike | null = null
   let timer: unknown = null
   let stopped = false
-  let hadError = false
+  /**
+   * US-002: true once the connection now open has caught up. Reset by every successful (re)open — the
+   * browser reconnects the same EventSource after a transient drop — so each connection catches up once.
+   */
+  let caughtUp = false
   /** Drives the delay; grows on every error and only an onopen resets it. */
   let failures = 0
   /** US-007: consecutive recoveries that a live session allowed; the cap applies to these only. */
@@ -130,13 +140,16 @@ export function createThreadEventStream(
     es.onopen = () => {
       failures = 0
       authedFailures = 0
-      if (hadError) {
-        hadError = false
-        handlers.onResync()
-      }
+      // A fresh connection owes the page a catch-up; its ready frame collects it.
+      caughtUp = false
     }
     es.addEventListener('ready', () => {
       handlers.onLiveChange(true)
+      // US-002: readiness is the one place the page learns what it missed between its GET and its
+      // subscription. A duplicate ready frame on the same connection reconciles nothing new.
+      if (caughtUp) return
+      caughtUp = true
+      handlers.onResync()
     })
     es.addEventListener('delta', (ev) => {
       const event = parseThreadLiveEvent('delta', ev.data)
@@ -155,7 +168,6 @@ export function createThreadEventStream(
       if (event && isNew(event.id)) handlers.onThread?.(event)
     })
     es.onerror = () => {
-      hadError = true
       // Any stream error kills the live flag (US-003 contract); the native EventSource still
       // reconnects on its own after a transient drop, and terminal failures recover below.
       handlers.onLiveChange(false)

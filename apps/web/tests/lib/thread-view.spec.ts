@@ -172,6 +172,32 @@ describe('US-002 thread-view', () => {
     expect(result[0].content).toBe('Hello world')
   })
 
+  test('US-002: a stale page adds messages the transcript does not hold yet', () => {
+    const current: ChatMessageDto[] = [message({ id: 'm2', seq: 2, status: 'complete', content: 'Final response' })]
+    const incoming: ChatMessageDto[] = [
+      message({ id: 'm1', seq: 1, status: 'complete', content: 'Intro' }),
+      message({ id: 'm2', seq: 2, status: 'streaming', content: 'Partial response' }),
+    ]
+
+    const result = mergeMessages(current, incoming, { stale: true })
+
+    expect(result.map(item => item.id)).toEqual(['m1', 'm2'])
+    expect(result.find(item => item.id === 'm2')).toEqual(current[0])
+  })
+
+  test('US-002: a stale page keeps the text applied through deltas for a message it repeats', () => {
+    const current: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'Hello' })]
+    const incoming: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'He' })]
+
+    expect(mergeMessages(current, incoming, { stale: true })[0].content).toBe('Hello')
+  })
+
+  test('US-002: a stale page still replaces the optimistic echo the server has recorded', () => {
+    const sent = message({ id: 'm5', seq: 5, clientMessageId: 'c1', status: 'pending', role: 'user' })
+
+    expect(mergeMessages([optimistic('c1')], [sent], { stale: true })).toEqual([sent])
+  })
+
   test('US-002: isTurnRunning is true while any message is pending or streaming', () => {
     expect(isTurnRunning([message({ id: 'm1', seq: 1, status: 'pending' })])).toBe(true)
     expect(isTurnRunning([message({ id: 'm1', seq: 1, status: 'streaming' })])).toBe(true)
