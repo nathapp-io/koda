@@ -1,4 +1,4 @@
-import { CONFIG_COMPLETED_OUTCOMES, isConfigKind, type ConfigJobKind, type SnapshotEventPayload, type StateEventPayload } from '@nathapp/fleet-protocol';
+import { CONFIG_COMPLETED_OUTCOMES, isConfigKind, type ConfigJobKind, type FleetJobStateName, type SnapshotEventPayload, type StateEventPayload } from '@nathapp/fleet-protocol';
 import type { BundleFile } from '../bundle/build-bundle';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { errorMessage } from '../errors';
@@ -68,6 +68,16 @@ function terminalReason(verdict: Verdict, outcome: UploadOutcome): string | unde
   if (outcome.kind === 'too-large') return 'bundle too large';
   if (outcome.kind === 'failed') return verdict.state === 'FAILED' && verdict.reason ? `${verdict.reason}; bundle upload failed` : 'bundle upload failed';
   return verdict.reason ?? undefined;
+}
+
+/**
+ * Finding 8 (US-006): the cancellation cutoff. A run's finish path commits the durable cancellation check and the
+ * RUNNING -> UPLOADING transition as one journal step; from that point a CANCEL is refused, so an acknowledged
+ * cancellation can never be followed by a run that finishes on its own verdict. Before it — ASSIGNED, a row still
+ * queued for the repo mutex, RUNNING — the request is accepted and durable.
+ */
+export function canAcceptCancel(state: FleetJobStateName): boolean {
+  return !isTerminalState(state) && state !== 'UPLOADING';
 }
 
 /** One job, from ASSIGN to cleanup (design §2). Only legal S1 §5.4 transitions are ever emitted (JobEvents refuses the rest). */
@@ -183,7 +193,7 @@ export class JobRun {
 
   requestCancel(): boolean {
     const row = this.row();
-    if (!row || isTerminalState(row.state)) return false;
+    if (!row || !canAcceptCancel(row.state)) return false;
     if (this.queued && row.state === 'ASSIGNED') {
       this.endWhileQueued();
       return true;
@@ -646,7 +656,9 @@ export class JobRun {
     if (this.halted) return;
     await this.awaitLogs(drained);
     if (this.halted) return;
-    if (this.events.currentState() === 'RUNNING') this.events.transition('UPLOADING');
+    // Finding 8 (US-006): the upload cutoff, committed as one journal step with no await between the durable
+    // cancellation check and RUNNING -> UPLOADING (see `commitUploadCutoff`).
+    verdict = this.commitUploadCutoff(row.command === 'RUN', verdict);
     if (!(await this.waitUntil(() => !this.uploadingPending())) && !this.halted) {
       this.events.lifecycle('warn', 'UPLOADING event not acked in time; uploading anyway');
     }
@@ -677,6 +689,25 @@ export class JobRun {
     if ((await drained) !== 'timeout') return;
     const seconds = Math.max(1, Math.round(this.deps.tuning.logDrainTimeoutMs / 1000));
     this.events.lifecycle('warn', `log upload did not finish within ${seconds} s; the bundle fills the rest`);
+  }
+
+  /**
+   * Finding 8 (US-006): the upload cutoff. The durable cancellation stamp is re-read and the RUNNING -> UPLOADING
+   * transition written in ONE journal transaction, with no await in between, so an accepted CANCEL lands either
+   * before this step or not at all: before it, this run reports CANCELLED for a RUN (the same precedence the verdict
+   * itself gives the stamp); after it, `requestCancel` sees an UPLOADING row and refuses. A resumed finish (the row is
+   * already UPLOADING) still reads a cancellation persisted before the cutoff. Non-RUN kinds keep their own verdict —
+   * CONFIG never reaches here, and its authoritative result keeps its precedence (D489).
+   */
+  private commitUploadCutoff(cancellationWins: boolean, verdict: Verdict): Verdict {
+    let final = verdict;
+    this.deps.journal.tx(() => {
+      const row = this.row();
+      if (row === null) return;
+      if (cancellationWins && row.cancelRequestedAt !== null) final = { state: 'CANCELLED', reason: null };
+      if (row.state === 'RUNNING') this.events.transition('UPLOADING');
+    });
+    return final;
   }
 
   /** D60: true when the journal holds no unacked UPLOADING state event (the server has applied it). */
