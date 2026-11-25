@@ -68,6 +68,10 @@ function mountPage(over: {
     threads: ref(over.threads ?? [listItem()]),
     threadsEnabled: ref(over.threadsEnabled ?? true),
     status: ref<'ACTIVE' | 'ARCHIVED'>('ACTIVE'),
+    current: ref(1),
+    hasNext: ref(false),
+    loadingMore: ref(false),
+    loadMore: jest.fn(async () => undefined),
     load,
   }
   const get = over.api?.get ?? jest.fn(async () => ({}))
@@ -171,6 +175,27 @@ describe('US-004 AC11-AC15: the project threads list page', () => {
     await m.settle()
 
     expect(m.load).toHaveBeenCalledWith('ARCHIVED')
+    m.app.unmount()
+  })
+
+  test.each(['ACTIVE', 'ARCHIVED'] as const)('AC-1/2/3: %s list loads page two from its mounted control, renders row 101 once, then hides control', async (status) => {
+    const firstPage = Array.from({ length: 100 }, (_, i) => listItem({ id: `${status}-${i + 1}`, status }))
+    const finalRow = listItem({ id: `${status}-101`, title: `${status}-101`, status })
+    const get = jest.fn(async (_path: string, options?: { query?: Record<string, string> }) =>
+      options?.query?.page === '2' ? { items: [finalRow], threadsEnabled: true } : { items: firstPage, threadsEnabled: true })
+    const m = mountPage({ api: { get } })
+    await m.settle()
+    if (status === 'ARCHIVED') {
+      clickByLabel(m.app, 'fleet.threads.list.archived')
+      await m.settle()
+    }
+    const button = m.app.find('[data-testid="threads-load-more"]')[0]
+    expect(button).toBeDefined()
+    ;(button?.props.onClick as () => void)()
+    await m.settle()
+    expect(get).toHaveBeenLastCalledWith('/projects/web/threads', { query: { status, size: '100', page: '2' } })
+    expect(m.app.textOf(m.app.root).split(`${status}-101`)).toHaveLength(2)
+    expect(m.app.find('[data-testid="threads-load-more"]')).toHaveLength(0)
     m.app.unmount()
   })
 
