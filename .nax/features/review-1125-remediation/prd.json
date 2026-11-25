@@ -3,7 +3,7 @@
   "feature": "review-1125-remediation",
   "branchName": "feat/review-1125-remediation",
   "createdAt": "2026-11-25T15:05:00.807Z",
-  "updatedAt": "2026-11-25T16:23:26.754Z",
+  "updatedAt": "2026-11-25T16:28:40.383Z",
   "userStories": [
     {
       "id": "US-001",
@@ -306,14 +306,17 @@
         "finding-13"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Four existing files can mirror a proven paging contract; generation guards and retry state need focused tests but no new architecture."
+        "reasoning": "Four existing files can mirror a proven paging contract; generation guards and retry state need focused tests but no new architecture.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useWorkspaceThreads.ts",
@@ -344,7 +347,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7240dde5c33b39cbb9dca7bda9072ae8a2adc86f"
     },
     {
       "id": "US-005",
