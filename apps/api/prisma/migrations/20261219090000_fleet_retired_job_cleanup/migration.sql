@@ -13,7 +13,8 @@ CREATE TABLE "FleetRetiredJobCleanup" (
     "jobId" TEXT NOT NULL,
     "leaseEpoch" INTEGER NOT NULL,
     "finishedAt" TIMESTAMP(3) NOT NULL,
-    "bundleKeys" TEXT[],
+    -- Required, as the model's `bundleKeys String[]` is: a deleted job that uploaded no bundle stores '{}'.
+    "bundleKeys" TEXT[] NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "FleetRetiredJobCleanup_pkey" PRIMARY KEY ("id")
