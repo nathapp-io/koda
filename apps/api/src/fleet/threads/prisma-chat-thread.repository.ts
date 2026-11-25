@@ -154,16 +154,16 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   async list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]> {
     const rows = await this.prisma.client.chatThread.findMany({ where: { ...scopeWhere(scope), ...(status ? { status } : {}) }, include: homeProjectInclude(scope), skip, take, orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }] });
-    const jobs = rows.length ? await this.prisma.client.fleetJob.findMany({ where: { threadId: { in: rows.map((row) => row.id) }, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true, threadId: true } }) : [];
-    const active = new Map<string, { id: string; state: string }>();
-    for (const job of jobs) if (job.threadId && !active.has(job.threadId)) active.set(job.threadId, { id: job.id, state: job.state });
+    const jobs = rows.length ? await this.prisma.client.fleetJob.findMany({ where: { threadId: { in: rows.map((row) => row.id) }, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true, threadId: true, requestedById: true, requestedByType: true } }) : [];
+    const active = new Map<string, (typeof jobs)[number]>();
+    for (const job of jobs) if (job.threadId && !active.has(job.threadId)) active.set(job.threadId, job);
     return rows.map((row) => this.mapThread(row, active.get(row.id) ?? null));
   }
 
   async get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null> {
     const row = await this.prisma.client.chatThread.findFirst({ where: { id, ...scopeWhere(scope) }, include: homeProjectInclude(scope) });
     if (!row) return null;
-    const job = await this.prisma.client.fleetJob.findFirst({ where: { threadId: id, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true } });
+    const job = await this.prisma.client.fleetJob.findFirst({ where: { threadId: id, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true, requestedById: true, requestedByType: true } });
     return this.mapThread(row, job);
   }
 
@@ -812,7 +812,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return { ...message, costUsd: row.costUsd?.toString() ?? null };
   }
 
-  private mapThread(row: Prisma.ChatThreadGetPayload<object> & { project?: { slug: string; name: string } }, activeJob: { id: string; state: string } | null): ChatThreadRecord {
+  private mapThread(row: Prisma.ChatThreadGetPayload<object> & { project?: { slug: string; name: string } }, activeJob: { id: string; state: string; requestedByType: string; requestedById: string } | null): ChatThreadRecord {
     return {
       mode: (row.mode ?? 'read') as ThreadMode,
       id: row.id, kind: mapThreadKind(row.kind), projectId: row.projectId,
@@ -824,7 +824,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,
       pendingQuestion: row.pendingQuestion, session: (row.session as unknown as ThreadSession | null) ?? null,
       pendingApprovals: readPendingApprovals(row.pendingApprovals),
-      lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
+      lastActivityAt: row.lastActivityAt, createdAt: row.createdAt,
+      activeJob: activeJob && { id: activeJob.id, state: activeJob.state, requesterUserId: activeJob.requestedByType === 'USER' ? activeJob.requestedById : null },
       writtenPaths: row.writtenPaths, publishedSha: row.publishedSha, specPublished: row.specPublished,
       preApproval: (row.preApproval as unknown as ThreadPreApproval | null) ?? null,
       lastWrite: (row.lastWrite as unknown as ThreadWriteResult | null) ?? null,

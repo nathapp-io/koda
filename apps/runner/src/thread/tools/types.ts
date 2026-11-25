@@ -1,4 +1,4 @@
-import type { EmbedderTool } from '@nathapp/nax-agent';
+import type { EmbedderTool, EmbedderToolContext } from '@nathapp/nax-agent';
 import type { ThreadSkillSource } from '@nathapp/fleet-protocol';
 import type { Git } from '../../executor/git';
 
@@ -11,6 +11,8 @@ export interface ThreadToolContext {
   nowMs: () => number;
   /** The thread's feature slug. Absent: only `docs/**` is allowlisted (no `.nax/features/<feature>/` prefix can match). */
   feature?: string;
+  /** Aborted when the owning session closes or halts. */
+  sessionSignal?: AbortSignal;
   /** Called after write_doc has written a file; the session counts and reports the write through it. */
   onDocWritten?: (path: string, bytes: number) => void;
 }
@@ -29,5 +31,5 @@ export interface ThreadTool {
   readonly description: string;
   readonly inputSchema: EmbedderTool['inputSchema'];
   readonly approval: 'never';
-  run(input: unknown): Promise<ThreadToolResult>;
+  run(input: unknown, context?: EmbedderToolContext): Promise<ThreadToolResult>;
 }

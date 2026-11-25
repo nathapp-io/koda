@@ -357,7 +357,7 @@ describeIntegration('schedule ticker (PG)', () => {
       const spy = vi.spyOn(jobRepo, 'lockLiveProject').mockImplementation(async (projectId: string) => {
         // Before the lock statement, so that statement stays the last one this backend is seen running.
         insertionPid = await ownBackendPid();
-        const live = await original(projectId);   // the real SELECT … FOR NO KEY UPDATE, inside the transaction
+        const live = await original(projectId);   // the project row lock, inside the transaction
         locked.resolve();
         await release.promise;
         return live;
@@ -454,6 +454,35 @@ describeIntegration('schedule ticker (PG)', () => {
       expect(await observer.fleetActivity.count({ where: { entityId: s.id, action: 'schedule.tick_dispatched' } })).toBe(0);
     });
 
+    it('allows an independent dispatch to commit while another dispatch holds the project lock', async () => {
+      const { projectId, repoId, createdById } = await ownProject();
+      const jobs = app.get(FleetJobsService);
+      const dispatch = (feature: string) => withTestActor({ type: 'USER', id: createdById }, () =>
+        jobs.dispatch(createdById, projectId, { repoId, command: 'RUN', feature, maxCostUsd: 5 }));
+      const original = jobRepo.lockLiveProject.bind(jobRepo);
+      const locked = deferred();
+      const release = deferred();
+      const spy = vi.spyOn(jobRepo, 'lockLiveProject').mockImplementationOnce(async (id) => {
+        const live = await original(id);
+        locked.resolve();
+        await release.promise;
+        return live;
+      });
+
+      const first = dispatch('first');
+      let second: ReturnType<typeof dispatch> | undefined;
+      try {
+        await within(locked.promise, 'first dispatch to hold the project lock');
+        second = dispatch('second');
+        const committed = await within(second, 'second dispatch to commit independently', 2_000);
+        expect(await observer.fleetJob.findUnique({ where: { id: committed.job.id } })).toMatchObject({ feature: 'second' });
+      } finally {
+        release.resolve();
+        spy.mockRestore();
+        await Promise.all([first, second]);
+      }
+    });
+
     it('US-008 AC-3: a soft deletion started while the authorized insert holds the project lock waits for it', async () => {
       const race = await insertAgainstDelete();
       let waits: BlockedBackend[] = [];
@@ -463,7 +492,7 @@ describeIntegration('schedule ticker (PG)', () => {
         const [insertion] = await observer.$queryRaw<Array<{ state: string; query: string }>>`
           SELECT a.state, a.query FROM pg_stat_activity a WHERE a.pid = ${race.insertionPid()}`;
         expect(insertion.state).toBe('idle in transaction');
-        expect(insertion.query).toContain('FOR NO KEY UPDATE');
+        expect(insertion.query).toContain('FOR SHARE');
         // The delete was started before this observation and has not finished.
         expect(race.deleteSettled()).toBe(false);
         waits = await race.waitForDeletion();

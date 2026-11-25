@@ -59,7 +59,7 @@ export class ThreadDto {
   @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' }, kodaToolsUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)' }, projectCodeUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;
-  @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;
+  @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' }, requesterUserId: { type: 'string', nullable: true } } }) activeJob: { id: string; state: string; requesterUserId: string | null } | null;
   @ApiProperty({ type: [String] }) writtenPaths: string[];
   @ApiProperty({ nullable: true, type: String }) publishedSha: string | null;
   @ApiProperty() specPublished: boolean;

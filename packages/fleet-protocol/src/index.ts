@@ -239,6 +239,8 @@ export interface RunnerEvent {
 }
 
 export interface JobReport { jobId: string; leaseEpoch: number; events: RunnerEvent[] }
+/** A rejected CANCEL with this detail leaves the running job's verdict to its state reports. */
+export const CANCEL_CUTOFF_DETAIL = 'cancel cutoff passed';
 export type CommandAckResult = 'ok' | 'rejected';
 export interface CommandAck { commandId: string; leaseEpoch: number; result: CommandAckResult; detail?: string }
 /** Fleet S5b 1c-b: `repoId` asks for one project repository's read-only token (a PROJECT session). */

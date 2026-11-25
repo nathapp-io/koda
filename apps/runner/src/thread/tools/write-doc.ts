@@ -1,4 +1,5 @@
-import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { closeSync, constants, fstatSync, ftruncateSync, mkdirSync, openSync, realpathSync, writeFileSync } from 'node:fs';
+import { lstat } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { isAllowedThreadDocPath, THREAD_DOC_LIMITS } from '@nathapp/fleet-protocol';
 import { sanitizeDiagnostic } from '../../diagnostics';
@@ -19,7 +20,8 @@ async function symlinkOnPath(root: string, path: string): Promise<string | null>
   return null;
 }
 
-async function write(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolResult> {
+async function write(ctx: ThreadToolContext, input: unknown, turnSignal?: AbortSignal): Promise<ThreadToolResult> {
+  if (ctx.sessionSignal?.aborted || turnSignal?.aborted) return refused('write cancelled');
   const path = fieldOf(input, 'path');
   if (typeof path !== 'string' || !isAllowedThreadDocPath(path, ctx.feature ?? '')) {
     // The refused path is echoed back to the agent, so it is capped at the longest path a thread may write.
@@ -37,11 +39,22 @@ async function write(ctx: ThreadToolContext, input: unknown): Promise<ThreadTool
   if (linked !== null) return refused(`refused symlink: ${linked}`);
 
   const target = join(ctx.worktree, path);
-  await mkdir(dirname(target), { recursive: true });
-  const [root, parent] = await Promise.all([realpath(ctx.worktree), realpath(dirname(target))]);
+  // Commit the bounded local write and its stream event in the same turn as the last
+  // ownership check. A close cannot hand this worktree to a successor in between.
+  if (ctx.sessionSignal?.aborted || turnSignal?.aborted) return refused('write cancelled');
+  mkdirSync(dirname(target), { recursive: true });
+  const root = realpathSync(ctx.worktree);
+  const parent = realpathSync(dirname(target));
   if (parent !== root && !parent.startsWith(`${root}${sep}`)) return refused('path escapes the worktree');
 
-  await writeFile(target, content, 'utf8');
+  const fd = openSync(target, constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) return refused('not a regular file');
+    ftruncateSync(fd, 0);
+    writeFileSync(fd, content, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
   ctx.onDocWritten?.(path, bytes);
   return { content: `wrote ${path} (${bytes} bytes)` };
 }
@@ -64,6 +77,6 @@ export function writeDocTool(ctx: ThreadToolContext): ThreadTool {
       additionalProperties: false,
     },
     approval: 'never',
-    run: (input) => refuseInvalidInput(() => write(ctx, input)),
+    run: (input, context) => refuseInvalidInput(() => write(ctx, input, context?.signal)),
   };
 }

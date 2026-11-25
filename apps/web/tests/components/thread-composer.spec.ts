@@ -12,7 +12,7 @@ import type { ComposerReason } from '~/lib/thread-types'
  *
  * Component contract (web context §4.62): props `composerState: { canSend, reason }`
  * (`reason` is a `ComposerReason`: a `ThreadSendRefusal` or `readOnly`),
- * `turnRunning: boolean` and a `send(text)` promise callback; emits `stop` only. Enter
+ * `showStop: boolean` and a `send(text)` promise callback; emits `stop` only. Enter
  * sends the trimmed draft and clears it on success, Shift+Enter inserts a newline (never
  * sends), whitespace sends nothing, a refused composerState renders the
  * `fleet.threads.refusal.<reason>` text, a readOnly state renders
@@ -36,12 +36,12 @@ const composerFile = webFile('components', 'fleet', 'threads', 'ThreadComposer.v
 const mountComposer = (
   composerState: ComposerState,
   send: (text: string) => Promise<ThreadActionResult> = async () => ({ ok: true }),
-  turnRunning = false,
+  showStop = false,
   toastError = jest.fn(),
   i18n: () => { t: (key: string, named?: Record<string, unknown>) => string; te: () => boolean } = () => i18nStub(),
 ): Mounted =>
   mountSfc(composerFile, {
-    props: { composerState, send, turnRunning },
+    props: { composerState, send, showStop },
     components: uiStubs,
     globals: { useI18n: i18n, useAppToast: () => ({ error: toastError }) },
   })
@@ -263,7 +263,7 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     app.unmount()
   })
 
-  test('AC7: with turnRunning true, clicking Stop emits stop', async () => {
+  test('AC7: with showStop true, clicking Stop emits stop', async () => {
     const app = mountComposer({ canSend: true, reason: null }, async () => ({ ok: true }), true)
 
     const stop = actionButton(app, 'fleet.threads.composer.stop')

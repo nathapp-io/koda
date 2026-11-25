@@ -147,8 +147,8 @@ const MARKERS: Record<string, Component> = {
   FleetThreadsThreadKodaToolsNotice: marker('page-thread-koda-tools-notice'),
   ThreadTimeline: marker('page-thread-timeline', ['slug']),
   FleetThreadsThreadTimeline: marker('page-thread-timeline', ['slug']),
-  ThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning', 'send']),
-  FleetThreadsThreadComposer: marker('page-thread-composer', ['composerState', 'turnRunning', 'send']),
+  ThreadComposer: marker('page-thread-composer', ['composerState', 'showStop', 'send']),
+  FleetThreadsThreadComposer: marker('page-thread-composer', ['composerState', 'showStop', 'send']),
   ThreadActionBar: marker('page-thread-action-bar'),
   FleetThreadsThreadActionBar: marker('page-thread-action-bar'),
   ThreadStaleBanner: marker('page-thread-stale-banner'),
@@ -482,7 +482,7 @@ describe('US-006 AC-1..AC-6: pages/threads/[id].vue — the loaded thread', () =
     await m.settle()
 
     expect(markerProp(m.app, 'page-thread-composer', 'composerState')).toEqual({ canSend: true, reason: null })
-    expect(markerProp(m.app, 'page-thread-composer', 'turnRunning')).toBe(false)
+    expect(markerProp(m.app, 'page-thread-composer', 'showStop')).toBe(false)
     m.app.unmount()
   })
 
@@ -642,7 +642,7 @@ describe('US-006 wiring: pages/threads/[id].vue — the other session controls',
   })
 
   test('Wiring: stopping a running turn posts to /threads/t1/stop', async () => {
-    const m = mountPage({ real: true, messages: [message({ status: 'streaming' })] })
+    const m = mountPage({ real: true, permissionKeys: ['thread.stop.own'], messages: [message({ status: 'streaming' })] })
     await m.settle()
 
     const stop = byTestId(m.app, 'thread-stop')

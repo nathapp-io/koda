@@ -112,6 +112,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
         :thread="controller.thread.value"
         :messages="controller.messages.value"
         :is-creator="isCreator"
+        :can-answer="canDecideApprovals"
         :slug="controller.thread.value.homeProject?.slug ?? ''"
         @answer="onAnswer"
       />
@@ -126,7 +127,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
       </div>
       <FleetThreadsThreadComposer
         :composer-state="composerState(controller.thread.value, controller.messages.value, { canSend: isCreator })"
-        :turn-running="isTurnRunning(controller.messages.value)"
+        :show-stop="homePermissions.permissions.value.hasOwn('thread.stop') && isTurnRunning(controller.messages.value)"
         :send="onSend"
         @stop="onStop"
       />

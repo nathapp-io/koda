@@ -362,6 +362,32 @@ describe('US-005 project composer effective send grants', () => {
   })
 })
 
+describe('Live turn controls', () => {
+  test.each([
+    [['thread.stop.own'], true],
+    [['thread.message.send'], false],
+  ] as const)('shows Stop according to its own permission (%j)', (keys, visible) => {
+    const m = mountPage({ messages: [message({ status: 'streaming' })], permissions: [...keys] })
+    expect(Boolean(m.app.one('[data-testid="thread-stop"]'))).toBe(visible)
+    m.app.unmount()
+  })
+
+  test.each([
+    ['u2', 'u1', ['thread.answer'], true],
+    ['u2', 'u1', ['thread.answer.own'], false],
+    ['u1', 'u2', ['thread.answer'], false],
+    ['u1', null, ['thread.answer'], false],
+  ] as const)('uses the live requester and answer grant (creator %s, requester %s, keys %j)', (creator, requester, keys, visible) => {
+    const m = mountPage({ thread: threadDetail({
+      createdById: creator,
+      activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: requester },
+      pendingQuestion: { text: 'Continue?', requestId: 'q1' },
+    }), permissions: [...keys] })
+    expect(Boolean(m.app.one('[data-testid="thread-answer-input"]'))).toBe(visible)
+    m.app.unmount()
+  })
+})
+
 describe('US-003 project-thread load recovery', () => {
   test.each([403, 404])('AC-1/AC-2: a %i response shows the same unavailable state without private detail', async () => {
     const m = mountPage({ thread: null, unavailable: true })
@@ -660,7 +686,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
   test('AC-10: the page renders one ThreadApprovalCard per pendingApprovals entry', async () => {
     const m = mountPage({
       thread: threadDetail({
-        pendingApprovals: [approval(), approval({ requestId: 'req2', tool: 'write_file', summary: 'Write docs/plan.md' })],
+        activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval(), approval({ requestId: 'req2', tool: 'write_file', summary: 'Write docs/plan.md' })],
       }),
       permissions: MODE_KEYS,
     })
@@ -674,7 +700,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
   })
 
   test('AC-10 (empty): no approval card is rendered when pendingApprovals is empty', async () => {
-    const m = mountPage({ thread: threadDetail({ pendingApprovals: [] }), permissions: MODE_KEYS })
+    const m = mountPage({ thread: threadDetail({ activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [] }), permissions: MODE_KEYS })
     await m.settle()
 
     expect(m.app.find('[data-testid="thread-approval"]')).toHaveLength(0)
@@ -683,7 +709,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
 
   test('US-012 gate: a creator without thread.answer sees the request but no decision controls', async () => {
     const m = mountPage({
-      thread: threadDetail({ pendingApprovals: [approval()] }),
+      thread: threadDetail({ activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval()] }),
       // The creator's role lacks the decision key: the card renders read-only (the API refuses anyway).
       permissions: ['thread.cap.update', 'thread.mode.ask', 'thread.mode.full'],
     })
@@ -699,7 +725,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
   // any-row holder who started the ask turn in somebody else's thread must get the decision controls too.
   test('B4: a non-creator holding the any-row thread.answer sees the decision controls', async () => {
     const m = mountPage({
-      thread: threadDetail({ createdById: 'u2', pendingApprovals: [approval()] }),
+      thread: threadDetail({ createdById: 'u2', activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval()] }),
       permissions: ['thread.answer'],
     })
     await m.settle()
@@ -712,7 +738,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
 
   test('B4: a non-creator holding only the own-row thread.answer sees no decision controls', async () => {
     const m = mountPage({
-      thread: threadDetail({ createdById: 'u2', pendingApprovals: [approval()] }),
+      thread: threadDetail({ createdById: 'u2', activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval()] }),
       // `own` means "my threads", so another creator's pending request stays read-only for this viewer.
       permissions: ['thread.answer.own'],
     })
@@ -726,7 +752,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
 
   test('B4: the thread creator with the own-row thread.answer still decides', async () => {
     const m = mountPage({
-      thread: threadDetail({ createdById: 'u1', pendingApprovals: [approval()] }),
+      thread: threadDetail({ createdById: 'u1', activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval()] }),
       permissions: ['thread.answer.own'],
     })
     await m.settle()
@@ -736,7 +762,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
   })
 
   test('US-012 wiring: Approve on a card reaches the controller action with its request id', async () => {
-    const m = mountPage({ thread: threadDetail({ pendingApprovals: [approval({ requestId: 'req-9' })] }), permissions: MODE_KEYS })
+    const m = mountPage({ thread: threadDetail({ activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval({ requestId: 'req-9' })] }), permissions: MODE_KEYS })
     await m.settle()
 
     const approve = m.app.one('[data-testid="thread-approval-approve"]')
@@ -753,7 +779,7 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
   test('B3: a pending request whose decision the runner rejected renders the rejection and stays decidable', async () => {
     const m = mountPage({
       thread: threadDetail({
-        pendingApprovals: [approval({ delivery: { decision: 'allow', result: 'rejected', detail: 'expired', at: '2026-10-14T10:00:00.000Z' } })],
+        activeJob: { id: 'j1', state: 'RUNNING', requesterUserId: 'u1' }, pendingApprovals: [approval({ delivery: { decision: 'allow', result: 'rejected', detail: 'expired', at: '2026-10-14T10:00:00.000Z' } })],
       }),
       permissions: MODE_KEYS,
     })

@@ -21,45 +21,35 @@ export function applyDelta(messages: readonly ChatMessageDto[], messageId: strin
   return messages.map((message, i) => (i === index ? { ...message, content: message.content + text } : message))
 }
 
-export interface MergeMessagesOptions {
-  /**
-   * US-002: the page is a snapshot read that started before the transcript last changed — a catch-up GET
-   * held while a newer read or a live delta landed, say. It may add messages the transcript does not hold
-   * yet, but it never rewrites one it does: the held copy already carries the newer news.
-   */
-  stale?: boolean
-}
-
 /**
- * Union by `id`; `incoming` wins, except that a message `streaming` on both sides keeps the longer
- * `content` (an older in-flight GET never shortens streamed text). Real messages sort ascending by
+ * Union by `id`; `incoming` wins, except when live text extends a snapshot that is still streaming. Real messages sort ascending by
  * `seq`; an optimistic entry is dropped when `incoming` holds a message with its `clientMessageId`,
  * and remaining optimistic entries sort after every real message.
  *
- * A `stale` page (US-002) keeps every message the transcript already holds and only contributes the
- * ones it does not know, so a snapshot taken before a newer read or a text delta cannot undo either.
+ * For rows already covered by a newer snapshot, `staleIds` preserves that snapshot in its entirety.
+ * A live text delta only changes content, so a server read can still supply new tool and usage metadata.
  */
 export function mergeMessages(
   current: readonly ChatMessageDto[],
   incoming: readonly ChatMessageDto[],
-  options: MergeMessagesOptions = {},
+  staleIds?: ReadonlySet<string>,
 ): ChatMessageDto[] {
   const inComingClientIds = new Set(incoming.map(message => message.clientMessageId).filter((id): id is string => id !== null))
   const byId = new Map<string, ChatMessageDto>()
   for (const message of incoming) byId.set(message.id, message)
   for (const message of current) {
     if (byId.has(message.id)) {
-      // The transcript already holds this sequence: a stale page's copy of it is older than what is held.
-      if (options.stale) byId.set(message.id, message)
+      if (staleIds?.has(message.id)) byId.set(message.id, message)
       continue
     }
     if (isOptimistic(message) && message.clientMessageId !== null && inComingClientIds.has(message.clientMessageId)) continue
     byId.set(message.id, message)
   }
-  // Streaming on both sides: keep the longer content (the in-flight GET is older than the stream).
+  // A delta can extend a snapshot in flight. A different prefix can also be a runner stream reset.
   for (const message of current) {
     const merged = byId.get(message.id)
-    if (merged && merged.status === STREAMING && message.status === STREAMING && merged.content.length < message.content.length) {
+    if (merged?.status === STREAMING && message.status === STREAMING &&
+        message.content.length > merged.content.length && message.content.startsWith(merged.content)) {
       byId.set(message.id, { ...merged, content: message.content })
     }
   }

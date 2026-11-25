@@ -932,11 +932,10 @@ describe('US-002 (F1) thread-controller: overlapping reads are ordered by when t
     await settle()
     expect(heldDetail).toHaveLength(2)
 
-    // The older read answers first: its snapshot is older news than the read already in flight, so it is
-    // discarded rather than shown and then replaced.
+    // A later read in flight may fail. The first successful snapshot can be displayed immediately.
     heldDetail[0].resolve(thread({ title: 'Stale snapshot' }))
     await settle()
-    expect(h.ctl.thread.value?.title).toBe('Initial')
+    expect(h.ctl.thread.value?.title).toBe('Stale snapshot')
 
     // The read that started later answers last: its detail is the fresher one and must be the one held.
     heldDetail[1].resolve(thread({ title: 'Fresh detail' }))
@@ -981,5 +980,152 @@ describe('US-002 (F1) thread-controller: overlapping reads are ordered by when t
 
     expect(h.ctl.messages.value.find(item => item.id === 'm2')?.status).toBe('complete')
     expect(h.ctl.messages.value.find(item => item.id === 'm2')?.content).toBe('Final response')
+  })
+})
+
+describe('thread detail and transcript snapshot ordering', () => {
+  test('slow polling applies a successful detail even when the next poll fails', async () => {
+    const first = deferred<ThreadDetailDto>()
+    const second = deferred<ThreadDetailDto>()
+    const details = [Promise.resolve(thread({ title: 'Initial' })), first.promise, second.promise]
+    const get = jest.fn(async (path: string) => path === THREAD_PATH
+      ? details.shift()
+      : { items: [message({ status: 'streaming' })] })
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+    h.advance(2000)
+    h.advance(2000)
+    second.reject(new Error('temporary failure'))
+    first.resolve(thread({ title: 'Updated during poll' }))
+    await settle()
+    expect(h.ctl.thread.value?.title).toBe('Updated during poll')
+    h.ctl.stop()
+  })
+
+  test('a late detail cannot undo a newer successful read or update after teardown', async () => {
+    const older = deferred<ThreadDetailDto>()
+    const afterUnmount = deferred<ThreadDetailDto>()
+    const get = jest.fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(Promise.resolve(thread({ title: 'Latest' })))
+      .mockReturnValueOnce(afterUnmount.promise)
+    const h = makeHarness({ get })
+    const first = h.ctl.reloadThread()
+    await h.ctl.reloadThread()
+    older.resolve(thread({ title: 'Older' }))
+    await first
+    expect(h.ctl.thread.value?.title).toBe('Latest')
+
+    const held = h.ctl.reloadThread()
+    h.ctl.stop()
+    afterUnmount.resolve(thread({ title: 'Previous lifecycle' }))
+    await held
+    expect(h.ctl.thread.value?.title).toBe('Latest')
+  })
+
+  test('tool metadata and fresh statuses survive live text arriving during a snapshot', async () => {
+    const user = message({ id: 'u', seq: 1, role: 'user', status: 'pending' })
+    const assistant = message({ id: 'a', seq: 2, status: 'streaming', content: 'start' })
+    const tool = { callId: 'c', name: 'read', input: 'file', isError: false, preview: 'ok', decidedBy: null }
+    const { h, server } = await upToHeldCatchUp([user, assistant])
+    for (const text of [' now', '!']) {
+      h.handlers.onDelta?.({ id: text, type: 'delta', threadId: 'th1', messageId: 'a', at: '', text })
+    }
+    await server.release([{ ...user, status: 'complete' }, { ...assistant, toolSummary: [tool], costUsd: '0.01' }])
+    expect(h.ctl.messages.value).toMatchObject([
+      { id: 'u', status: 'complete' },
+      { id: 'a', content: 'start now!', toolSummary: [tool], costUsd: '0.01' },
+    ])
+  })
+
+  test('reconciles a missed prefix with a live delta received during reconnect', async () => {
+    const partial = message({ id: 'a', seq: 1, status: 'streaming', content: 'Hello' })
+    const { h, server } = await upToHeldCatchUp([partial])
+    // The initial GET missed " there". The reconnect GET took its snapshot before "!" arrived.
+    h.handlers.onDelta?.({ id: 'e', type: 'delta', threadId: 'th1', messageId: 'a', at: '', text: '!' })
+    server.setLive([{ ...partial, content: 'Hello there!' }])
+    await server.release([{ ...partial, content: 'Hello there' }])
+    expect(h.ctl.messages.value[0].content).toBe('Hello there!')
+  })
+
+  test('a busy stream can trigger only one verification read per page refresh', async () => {
+    const row = message({ id: 'a', seq: 1, status: 'streaming', content: 'a' })
+    const first = deferred<{ items: ChatMessageDto[] }>()
+    const verification = deferred<{ items: ChatMessageDto[] }>()
+    const reads = [Promise.resolve({ items: [row] }), first.promise, verification.promise]
+    const get = jest.fn(async (path: string) => path === THREAD_PATH
+      ? thread()
+      : reads.shift() ?? { items: [{ ...row, content: 'settled' }] })
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+    h.handlers.onLiveChange(true)
+    const refreshing = h.ctl.load()
+    await settle()
+    h.handlers.onDelta?.({ id: '1', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'c' })
+    first.resolve({ items: [{ ...row, content: 'ab' }] })
+    await settle()
+    h.handlers.onDelta?.({ id: '2', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'd' })
+    verification.resolve({ items: [{ ...row, content: 'abc', costUsd: '0.20' }] })
+    await refreshing
+    expect(h.messageCalls()).toHaveLength(3) // initial, refresh, verification
+    expect(h.ctl.messages.value[0].costUsd).toBe('0.20')
+
+    // A later stream event can still fetch the authoritative final state.
+    h.handlers.onMessage?.({ id: '3', type: 'message', messageId: 'a', threadId: 'th1', at: '' })
+    await settle()
+    expect(h.ctl.messages.value[0].content).toBe('settled')
+  })
+
+  test('stopping during a held full page keeps its rows and subsequent requests out of the next lifecycle', async () => {
+    const { h, server } = await upToHeldCatchUp([message({ content: 'original' })])
+    const reads = h.messageCalls().length
+    h.ctl.stop()
+    h.ctl.start()
+    await server.release(sequence(1, PAGE))
+    expect(h.messageCalls()).toHaveLength(reads)
+    expect(h.ctl.messages.value.map(item => item.content)).toEqual(['original'])
+  })
+
+  test('a delayed send acknowledgement cannot replace its already consumed message', async () => {
+    const server = heldCatchUpServer()
+    const posted = deferred<{ message: ChatMessageDto }>()
+    const h = makeHarness({ get: server.get, post: jest.fn(() => posted.promise) })
+    await h.ctl.load()
+    h.ctl.start()
+    const sending = h.ctl.send('hello')
+    const sent = message({ id: 'user', role: 'user', content: 'hello', status: 'pending',
+      clientMessageId: h.ctl.messages.value[0].clientMessageId })
+    server.setLive([{ ...sent, status: 'complete' }])
+    h.handlers.onMessage?.({ id: 'e', type: 'message', threadId: 'th1', messageId: 'user', at: '' })
+    await settle()
+    posted.resolve({ message: sent })
+    await sending
+    expect(h.ctl.messages.value).toMatchObject([{ id: 'user', status: 'complete' }])
+  })
+
+  test('a newer tail refresh does not invalidate earlier rows of a paged catch-up', async () => {
+    const rows = sequence(1, PAGE + 1)
+    const server = heldCatchUpServer()
+    // Limit each response exactly as the wire does, with the last entry in the second page.
+    const get = jest.fn(async (path: string, options?: { query?: { afterSeq?: string } }) => {
+      const response = await server.get(path, options)
+      return 'items' in response ? { items: response.items.slice(0, PAGE) } : response
+    })
+    server.setLive(rows)
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+    server.hold()
+    h.handlers.onResync()
+    await settle()
+    server.setLive([...rows, message({ id: 'tail', seq: PAGE + 2, content: 'new tail' })])
+    h.handlers.onMessage?.({ id: 'e', type: 'message', threadId: 'th1', messageId: 'tail', at: '' })
+    await settle()
+    await server.release([{ ...rows[0], costUsd: '0.25' }, ...rows.slice(1, PAGE)])
+    expect(h.ctl.messages.value[0].costUsd).toBe('0.25')
+    expect(h.ctl.messages.value.at(-1)?.content).toBe('new tail')
+    expect(h.ctl.messages.value).toHaveLength(PAGE + 2)
   })
 })

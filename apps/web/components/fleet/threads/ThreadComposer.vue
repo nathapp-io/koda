@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { buildThreadMessageSchema } from '~/lib/thread-create'
@@ -10,7 +11,7 @@ import type { ThreadActionResult } from '~/lib/thread-controller'
  * viewer's read-only note.
  *
  * Contract: props `composerState: { canSend, reason }` (`reason` is a `ComposerReason`:
- * a `ThreadSendRefusal` or `readOnly`), `turnRunning: boolean` and an async `send(text)`
+ * a `ThreadSendRefusal` or `readOnly`), `showStop: boolean` and an async `send(text)`
  * action; emits `stop` only. Enter sends the validated draft and awaits the result,
  * clearing the draft on success; Shift+Enter inserts a newline (never sends), whitespace
  * sends nothing, a refusing `composerState` renders the `fleet.threads.refusal.<reason>`
@@ -25,7 +26,7 @@ import type { ThreadActionResult } from '~/lib/thread-controller'
  */
 const props = defineProps<{
   composerState: { canSend: boolean; reason: ComposerReason | null }
-  turnRunning: boolean
+  showStop: boolean
   send: (text: string) => Promise<ThreadActionResult>
 }>()
 const emit = defineEmits<{
@@ -66,6 +67,7 @@ function handleKeydown(event: KeyboardEvent): void {
  * nothing was written. The draft stays exactly as the user left it and the returned request is
  * named beside it.
  */
+const showInput = computed(() => props.composerState.reason !== 'readOnly' && props.composerState.reason !== 'archived')
 const sending = ref(false)
 const pendingApprovalId = ref<string | null>(null)
 
@@ -118,21 +120,22 @@ function stop(): void {
       <p v-if="pendingApprovalId" class="text-sm text-muted-foreground" role="status" data-testid="thread-composer-pending">
         {{ t('fleet.threads.composer.pendingApproval', { id: pendingApprovalId }) }}
       </p>
-      <div class="flex justify-end gap-2">
-        <Button
-          v-if="props.turnRunning"
-          type="button"
-          variant="outline"
-          data-testid="thread-stop"
-          @click="stop"
-        >{{ t('fleet.threads.composer.stop') }}</Button>
-        <Button
-          type="button"
-          :disabled="sending || !props.composerState.canSend || String(draft ?? '').trim().length === 0"
-          data-testid="thread-send"
-          @click="sendDraft"
-        >{{ t('fleet.threads.composer.send') }}</Button>
-      </div>
     </template>
+    <div v-if="props.showStop || showInput" class="flex justify-end gap-2">
+      <Button
+        v-if="props.showStop"
+        type="button"
+        variant="outline"
+        data-testid="thread-stop"
+        @click="stop"
+      >{{ t('fleet.threads.composer.stop') }}</Button>
+      <Button
+        v-if="showInput"
+        type="button"
+        :disabled="sending || !props.composerState.canSend || String(draft ?? '').trim().length === 0"
+        data-testid="thread-send"
+        @click="sendDraft"
+      >{{ t('fleet.threads.composer.send') }}</Button>
+    </div>
   </div>
 </template>

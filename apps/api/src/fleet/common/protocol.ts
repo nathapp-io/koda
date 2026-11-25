@@ -65,6 +65,9 @@ export function isSupportedProtocolVersion(value: unknown): value is number {
   return typeof value === 'number' && SUPPORTED_FLEET_PROTOCOL_VERSIONS.includes(value);
 }
 
+// Keep the persisted v4 acknowledgement readable across runner/API upgrades.
+export const CANCEL_CUTOFF_DETAIL = 'cancel cutoff passed' satisfies typeof import('@nathapp/fleet-protocol').CANCEL_CUTOFF_DETAIL;
+
 /** Mirror of the package's APPROVAL_TEXT_MAX_BYTES (protocol.spec pins them equal). */
 export const APPROVAL_TEXT_MAX_BYTES = 12_288;
 /** S1.5 §1.6, A3. */

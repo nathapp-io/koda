@@ -304,11 +304,12 @@ describe('ThreadJobRun koda tool session sets (US-006 AC-11, AC-12, AC-15, AC-16
     const starting = context1.run.start('prepare');
     await waitFor(() => context1.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
     const tools = (context1.opened.at(-1)?.['tools'] ?? []) as EmbedderTool[];
-    const signal = new AbortController().signal;
-    const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9', signal));
+    const turn = new AbortController();
+    const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9', turn.signal));
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ jobId, leaseEpoch, name: 'koda_get_ticket', toolCallId: 'c9', input: { ref: 'WEB-1' } });
-    expect(calls[0]?.signal).toBe(signal);
+    turn.abort();
+    expect(calls[0]?.signal?.aborted).toBe(true);
     expect(answer).toEqual({ content: 'WEB-1: fix login', isError: false });
     context1.run.halt();
     await starting;
@@ -351,6 +352,15 @@ describe('ThreadJobRun gates proxied koda calls on the RUNNING ack (review B3)',
     };
     return { ...context1, tools, stop };
   }
+
+  test('a retained proxy cannot reach the API after halt when the RUNNING ack wait is disabled', async () => {
+    const { calls, caller } = recordingCaller(async () => ({ content: 'sent', isError: false }));
+    const { tools, stop } = await startRun(caller, {});
+    await stop();
+    const reply = await tools[2]?.run({ ref: 'WEB-1' }, context('late'));
+    expect(calls).toHaveLength(0);
+    expect(reply?.isError).toBe(true);
+  });
 
   test('B3: a call made while RUNNING is still unacked waits for the sync ack, then makes its one call', async () => {
     const seen = { polls: 0, pendingAtCall: [] as string[] };

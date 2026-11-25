@@ -99,7 +99,7 @@ export interface ChatThreadRecord {
    */
   pendingApprovals: ThreadPendingApproval[];
   session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
-  activeJob: { id: string; state: string } | null;
+  activeJob: { id: string; state: string; requesterUserId: string | null } | null;
   /** Distinct paths write_doc touched since the last publish (capped at 200 by the ingest, US-002). */
   writtenPaths: string[];
   publishedSha: string | null;

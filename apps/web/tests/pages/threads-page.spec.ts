@@ -243,6 +243,22 @@ describe('koda#294: out-of-order status reads on the project threads page', () =
   }
 
   const activeRows = [listItem({ id: 'th1' })]
+  test('ignores a failed Load More from a previous tab', async () => {
+    const api = queuedApi()
+    const m = mountPage({ api })
+    api.reads[0].resolve({ items: Array.from({ length: 100 }, (_, i) => listItem({ id: String(i) })), threadsEnabled: true })
+    await m.settle()
+    const more = m.app.find('[data-testid="threads-load-more"]')[0]
+    ;(more.props.onClick as () => void)()
+    clickByLabel(m.app, 'fleet.threads.list.archived')
+    api.reads[2].resolve({ items: [], threadsEnabled: true })
+    await m.settle()
+    api.reads[1].reject(new Error('old page failed'))
+    await m.settle()
+    expect(m.app.textOf(m.app.root)).not.toContain('fleet.threads.list.loadMoreFailed')
+    m.app.unmount()
+  })
+
   const archivedRows = [listItem({ id: 'th-old', status: 'ARCHIVED' })]
 
   /** Mount, settle the initial ACTIVE read, then click Archived and Active without settling either. */

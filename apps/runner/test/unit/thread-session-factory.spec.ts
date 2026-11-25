@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
-import { createFileTranscriptStore, nativeBackend, type AgentSession, type CreateAgentSessionOptions, type NativeBackendOptions, type SessionBackend } from '@nathapp/nax-agent';
+import { createFileTranscriptStore, createMemoryTranscriptStore, nativeBackend, type AgentSession, type CreateAgentSessionOptions, type NativeBackendOptions, type SessionBackend } from '@nathapp/nax-agent';
 import type { AcpBackendOptions } from '@nathapp/nax-agent-acp/client';
 
 const factoryModule = await import('../../src/thread/session-factory').catch(() => undefined);
@@ -38,6 +38,7 @@ function setup(overrides: {
   createError?: Error;
   resumeError?: Error;
   tools?: CreateAgentSessionOptions['tools'];
+  createStore?: typeof createFileTranscriptStore;
 } = {}) {
   const calls: {
     create: Array<{ options: CreateAgentSessionOptions }>;
@@ -78,7 +79,7 @@ function setup(overrides: {
     },
     createFileTranscriptStore: (directory: string) => {
       calls.transcript.push(directory);
-      return createFileTranscriptStore(directory);
+      return (overrides.createStore ?? createFileTranscriptStore)(directory);
     },
   };
   const factory = factoryModule && new factoryModule.ThreadSessionFactory({
@@ -96,10 +97,10 @@ function setup(overrides: {
     resume: overrides.resume ?? false,
     backend: overrides.backend ?? { kind: 'native', model: 'm/x' },
   });
-  return { calls, acpSentinel, open: (jobId = 'job-1', value = assigned) => {
+  return { calls, acpSentinel, open: (jobId = 'job-1', value = assigned, transcriptSignal?: AbortSignal) => {
     expect(factoryModule).toBeDefined();
     if (factory === undefined) throw new Error('ThreadSessionFactory is unavailable');
-    return factory.open({ jobId, thread: value, worktree: '/work/tree', tools: overrides.tools ?? [], approvalTimeoutSec: 60 });
+    return factory.open({ jobId, thread: value, worktree: '/work/tree', transcriptSignal, tools: overrides.tools ?? [], approvalTimeoutSec: 60 });
   } };
 }
 
@@ -169,6 +170,37 @@ test('US-006 AC-4: stores the transcript below the thread home directory', async
   const result = await h.open();
   expect(h.calls.transcript).toEqual([join('/runner-home', 'threads', 'thread-1', 'transcript')]);
   expect(result).toEqual({ ok: true, session, resumed: false });
+});
+
+test('a resumed session reads the admitted transcript save and rejects its predecessor’s late marker', async () => {
+  const memory = createMemoryTranscriptStore();
+  const writing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const h = setup({ createStore: () => ({
+    ...memory,
+    async save(id, doc) { writing.resolve(); await release.promise; await memory.save(id, doc); },
+  }) });
+  const oldRun = new AbortController();
+  await h.open('old', thread({}), oldRun.signal);
+  const oldStore = h.calls.create[0].options.transcriptStore;
+  const doc = { savedAt: '2026-01-10T00:00:00Z', messages: [] };
+  const save = oldStore.save('thread-1', doc);
+  try {
+    await writing.promise;
+    oldRun.abort();
+    await h.open('new', thread({ resume: true }), new AbortController().signal);
+    const resumed = h.calls.resume[0].options.transcriptStore;
+    const reading = resumed.load('thread-1');
+    await h.open('other', thread({ threadId: 'other' }), new AbortController().signal);
+    expect(await h.calls.create[1].options.transcriptStore.load('other')).toBeNull();
+    release.resolve();
+    expect(await reading).toMatchObject(doc);
+    await expect(oldStore.markTurn('thread-1', { turnId: 'old', state: 'ended' })).rejects.toThrow();
+    expect((await resumed.load('thread-1'))?.turn).toBeUndefined();
+  } finally {
+    release.resolve();
+    await save;
+  }
 });
 
 test('US-006 AC-5: creates the session with the assigned thread id', async () => {

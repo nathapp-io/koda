@@ -11,13 +11,14 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FleetCommandOut, SyncRequest } from '@nathapp/fleet-protocol';
 import { runCommand } from '../../src/commands/run';
 import { loadRunnerConfig, resolveHome, type RunnerConfig } from '../../src/config/runner-config';
 import { startDaemon, HomeOwnershipError, RUNNER_HOME_LOCK_FILE, type DaemonHandle, type DaemonOptions } from '../../src/daemon/daemon';
+import type { Git } from '../../src/executor/git';
 import { readIdentity, type RunnerIdentityFile } from '../../src/identity/identity-store';
 import { Journal } from '../../src/journal/journal';
 import { createMemoryLogger, type MemoryLogger } from '../../src/logger';
@@ -300,6 +301,50 @@ function logLines(stderr: string): Array<{ level?: string; msg?: string }> {
 const occupied = (home: string): string => `Runner home is already in use: ${home}`;
 
 describe('US-001 ownership across daemon startup, recovery and shutdown', () => {
+  test.each(['stop', 'crash'] as const)('%s holds the home until an in-flight periodic mirror prune retires', async (method) => {
+    const home = await enrolledHome('active-prune');
+    const opts = await daemonOptions(home, recordingTransport(), new FakeExecutor());
+    const probe = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const git: Git = {
+      async run(args) {
+        if (args[0] === '--version') return { code: 0, stdout: 'git version 2.45.0', stderr: '' };
+        if (args[0] !== 'rev-parse') throw new Error('unexpected Git command');
+        probe.resolve();
+        await resume.promise;
+        return { code: 0, stdout: 'false', stderr: '' };
+      },
+      async ok() { throw new Error('unexpected Git command'); },
+    };
+    const owner = await startDaemon({ ...opts, git, tuning: { ...opts.tuning, pruneIntervalMs: 25 } });
+    const mirror = join(home.dir, 'project-code', 'r.git');
+    let retiring: Promise<void> | undefined;
+    let contender: Awaited<ReturnType<typeof startDaemon>> | undefined;
+    try {
+      await mkdir(mirror, { recursive: true });
+      await probe.promise;
+      if (method === 'stop') {
+        const reachedIdle = Promise.withResolvers<void>();
+        const idle = owner.supervisor.idle.bind(owner.supervisor);
+        owner.supervisor.idle = async () => { reachedIdle.resolve(); await idle(); };
+        retiring = owner.stop();
+        await reachedIdle.promise;
+      } else owner.crash();
+
+      const attempt = startDaemon(opts).then((handle) => { contender = handle; });
+      await expect(attempt).rejects.toMatchObject({ kind: 'occupied' });
+      resume.resolve();
+      await (retiring ?? owner.stop());
+      await expect(stat(mirror)).rejects.toMatchObject({ code: 'ENOENT' });
+      contender = await startDaemon(opts);
+      expect(contender.journal.getMeta('boot_id')).toBe(contender.bootId);
+    } finally {
+      resume.resolve();
+      await owner.stop();
+      await contender?.stop();
+    }
+  });
+
   test('AC-1: two runner processes released together against one idle home put exactly one boot id on POST /fleet/runner/sync', async () => {
     const home = await enrolledHome('ac1');
     const a = await HomeWorker.spawn({ mode: 'run', home: home.dir, workspaceRoot: home.workspaceRoot, socketDir: home.socketDir, naxHome: home.naxHome });

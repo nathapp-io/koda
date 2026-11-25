@@ -10,7 +10,7 @@ import type { ThreadPendingQuestion } from '~/lib/thread-types'
  * answer input on a pending question.
  *
  * Component contract (web context §4.62): props `question: ThreadPendingQuestion` and
- * `isCreator: boolean`; emits `answer(requestId, text)`. The card was created in US-006
+ * `canAnswer: boolean`; emits `answer(requestId, text)`. The card was created in US-006
  * (question text, `answer` emit declared); US-007 completes the creator answering UI:
  * a text field and a Send control, shown to the creator only — a non-creator sees the
  * question text with no answer input.
@@ -29,9 +29,9 @@ const question = (over: Partial<ThreadPendingQuestion> = {}): ThreadPendingQuest
   ...over,
 })
 
-const mountCard = (isCreator: boolean, q: ThreadPendingQuestion = question()): Mounted =>
+const mountCard = (canAnswer: boolean, q: ThreadPendingQuestion = question()): Mounted =>
   mountSfc(cardFile, {
-    props: { question: q, isCreator },
+    props: { question: q, canAnswer },
     components: uiStubs,
     globals: { useI18n: () => i18nStub() },
   })

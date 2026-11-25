@@ -107,30 +107,13 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   let retryTimer: unknown = null
   let started = false
 
-  /**
-   * US-002 (finding 11): the order of the reads against the state they write.
-   *
-   * A read answers from the server as it was when the read started, so a held catch-up GET can resolve
-   * after a newer read or a live text delta already moved the state. Reads are therefore ordered by when
-   * they **started**, not by which response arrives first: a read carries the sequence number it was given
-   * when it started, and the freshest news is the one from the highest number that has landed.
-   *
-   * - `detailReadSeq`: the last detail read started. A detail answer is applied only while no read started
-   *   after it; an older-started answer that arrives late is dropped rather than overwriting a fresher one.
-   * - `transcriptReadSeq` / `newestCommittedRead`: the same ordering for transcript pages, plus
-   *   `transcriptMutationSeq`, which a non-read change (a delta, an optimistic echo, a send result) bumps.
-   *   A page is a stale snapshot when something else changed the transcript after it started — a non-read
-   *   change, or a read that started later and already committed — and a stale page may only add messages,
-   *   never overwrite one the transcript already holds.
-   */
+  // A request may settle out of order. Only a successful snapshot supersedes an earlier read.
   let detailReadSeq = 0
-  let transcriptReadSeq = 0
-  let newestCommittedRead = 0
-  let transcriptMutationSeq = 0
-  /**
-   * Bumped by `stop()`. A read still in flight when the page was torn down must not resume its live
-   * machinery (a reopened stream or a restarted poll) once it finishes.
-   */
+  let committedDetailSeq = 0
+  let transcriptRevision = 0
+  // Incremental refreshes and full transcript pages can cover different messages.
+  const committedMessageReads = new Map<string, number>()
+  const lastTextDelta = new Map<string, number>()
   let epoch = 0
 
   const messagesPage = (afterSeq: number) => ({ query: { afterSeq: String(afterSeq), limit: String(MESSAGES_PAGE_SIZE) } })
@@ -144,67 +127,68 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     void run().catch(() => undefined)
   }
 
-  /**
-   * The one write path for a change the controller makes itself (a delta, the optimistic echo, a send
-   * result). Bumping `transcriptMutationSeq` is what makes every transcript read already in flight stale.
-   */
-  const mutateMessages = (next: ChatMessageDto[]): void => {
-    messages.value = next
-    transcriptMutationSeq += 1
-  }
-
-  /** The one write path for the thread detail (`reloadThread` decides whether an answer still qualifies). */
-  const commitThread = (next: ThreadDetailDto): void => {
+  const reloadThread = async (): Promise<void> => {
+    const session = epoch
+    const readSeq = ++detailReadSeq
+    const next = await deps.api.get<ThreadDetailDto>(threadPath)
+    if (session !== epoch || readSeq < committedDetailSeq) return
+    committedDetailSeq = readSeq
     thread.value = next
   }
 
-  const reloadThread = async (): Promise<void> => {
-    const readSeq = ++detailReadSeq
-    const next = await deps.api.get<ThreadDetailDto>(threadPath)
-    // A read that started later holds fresher detail, whether it answered before or after this one: this
-    // answer is older news, and applying it would undo the newer snapshot.
-    if (readSeq !== detailReadSeq) return
-    commitThread(next)
+  /** Merge a page while preserving newer snapshots of overlapping rows and any live streaming text. */
+  const readMessages = async (afterSeq: number): Promise<ChatMessageDto[]> => {
+    const session = epoch
+    let verifyingText = false
+    while (session === epoch) {
+      const readSeq = ++transcriptRevision
+      const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(afterSeq))
+      if (session !== epoch) return []
+
+      let missingText = false
+      const staleIds = new Set<string>()
+      for (const item of items) {
+        if ((committedMessageReads.get(item.id) ?? 0) > readSeq) {
+          staleIds.add(item.id)
+          continue
+        }
+        committedMessageReads.set(item.id, readSeq)
+        if (item.status === 'streaming' && (lastTextDelta.get(item.id) ?? 0) > readSeq) {
+          const current = messages.value.find(row => row.id === item.id)
+          if (current && !item.content.startsWith(current.content) && !current.content.startsWith(item.content)) {
+            // A reconnect can miss text before the delta. Without event offsets neither string
+            // identifies the complete transcript. Read again after observing this delta.
+            missingText = true
+          }
+        } else {
+          lastTextDelta.delete(item.id)
+        }
+      }
+      messages.value = mergeMessages(messages.value, items, staleIds)
+      // A second divergent delta belongs to a subsequent event refresh. Keep this load bounded.
+      if (!missingText || verifyingText) return items
+      verifyingText = true
+    }
+    return []
   }
 
-  /**
-   * One transcript page, plus whether anything newer than it already landed while it was in flight: a
-   * non-read change after it started, or a read that started later and already committed its rows.
-   */
-  const readMessages = async (afterSeq: number): Promise<{ items: ChatMessageDto[]; readSeq: number; stale: boolean }> => {
-    const readSeq = ++transcriptReadSeq
-    const mutatedAt = transcriptMutationSeq
-    const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(afterSeq))
-    return { items, readSeq, stale: transcriptMutationSeq !== mutatedAt || newestCommittedRead > readSeq }
-  }
-
-  /** Commit one page: a stale page adds the rows the transcript does not hold and overwrites none of them. */
-  const applyRead = (items: ChatMessageDto[], readSeq: number, stale: boolean): void => {
-    newestCommittedRead = Math.max(newestCommittedRead, readSeq)
-    messages.value = mergeMessages(messages.value, items, { stale })
-  }
-
-  /** GET messages after the refetch cursor (`refetchAfterSeq`), merged so optimistic messages survive. */
   const refreshMessages = async (): Promise<void> => {
-    const { items, readSeq, stale } = await readMessages(refetchAfterSeq(messages.value))
-    applyRead(items, readSeq, stale)
-    syncPolling()
+    const session = epoch
+    await readMessages(refetchAfterSeq(messages.value))
+    if (session === epoch) syncPolling()
   }
 
-  /**
-   * Full reload: the thread, then messages paged forward from sequence zero, 200 at a time, while a
-   * page returns a full 200 items (at most `MAX_PAGES` pages).
-   */
+  /** Reload the detail and up to MAX_PAGES transcript pages from sequence zero. */
   const load = async (): Promise<void> => {
+    const session = epoch
     await reloadThread()
     let afterSeq = 0
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const { items, readSeq, stale } = await readMessages(afterSeq)
-      applyRead(items, readSeq, stale)
+    for (let page = 0; page < MAX_PAGES && session === epoch; page += 1) {
+      const items = await readMessages(afterSeq)
       if (items.length < MESSAGES_PAGE_SIZE) break
       afterSeq = Math.max(...items.map(item => item.seq))
     }
-    syncPolling()
+    if (session === epoch) syncPolling()
   }
 
   const armPoll = (): void => {
@@ -246,7 +230,8 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
         // A delta for a message we do not hold: the load raced the stream, refetch the gap.
         inBackground(refreshMessages)
       } else {
-        mutateMessages(next)
+        lastTextDelta.set(event.messageId, ++transcriptRevision)
+        messages.value = next
       }
     },
     onMessage: () => {
@@ -314,7 +299,7 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   })
 
   const dropOptimistic = (cid: string): void => {
-    mutateMessages(messages.value.filter(message => message.id !== `local:${cid}`))
+    messages.value = messages.value.filter(message => message.id !== `local:${cid}`)
   }
 
   /**
@@ -329,7 +314,7 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
    */
   const send = async (text: string): Promise<ThreadActionResult> => {
     const cid = newClientMessageId()
-    mutateMessages([...messages.value, {
+    messages.value = [...messages.value, {
       id: `local:${cid}`,
       seq: 0,
       jobId: null,
@@ -345,7 +330,7 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
       costUsd: null,
       costSource: null,
       createdAt: new Date(deps.now()).toISOString(),
-    }])
+    }]
     syncPolling()
     const firstAttemptAt = deps.now()
     for (;;) {
@@ -357,7 +342,8 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
           return { ok: false, pendingApproval: answer.id }
         }
         const { message } = answer
-        mutateMessages(mergeMessages(messages.value, [message]))
+        // A GET may have already replaced the echo and observed the runner consume it.
+        if (!committedMessageReads.has(message.id)) messages.value = mergeMessages(messages.value, [message])
         syncPolling()
         return { ok: true }
       } catch (error: unknown) {

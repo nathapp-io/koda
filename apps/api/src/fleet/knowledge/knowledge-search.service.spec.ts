@@ -193,6 +193,22 @@ describe('KnowledgeSearchService', () => {
     expect(result.hits.map((hit) => hit.path)).toEqual(['a.md']);
   });
 
+  it('drops a repository retired during retrieval before filling the hit limit', async () => {
+    const repos = ['r1', 'r2'];
+    const { service, embedding } = harness({
+      repos,
+      lexical: [row('retired', { repoId: 'r1' }), row('current', { repoId: 'r2' })],
+    });
+    embedding.embed.mockImplementationOnce(async () => {
+      repos.shift();
+      return EMBEDDING;
+    });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, limit: 1 });
+
+    expect(result.hits.map((hit) => hit.repoId)).toEqual(['r2']);
+  });
+
   it('AC-5: keeps the hits of a repository the project still owns', async () => {
     const { service } = harness({ lexical: [row('a', { repoId: 'r1' })], repos: ['r1', 'r2'] });
 
