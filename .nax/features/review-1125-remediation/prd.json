@@ -1,0 +1,829 @@
+{
+  "project": "koda",
+  "feature": "review-1125-remediation",
+  "branchName": "feat/review-1125-remediation",
+  "createdAt": "2026-11-25T15:05:00.807Z",
+  "updatedAt": "2026-11-25T15:05:00.807Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Display pending approval for three web actions",
+      "description": "**Goal** — Keep ticket creation, fleet cancellation and thread send pending until the returned response represents an executed write.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 10. ApprovalPendingFilter returns HTTP 202 with an enveloped ApprovalRequestSummaryDto. Ticket submit currently ignores the result, fleet cancel assigns it to the job view, and thread send merges it as a message. Distinguish the approval summary using its actual shape in the request/response path. Limit the behavior change to these three operations. Expose the returned request ID and keep the draft or job visible. Translate new copy in both locales. Preserve the existing retry rules for transport errors and closing sessions.\n\nFor the three approval-gated web calls, use the existing unwrapped approval summary. Check the operation's permission key, pending status and request ID, following the existing fleet dispatch UI. A pending transcript message also has a pending status. A queued reindex also has HTTP status 202. Neither alone identifies an approval.\n\n**Scope** — In: extend useApi.ts, useFleetJobs.ts, CreateTicketDialog.vue, the project fleet-job detail page, thread-controller.ts, ThreadComposer.vue and both thread-detail page adapters; add en/zh feedback and extend their existing package tests. Out: stream catch-up and snapshot ordering (US-002), project load states (US-003), send permission decisions (US-005), and unrelated approval-gated operations. Changes to the public approval wire format, permission catalog or fleet protocol. Create no new files.\n\n**Interface** — Reuse ApprovalRequestSummary from lib/approval-requests.ts and the FleetJobOpenItems scoped pending pattern. The exact operation keys are ticket.create, fleet.job.cancel and thread.message.send. Widen cancellation and send result contracts only where needed; carry the pending request ID through the existing ThreadActionResult/page/composer chain without classifying it as executed success or transport failure. Executed cancellation still applies the returned job using the existing label-preserving path. Pending send removes only its own optimistic echo and retains the editable draft.\n\n**Verification** — Extend tests/components/CreateTicketDialog.spec.ts, tests/pages/fleet-job-detail.spec.ts, tests/lib/thread-controller.spec.ts, tests/components/thread-composer.spec.ts, tests/pages/threads-detail-actions-page.spec.ts and tests/composables/useApi.spec.ts. Mount the real composer through the project action page; use actual unwrapped summary fixtures, not a made-up pending marker. Dated review fixtures are read-only.",
+      "acceptanceCriteria": [
+        "[integration] When the mounted ticket-create action receives an ApprovalRequestSummary with permissionKey 'ticket.create', status 'pending' and a returned request ID, it displays pending feedback containing that ID.",
+        "[integration] When the mounted job-cancel action receives an ApprovalRequestSummary with permissionKey 'fleet.job.cancel', status 'pending' and a returned request ID, it displays pending feedback containing that ID.",
+        "[integration] When the mounted thread-send action receives an ApprovalRequestSummary with permissionKey 'thread.message.send', status 'pending' and a returned request ID, it displays pending feedback containing that ID.",
+        "[integration] When ticket submission awaits approval, CreateTicketDialog remains open with its populated form.",
+        "[integration] When ticket submission awaits approval, CreateTicketDialog emits no created event.",
+        "[integration] When a ticket-create or job-cancel response is pending approval, its mounted action produces zero execution-success toasts.",
+        "[integration] When cancellation awaits approval, the mounted fleet-job detail page continues to render the original job.",
+        "[integration] When thread send awaits approval, the mounted composer retains an editable draft.",
+        "[integration] When thread send awaits approval, the transcript returns to its pre-submit messages.",
+        "[unit] When createThreadController.send receives a pending approval response, it makes exactly one POST.",
+        "[integration] When the mounted ticket form receives the existing executed create response, it emits created.",
+        "[integration] When the mounted cancellation form receives the existing executed cancellation response, it renders the returned job.",
+        "[integration] When the mounted thread composer receives the existing executed send response, the returned message replaces its optimistic message.",
+        "[unit] When the web request adapter receives queued-reindex HTTP 202 with data { queued: true }, it still delivers { queued: true } to its caller.",
+        "[unit] When the thread message POST rejects with a non-409 transport error, createThreadController.send retains the existing result { ok: false, error } with that original error."
+      ],
+      "tags": [
+        "web",
+        "approvals",
+        "threads",
+        "security",
+        "finding-10"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three mounted workflows and a shared adapter/controller contract must distinguish approval authorization from execution without regressing retries; approval handling requires strict security isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/route/approval-gated.decorator.ts",
+        "docs/review-evidence/20261125/web.ts",
+        "apps/web/composables/useFleetJobs.ts",
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/components/fleet/FleetJobOpenItems.vue"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useApi.ts",
+          "reason": "allow scoped callers to distinguish an approval response from an executed result."
+        },
+        {
+          "path": "apps/web/composables/useFleetJobs.ts",
+          "reason": "carry the cancel result through to the job page."
+        },
+        {
+          "path": "apps/web/components/CreateTicketDialog.vue",
+          "reason": "preserve form and present the request ID on pending creation."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "branch before applying a job response or showing success."
+        },
+        {
+          "path": "apps/web/lib/thread-controller.ts",
+          "reason": "distinguish pending send and remove its optimistic echo."
+        },
+        {
+          "path": "apps/web/components/fleet/threads/ThreadComposer.vue",
+          "reason": "retain pending drafts and present the request ID."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "handle pending send through the project page action."
+        },
+        {
+          "path": "apps/web/pages/threads/[id].vue",
+          "reason": "preserve the shared action contract for workspace threads."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "English pending feedback."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "Chinese pending feedback."
+        },
+        {
+          "path": "apps/web/tests/components/CreateTicketDialog.spec.ts",
+          "reason": "test populated form on pending and executed submission."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "exercise both cancellation replies."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-controller.spec.ts",
+          "reason": "exercise pending and executed send responses."
+        },
+        {
+          "path": "apps/web/tests/components/thread-composer.spec.ts",
+          "reason": "assert draft and feedback after pending send."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "mount the project page with its real composer and verify pending-send feedback and draft preservation."
+        },
+        {
+          "path": "apps/web/tests/composables/useApi.spec.ts",
+          "reason": "check response discrimination against queued reindex."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Catch up when the thread event stream first becomes ready",
+      "description": "**Goal** — Recover the initial GET-to-subscription gap and prevent stale thread snapshots from undoing live progress.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 11. useThread and useWorkspaceThread both load before subscribing. createThreadEventStream marks the initial ready event live, while its resync callback currently fires on transport reopen. Catch up at server readiness once per connected stream, including reconnect. Reconcile thread detail and messages. Protect both snapshot ordering and updates to the same message sequence, including text deltas. A rejected background read must be handled and allow subsequent recovery.\n\n**Scope** — In: extend lib/thread-event-stream.ts, lib/thread-controller.ts and lib/thread-view.ts and exercise both existing adapters. Preserve US-001 pending-send and optimistic-state behavior. Out: the project page's explicit load-error presentation/retry UI (US-003), list paging (US-004) and composer permission resolution (US-005). Create no new files.\n\n**Interface** — Retain ThreadEventHandlers and the shared controller entry points. onResync must signal catch-up at ready, not independently at both transport open and ready. A connection includes the native EventSource reconnect path; duplicate ready frames do not create duplicate catch-ups. Reconcile detail as well as messages, and guard responses against later reads, same-sequence terminal updates, text deltas and teardown. Catch rejected fire-and-forget reads so a later connection can recover. Preserve stream dedupe, auth refresh/backoff and polling fallback.\n\n**Verification** — Extend tests/lib/thread-event-stream.spec.ts, thread-event-stream-recovery.spec.ts and thread-controller.spec.ts plus tests/composables/useThread.spec.ts and useWorkspaceThread.spec.ts. Hold promises around ready and live events, including completion between initial GET and subscription in both scopes; stop during a held recovery to verify no reopened stream or poll. Dated event-bus fixtures are references only.",
+      "acceptanceCriteria": [
+        "[integration] Given either a project or workspace thread whose turn finishes between initial GET and subscription, when ready arrives without a disconnect, the controller reconciles the final transcript.",
+        "[integration] Given either scope whose turn finishes between initial GET and subscription, when ready arrives without a disconnect, the mounted composer becomes available.",
+        "[unit] When createThreadEventStream receives open, ready and duplicate ready, then reconnect open and ready, it initiates exactly one catch-up for each ready connection.",
+        "[unit] Given a held catch-up snapshot and either a newer onMessage-triggered read returning a terminal message or an onDelta text update for that same message sequence, when the older snapshot resolves, the message retains the status observed immediately before that response rather than regressing it.",
+        "[unit] Given a held catch-up snapshot and either a newer onMessage-triggered read returning a terminal message or an onDelta text update for that same message sequence, when the older snapshot resolves, the message retains its latest content.",
+        "[unit] Given a held catch-up snapshot and either a newer onMessage-triggered read returning a terminal message or an onDelta text update for that same message sequence, when the older snapshot resolves, the transcript contains exactly one copy of that message.",
+        "[unit] When a ready-triggered read rejects and a later reconnect succeeds, the thread controller recovers the transcript.",
+        "[unit] When the controller stops during a held recovery, completion of that recovery cannot reopen its stream.",
+        "[unit] When the controller stops during a held recovery, completion of that recovery cannot restart polling."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "sse",
+        "concurrency",
+        "finding-11"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shared asynchronous stream/snapshot reconciliation spans both scopes and same-sequence revisions; preserve authentication recovery and session lifecycle under strict isolated tests."
+      },
+      "contextFiles": [
+        "apps/web/composables/useThread.ts",
+        "apps/web/composables/useWorkspaceThread.ts",
+        "docs/review-evidence/20261125/web.ts",
+        "apps/web/lib/thread-event-stream.ts",
+        "apps/web/lib/thread-controller.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/thread-event-stream.ts",
+          "reason": "deliver one catch-up signal per ready connection."
+        },
+        {
+          "path": "apps/web/lib/thread-controller.ts",
+          "reason": "reconcile ready reads, failed reads, late replies and teardown."
+        },
+        {
+          "path": "apps/web/lib/thread-view.ts",
+          "reason": "preserve newer message content and terminal state during reconciliation."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-event-stream.spec.ts",
+          "reason": "change the first-ready and reconnect expectations."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-event-stream-recovery.spec.ts",
+          "reason": "retain backoff and auth recovery coverage."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-controller.spec.ts",
+          "reason": "cover overlapping snapshots and live deltas."
+        },
+        {
+          "path": "apps/web/tests/composables/useThread.spec.ts",
+          "reason": "exercise the project adapter through ready."
+        },
+        {
+          "path": "apps/web/tests/composables/useWorkspaceThread.spec.ts",
+          "reason": "exercise the workspace adapter through ready."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Show project thread errors and retry transient loads",
+      "description": "**Goal** — Give project-thread deep links explicit loading, unavailable and retryable states that clear when the thread recovers.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 12. useThread suppresses its initial load rejection to keep the stream alive. Expose load state to the project detail page following useWorkspaceThread. Distinguish initial loading, unavailable or inaccessible detail and a retryable failure. Avoid revealing whether a forbidden thread exists. A successful retry or live recovery clears obsolete feedback.\n\n**Scope** — In: extend composables/useThread.ts, pages/[project]/threads/[id].vue and both locale files when existing copy cannot be reused. Consume US-002 recovery without a second subscription. Out: stream reconciliation algorithms (US-002), thread list paging (US-004) and effective send grants (US-005). Preserve US-001 pending-send presentation. Create no new files.\n\n**Interface** — Adapt the workspace loadFailed/loadThread pattern to expose project load state and a visible retry. A 403 and 404 have the same localized unavailable presentation and expose no private thread content; a transient 503 has a retry action. Retain mount/unmount guards and the single existing stream even after a failed initial GET. A valid thread obtained from a later live read must supersede the failed state, not remain masked by it.\n\n**Verification** — Extend tests/pages/threads-detail-page.spec.ts and tests/composables/useThread.spec.ts with 403/404/503, explicit retry, live recovery and unmount. Use the existing mounted page and adapter harnesses; do not modify dated review fixtures.",
+      "acceptanceCriteria": [
+        "[integration] When a project-thread deep link returns 403 or 404, its detail area renders the same localized unavailable message for either response.",
+        "[integration] When a project-thread deep link returns 403 or 404, the detail area displays no private thread content.",
+        "[integration] Given an initial project-thread 503, when the user selects the visible retry action and the API returns valid detail, the page displays that thread.",
+        "[integration] Given an initial project-thread 503 followed by a successful visible retry, the page clears its obsolete failure feedback.",
+        "[integration] Given an initial project-thread 503 followed by a successful visible retry, the page uses exactly one thread subscription.",
+        "[unit] Given an initial load failure, when a later live reload resolves with a valid thread, stale error state no longer masks the loaded thread."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "recovery",
+        "security",
+        "finding-12"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing workspace recovery is reusable, but forbidden-resource existence and private-content presentation require the security override."
+      },
+      "contextFiles": [
+        "apps/web/composables/useWorkspaceThread.ts",
+        "apps/web/pages/threads/[id].vue",
+        "docs/review-evidence/20261125/web.md",
+        "apps/web/composables/useThread.ts",
+        "apps/web/pages/[project]/threads/[id].vue"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useThread.ts",
+          "reason": "surface initial read failure and retry without duplicating the stream."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "render unavailable and retry states alongside loaded detail."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "supply English feedback when an existing key cannot be reused."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "supply corresponding Chinese feedback."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "exercise initial failures and successful retry."
+        },
+        {
+          "path": "apps/web/tests/composables/useThread.spec.ts",
+          "reason": "cover retry, recovery and unmount behavior."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Page active and archived project threads",
+      "description": "**Goal** — Make project threads beyond the first 100 reachable for both statuses without corrupting the list during overlapping requests.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 13. useThreads loads the first 100 rows for a status. Mirror useWorkspaceThreads' loadMore behavior on the project route. Retain the current generation guard across status switches and same-status reloads. Keep the page number on failure so retry reads the missing page.\n\n**Scope** — In: extend composables/useThreads.ts, pages/[project]/threads/index.vue, tests/composables/useThreads.spec.ts and tests/pages/threads-page.spec.ts. Reuse existing localized load-more/retry controls and workspace paging conventions. Out: detail stream recovery (US-002/003), composer access (US-005) and API pagination contract changes. Create no new files.\n\n**Interface** — Mirror useWorkspaceThreads current/hasNext/loadingMore/loadMore behavior for GET /projects/:slug/threads. Keep the selected status in every later-page request, retain existing page-one query behavior, append only successful current-generation pages, and leave the page counter unchanged on failure. Reject duplicate in-flight loadMore calls. Preserve both the composable generation and the page's independent guard around thread and member reads; a status switch or same-status reload invalidates older append responses.\n\n**Verification** — Mount 101 ACTIVE and 101 ARCHIVED rows and exercise the actual load-more control. Use deferred page-two reads to cover status switches and same-status page-one reloads, plus double-click and retry of the same failed page with existing rows retained.",
+      "acceptanceCriteria": [
+        "[integration] Given 101 active and 101 archived project threads, when load more is selected for either status, useThreads requests page two with that selected status.",
+        "[integration] Given 101 active and 101 archived project threads, when page two is loaded for either status, the mounted list displays row 101 exactly once.",
+        "[integration] Given either status with a short second page, when that page resolves, the mounted project list hides its load-more control.",
+        "[unit] Given a held ACTIVE page-two response, when the list switches to ARCHIVED before it resolves, releasing that response leaves the new list intact.",
+        "[unit] Given a held page-two response, when a same-status page-one reload occurs before it resolves, releasing that response leaves the reloaded list intact.",
+        "[unit] When load more is double-clicked during a pending read, useThreads issues only one request.",
+        "[unit] Given a failed load-more read, when the user retries, useThreads requests the same missing page.",
+        "[unit] When a load-more read fails, the already visible project-thread rows remain visible."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "pagination",
+        "finding-13"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four existing files can mirror a proven paging contract; generation guards and retry state need focused tests but no new architecture."
+      },
+      "contextFiles": [
+        "apps/web/composables/useWorkspaceThreads.ts",
+        "apps/web/pages/threads/index.vue",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/web/composables/useThreads.ts",
+        "apps/web/pages/[project]/threads/index.vue"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useThreads.ts",
+          "reason": "track next page, selected status and in-flight reads."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/index.vue",
+          "reason": "expose the load-more control and retry feedback."
+        },
+        {
+          "path": "apps/web/tests/composables/useThreads.spec.ts",
+          "reason": "exercise generations, concurrent calls and failures."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-page.spec.ts",
+          "reason": "exercise active and archived paging."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Apply effective project send permission to the composer",
+      "description": "**Goal** — Enable project-thread input from effective any-row or own-row send grants rather than creator identity alone.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 14. composerState gates on creator identity before checking sendRefusal and running messages. On the project page resolve send access from useProjectPermissions, including any-row and own-row keys and thread ownership. Pass the boolean into the shared composer logic. The workspace page supplies its existing personal-thread decision. Permissions still load asynchronously and API authorization remains authoritative.\n\n**Scope** — In: change lib/thread-view.ts and both thread-detail pages; update tests/lib/thread-view.spec.ts, tests/pages/threads-detail-page.spec.ts, threads-detail-actions-page.spec.ts and workspace-thread-detail-page.spec.ts. Retain US-001 pending draft behavior and US-003 load/error states. Out: other creator/requester-based thread controls, API authorization changes, permission catalog changes and stream algorithms (US-002). Create no new files.\n\n**Interface** — Replace the shared helper's creator-only send input with a resolved boolean. The project page reactively resolves permissions.value.has('thread.message.send') OR (isCreator AND permissions.value.hasOwn('thread.message.send')); useProjectPermissions already fails closed while loading or failed. Preserve sendRefusal and running-message reasons after access is granted. The personal workspace page supplies its existing owner-based decision and does not require project permissions for its composer. API refusals still surface through existing extractApiError behavior.\n\n**Verification** — Mount real composer controls across any-row, own-row, absent and loading grants for creator and noncreator threads. Supply thread.message.send.own alongside thread.archive in the existing creator actions-page fixture, retaining typing, submission and refusal-toast assertions. Keep the workspace owner control unchanged.",
+      "acceptanceCriteria": [
+        "[integration] Given an idle project thread created by someone else, when the viewer holds any-row thread.message.send, the mounted composer is enabled.",
+        "[integration] Given an idle project thread created by someone else, when the viewer holds only thread.message.send.own, the mounted composer is disabled.",
+        "[integration] Given the creator's idle project thread, when the creator holds only thread.message.send.own, the mounted composer permits sending.",
+        "[integration] Given the creator's project thread, when send grants are missing or still loading, the mounted composer remains read-only.",
+        "[integration] Given a read-only creator's project composer while grants load, when an effective send grant arrives, the mounted composer updates to permit sending.",
+        "[unit] Given resolved send permission, when thread.sendRefusal is present, composerState disables sending with that server refusal reason.",
+        "[unit] Given resolved send permission and no server refusal, when a turn is running, composerState disables sending with reason 'turnRunning'.",
+        "[integration] When a personal workspace thread is mounted, its composer retains the existing owner-based behavior without requiring project permission data."
+      ],
+      "tags": [
+        "web",
+        "threads",
+        "permissions",
+        "security",
+        "finding-14"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small shared-helper and page change directly implements effective access-control gating, so strict security TDD overrides the default strategy."
+      },
+      "contextFiles": [
+        "apps/web/lib/permissions.ts",
+        "apps/web/composables/usePermissions.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "docs/review-evidence/20261125/web.ts",
+        "apps/web/lib/thread-view.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/thread-view.ts",
+          "reason": "take a resolved send decision while retaining session and running-turn checks."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/[id].vue",
+          "reason": "derive the send decision reactively from ownership and effective keys."
+        },
+        {
+          "path": "apps/web/pages/threads/[id].vue",
+          "reason": "adapt the shared helper without changing workspace scope."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-view.spec.ts",
+          "reason": "replace creator-only fixtures with resolved send decisions."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "assert the project grant matrix."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "give the creator fixture its effective thread.message.send.own grant alongside thread.archive, retaining the typing, submission and refusal-toast assertions."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-thread-detail-page.spec.ts",
+          "reason": "retain the personal-thread control."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Honor RUN cancellation through log drain",
+      "description": "**Goal** — Make accepted RUN cancellation and the durable upload cutoff agree with the terminal event and command acknowledgement.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 8. JobRun.finish computes a verdict before awaitLogs. For a RUN, serialize the final cancellation check with the RUNNING to UPLOADING journal transition. An accepted cancellation wins while the drain is held. A newly delivered cancellation after this cutoff must report refusal. Replay of an already handled command uses its recorded acknowledgement. Preserve command-specific CONFIG result semantics, existing lease fencing and recovery.\n\n**Scope** — In: modify src/supervisor/job-run.ts, supervisor.ts and command-handler.ts plus job-run.spec.ts, supervisor.spec.ts and command-handler.spec.ts. Out: THREAD shutdown (US-007), changing API cancel/wire contracts, new lease rules, and redefining CONFIG's authoritative result precedence. Create no new files.\n\n**Interface** — Propagate the active RUN requestCancel decision through Supervisor.cancel into CommandHandler's recorded acknowledgement. Use the same cutoff for a journal-only RUN before READOPT: RUNNING accepts durably; UPLOADING and terminal rows refuse a newly delivered CANCEL without mutating the journal. Serialize the post-drain durable cancellation check and RUNNING → UPLOADING transition through the existing journal transaction/state machinery without an intervening await. A resumed finish reads an already persisted cancellation. Previously recorded command IDs replay their recorded result even after the job ends; a different command ID is a fresh decision. Preserve single-terminal publication, upload fencing, epoch isolation, non-RUN behavior and existing CONFIG controls.\n\n**Verification** — Drive ASSIGN and CANCEL through the real handler, Supervisor and SQLite Journal using the existing FakeExecutor/FakeLogShipping and injected clock seams. Hold drain after a successful RUN result, verify the durable timestamp and ok ack, then release it. Cover replay versus a distinct late command, journal-only restart before readoption, finish recovery and the existing job-run-config.spec.ts precedence control. Dated lifecycle fixtures are read-only.",
+      "acceptanceCriteria": [
+        "[integration] Given a RUN assigned through the handler and journal with a successful result and held log drain, when CANCEL is delivered, its acknowledgement is ok.",
+        "[integration] Given that RUN while log drain is held, when CANCEL is accepted, cancelRequestedAt is durable in the journal.",
+        "[integration] Given an accepted CANCEL during a successful RUN's held log drain, when drain is released, the runner publishes exactly one CANCELLED terminal event.",
+        "[integration] Given the same accepted CANCEL command ID, when it is replayed after completion, the handler returns its original acknowledgement.",
+        "[integration] Given the accepted CANCEL command ID replayed after completion, the run still has exactly one terminal event.",
+        "[integration] Given a previously uncancelled RUN in UPLOADING, when a distinct CANCEL is first delivered, the handler refuses it.",
+        "[integration] Given a previously uncancelled RUN in UPLOADING, when a distinct CANCEL is first delivered, cancelRequestedAt remains unset.",
+        "[unit] Given a persisted RUN with an accepted cancellation, when finish resumes, its final event is CANCELLED.",
+        "[unit] Given an otherwise identical successful RUN without cancellation, when finish resumes, its final event is COMPLETED.",
+        "[unit] Given restart before readoption and a journal-only RUNNING RUN, when a fresh CANCEL arrives, the journal records the cancellation request.",
+        "[unit] Given restart before readoption and a journal-only UPLOADING or terminal RUN, when a fresh CANCEL arrives, it is refused without changing the journal.",
+        "[unit] Given a CONFIG operation that already produced its authoritative result, when late cancellation arrives, its terminal state and reason still follow that result: COMPLETED for ok, no_changes or drift and FAILED for conflict, invalid, push_failed, pr_failed or timeout, with reason equal to the result outcome rather than CANCELLED, preserving existing late-cancel precedence."
+      ],
+      "tags": [
+        "runner",
+        "cancellation",
+        "journal",
+        "concurrency",
+        "finding-8"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module command replay, durable state and asynchronous drain require concurrency regressions; no authentication or credential behavior is changed."
+      },
+      "contextFiles": [
+        "docs/review-evidence/20261125/runner-lifecycle.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/runner/src/supervisor/job-run-config.spec.ts",
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/supervisor/supervisor.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/supervisor/job-run.ts",
+          "reason": "resolve RUN cancellation and upload cutoff consistently in requestCancel and finish."
+        },
+        {
+          "path": "apps/runner/src/supervisor/supervisor.ts",
+          "reason": "propagate the active RUN's cancellation result and apply the same cutoff to journal-only recovery before readoption."
+        },
+        {
+          "path": "apps/runner/src/supervisor/supervisor.spec.ts",
+          "reason": "distinguish recovered and active RUN cancellation before and after the cutoff while preserving the thread and CONFIG paths."
+        },
+        {
+          "path": "apps/runner/src/supervisor/command-handler.ts",
+          "reason": "carry the run cancellation decision into the acknowledgement."
+        },
+        {
+          "path": "apps/runner/src/supervisor/job-run.spec.ts",
+          "reason": "cover final decision and recovery from persisted cancellation."
+        },
+        {
+          "path": "apps/runner/src/supervisor/command-handler.spec.ts",
+          "reason": "cover fresh versus redelivered command IDs."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Bound thread turn settlement and session close",
+      "description": "**Goal** — Bound THREAD shutdown across turn finalization and session close while making terminal stream sealing irreversible.\n\n**Motivation** — People can see success for a write still awaiting approval, lose access to usable thread controls, or see an acknowledged cancellation finish as completed.\n\n**Approach** — Finding 9. ThreadJobRun.finishRun awaits turnSettled before closeHeldSession starts its timed wait. After startup and any live-publish coordination, use one threadCloseTimeoutMs budget for settling the cancelled turn and waiting on session close. Start close exactly once even when the budget is exhausted. Seal the writer and fence late turn callbacks and writes. Keep the separate log-drain timeout and daemon halt semantics.\n\n**Scope** — In: change src/thread/thread-job-run.ts and thread-event-writer.ts; extend test/unit/thread-event-writer.spec.ts, thread-job-run-hardening.spec.ts and thread-job-run-turns.spec.ts, retaining halt-safety controls. Out: normal RUN cancellation cutoff (US-006), changing thread protocol events, startup/live-publish coordination policy or log-drain timeout settings. Create no new files.\n\n**Interface** — Retain the single startClose/startSessionClose owner and first close reason. Start the shared close deadline only after startup/live-publish coordination; turn settlement consumes that budget and close waits only its remainder. Even zero remaining time must initiate session.close once. A retained writer reference must refuse event, flush and callback writes after its terminal marker; clearing the run's writer reference alone is insufficient. Fence late turn completion from rearming timers, changing spend/journal or publishing another end. A timely turn's final transcript still precedes the single close marker. Halt stops writes and heartbeats and leaves a recoverable row without a terminal event.\n\n**Verification** — Use real temporary stream files, real SQLite and manualClock, with held transcript finalizers and close promises; assert stream bytes and durable terminal state outside swallowed callbacks. Cover partial-budget settlement, timeout with a still-held finalizer, exactly-once close, timely finalization and halt during settlement. The separate log drain can complete immediately in the close-budget proof; dated lifecycle fixtures remain read-only.",
+      "acceptanceCriteria": [
+        "[integration] Given ready startup, held transcript finalization and an immediately completing log drain, when THREAD_CLOSE is delivered and the injected clock advances by threadCloseTimeoutMs, the run seals its stream while the finalizer remains held.",
+        "[integration] Given the same held-finalizer THREAD_CLOSE with ready startup and an immediately completing log drain, when the close budget expires, the journal job has non-null doneAt without requiring finalizer release.",
+        "[integration] Given the same held-finalizer THREAD_CLOSE, when the close budget expires with log drain complete, heartbeats stop.",
+        "[unit] Given turn settlement consumes part of threadCloseTimeoutMs and session.close remains held, finishRun waits only the remaining close budget.",
+        "[unit] Given settlement consumes part or all of the close budget, finishRun starts session.close exactly once.",
+        "[unit] Given a sealed thread stream, when the held finalizer is released and late callbacks write through a retained writer, the stream bytes stay fixed.",
+        "[unit] Given a sealed, completed thread run, when a held finalizer and late callbacks settle, its terminal event count stays fixed.",
+        "[unit] Given a sealed, completed thread run, when a held finalizer and late callbacks settle, its journal completion stays fixed.",
+        "[unit] Given timely turn settlement during close, the final transcript content precedes the single close marker.",
+        "[unit] When daemon halt occurs during turn settlement, the job remains recoverable without publishing a terminal event."
+      ],
+      "tags": [
+        "runner",
+        "threads",
+        "sessions",
+        "shutdown",
+        "finding-9"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Agent-session lifecycle, shared deadlines and late writes cross asynchronous ownership boundaries; session handling uses strict isolated TDD."
+      },
+      "contextFiles": [
+        "docs/review-evidence/20261125/runner-lifecycle.ts",
+        "apps/runner/test/unit/thread-job-run-halt-safety.spec.ts",
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/src/thread/thread-event-writer.ts",
+        "apps/runner/test/unit/thread-job-run-hardening.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/thread/thread-job-run.ts",
+          "reason": "bound the wait, fence stale finalizers, and preserve the close owner."
+        },
+        {
+          "path": "apps/runner/src/thread/thread-event-writer.ts",
+          "reason": "make stream sealing effective for callbacks already holding the writer when the deadline expires."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-event-writer.spec.ts",
+          "reason": "check that a late callback on a retained writer cannot append past its terminal marker."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-job-run-hardening.spec.ts",
+          "reason": "cover a held turn, held close and late writes."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-job-run-turns.spec.ts",
+          "reason": "cover a turn settling normally during close."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Fence scheduled job insertion against project deletion",
+      "description": "**Goal** — Serialize fleet job creation with project soft deletion so a previously authorized schedule cannot insert into a deleted project.\n\n**Motivation** — Project and repository removal can also leave jobs, stored files and search results inconsistent.\n\n**Approach** — Finding 4. ScheduleTicker.dispatchFresh checks owner access before FleetJobsService.dispatch opens the job insertion transaction. Inside that transaction acquire a row lock on the live Project using a transaction-aware repository method, compatible with both soft-delete UPDATE paths. Decide liveness under the lock before creating the job or its dependent records. Keep the established handling for a refused dispatch and post-commit placement.\n\n**Scope** — In: extend jobs/domain/fleet-job.domain.ts, prisma-fleet-job.repository.ts and fleet-jobs.service.ts; update dispatch fixtures in fleet-jobs.service.spec.ts, fleet-jobs.audit.spec.ts and fleet-jobs.thread-handoff.spec.ts. Extend fleet-schedule-ticker.integration.spec.ts and retain project-deletion-quiesce.integration.spec.ts controls. Out: repository cleanup (US-009), bundle reconciliation (US-010), permission policy/catalog changes and changing the ticker's claim protocol. Create no new files.\n\n**Interface** — Declare the project-liveness lock on IFleetJobRepository and implement it using the active transaction-aware Prisma client. The lock must conflict with a non-key deletedAt UPDATE from both ID and slug deletion; FOR KEY SHARE is insufficient. Refuse a missing/deleted project within the insertion transaction before job, links, event, activity or audit insertion. Preserve ScheduleTicker's owner authorization, error classification and no enclosing transaction around dispatch, plus post-commit live publication/placement and deletion-listener quiescence of queued jobs.\n\n**Verification** — The reviewed database controls established separate sides of this race, not its interleaving. Add deterministic two-connection PostgreSQL tests: pause after owner authorization, delete through the application and resume with no runner attached; separately pause after the locked live-project read, start application deletion on another connection, observe PostgreSQL lock waiting, then release insertion and verify listener cancellation. Keep a live-project authorized-owner success control and two-ticker occurrence race. Run DB regressions on isolated test PostgreSQL outside the sandbox using the shared DB gate; skipped controls are not verification.",
+      "acceptanceCriteria": [
+        "[integration] Given disposable PostgreSQL with no runner attached and a due tick paused after successful owner authorization, when application soft deletion commits before the tick resumes, a fresh database read finds zero jobs for that schedule.",
+        "[integration] Given the same delete-before-insert interleaving with no runner attached, when the tick resumes, no assignment command exists for that schedule's dispatch.",
+        "[integration] Given an authorized insert paused after its in-transaction live-project read, when application soft deletion starts on a second PostgreSQL connection, PostgreSQL lock-wait observation establishes that deletion waits for insertion.",
+        "[integration] Given deletion waiting for the authorized insert, when insertion is released and deletion commits, the deletion listener cancels the queued job.",
+        "[integration] Given a live project and authorized schedule owner, when a due tick runs, it creates exactly one job, including when two tickers race to claim the same occurrence."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "schedules",
+        "transactions",
+        "security",
+        "finding-4"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three existing production files can reuse the repository/ALS row-lock pattern without new architecture; two-connection race tests and the authorization/liveness boundary still require strict isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/fleet/jobs/project-deletion-jobs.listener.ts",
+        "docs/review-evidence/20261125/database-controls.py",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+          "reason": "declare the live-project lock operation."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+          "reason": "lock and check the project through the active Prisma transaction."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "refuse insertion for a missing or deleted project within the create transaction."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+          "reason": "supply the live-project guard in dispatch fixtures and cover refusal."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.audit.spec.ts",
+          "reason": "supply a live project in successful insertion fixtures and preserve the audit rollback checks."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.thread-handoff.spec.ts",
+          "reason": "supply the project guard in the handoff dispatch fixture while retaining the expected handoff decision."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-schedule-ticker.integration.spec.ts",
+          "reason": "add a deterministic two-connection tick versus delete case."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/project-deletion-quiesce.integration.spec.ts",
+          "reason": "retain the opposite ordering as a control."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Retain cleanup targets across fleet repository deletion",
+      "description": "**Goal** — Preserve terminal-job file cleanup work durably before repository cascades erase its discovery metadata.\n\n**Motivation** — Project and repository removal can also leave jobs, stored files and search results inconsistent.\n\n**Approach** — Finding 5. FleetReposService.remove locks the repository, rejects unfinished jobs, then deletes it. Cascades erase the only lookup for logs and bundles. Capture terminal job IDs, lease-epoch bounds, finished times and exact bundle keys in durable cleanup records in the same transaction, before the cascade. Keep those records independent of the deleted parents. Extend the existing retention pass to consume eligible records using its cutoff and store methods. Use bounded batches, retry partial failures idempotently and acknowledge only after all targeted deletions succeed. Keep the existing retention setting and schedule.\n\n**Scope** — In: add the independent Prisma cleanup model and migration; extend fleet-repos.service.ts, repos/domain/fleet-repo.domain.ts and prisma-fleet-repo.repository.ts for transactional capture; extend logs/domain/log-retention.domain.ts, prisma-log-retention.repository.ts and fleet-log-retention.processor.ts for due-work consumption. Out: project dispatch fencing (US-008), request-time bundle reconciliation (US-010), search ranking (US-011). Also out: A retrospective scan or deletion of files orphaned before the cleanup records exist.\n\n**Interface** — Create apps/api/prisma/migrations/20261219090000_fleet_retired_job_cleanup/migration.sql for the independent table and due-work index without rewriting existing job history. Records retain stable job identity, maximum lease epoch, finish time and exact bundle keys with no cascading parent dependency. Capture inside the repository deletion transaction after the existing lock/busy check and before cascade. The existing retention cutoff and LogStore.deletePrefix/ArtifactStore.delete consume only eligible captured targets; delete targeted files before acknowledging their cleanup record, tolerate already absent targets, and advance bounded pagination past failed records so later eligible work is reachable. Retain the record until every target deletion succeeds. Keep existing non-deleted-job retention, configuration and 04:45 schedule unchanged.\n\n**Verification** — Extend fleet-repos.service.spec.ts, fleet-log-retention.processor.spec.ts and test/integration/fleet/fleet-log-retention.integration.spec.ts. Use real repository DELETE, PostgreSQL and disk files at two epochs; restart the worker before purge. Verify transaction rollback, busy refusal, retention cutoff advancement, unrelated-file safety and partial deletion replay with bounded progress. Regenerate Prisma after the additive schema change. The migration is this story's only new file; extend existing source and test files.",
+      "acceptanceCriteria": [
+        "[integration] Given repository deletion captured an expired terminal job with log files at two epochs and a recorded bundle, when the retention worker restarts and purges, all captured target files are gone.",
+        "[integration] Given the deleted repository's captured targets were all removed by the restarted retention worker, purge removes their durable cleanup record.",
+        "[integration] Given deletion and purge of the expired terminal job, an unrelated job's files remain.",
+        "[integration] Given removal aborts after target capture, when the transaction rolls back, the repository, its files and metadata remain intact.",
+        "[integration] Given removal aborts after target capture, the rollback leaves zero committed cleanup records.",
+        "[integration] Given a repository has an unfinished job, FleetReposService.remove still refuses removal.",
+        "[integration] Given a removed repository's terminal job finished newer than the retention cutoff, its captured files survive the first purge.",
+        "[integration] Given that captured terminal job becomes older than the advanced retention cutoff, the next purge expires its files.",
+        "[unit] Given one store deletion succeeds and a later store deletion fails, the cleanup record remains pending.",
+        "[unit] Given pending cleanup after partial deletion, when purge retries with the first file already absent, it completes the remaining work.",
+        "[unit] Given cleanup succeeded on retry after partial deletion, a third purge makes no further change.",
+        "[unit] Given multiple eligible records including one persistently failing target, bounded purge processing still reaches later eligible records."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "retention",
+        "migration",
+        "finding-5"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "An additive independent persistence model connects repository deletion to restart-safe, bounded, idempotent cleanup across two stores and transactions."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/logs/log-store.ts",
+        "apps/api/src/fleet/artifacts/artifact-store.ts",
+        "docs/review-evidence/20261125/database-controls.py",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/logs/fleet-log-retention.processor.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261219090000_fleet_retired_job_cleanup/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "add durable cleanup records with cutoff and stable job identity."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.ts",
+          "reason": "capture cleanup targets before deleting each eligible repository."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/domain/fleet-repo.domain.ts",
+          "reason": "declare transactional capture."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+          "reason": "persist cleanup records for terminal jobs in the deletion transaction."
+        },
+        {
+          "path": "apps/api/src/fleet/logs/domain/log-retention.domain.ts",
+          "reason": "describe outstanding cleanup records and acknowledgement."
+        },
+        {
+          "path": "apps/api/src/fleet/logs/prisma-log-retention.repository.ts",
+          "reason": "page due records and settle successfully completed work."
+        },
+        {
+          "path": "apps/api/src/fleet/logs/fleet-log-retention.processor.ts",
+          "reason": "drain deleted-repository work through both stores as part of purge."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "extend the removal fixtures with capture and rollback."
+        },
+        {
+          "path": "apps/api/src/fleet/logs/fleet-log-retention.processor.spec.ts",
+          "reason": "cover partial cleanup, replay and bounded progress."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-log-retention.integration.spec.ts",
+          "reason": "exercise repository DELETE followed by retention against real files."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Reconcile a stored bundle after metadata failure",
+      "description": "**Goal** — Reconcile this upload attempt after metadata transaction failure without deleting committed or uncertain bundle bytes.\n\n**Motivation** — Project and repository removal can also leave jobs, stored files and search results inconsistent.\n\n**Approach** — Finding 6. BundleService.upload generates a unique attempt key, writes bytes, then uses a transaction to fence and record that attempt. Known rejections already delete the new object. Handle a thrown transactional error as well. After the transaction settles, use a fresh primary database read for this job, bundle kind and epoch. Delete only an attempt known to be unreferenced. If the commit is uncertain and the read itself fails, retain the bytes, emit a recoverable diagnostic identifying the attempt, and propagate the original failure. This story covers request-time reconciliation.\n\nFor bundle reconciliation, a primary read must observe the settled metadata transaction. If an acknowledgement was lost and its commit could still be running, serialize the verification with the same job-row lock in a fresh transaction before reading the artifact pointer. An inconclusive verification preserves the bytes. Per-attempt keys are unique, so subsequent upload attempts cannot reclaim an old key. The exception path only cleans up its own attempt.\n\n**Scope** — In: extend artifacts/bundle.service.ts, bundle.service.spec.ts and test/integration/fleet/fleet-bundles.integration.spec.ts. Out: durable retired-job cleanup (US-009), changes to the ArtifactStore contract, and changes to holder fencing, normal ingest or log fallback behavior. Also out: A retrospective scan or deletion of files orphaned before the cleanup records exist. Changes to the public approval wire format, permission catalog or fleet protocol. Create no new files.\n\n**Interface** — Reuse IFleetJobRepository.lockById/findArtifact and ArtifactStore.delete. Leave the failed metadata transaction scope before verification; in a fresh primary transaction acquire the same job-row lock used to record metadata and read the pointer for (jobId, 'bundle', leaseEpoch). Retain an attempt referenced by durable metadata or one whose status cannot be established. Delete only this attempt's confirmed orphan key, never the previous good or another attempt's key. Verification or deletion errors produce an identifying recoverable diagnostic without replacing the original request error. Maintain known rejection cleanup, successful replacement behavior and per-attempt random keys.\n\n**Verification** — Use actual disk-store bytes for replacement rollback, two-connection lost-ack reconciliation and a successful new-key retry. Hold the recording transaction's job lock after it points at the new key, observe the verification transaction waiting with bytes present, commit and verify the original error still propagates with readable committed bytes. Inject verification-read and orphan-delete errors in unit tests. Dated bundle-cleanup fixtures are read-only.",
+      "acceptanceCriteria": [
+        "[integration] Given replacement bundle bytes were written but metadata transaction fails before recording them and the database is reachable, the new attempt file is removed.",
+        "[integration] Given the same pre-record metadata failure, the upload request fails with the original transaction error.",
+        "[integration] Given the same pre-record metadata failure after replacement bytes were written, the previous bundle row and its bytes remain readable.",
+        "[integration] Given a lost commit acknowledgement and a recording transaction holding the job-row lock after pointing at the new attempt, when reconciliation starts on a second PostgreSQL connection, lock-wait observation establishes that verification waits for that lock while the bytes remain present.",
+        "[integration] Given the lost-ack recording transaction commits after verification waits, the request reports its original error.",
+        "[integration] Given the lost-ack recording transaction commits after verification waits, the recorded bundle remains readable.",
+        "[unit] Given an uncertain commit and a failed verification read, BundleService.upload retains the attempt bytes.",
+        "[unit] Given an uncertain commit and a failed verification read, the recoverable diagnostic identifies the attempt key.",
+        "[unit] Given an uncertain commit and a failed verification read, the transaction error remains the request error.",
+        "[unit] Given a confirmed orphan whose deletion fails, an identifying diagnostic is emitted without masking the original transaction failure.",
+        "[integration] Given a failed upload is retried with a new key, a successful retry has readable bytes matching its durable metadata.",
+        "[integration] Given the successful retry uses a new key, cleanup for the failed attempt cannot remove that successful key."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "bundles",
+        "transactions",
+        "concurrency",
+        "finding-6"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Ambiguous commit reconciliation crosses database and disk durability; an incorrect primary-read or lock boundary can irreversibly delete committed bytes."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/artifacts/artifact-store.ts",
+        "docs/review-evidence/20261125/bundle-cleanup.ts",
+        "apps/api/src/fleet/artifacts/bundle.service.ts",
+        "apps/api/test/integration/fleet/fleet-bundles.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/artifacts/bundle.service.ts",
+          "reason": "reconcile the attempt outside the failed transaction and preserve the original error."
+        },
+        {
+          "path": "apps/api/src/fleet/artifacts/bundle.service.spec.ts",
+          "reason": "inject transaction, verification-read and delete errors."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-bundles.integration.spec.ts",
+          "reason": "exercise actual stored bytes and durable metadata across attempts."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Rank knowledge candidates from registered repositories",
+      "description": "**Goal** — Restrict lexical and vector candidate retrieval to eligible registered project repositories before either row cap.\n\n**Motivation** — Project and repository removal can also leave jobs, stored files and search results inconsistent.\n\n**Approach** — Finding 7. KnowledgeSearchService.search currently chooses bounded lexical and vector candidates before listProjectRepos is consulted. Obtain the project registry first and apply the registered repo IDs, intersected with any requested repo, inside both storage predicates before either leg's row cap. Preserve project partitioning, source selection, embedded-row constraints, path-prefix behavior, rank fusion, outcome job visibility, lexical-only mode and the existing meaning of empty. Empty eligibility must never broaden a query.\n\n**Scope** — In: modify knowledge-search.service.ts, knowledge-search.service.spec.ts and test/integration/fleet/knowledge-store.integration.spec.ts. Verify shared service behavior consumed by the REST route and assistant tool. Out: retired-file cleanup (US-009), deleting retired Lance chunks instead of filtering, changing callers' public contracts. Also out: Expansion of the existing project-repository enumeration limit. US-011 takes eligible repository IDs from the current bounded listProjectRepos result. Create no new files.\n\n**Interface** — Keep KnowledgeSearchQuery/KnowledgeSearchResult and KnowledgeChunkStore lexical/vector interfaces. Read the bounded registry first, intersect optional repoId, and pass the same eligible set into both source predicates before where/limit retrieval. An empty intersection produces zero eligible hits, never an omitted filter. Preserve docs/outcomes/all namespaces, provider != 'none' on the vector leg, project_<projectId> partitioning, post-leg path-prefix handling, reciprocal rank fusion, job visibility and final limits. Keep empty tied to stored rows of the requested source, not zero hits or zero eligible repositories; retain lexical fallback when embedding fails. The REST unknown owner/name response remains knowledge.repoNotFound.\n\n**Verification** — Extend service-boundary tests for empty, foreign, retired and live explicit repos and all sources/visibility controls. Use real temporary LanceDB to place the only live lexical match below 50 higher-ranked retired rows; separately use controlled embeddings with no lexical query match to prove the live vector candidate survives retired candidates. Restore and close all native-store resources. Dated search-ranking fixtures are read-only references.",
+      "acceptanceCriteria": [
+        "[integration] Given one matching live document below 50 higher-ranked retired documents, project-wide lexical-only search returns the live document.",
+        "[integration] Given one matching live document below 50 higher-ranked retired documents, project-wide lexical-only search returns zero retired hits.",
+        "[integration] Given controlled embeddings and real LanceDB with the only live vector match below retired candidates and no lexical query match, vector-enabled KnowledgeSearchService.search returns the live document.",
+        "[unit] Given an empty project registry, KnowledgeSearchService.search returns zero eligible hits.",
+        "[unit] Given an explicit retired repoId, KnowledgeSearchService.search returns zero eligible hits.",
+        "[unit] Given an explicit repoId belonging to another project, KnowledgeSearchService.search returns zero eligible hits.",
+        "[unit] Given an explicit live registered repoId, KnowledgeSearchService.search restricts both lexical and vector legs to that repository.",
+        "[unit] Given an unknown owner/name repository selector, ProjectKnowledgeController.search throws NotFoundAppException for knowledge.repoNotFound, retaining the REST route's existing not-found response.",
+        "[unit] Given matching docs and accessible outcomes in registered repositories and a limit large enough to include both, KnowledgeSearchService.search returns only hits with source 'repo' for docs, only source 'outcome' for outcomes, and both source families for all, preserving existing source filtering.",
+        "[unit] Given registered repositories and a pathPrefix, KnowledgeSearchService.search returns only repository-document hits whose path starts with that prefix and no outcome hits, preserving existing path-prefix filtering for docs, outcomes and all.",
+        "[unit] Given registered repositories with outcome candidates for inaccessible jobs, KnowledgeSearchService.search returns no outcome hit for a job omitted by describeJobs.",
+        "[unit] Given registered repositories with lexical matches and an embedding failure, KnowledgeSearchService.search returns those lexical hits with lexicalOnly true, retaining lexical fallback.",
+        "[unit] Given docs, outcomes or all searches, including when eligible repositories yield no hits, KnowledgeSearchService.search returns empty true exactly when the project's table has no stored rows of the requested source family (repo for docs, outcome for outcomes, either for all), keeping empty keyed to stored source rows rather than eligible-hit count."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "knowledge",
+        "search",
+        "security",
+        "finding-7"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Hybrid native-store ranking must preserve source semantics and project/job visibility while moving eligibility before truncation; access-scope correctness invokes the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-chunk-store.ts",
+        "apps/api/src/fleet/knowledge/project-knowledge.controller.ts",
+        "apps/api/src/fleet/assistant/tools/kb-tools.ts",
+        "docs/review-evidence/20261125/search-ranking.ts",
+        "apps/api/src/fleet/knowledge/knowledge-search.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-search.service.ts",
+          "reason": "scope both rank inputs to project-registered repositories before truncating candidates."
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-search.service.spec.ts",
+          "reason": "cover eligibility, mode and project scope controls."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/knowledge-store.integration.spec.ts",
+          "reason": "exercise the search service with real LanceDB ordering and constraints."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Brownfield scope and evidence\nResolve only findings 4–14 from docs/20261125-review-whole-repo.md in one feature and PR, with the eleven prescribed owning stories. The review identifies historical observations at 7e2342791 and the supplied spec identifies integration checks at abae5e5b5; this analysis reads the current checkout rather than claiming to reproduce those commits. Findings 4–14 are described at docs/20261125-review-whole-repo.md:31–117. The historical fixtures under docs/review-evidence/20261125 assert the old failures and are read-only references, not regression tests to update. The feature is done when package regressions demonstrate each action, race, shutdown boundary, cleanup lifecycle and search result specified below, including deterministic PostgreSQL interleavings rather than only the old separate database controls. No implementation or tests were executed while drafting this PRD. Codebase-memory MCP and shell/test execution tools are not exposed in this session; navigation used direct reads and targeted text searches.\n\nArchitecture and rules\nDespite the automated context labeling web as Next.js, the app is Nuxt 4 SSR with Vue, hand-written Nuxt composables and Jest/Playwright (.nax/mono/apps/web/context.md:11–32). Browser /api calls proxy through Nuxt; SSR uses internal API addressing and forwarded request cookies. apps/web/composables/useApi.ts:213–275 contains this transport and apps/web/composables/useApi.ts:276–299 contains the existing one-refresh retry. Preserve SSR headers, language, cookie forwarding and retry behavior; do not introduce a generated web client or generic interception of every 202. All new feedback must use both apps/web/i18n/locales/en.json and zh.json. Reuse existing UI primitives, ErrorState/LoadingState, permission composables and semantic tokens. These are workflow corrections, not a navigation/token/board redesign. API is NestJS on Fastify with Prisma 7 and Vitest, not bare Fastify. Runner is Bun-only ESM with real bun:sqlite journals and injected clocks/executor/session seams. API repository access must remain behind existing domain interfaces/tokens; extend the existing module-private repositories rather than introducing cross-module Prisma access. .nax/rules/api-data.md:19–116 defines repository → service → public layering, transaction-aware PrismaService.client and txManager.run; do not bypass ALS with a cached raw client or explicit tx parameters. Read .nax/rules/nathapp-packages.md and use nathapp-nestjs-docs when available before implementing API platform changes. Use generated Prisma types from src/generated/prisma/client, not @prisma/client. .nax/rules/api-auth.md:11–30 requires permission keys, not role claims. API state changes still go through JobTransitionsService; publish live events and invoke placement after commit. No approval DTO, permission-catalog, fleet-protocol or generated CLI changes are needed.\n\nShared design instructions (verbatim)\nEach story below names the current producer, the consuming entry point, the changed behavior and the checks at their boundary. Use the existing project rules in `.nax/rules/`, including the permission-key, repository, transaction, test-isolation and web i18n rules. Regression tests belong in package test suites. The dated review fixtures assert historical behavior and are read-only references.\nFor the three approval-gated web calls, use the existing unwrapped approval summary. Check the operation's permission key, pending status and request ID, following the existing fleet dispatch UI. A pending transcript message also has a pending status. A queued reindex also has HTTP status 202. Neither alone identifies an approval.\nFor bundle reconciliation, a primary read must observe the settled metadata transaction. If an acknowledgement was lost and its commit could still be running, serialize the verification with the same job-row lock in a fresh transaction before reading the artifact pointer. An inconclusive verification preserves the bytes. Per-attempt keys are unique, so subsequent upload attempts cannot reclaim an old key. The exception path only cleans up its own attempt.\n\nUS-001 / finding 10: scoped approval outcomes\nThe producer apps/api/src/approvals/route/approval-gated.decorator.ts:24–34 replies 202 with JsonResponse.Ok(ApprovalRequestSummaryDto.from(...)), not a special outer pending marker. The unwrapped type already exists at apps/web/lib/approval-requests.ts:42–65. The exact route keys are ticket.create (apps/api/src/tickets/tickets.controller.ts:173), fleet.job.cancel (apps/api/src/fleet/jobs/fleet-jobs.controller.ts:62), and thread.message.send (apps/api/src/fleet/threads/threads.controller.ts:300). apps/web/components/fleet/FleetJobOpenItems.vue:60–80 shows scoped permissionKey/status checks and returned request IDs for existing dispatch/ruling flows; mirror that behavior. apps/web/composables/useFleetJobs.ts:6–8 already unions dispatch with ApprovalRequestSummary, but cancel still promises FleetJobDto at line 78. apps/web/components/CreateTicketDialog.vue:132–140 ignores the create response, emits created, closes and resets. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:239–247 applies the cancel result as a job before its success toast; preserveJobLabels must still be used for executed replies. apps/web/lib/thread-controller.ts:48–52 defines ThreadActionResult; send at line 225 creates a pending optimistic message and line 252 destructures an executed { message } unconditionally. apps/web/components/fleet/threads/ThreadComposer.vue:68–77 clears equal submitted drafts when result.ok, with protection for newer edits; preserve that protection and distinguish execution from approval pending. Both project and workspace page onSend adapters forward that action result; pending is not an error toast and must not enter closing/transport retry loops. Modify useApi.ts only to enable scoped result discrimination, useFleetJobs.ts, CreateTicketDialog.vue, thread-controller.ts, ThreadComposer.vue and both detail pages plus locales. Extend existing tests/components/CreateTicketDialog.spec.ts, tests/pages/fleet-job-detail.spec.ts, tests/lib/thread-controller.spec.ts, tests/components/thread-composer.spec.ts, tests/pages/threads-detail-actions-page.spec.ts and tests/composables/useApi.spec.ts. The actions page already mounts the real composer at apps/web/tests/pages/threads-detail-actions-page.spec.ts:68; use it to observe feedback and editable drafts.\n\nUS-002 / finding 11: ready-boundary reconciliation\nBoth adapters initially load then subscribe: apps/web/composables/useThread.ts:41–50 and useWorkspaceThread.ts:72–81. apps/web/lib/thread-event-stream.ts:123–132 currently calls onResync at reopen after hadError, while ready only sets live; move catch-up to one ready notification per connected stream, including native EventSource reconnects, without double-fetching on open plus ready. Retain dedupe, tri-state refreshAuth, backoff and stopped checks at thread-event-stream.ts:70–117. apps/web/lib/thread-controller.ts:114–137 performs unversioned detail/message reads; event, poll and resync handlers at lines 145–194 use fire-and-forget reads, currently without rejection handling. Responses can arrive after newer reads, live deltas or stop. Protect response order and same-message revisions, not just the highest message seq: a delta appends to a message without changing seq. apps/web/lib/thread-view.ts:19–48 preserves longer content only when both versions are streaming, so a late pending/streaming snapshot can still regress a terminal state or content. Preserve optimistic sends introduced by US-001 and refetchAfterSeq behavior. Extend tests/lib/thread-event-stream.spec.ts, thread-event-stream-recovery.spec.ts, thread-controller.spec.ts, tests/composables/useThread.spec.ts and useWorkspaceThread.spec.ts. The injected controller harness at apps/web/tests/lib/thread-controller.spec.ts:66–95 captures handlers and timers and can hold promises deterministically. Both adapters must exhibit recovery, not merely the pure stream helper.\n\nUS-003 / finding 12: project deep-link feedback\napps/web/composables/useThread.ts:44–48 suppresses initial failures and exposes only ThreadController. The workspace adapter's loadFailed/loadThread contract at apps/web/composables/useWorkspaceThread.ts:22–28 and :54–68 is the existing recovery pattern. Its page prioritizes loaded detail, then failure, then loading at apps/web/pages/threads/[id].vue:93–131. The project template at apps/web/pages/[project]/threads/[id].vue:116–185 renders nothing without a thread. Add project load-state/retry adaptation without a second stream and classify 403/404 identically without exposing private content or existence. Recovery through US-002 live reads as well as explicit retry must supersede stale failure feedback. Extend useThread.spec.ts and tests/pages/threads-detail-page.spec.ts; existing mounted page harness starts at apps/web/tests/pages/threads-detail-page.spec.ts:13 and already uses permission stubs and real thread presentation. Reuse localized copy where possible; otherwise add both locales. Maintain existing load/unmount guards and the separate runner-options failure degradation.\n\nUS-004 / finding 13: project list pagination\napps/web/composables/useThreads.ts:35–52 has a generation counter but requests only { status, size: '100' }. apps/web/composables/useWorkspaceThreads.ts:29–108 already provides current, hasNext, loadingMore and loadMore; it advances the page only after a successful current-generation response. Mirror its contract and selected-status preservation while guarding page-one reloads as well as status changes. apps/web/pages/[project]/threads/index.vue:22–41 has an additional page-load token covering members.load; do not replace it with only the composable generation. Its template at lines 83–85 has no pagination control. Add load-more and failure feedback retaining visible rows and the failed page. Extend tests/composables/useThreads.spec.ts (existing exact first-page query assertions at lines 36–60 and generation regressions thereafter) and tests/pages/threads-page.spec.ts; mirror workspace list/page patterns. Keep first-page query compatibility and reuse existing localized load-more/retry copy.\n\nUS-005 / finding 14: effective send access\napps/web/lib/thread-view.ts:80–105 takes ComposerViewer.isCreator before server sendRefusal and isTurnRunning. The project page already derives isCreator and useProjectPermissions at apps/web/pages/[project]/threads/[id].vue:43–49, but passes only isCreator at line 175. apps/web/lib/permissions.ts:37–42 defines has as any-row only and hasOwn as any-row OR .own; use has('thread.message.send') OR (isCreator AND hasOwn('thread.message.send')), never promote another creator's own-only grant. apps/web/composables/usePermissions.ts:94–100 supplies EMPTY_PERMISSIONS while pending or failed, including refresh. Pass the resolved reactive send decision into shared composerState, retaining server refusal and running-turn priority after the read-only decision. apps/web/pages/threads/[id].vue:123–127 must adapt its existing personal-owner decision, without importing project permission data for workspace composer access. Other thread controls continue to use their existing creator/requester/archive/mode rules. Extend tests/lib/thread-view.spec.ts, tests/pages/threads-detail-page.spec.ts and workspace-thread-detail-page.spec.ts. Update the real-composer creator fixture in threads-detail-actions-page.spec.ts with thread.message.send.own alongside thread.archive, keeping typing, submission and refusal-toast assertions.\n\nUS-006 / finding 8: cancellation linearization\napps/runner/src/supervisor/job-run.ts:184–194 accepts any nonterminal row, including UPLOADING. finish at line 576 judges before draining, awaits logs at line 647, transitions UPLOADING at line 649 and later emits the earlier verdict at line 672. Establish one synchronous/journal-atomic decision after the drain that checks durable RUN cancellation and advances RUNNING → UPLOADING; avoid an await between the last check and transition. Journal.tx exists at apps/runner/src/journal/journal.ts:79 and writes are durable before observers/acks. requestCancel must use the same RUN cutoff and reject new post-cutoff requests. apps/runner/src/supervisor/supervisor.ts:155–169 discards the active run's boolean and returns ok even for journal-only terminal rows; propagate the decision and apply it to journal-only RUN recovery. apps/runner/src/supervisor/command-handler.ts:180–182 translates cancel into acknowledgements, while :85–106 replays recorded command outcomes before applying anything anew; preserve replay identity and don't reevaluate a previously handled CANCEL by current job state. Cancellation during held logs wins over a previously computed successful RUN verdict and persists through restart. Do not generalize RUN result precedence to CONFIG: finishConfig is separate at job-run.ts:349 and src/supervisor/job-run-config.spec.ts has command-specific authoritative-result controls. Extend job-run.spec.ts, supervisor.spec.ts and command-handler.spec.ts using real Journal, FakeExecutor, FakeLogShipping and fakeTime; command-handler.spec.ts:423 already controls held versus unknown jobs. Maintain lease epochs, one terminal event, upload fencing, PLAN/REVIEW/FIX behavior and thread paths.\n\nUS-007 / finding 9: one close budget and late-write fencing\napps/runner/src/thread/thread-job-run.ts:975–1008 awaits startup and livePublish, cancels the turn, waits turnSettled without a deadline, then starts closeHeldSession. closeHeldSession at :710–714 clears the session, while startSessionClose at :1191–1197 owns the exactly-once close promise and awaitSessionClose at :1221–1234 starts a fresh full timeout. Apply one deadline after startup/live-publish coordination across settlement plus close; close must still start if settlement consumes all the budget, and logDrainTimeoutMs stays separate. runTurn retains a writer reference at :817–833 and only checks halted, and consume at :852–862 can update spend after a close, so fencing only this.writer = null is insufficient. ThreadEventWriter.event at apps/runner/src/thread/thread-event-writer.ts:186–203 and closed/failed at :216–225 currently have no sealed state. Seal terminal markers against late event/flush/direct callbacks, while timely transcript finalization remains before the marker. Guard late turn completion from rearming idle, mutating journal or publishing another terminal event. Preserve the sole close owner, first close reason, halt recoverability and credential/worktree behavior. Extend test/unit/thread-event-writer.spec.ts, thread-job-run-hardening.spec.ts and thread-job-run-turns.spec.ts; keep thread-job-run-halt-safety.spec.ts controls. The hardening harness injects manualClock, real files, SQLite and session behavior at apps/runner/test/unit/thread-job-run-hardening.spec.ts:27–69, enabling held finalizer/close budgets without real-time sleeps or paid agents.\n\nUS-008 / finding 4: live-project insertion fence\napps/api/src/fleet/schedules/schedule-ticker.ts:147–173 authorizes owner access outside dispatch and intentionally has no transaction around dispatch. Its onDispatchError at :193–218 preserves template-invalid refusal and post-commit-side-effect handling. apps/api/src/fleet/jobs/fleet-jobs.service.ts:90–128 resolves repo, tickets, pin, budget and snapshots before opening insertion; :130–177 inserts job, links, events, activity and audit in txManager.run, and :186–196 publishes and places after commit. Add a live-project lock operation to jobs/domain/fleet-job.domain.ts and implement it transaction-aware in prisma-fleet-job.repository.ts; use a row lock conflicting with PostgreSQL's non-key deletedAt UPDATE, e.g. FOR UPDATE, not FOR KEY SHARE. Decide live state inside the same insert transaction before job or dependent writes and before any thread lock/insert effects. The repo's ALS client is already used at apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:94–97; lockById at :249–252 shows the row-lock pattern. Both application delete paths must conflict with this boundary: apps/api/src/projects/projects.service.ts:251–284 calls ID-based and slug-based update methods under audited transactions, then announces deletion after commit at :295–300. apps/api/src/fleet/jobs/project-deletion-jobs.listener.ts:39–56 quiesces unstarted jobs after deletion, publishing after its own transaction; retain this opposite-order control. Update dispatch mocks in fleet-jobs.service.spec.ts, fleet-jobs.audit.spec.ts and fleet-jobs.thread-handoff.spec.ts with a live guard. Extend test/integration/fleet/fleet-schedule-ticker.integration.spec.ts (pre-deleted control at :234–245) with two real connections and barriers after owner authorization and after the in-transaction project read. Observe PostgreSQL lock waiting with a bounded wait rather than assuming it from elapsed time. Keep project-deletion-quiesce.integration.spec.ts and two-ticker occurrence claiming. No runner should attach in the delete-wins case, so placement cannot obscure insertion evidence.\n\nUS-009 / finding 5: durable retired-job cleanup\napps/api/src/fleet/repos/fleet-repos.service.ts:669–681 locks FleetRepo, rejects unfinished jobs, then cascades deletion inside the same transaction as activity/audit. prisma-fleet-repo.repository.ts:313–319 uses ACTIVE_STATES and FOR UPDATE. FleetJob.repo and artifact/log relations cascade (apps/api/prisma/schema.prisma:1232, :1567, :1588), removing all current retention discovery pointers. apps/api/src/fleet/logs/prisma-log-retention.repository.ts:16–32 only discovers surviving terminal FleetJob rows with unexpired rows or log events, ordered by (finishedAt,id) in bounded pages. fleet-log-retention.processor.ts:36–47 uses the existing 04:45 cron and logRetentionDays setting; :56–75 walks RETENTION_BATCH=200 with a cursor that advances even after per-job failure, and :78–96 deletes log prefixes through selected epoch and exact artifact keys before expiring rows under lock. Introduce an independent cleanup model and the sole new authored file apps/api/prisma/migrations/20261219090000_fleet_retired_job_cleanup/migration.sql, including a due-work index and no historical rewrite/backfill. Capture stable terminal job ID, max lease epoch, finish time and exact bundle keys in the deletion transaction before cascade; records must have no cascading dependence on Project/FleetRepo/FleetJob. Persist capture through the repo domain/repository, not cross-module service Prisma calls. Extend log-retention.domain.ts, prisma-log-retention.repository.ts and the existing processor to cursor-page due records with the same cutoff and store APIs. Acknowledge only once every target delete succeeds; retries must tolerate absent files and not starve later records behind one persistent failure. Preserve existing retention of live-parent jobs and no-op behavior when retention is disabled. Extend fleet-repos.service.spec.ts for capture/rollback and busy refusal, fleet-log-retention.processor.spec.ts for partial success/replay/progress and test/integration/fleet/fleet-log-retention.integration.spec.ts using actual repository DELETE, temporary disk files, worker restart and cutoff advance. The existing integration suite already creates multi-epoch files, unrelated jobs and idempotent purge controls at :45–60 and :92–157.\n\nUS-010 / finding 6: request-time bundle reconciliation\napps/api/src/fleet/artifacts/bundle.service.ts:59–66 writes a server-generated randomUUID key per attempt. :71–98 re-locks the job, fences the holder/state, records artifact + ingest + activity + audit in a transaction. Only returned known rejections delete this attempt (:99–102); thrown transaction errors currently escape without reconciliation. Its success path schedules log fallback, kicks ingest and deletes the replaced key after commit (:104–125). Preserve all of these existing responsibilities. Repository findArtifact identifies (jobId,kind,leaseEpoch) at apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:578; lockById uses FOR UPDATE at :249. On thrown metadata failure, leave the failed transaction scope and start a fresh primary transaction, acquire that same job lock, then read the artifact pointer for this job/kind/epoch. A plain immediate read is unsafe for a lost-ack commit still running; the verification transaction must wait until its row lock settles. If pointer equals this key retain it; only a confirmed unreferenced own key can be deleted. Missing/inconclusive verification due to a read error must preserve bytes and identify the key in a recoverable diagnostic. A confirmed-orphan delete failure must also identify the key without masking the original error. Don't delete the previous good bundle or a later attempt's key, don't treat an uncertain outcome as successful execution, and don't rely on a replica or poisoned ALS transaction. ArtifactStore at apps/api/src/fleet/artifacts/artifact-store.ts:18–24 already supplies put/get/stat/delete. Extend bundle.service.spec.ts with transactional/read/delete faults and test/integration/fleet/fleet-bundles.integration.spec.ts with actual disk bytes and two PostgreSQL connections. The existing replacement/fencing/download controls at :75–115 must remain. This is not US-009 retention and does not scan old orphans.\n\nUS-011 / finding 7: eligible repositories before row limits\napps/api/src/fleet/knowledge/knowledge-search.service.ts:165–190 builds source/repo predicates, :264–271 requests 50 rows per leg (200 for path-prefix searches), and :273–277 consults the registry only after retrieval, allowing retired rows to consume every candidate slot. Obtain listProjectRepos first and intersect its IDs with optional repoId before constructing both storage predicates. Empty eligibility must produce no hits without omitting the repo clause. Keep source_id namespaces for repo/outcome, project_<projectId> partitions, vector provider != 'none', post-retrieval path-prefix rules, RRF K=60, job-description visibility and final limit behavior. KnowledgeChunkStore already applies where before limit for vector and lexical at apps/api/src/fleet/knowledge/knowledge-chunk-store.ts:118–122 and :150–152; no new storage API is required. Search's empty flag remains based on stored source rows, not eligible-hit count, at knowledge-search.service.ts:301–317, and embedding failures retain lexical fallback at :325–332. apps/api/src/fleet/knowledge/knowledge-index.service.ts:33–35 delegates the registry to the existing bounded repository result (prisma-knowledge-index.repository.ts:76–83); do not expand this bound. Both REST and assistant consumers delegate to the shared search: project-knowledge.controller.ts:187–201 resolves owner/name or raises knowledge.repoNotFound and maps store outages; apps/api/src/fleet/assistant/tools/kb-tools.ts:253–280 passes project/source/repo/path/limit and distinguishes empty from no hits. Extend knowledge-search.service.spec.ts, whose harness already injects store/embedding/registry/job visibility at :85–112, and test/integration/fleet/knowledge-store.integration.spec.ts, whose real temporary LanceDB setup/teardown is at :50–66. Seed the live row below 50 retired candidates separately for full-text and vector queries; controlled embeddings must have no lexical match in the vector proof. Do not remove stored retired chunks as a substitute for predicate correctness.\n\nVerification, compatibility and migration sequence\nBinding order is US-001 → US-002 → US-003, US-001 + US-003 → US-005; US-004 and runner/API stories have no declared dependencies. Keep exactly these dependencies, but coordinate edits to shared web files across those stories. US-001 changes controller/action results consumed by US-002/003/005; US-005 must adapt both pages and fixtures without undoing pending-draft or load-error behavior. US-006 and US-007 cover distinct execution paths. US-009's schema must precede its capture/retention repository implementation; regenerate the Prisma client and ship the additive migration in the same PR. No retroactive target discovery or parent-FK conversion is required. Schema/db-push test setup and migration need the same due index; preserve partial-index helper rules if introducing any partial index. No public wire migration, CLI generation or runner protocol bump is intended; if a public controller/DTO contract is unexpectedly changed, stop and reconcile scope and the repository generation requirement rather than editing generated clients by hand.\nPackage regression tests stay in existing Jest, Vitest and bun:test suites; don't create US-numbered test directories or edit generated acceptance files. For API PostgreSQL tests retain canRunDbTests(), KODA_DB_TESTS=1 and explicit NAX_SANDBOXED=1 skips; skipped tests are not proof. Use declared host testScoped commands when available to run the integration paths. API global setup force-resets a local *_test database and serializes DB suites; don't run two reset-based suites simultaneously against the same DB. Two connections inside one race test are intentional and must close in finally/afterAll. A second checkout needs its own container/database. Use temporary per-suite directories, restore env/spies, close Nest/Prisma/Lance handles, and use bootHttpApp's existing port-0 listener (.nax/rules/api-test-isolation.md:15–58). Runner lifecycle regressions should use real SQLite/files and injected clocks; only socket/process-dependent blocks skip in the sandbox. Security-sensitive approval, inaccessible-detail, effective-permission, session-close, project-fence and search-visibility stories use strict three-session-tdd. No quality gate is an acceptance criterion; typecheck/lint/build remain pipeline gates.\n\nRefinement audit: complete spec-AC ledger\nThe spec contains 47 acceptance bullets. The following ledger enumerates every original bullet in source order; each arrow names the 1-based acceptanceCriteria positions within that same story after refinement. Splitting composite bullets preserves their setup and regression qualifications, not just their headline assertion.\nUS-001: (1) real pending-summary shapes, corresponding operation keys and mounted request-ID feedback → 1–3; (2) populated pending ticket dialog stays open with no created event → 4–5; (3) pending ticket/job have zero execution-success toasts → 6; (4) pending cancel retains original mounted job → 7; (5) pending send retains editable draft and pre-submit transcript → 8–9; (6) pending send makes one POST → 10; (7) existing executed responses through all three forms retain created event, returned job and optimistic replacement → 11–13; (8) queued-reindex 202 still delivers { queued: true } through the request adapter → 14. Criterion 15 is the explicit non-409 transport-error negative path added by this refinement request, not a claimed original spec bullet.\nUS-002: (1) each scope reconciles a turn finished between GET and subscription on ready, with final transcript and available composer without disconnecting → 1–2; (2) open/ready/duplicate-ready then reconnect/open/ready gives one catch-up per ready connection → 3; (3) a held older snapshot cannot regress same-message terminal/delta status or content or introduce duplicates → 4–6; (4) a rejected ready read recovers on reconnect, and stopped held recovery cannot reopen stream or polling → 7–9.\nUS-003: (1) 403/404 deep links show the same localized unavailable message without private content → 1–2; (2) initial 503 followed by the visible retry and valid detail displays the thread, clears failure and keeps one subscription → 3–5; (3) later live reload after initial failure is not masked by stale error state → 6.\nUS-004: (1) 101 active and 101 archived threads each load page two for the selected status, show row 101 once and hide load more after the short page → 1–3; (2) held active page two cannot alter a switched archived list or same-status page-one reload → 4–5; (3) double-click issues one request and failure retry reads the same page while preserving visible rows → 6–8.\nUS-005: (1) another creator's idle project thread permits any-row send but refuses own-only → 1–2; (2) creator own-only permits send, missing/loading grants remain read-only and later grants update the composer → 3–5; (3) send permission does not override server sendRefusal or running-turn reasons → 6–7; (4) personal workspace keeps existing owner behavior without project permissions → 8.\nUS-006: (1) handler/journal ASSIGN, successful RUN result, held drain and CANCEL yield ok acknowledgement, durable timestamp and exactly one CANCELLED terminal → 1–3; (2) same command ID replays its original ack and one terminal, while a distinct first-delivery UPLOADING CANCEL refuses with no timestamp on a previously uncancelled RUN → 4–7; (3) persisted accepted cancellation resumes CANCELLED while otherwise identical uncancelled success remains COMPLETED → 8–9; (4) pre-readoption journal-only RUNNING accepts a fresh CANCEL but UPLOADING/terminal refuse without journal mutation → 10–11; (5) CONFIG already-authoritative result retains existing late-cancel precedence → 12. The last assertion now names the observable terminal-state/reason mapping rather than leaving precedence undefined.\nUS-007: (1) ready startup, held transcript finalizer and immediately completing drain allow sealing, completion and stopped heartbeats at the injected close budget while finalizer remains held → 1–3; (2) settlement spends part of the one close budget, held close waits only its remainder and starts once → 4–5; (3) released finalizer/late callbacks cannot change sealed stream bytes, terminal count or journal completion → 6–8; (4) timely final transcript precedes the single marker and halt during settlement leaves a recoverable nonterminal job → 9–10.\nUS-008: (1) disposable PostgreSQL, no runner, due tick paused after owner authorization, committed application soft deletion and resumed tick yield fresh zero schedule-job count and no assignment → 1–2; (2) locked live-project read holds application deletion on a second connection as observed in PostgreSQL, then insert release/deletion commit results in listener cancellation of queued job → 3–4; (3) live authorized project still creates one scheduled job, including two tickers racing for the occurrence → 5.\nUS-009: (1) repo DELETE with expired terminal job, two log epochs and recorded bundle, followed by worker restart/purge, removes targets and cleanup record while retaining unrelated files → 1–3; (2) abort after capture preserves repo/files/metadata with zero committed cleanup records and unfinished job still refuses deletion → 4–6; (3) newer terminal files survive first cutoff and expire after cutoff passes finish time → 7–8; (4) partial store deletion leaves pending work, retry tolerates the first file already absent, and third pass changes nothing → 9–11; (5) bounded processing reaches later eligible records despite a persistent failure → 12.\nUS-010: (1) post-put pre-record transaction failure with reachable DB removes new file, fails the request and preserves previous bundle row/bytes → 1–3; (2) two-connection disk-store lost-ack simulation waits on recording transaction's job lock with bytes present, then commit preserves readable recorded bundle while request reports original error → 4–6; (3) uncertain-commit verification failure retains bytes, diagnoses attempt key and preserves transaction error; confirmed-orphan delete failure also diagnoses without masking original → 7–10; (4) new-key retry succeeds with readable bytes and matching metadata and cannot be removed by old-attempt cleanup → 11–12.\nUS-011: (1) live lexical match below 50 retired higher ranks returns live and zero retired hits → 1–2; (2) real LanceDB/controlled embedding, live vector candidate below retired rows and no lexical match still returns live → 3; (3) empty registry, retired explicit ID and foreign-project ID give zero eligible hits, live explicit repo constrains both legs and unknown REST repo name retains existing not-found → 4–8; (4) docs/outcomes/all with registered repos preserve source/path-prefix filters, omit inaccessible outcomes, retain embedding-failure lexical fallback and keep empty tied to stored source rows → 9–13. These last assertions now name actual hit sources, path prefix results, describeJobs visibility, lexicalOnly and empty values.\n\nRefinement audit: fit, negatives, boundaries and routing\nEvery story has a negative path: US-001 transport failure and deferred writes; US-002 failed background read/stopped recovery; US-003 inaccessible/transient loads; US-004 failed/overtaken paging; US-005 absent/own-only/refused send access; US-006 fresh post-cutoff CANCEL refusal; US-007 held finalizer/close and halt; US-008 delete-wins insertion refusal; US-009 partial deletion/rollback/busy refusal; US-010 transaction/read/delete failures; US-011 empty/foreign/retired eligibility and embedding failure. Regression anchors remain in their original owning stories, including existing executed responses, original displayed job, selected status, personal owner semantics, replayed acknowledgement, CONFIG precedence, timely transcript ordering, opposite lock ordering, retry idempotence, original bundle error, matching metadata and existing search empty/fallback semantics. No deprecated file-content tags occur. All 11 binding IDs, workdirs and dependency arrays remain unchanged; every referenced dependency exists. All five feature exclusions remain verbatim at top level, with nearby exclusions echoed in relevant story scopes; there is no story-local out-of-scope block in the spec to hoist.\nAll spec-recommended Context Files are now included per story within five entries, replacing lower-priority implementation/test files already named in descriptions and the analysis. Historical fixtures are read-only context even when located outside workdir. No new output is listed as context; US-009's migration remains the sole new file. The ambiguous US-009 instruction to keep files before acknowledgement was corrected to delete targeted files before acknowledging the cleanup record, matching every cleanup AC. Source API checks reconfirmed that thread message events are notifications triggering reads, not full message DTOs (apps/web/lib/thread-controller.ts:169–180); ACs therefore exercise onMessage-triggered reads or actual onDelta text updates. CONFIG late-cancel behavior is observable through state/reason events (apps/runner/src/supervisor/job-run.ts:349–373 and job-run-config.spec.ts:178–183). Search source/path/empty/fallback semantics were rechecked at apps/api/src/fleet/knowledge/knowledge-search.service.ts:263–332 and unknown-repo behavior at project-knowledge.controller.ts:186–191. US-008 complexity is reduced from expert to complex because it extends three existing production files with the existing ALS repository-lock pattern; strict security TDD still applies. US-010 retains expert routing because lost commit acknowledgement plus irreversible file deletion needs a settled-primary-read proof, not merely an ordinary catch/delete. Other routing remains tied to the existing package seams and security overrides. This audit is direct-read verification of the PRD, not a claim that implementation regressions or a JSON parser were executed.",
+  "outOfScope": [
+    "Deployment, runner distribution, CLI publication and live data changes.",
+    "Findings 1–3 and 15–18 from the November 25 review, and the separate performance work.",
+    "A retrospective scan or deletion of files orphaned before the cleanup records exist.",
+    "Expansion of the existing project-repository enumeration limit. US-011 takes eligible repository IDs from the current bounded listProjectRepos result.",
+    "Changes to the public approval wire format, permission catalog or fleet protocol."
+  ],
+  "routingProfile": "native-codex-ds"
+}
