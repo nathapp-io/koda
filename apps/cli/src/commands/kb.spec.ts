@@ -74,6 +74,7 @@ import {
 } from '../generated';
 import { resolveContext } from '../config';
 import { readFile } from 'fs/promises';
+import { ApprovalPendingError } from '../utils/approval-pending';
 
 describe('kbCommand', () => {
   let program: Command;
@@ -506,6 +507,7 @@ describe('kbCommand', () => {
       }
 
       expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(jest.spyOn(console, 'error').mock.calls.flat().join(' ')).toContain('Service unavailable');
     });
   });
 
@@ -691,6 +693,24 @@ describe('kbCommand', () => {
       }
 
       expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(jest.spyOn(console, 'error').mock.calls.flat().join(' ')).toContain('Invalid document content');
+    });
+
+    it('routes pending approval through the approval path and exits 5', async () => {
+      const pending = new ApprovalPendingError({
+        id: 'approval-1',
+        permissionKey: 'rag.document.add',
+        requiredMode: 'human',
+        status: 'PENDING',
+        expiresAt: '2026-12-01T00:00:00.000Z',
+      });
+      (ragControllerAddDocument as jest.Mock).mockRejectedValue(pending);
+
+      await program.parseAsync(['node', 'koda', 'kb', 'add', '--file', 'example.md']);
+
+      expect(jest.spyOn(console, 'error').mock.calls.flat().join(' ')).toContain('Approval required: rag.document.add');
+      expect(jest.spyOn(console, 'error').mock.calls.flat().join(' ')).toContain('koda approval show approval-1');
+      expect(exitSpy).toHaveBeenCalledWith(5);
     });
   });
 
