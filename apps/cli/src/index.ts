@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { finishSuccess } from './utils/output';
+import { configureResultOutput, finishSuccess } from './utils/output';
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
@@ -284,6 +284,7 @@ process.on('unhandledRejection', (reason: unknown) => {
 // Graceful shutdown on SIGINT (Ctrl+C) / SIGTERM — exits 130 / 143
 installSignalHandlers();
 
+program.hook('preAction', configureResultOutput);
 program.parse(process.argv);
 
 // Show help if no command provided

@@ -46,7 +46,7 @@ paths:
 
 ## Implementation Anti-Patterns
 - Do not hardcode API URLs
-- Do not use sync FS operations in production command paths (`readFileSync`)
+- Do not use sync FS operations in production command paths (`readFileSync`). The shared stdout writer may use a checked synchronous write to fd 1 when redirected to a regular file, so immediate exits preserve their output.
 - Use shared validation/output helpers; avoid duplicating command-local variants
 - Retry transient 5xx failures with backoff when appropriate
 

@@ -23,21 +23,31 @@ export function outputFixture(routes: Record<string, unknown>, profiles = {}) {
   writeFileSync(join(dir, '.koda/config.json'), JSON.stringify({ profiles }));
   writeFileSync(join(dir, 'responses.json'), JSON.stringify(routes));
 
-  async function run(args: string[], reader?: OutputReader, waitForRoute?: string) {
+  async function run(
+    args: string[], reader?: OutputReader,
+    options: { waitForRoute?: string; limitFileSize?: boolean } = {},
+  ) {
     const file = join(dir, 'stdout');
     const fd = reader ? undefined : openSync(file, 'w');
     try {
-      const child = spawn(process.execPath, [
+      const nodeArgs = [
         '--require', join(__dirname, 'output-api.cjs'), '--import', 'tsx',
         'src/index.ts', '--cwd', join(dir, 'project'), ...args,
-      ], {
+      ];
+      // POSIX shells express this limit in blocks of 512 or 1024 bytes.
+      const [executable, ...argv] = options.limitFileSize
+        ? ['/bin/sh', '-c', 'ulimit -f 64 || exit 125; exec "$@"', 'sh', process.execPath, ...nodeArgs]
+        : [process.execPath, ...nodeArgs];
+      const child = spawn(executable, argv, {
         cwd: resolve(__dirname, '../..'),
         stdio: ['pipe', fd ?? 'pipe', 'pipe'],
         timeout: 20000,
         env: {
+          // The file-size cap must apply to the command output without truncating the loader cache.
+          TSX_DISABLE_CACHE: options.limitFileSize ? '1' : undefined,
           PATH: process.env.PATH, NODE_ENV: 'test', KODA_API_URL: 'http://fixture.invalid',
           KODA_API_KEY: 'fixture-key', KODA_PROJECT_SLUG: 'sample', KODA_TEST_HOME: dir,
-          KODA_TEST_RESPONSES: join(dir, 'responses.json'), KODA_TEST_WAIT_FOR_READER: waitForRoute,
+          KODA_TEST_RESPONSES: join(dir, 'responses.json'), KODA_TEST_WAIT_FOR_READER: options.waitForRoute,
         },
       });
       const errors: Buffer[] = [];

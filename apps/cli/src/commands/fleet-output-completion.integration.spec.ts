@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { outputFixture, slowReader } from '../../test/helpers/output-child';
 
@@ -34,11 +35,30 @@ it.each([false, true])('delivers both NDJSON pages on completion (follow=%s)', a
         await delay(2);
       }
       return Buffer.concat(chunks);
-    } : slowReader, follow ? entries + '1' : undefined);
+    } : slowReader, { waitForRoute: follow ? entries + '1' : undefined });
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
     expect(result.stdout.length).toBe(expected.length);
     expect(result.stdout.equals(expected)).toBe(true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+it('reports a broken pipe when the next follow poll has no more entries', async () => {
+  const fixture = outputFixture({
+    [entries + '0']: { ret: 0, data: { entries: [final], nextCursor: 1, atEnd: true, complete: false } },
+    [entries + '1']: { ret: 0, data: { entries: [], nextCursor: 1, atEnd: true, complete: true } },
+  });
+  try {
+    const args = ['fleet', 'job', 'logs', 'job-1', '--lease-epoch', '1', '--follow', '--json'];
+    const result = await fixture.run(args, async stdout => {
+      await once(stdout, 'readable');
+      stdout.destroy();
+      return Buffer.alloc(0);
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/^Failed to write CLI output:/);
   } finally {
     fixture.cleanup();
   }
@@ -49,7 +69,12 @@ it('preserves exit 1 for an unreachable repository', async () => {
     '/api/fleet/repos/fr1/check': { ret: 0, data: { repoId: 'fr1', reachable: false, reason: 'app_not_installed' } },
   });
   try {
-    const result = await fixture.run(['fleet', 'repo', 'check', 'fr1', '--json'], slowReader);
+    const args = ['fleet', 'repo', 'check', 'fr1', '--json'];
+    const file = await fixture.run(args);
+    const result = await fixture.run(args, slowReader);
+    expect(file.stderr).toBe('');
+    expect(file.code).toBe(1);
+    expect(file.stdout.equals(result.stdout)).toBe(true);
     expect(result.stderr).toBe('');
     expect(result.code).toBe(1);
     expect(JSON.parse(result.stdout.toString())).toMatchObject({ repoId: 'fr1', reachable: false });

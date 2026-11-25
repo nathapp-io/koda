@@ -41,6 +41,14 @@ describe('ordinary CLI output', () => {
     expect(pipe.stdout.equals(file.stdout)).toBe(true);
   });
 
+  const posixTest = process.platform === 'win32' ? it.skip : it;
+  posixTest('reports a short regular-file write at the file size limit', async () => {
+    const result = await fixture.run(['kb', 'list', '--json'], undefined, { limitFileSize: true });
+    expect([32768, 65536]).toContain(result.stdout.length);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/^Failed to write CLI output:/);
+  });
+
   it('exits 1 if a consumer closes during a large JSON result', async () => {
     const result = await fixture.run(['kb', 'list', '--json'], async stdout => {
       await once(stdout, 'readable');
@@ -48,5 +56,6 @@ describe('ordinary CLI output', () => {
       return Buffer.alloc(0);
     });
     expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/^Failed to write CLI output:/);
   });
 });
