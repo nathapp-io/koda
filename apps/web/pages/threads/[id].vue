@@ -125,7 +125,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
         />
       </div>
       <FleetThreadsThreadComposer
-        :composer-state="composerState(controller.thread.value, controller.messages.value, { isCreator })"
+        :composer-state="composerState(controller.thread.value, controller.messages.value, { canSend: isCreator })"
         :turn-running="isTurnRunning(controller.messages.value)"
         :send="onSend"
         @stop="onStop"

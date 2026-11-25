@@ -48,6 +48,8 @@ const toast = useAppToast()
 
 const isCreator = computed(() => controller.thread.value !== null && controller.thread.value.createdById === auth.user.value?.id)
 const canManage = computed(() => permissions.value.has('thread.archive'))
+const canSend = computed(() => permissions.value.has('thread.message.send')
+  || (isCreator.value && permissions.value.hasOwn('thread.message.send')))
 
 /**
  * US-012 (F1): the modes this viewer may switch to. Mirrors the API — the target key counts in its own-or-any-row form
@@ -177,7 +179,7 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         />
       </div>
       <FleetThreadsThreadComposer
-        :composer-state="composerState(controller.thread.value, controller.messages.value, { isCreator })"
+        :composer-state="composerState(controller.thread.value, controller.messages.value, { canSend })"
         :turn-running="isTurnRunning(controller.messages.value)"
         :send="onSend"
         @stop="onStop"

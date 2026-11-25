@@ -26,7 +26,7 @@ const controller = useWorkspaceThread('t1')
     <input
       v-if="controller.thread.value"
       data-testid="composer"
-      :disabled="!composerState(controller.thread.value, controller.messages.value, { isCreator: true }).canSend"
+      :disabled="!composerState(controller.thread.value, controller.messages.value, { canSend: true }).canSend"
     >
   </div>
 </template>

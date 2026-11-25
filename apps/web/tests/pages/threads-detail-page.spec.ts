@@ -7,7 +7,7 @@ import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder, enI18n } from '../helpers/fleet-harness'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
-import { projectPermissionsStub } from '../helpers/permission-nav'
+import { permissionSet } from '~/lib/permissions'
 
 /**
  * US-006 AC14-AC15: pages/[project]/threads/[id].vue — the thread detail page.
@@ -167,8 +167,19 @@ function mountPage(over: {
   loadFailed?: boolean
   unavailable?: boolean
   retry?: () => Promise<void>
+  creatorId?: string
+  viewerId?: string
+  permissionPending?: boolean
 } = {}) {
-  const thread = ref(over.thread === undefined ? threadDetail() : over.thread)
+  const thread = ref(over.thread === undefined ? threadDetail({ createdById: over.creatorId ?? 'u1' }) : over.thread)
+  const permissionKeys = ref(over.permissions ?? ['thread.archive'])
+  const permissionPending = ref(over.permissionPending ?? false)
+  const permissionSetStub = {
+    permissions: Vue.computed(() => permissionPending.value ? permissionSet([]) : permissionSet(permissionKeys.value)),
+    pending: permissionPending,
+    error: ref<unknown>(null),
+    refresh: async (): Promise<void> => undefined,
+  }
   const loadFailed = ref(over.loadFailed ?? false)
   const retry = over.retry ?? jest.fn(async () => undefined)
   const messages = ref(over.messages ?? [])
@@ -196,6 +207,7 @@ function mountPage(over: {
   // US-012: the mode control and the approval cards are the page's own children, mounted for real.
   const modeControl = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadModeControl.vue'), { useI18n: () => enI18n() })
   const approvalCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue'), { useI18n: () => enI18n() })
+  const composer = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), { useI18n: () => enI18n() })
   const queuedNotice = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadQueuedNotice.vue'), { useI18n: () => i18nStub() })
   const app = mountSfc(pageFile, {
     components: {
@@ -212,7 +224,7 @@ function mountPage(over: {
       FleetThreadsThreadStartFlow: { props: ['slug', 'thread'], template: '<aside data-testid="thread-start-flow" :data-slug="slug" :data-thread-id="thread.id" />' },
       FleetThreadsThreadPreApprovalCard: { props: ['slug', 'thread'], emits: ['changed'], template: '<button data-testid="thread-preapproval-card" :data-slug="slug" :data-thread-id="thread.id" @click="$emit(\'changed\')" />' },
       FleetThreadsThreadControls: { props: ['maxCostUsd'], template: '<div data-testid="page-controls" :data-max-cost="maxCostUsd" />' },
-      FleetThreadsThreadComposer: { template: '<div data-testid="page-composer" />' },
+      FleetThreadsThreadComposer: composer,
       ErrorState: { emits: ['retry'], template: '<section data-testid="thread-load-error"><button data-testid="thread-retry" @click="$emit(\'retry\')">retry</button></section>' },
       LoadingState: { template: '<section data-testid="thread-loading" />' },
       ThreadTimeline: timeline,
@@ -231,7 +243,7 @@ function mountPage(over: {
       useI18n: () => i18nStub(),
       useAppToast: () => toastRecorder(),
       useRoute: () => ({ params: { project: 'web', id: 'th1' } }),
-      useAuth: () => ({ user: ref({ id: 'u1', email: 'owner@k.t', role: 'MEMBER' }) }),
+      useAuth: () => ({ user: ref({ id: over.viewerId ?? 'u1', email: 'owner@k.t', role: 'MEMBER' }) }),
       useThread: () => ({
         thread,
         messages,
@@ -266,7 +278,7 @@ function mountPage(over: {
       }),
       // Permissions P1 US-007: the page's archive-any control follows `thread.archive`; US-012 adds
       // the three mode keys the REPO mode control is limited to.
-      useProjectPermissions: () => projectPermissionsStub(over.permissions ?? ['thread.archive']),
+      useProjectPermissions: () => permissionSetStub,
     },
   })
   const settle = async (): Promise<void> => {
@@ -275,13 +287,60 @@ function mountPage(over: {
       await Vue.nextTick()
     }
   }
-  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval, thread, loadFailed }
+  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval, thread, loadFailed, permissionKeys, permissionPending }
 }
 
 /** The resolved title useHead received: `title` may be a value or a function. */
 function headTitle(head: CapturedHead): unknown {
   return typeof head.title === 'function' ? (head.title as () => unknown)() : head.title
 }
+
+describe('US-005 project composer effective send grants', () => {
+  const composerStateFrom = (m: ReturnType<typeof mountPage>) => {
+    const input = m.app.one('[data-testid="thread-composer-input"]')
+    return {
+      canSend: input !== undefined && input.props.disabled !== true,
+      reason: input === undefined ? 'readOnly' : null,
+    }
+  }
+
+  test('AC-1: any-row send grant enables a non-creator project composer', async () => {
+    const m = mountPage({ creatorId: 'u2', viewerId: 'u1', permissions: ['thread.message.send'] })
+    expect(composerStateFrom(m)).toEqual({ canSend: true, reason: null })
+    m.app.unmount()
+  })
+
+  test('AC-2: own-only send grant does not enable a non-creator project composer', async () => {
+    const m = mountPage({ creatorId: 'u2', viewerId: 'u1', permissions: ['thread.message.send.own'] })
+    expect(composerStateFrom(m)).toEqual({ canSend: false, reason: 'readOnly' })
+    m.app.unmount()
+  })
+
+  test('AC-3: own-only send grant enables the creator project composer', async () => {
+    const m = mountPage({ permissions: ['thread.message.send.own'] })
+    expect(composerStateFrom(m)).toEqual({ canSend: true, reason: null })
+    m.app.unmount()
+  })
+
+  test.each([
+    ['missing', []],
+    ['loading', ['thread.message.send']],
+  ])('AC-4: %s send grants keep creator composer read-only', async (_label, permissions) => {
+    const m = mountPage({ permissions, permissionPending: _label === 'loading' })
+    expect(composerStateFrom(m)).toEqual({ canSend: false, reason: 'readOnly' })
+    m.app.unmount()
+  })
+
+  test('AC-5: composer reactively enables when an effective grant arrives', async () => {
+    const m = mountPage({ permissions: [], permissionPending: true })
+    expect(composerStateFrom(m)).toEqual({ canSend: false, reason: 'readOnly' })
+    m.permissionKeys.value = ['thread.message.send.own']
+    m.permissionPending.value = false
+    await Vue.nextTick()
+    expect(composerStateFrom(m)).toEqual({ canSend: true, reason: null })
+    m.app.unmount()
+  })
+})
 
 describe('US-003 project-thread load recovery', () => {
   test.each([403, 404])('AC-1/AC-2: a %i response shows the same unavailable state without private detail', async () => {
@@ -350,9 +409,9 @@ describe('US-002: project thread conversation ordering and cap wiring', () => {
     }
     walk(m.app.root)
     expect(ids.indexOf('page-controls')).toBeLessThan(ids.indexOf('thread-timeline'))
-    expect(ids.indexOf('thread-timeline')).toBeLessThan(ids.indexOf('page-composer'))
+    expect(ids.indexOf('thread-timeline')).toBeLessThan(ids.indexOf('thread-composer'))
     for (const panel of ['thread-flows-panel', 'thread-start-flow', 'thread-preapproval-card']) {
-      expect(ids.indexOf('page-composer')).toBeLessThan(ids.indexOf(panel))
+      expect(ids.indexOf('thread-composer')).toBeLessThan(ids.indexOf(panel))
     }
     m.app.unmount()
   })

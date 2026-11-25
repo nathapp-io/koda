@@ -189,7 +189,7 @@ function mountPage(over: {
         runnerName: (id: string | null) => id,
       }),
       // Permissions P1 US-007: ThreadControls' canManage prop follows the project `thread.archive` key.
-      useProjectPermissions: () => projectPermissionsStub(['thread.archive']),
+      useProjectPermissions: () => projectPermissionsStub(['thread.archive', 'thread.message.send.own']),
     },
   })
   const settle = async (): Promise<void> => {

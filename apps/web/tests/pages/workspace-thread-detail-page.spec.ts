@@ -509,6 +509,17 @@ describe('US-006 AC-1..AC-6: pages/threads/[id].vue — the loaded thread', () =
 })
 
 describe('US-006 AC-7..AC-9: pages/threads/[id].vue — send and archive', () => {
+  test('US-005 AC-8: workspace composer remains owner-enabled while project permissions are still pending', async () => {
+    const m = mountPage({ real: true, permissionGet: 'pending' })
+    await m.settle()
+
+    expect(typeAndEnter(m.app, 'hello')).toBe(true)
+    await m.settle()
+    expect(m.posts.map(call => call.path)).toEqual(['/threads/t1/messages'])
+    expect(byTestId(m.app, 'thread-composer-input')?.props['model-value']).toBe('')
+    m.app.unmount()
+  })
+
   test('AC-7: sending from the composer posts to /threads/t1/messages', async () => {
     const m = mountPage({ real: true })
     await m.settle()

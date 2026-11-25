@@ -97,13 +97,12 @@ export function sessionLabel(thread: ThreadDto): SessionLabel {
 }
 
 export interface ComposerViewer {
-  isCreator: boolean
+  canSend: boolean
 }
 
 /**
- * The composer's send state. The web never re-implements the API send checks: the reason is the
- * viewer-only case (not the creator), then `thread.sendRefusal`, then a running turn (the API sends
- * no `thread` event when a turn starts, so `sendRefusal` can lag).
+ * Derive the composer state from resolved scope-specific send access, then preserve server refusal
+ * and running-turn reasons. The API remains authoritative for every send attempt.
  */
 export function composerState(
   thread: ThreadDetailDto,
@@ -111,7 +110,7 @@ export function composerState(
   viewer: ComposerViewer,
 ): { canSend: boolean; reason: ComposerReason | null } {
   let reason: ComposerReason | null = null
-  if (!viewer.isCreator) {
+  if (!viewer.canSend) {
     reason = 'readOnly'
   } else if (thread.sendRefusal !== null) {
     reason = thread.sendRefusal
