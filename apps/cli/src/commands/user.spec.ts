@@ -8,7 +8,10 @@ jest.mock('../generated', () => ({
   adminUsersControllerCreate: jest.fn(),
   adminUsersControllerUpdate: jest.fn(),
 }));
-jest.mock('../utils/output', () => ({ table: jest.fn() }));
+jest.mock('../utils/output', () => ({
+  finishSuccess: jest.requireActual('../utils/output').finishSuccess,
+  table: jest.fn(),
+}));
 jest.mock('../config', () => ({ resolveContext: jest.fn() }));
 
 import { Command } from 'commander';

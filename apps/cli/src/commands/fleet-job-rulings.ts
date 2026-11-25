@@ -3,7 +3,7 @@ import { fleetRulingsControllerCreate, fleetRulingsControllerList, type FleetPrR
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 
 interface Options { project?: string; json?: boolean }
 
@@ -27,7 +27,7 @@ function registerList(job: Command): void {
         const rulings = unwrap<FleetPrRulingDto[]>(await fleetRulingsControllerList({ path: { slug, id: jobId } }));
         if (options.json) console.log(JSON.stringify(rulings, null, 2));
         else table(['Item', 'Disposition', 'State', 'Actor', 'Skip reason'], rulings.map((r) => [r.itemId, r.disposition, r.state, r.actorType, r.skipReason ?? '-']));
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 }
@@ -43,7 +43,7 @@ function registerCreate(job: Command): void {
         const response = await fleetRulingsControllerCreate({ path: { slug, id: jobId }, body: { itemId, text } });
         const ruling = unwrap<FleetPrRulingDto>(response);
         console.log(`Ruling recorded: ${ruling.id}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 }

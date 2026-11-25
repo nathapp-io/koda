@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { Command } from 'commander';
 import { ticketWatchControllerUnwatch, ticketWatchControllerWatch } from '../generated';
 import { unwrap } from '../utils/api';
@@ -26,7 +27,7 @@ export function registerTicketWatch(ticket: Command): void {
           const state = unwrap<WatchState>(await call({ path: { slug: ctx.projectSlug, ref } }));
           if (options.json) console.log(JSON.stringify(state, null, 2));
           else console.log(`${verb} ${ref} (${state.count} watching)`);
-          process.exit(0);
+          return finishSuccess();
         } catch (err: unknown) {
           handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
         }

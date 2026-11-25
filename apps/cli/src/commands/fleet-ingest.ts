@@ -9,7 +9,7 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { oneOf } from './fleet-analytics';
 import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetValidation, pageHint } from './fleet-shared';
@@ -60,7 +60,7 @@ function registerStatus(ingest: Command): void {
           const hint = pageHint(page);
           if (hint) console.log(hint);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, ADMIN);
       }
@@ -75,7 +75,7 @@ function registerBackfill(ingest: Command): void {
       try {
         await withContext({}, { requireProject: false });
         printQueued(unwrap<IngestQueuedDto>(await fleetIngestControllerBackfill()));
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, ADMIN);
       }
@@ -95,7 +95,7 @@ function registerRerun(ingest: Command): void {
           ? await fleetIngestControllerRerunJob({ path: { jobId } })
           : await fleetIngestControllerRerunOutdated();
         printQueued(unwrap<IngestQueuedDto>(result));
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { ...ADMIN, notFoundMessage: `Job not found: ${jobId}` });
       }

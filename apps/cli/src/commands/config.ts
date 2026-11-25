@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { getConfig, getProfiles, maskApiKey, setConfig, type Profile } from '../config';
 
 export interface ConfigShowResult {
@@ -49,7 +50,7 @@ export function configProfileListAction(deps?: ConfigProfileActionDeps): void {
       console.log(`${p.name}\t${p.apiUrl}`);
     }
   }
-  process.exit(0);
+  return finishSuccess();
 }
 
 export function configProfileAddAction(

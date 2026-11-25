@@ -14,7 +14,7 @@ import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetValidation, pageHint, splitRepoPath } from './fleet-shared';
 
@@ -79,7 +79,7 @@ function registerAdd(repo: Command): void {
         printHumanTokenWarning(created);
         if (options.json) console.log(JSON.stringify(created, null, 2));
         else console.log(`Registered ${created.owner}/${created.name} (${created.id}), default branch ${created.defaultBranch}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         if (err instanceof TokenFileValidationError) return;
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
@@ -102,7 +102,7 @@ function registerCredentials(repo: Command): void {
         printHumanTokenWarning(updated);
         if (options.json) console.log(JSON.stringify(updated, null, 2));
         else console.log(`Updated GitLab credentials for ${updated.owner}/${updated.name} (${updated.id})`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { if (err instanceof TokenFileValidationError) return; handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT }); }
     });
 }
@@ -135,7 +135,7 @@ function registerList(repo: Command): void {
           const hint = pageHint(page);
           if (hint) console.log(hint);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, options.all ? { forbiddenHint: ADMIN_TOKEN_HINT } : undefined);
       }
@@ -153,7 +153,7 @@ function registerRemove(repo: Command): void {
         await withContext({}, { requireProject: false });
         await fleetReposControllerRemove({ path: { id: repoId } });
         console.log(`Removed repo ${repoId}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT, notFoundMessage: `Repo not found: ${repoId}` });
       }
@@ -171,7 +171,8 @@ function registerCheck(repo: Command): void {
         const result = unwrap<RepoCheckResultDto>(await fleetReposControllerCheck({ path: { id: repoId } }));
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else console.log(result.reachable ? `Reachable (${result.checkedAt})` : `Unreachable: ${result.reason ?? 'unknown'} (${result.checkedAt})`);
-        process.exit(result.reachable ? 0 : 1);
+        if (result.reachable) return finishSuccess();
+        process.exit(1);
       } catch (err: unknown) {
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT, notFoundMessage: `Repo not found: ${repoId}` });
       }

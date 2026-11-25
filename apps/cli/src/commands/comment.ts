@@ -5,7 +5,7 @@ import {
   commentsControllerUpdateFromHttp,
   commentsControllerDeleteFromHttp,
 } from '../generated';
-import { success, table } from '../utils/output';
+import { finishSuccess, success, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -42,7 +42,7 @@ export function commentCommand(program: Command): void {
           console.log(`Body: ${(commentData as Record<string, unknown>).body}`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -76,7 +76,7 @@ export function commentCommand(program: Command): void {
           table(['ID', 'Type', 'Body'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -104,7 +104,7 @@ export function commentCommand(program: Command): void {
           success(`Comment '${options.id}' updated.`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Comment not found: ${options.id}` });
       }
@@ -131,7 +131,7 @@ export function commentCommand(program: Command): void {
           success(`Comment '${options.id}' deleted.`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Comment not found: ${options.id}` });
       }

@@ -8,7 +8,7 @@ import {
   projectInvitesControllerResend,
   projectInvitesControllerCancel,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -127,7 +127,7 @@ export function memberCommand(program: Command): void {
           );
           if (page.hasNext) console.log(`Next: --page ${page.current + 1}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -150,7 +150,7 @@ export function memberCommand(program: Command): void {
         const added = unwrap<MemberPrincipalRow>(response);
         if (options.json) console.log(JSON.stringify(added, null, 2));
         else console.log(`Added ${added.email} as ${roleNames(added)}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, {
           notFoundMessage: `No user with email ${options.email} (or an unknown role key, or project not found)`,
@@ -182,7 +182,7 @@ export function memberCommand(program: Command): void {
         } else {
           console.log(`Invite created for ${options.email}. Share this link (shown once): ${result.invitePath}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -226,7 +226,7 @@ export function memberCommand(program: Command): void {
             invite.expiresAt,
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -249,7 +249,7 @@ export function memberCommand(program: Command): void {
         }
         if (options.json) console.log(JSON.stringify({ removed: userId }, null, 2));
         else console.log(`Removed ${userId}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

@@ -9,7 +9,7 @@ import {
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 
 type PrincipalType = 'USER' | 'AGENT';
@@ -107,7 +107,7 @@ export function roleBindingCommand(program: Command): void {
           if (page.hasNext) console.log(`Next: --page ${page.current + 1}`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -149,7 +149,7 @@ export function roleBindingCommand(program: Command): void {
           console.log(`Granted ${binding.roleKey} to ${principalLabel} (binding ${binding.id})`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -168,7 +168,7 @@ export function roleBindingCommand(program: Command): void {
         if (options.json) console.log(JSON.stringify({ revoked: bindingId }, null, 2));
         else console.log(`Revoked ${bindingId}`);
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

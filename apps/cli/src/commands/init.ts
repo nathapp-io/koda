@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { resolveAuth } from '../utils/auth';
@@ -83,5 +84,5 @@ export async function initCommand(options: InitOptions, deps: InitDeps = _initDe
 
   console.log('✓ Created .koda/config.json');
   console.log('Note: This file must not contain API tokens or secrets.');
-  process.exit(0);
+  return finishSuccess();
 }

@@ -16,7 +16,7 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { ADMIN_TOKEN_HINT, ago, handleFleetValidation } from './fleet-shared';
 
@@ -103,7 +103,7 @@ function registerSpend(analytics: Command): void {
         const s = await fetchSpend(o);
         if (o.json) printJson(s);
         else printSpend(s);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, o.allProjects ? { forbiddenHint: ADMIN_TOKEN_HINT } : undefined);
       }
@@ -135,7 +135,7 @@ function registerQuality(analytics: Command): void {
         }));
         if (o.json) printJson(q);
         else printQuality(q);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -160,7 +160,7 @@ function registerStories(analytics: Command): void {
             r.jobId, r.featureName, r.storyId, String(r.attempts), yesNo(r.firstPassSuccess), yesNo(r.success), r.costUsd, ago(r.completedAt),
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -184,7 +184,7 @@ function registerJobs(analytics: Command): void {
             r.jobId, r.command, r.featureName, r.state, r.costUsd, r.ledgerCostUsd ?? '-', r.driftUsd ?? '-', ago(r.finishedAt),
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -240,7 +240,7 @@ export function registerJobAnalytics(job: Command): void {
         const j = unwrap<JobAnalyticsDto>(await projectFleetAnalyticsControllerJob({ path: { slug, id: jobId } }));
         if (o.json) printJson(j);
         else printJobAnalytics(j);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }

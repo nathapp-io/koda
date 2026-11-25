@@ -4,7 +4,7 @@ import {
   webhookControllerList,
   webhookControllerRemove,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -46,7 +46,7 @@ export function webhookCommand(program: Command): void {
           ];
           table(['Field', 'Value'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -77,7 +77,7 @@ export function webhookCommand(program: Command): void {
           ]);
           table(['ID', 'URL', 'Events'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -99,7 +99,7 @@ export function webhookCommand(program: Command): void {
         } else {
           console.log(`Webhook '${options.id}' deleted.`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Webhook not found: ${options.id}` });
       }

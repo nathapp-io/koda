@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { configureResultOutput, finishSuccess } from './utils/output';
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
@@ -119,7 +120,7 @@ program
           const config = configShow();
           console.log('API Key: ' + config.apiKey);
           console.log('API URL: ' + (config.apiUrl || '(not set)'));
-          process.exit(0);
+          return finishSuccess();
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           console.error(`Error: ${errorMessage}`);
@@ -143,7 +144,7 @@ program
             apiUrl: options.apiUrl,
           });
           console.log(result.message);
-          process.exit(0);
+          return finishSuccess();
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           console.error(`Error: ${errorMessage}`);
@@ -175,7 +176,7 @@ program
               }
               configProfileAddAction(name, options.apiUrl, apiKey, { getProfiles, setProfile, removeProfile });
               console.log(`Profile '${name}' saved.`);
-              process.exit(0);
+              return finishSuccess();
             } catch (error) {
               const errorMessage = error instanceof Error ? error.message : String(error);
               console.error(`Error: ${errorMessage}`);
@@ -190,7 +191,7 @@ program
           .action((name) => {
             configProfileRemoveAction(name, { getProfiles, setProfile, removeProfile });
             console.log(`Profile '${name}' removed.`);
-            process.exit(0);
+            return finishSuccess();
           })
       )
   );
@@ -201,7 +202,7 @@ program
   .description('Print CLI version')
   .action(() => {
     console.log(version);
-    process.exit(0);
+    return finishSuccess();
   });
 
 // Project command
@@ -283,6 +284,7 @@ process.on('unhandledRejection', (reason: unknown) => {
 // Graceful shutdown on SIGINT (Ctrl+C) / SIGTERM — exits 130 / 143
 installSignalHandlers();
 
+program.hook('preAction', configureResultOutput);
 program.parse(process.argv);
 
 // Show help if no command provided

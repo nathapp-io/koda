@@ -3,7 +3,7 @@ import { projectRepoConfigControllerList, projectRepoConfigControllerSubmitDrift
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 
 interface NaxFileList {
   baseSha: string;
@@ -27,7 +27,7 @@ function registerNaxFiles(fleet: Command): void {
           console.log(`${list.defaultBranch} @ ${list.baseSha.slice(0, 12)}`);
           table(['Group', 'Path', 'Size'], list.files.map((f) => [f.group, f.path, f.size == null ? '-' : String(f.size)]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Repo not found in this project: ${repoId}` });
       }
@@ -51,7 +51,7 @@ function registerDriftCheck(fleet: Command): void {
           const placed = result.placement.assigned ? `assigned to ${result.placement.runnerId}` : 'waiting for a runner';
           console.log(`Queued drift check ${result.job.id} (${result.job.state}, ${placed}); follow it with: koda fleet job show ${result.job.id}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Repo not found in this project: ${repoId}` });
       }

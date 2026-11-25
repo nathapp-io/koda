@@ -9,7 +9,7 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetValidation, pageHint } from './fleet-shared';
 
@@ -47,7 +47,7 @@ function registerList(runner: Command): void {
           const hint = pageHint(page);
           if (hint) console.log(hint);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
       }
@@ -66,7 +66,7 @@ function registerToggle(runner: Command, name: 'enable' | 'disable'): void {
         const updated = unwrap<RunnerDto>(await runnersControllerUpdate({ path: { id: runnerId }, body: { enabled } }));
         if (options.json) console.log(JSON.stringify(updated, null, 2));
         else console.log(`Runner ${updated.name} ${enabled ? 'enabled' : 'disabled'}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT, notFoundMessage: `Runner not found: ${runnerId}` });
       }
@@ -95,7 +95,7 @@ function registerEnrollToken(runner: Command): void {
           console.log(`Expires: ${created.expiresAt}`);
           console.log(`On the runner machine: koda-runner enroll --server ${server} --token ${created.token}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
       }

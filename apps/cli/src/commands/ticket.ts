@@ -21,7 +21,7 @@ import {
   agentsControllerFindBySlug,
 } from '../generated';
 import type { AssignTicketDto, TicketFleetJobDto } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
@@ -159,10 +159,10 @@ export function ticketCommand(program: Command): void {
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
-          process.exit(0);
+          return finishSuccess();
         } else {
           console.log(`✓ Ticket created successfully: ${ticketData.ref || `KODA-${ticketData.number}`}`);
-          process.exit(0);
+          return finishSuccess();
         }
       } catch (err: unknown) {
         handleApiError(err);
@@ -209,7 +209,7 @@ export function ticketCommand(program: Command): void {
           }
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -246,7 +246,7 @@ export function ticketCommand(program: Command): void {
           table(['#', 'Type', 'Priority', 'Status', 'Assignee', 'Title'], rows);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -330,7 +330,7 @@ export function ticketCommand(program: Command): void {
           printFleetRuns(fleetJobs);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -355,7 +355,7 @@ export function ticketCommand(program: Command): void {
   path: { slug: ctx.projectSlug, ref }
   });
         console.log(`✓ Ticket verified successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -411,7 +411,7 @@ export function ticketCommand(program: Command): void {
           console.log(`✓ Ticket unassigned`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Agent or ticket not found` });
       }
@@ -428,7 +428,7 @@ export function ticketCommand(program: Command): void {
 
         await ticketsControllerStart({ path: { slug: ctx.projectSlug, ref }});
         console.log(`✓ Ticket started successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -454,7 +454,7 @@ export function ticketCommand(program: Command): void {
   path: { slug: ctx.projectSlug, ref }
   });
         console.log(`✓ Fix submitted successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -493,7 +493,7 @@ export function ticketCommand(program: Command): void {
         console.log(options.pass
           ? `✓ Fix verified and ticket closed successfully`
           : `✓ Fix verification submitted successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -514,7 +514,7 @@ export function ticketCommand(program: Command): void {
 
         await ticketsControllerClose({ body: { body: options.reason }, path: { slug: ctx.projectSlug, ref } });
         console.log(`✓ Ticket closed successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -539,7 +539,7 @@ export function ticketCommand(program: Command): void {
   path: { slug: ctx.projectSlug, ref }
   });
         console.log(`✓ Ticket rejected successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -571,7 +571,7 @@ export function ticketCommand(program: Command): void {
           console.log(`✓ Ticket updated successfully`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -591,7 +591,7 @@ export function ticketCommand(program: Command): void {
         await ticketsControllerSoftDelete({ path: { slug: ctx.projectSlug, ref }});
 
         console.log(`✓ Ticket deleted successfully`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -620,7 +620,7 @@ export function ticketCommand(program: Command): void {
           console.log(`externalRef: ${linkData.externalRef}`);
         }
 
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -645,7 +645,7 @@ export function ticketCommand(program: Command): void {
         }
 
         await ticketLinksControllerRemove({ path: { slug: ctx.projectSlug, ref, linkId: match.id }});
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -668,7 +668,7 @@ export function ticketCommand(program: Command): void {
   });
 
         console.log(`✓ Label attached to ticket ${ref}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket or label not found` });
       }
@@ -688,7 +688,7 @@ export function ticketCommand(program: Command): void {
   path: { slug: ctx.projectSlug, ref, labelId: options.label }
   });
         console.log(`✓ Label detached from ticket ${ref}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket or label not found` });
       }

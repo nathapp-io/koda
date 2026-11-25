@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { adminUsersControllerCreate, adminUsersControllerList, adminUsersControllerUpdate } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -49,7 +49,7 @@ export function userCommand(program: Command): void {
           table(['ID', 'Email', 'Name', 'Disabled'], rows);
           if (page.hasNext) console.log(`Next: --page ${page.current + 1}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -71,7 +71,7 @@ export function userCommand(program: Command): void {
         const created = unwrap<UserRow>(response);
         if (options.json) console.log(JSON.stringify(created, null, 2));
         else console.log(`User created: ${created.email} (${created.id})`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -88,7 +88,7 @@ export function userCommand(program: Command): void {
         const updated = unwrap<UserRow>(response);
         if (options.json) console.log(JSON.stringify(updated, null, 2));
         else console.log(`User disabled: ${userId}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `User not found: ${userId}` });
       }

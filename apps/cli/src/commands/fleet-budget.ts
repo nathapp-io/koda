@@ -19,7 +19,7 @@ import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { parseBudgetUsd } from '../utils/parse-usd';
 import { ADMIN_TOKEN_HINT, handleFleetValidation, resolveRepo } from './fleet-shared';
 
@@ -127,7 +127,7 @@ function registerList(budget: Command): void {
             p.warnPercent === null ? '-' : `${p.warnPercent}%`, p.hardStop ? p.runningJobs : 'off', budgetState(p),
           ]));
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, adminHint(options.project));
       }
@@ -189,7 +189,7 @@ function registerSet(budget: Command): void {
           : unwrap<BudgetPolicyDto>(await api.create({ scopeType: scope.scopeType, ...(scopeId ? { scopeId } : {}), windowKind: options.window, ...fields, amountUsd: options.amount }));
         if (options.json) console.log(JSON.stringify(saved, null, 2));
         else printRow(existing ? 'Updated' : 'Created', saved);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, projectScoped ? undefined : { forbiddenHint: ADMIN_TOKEN_HINT });
       }
@@ -207,7 +207,7 @@ function registerRemove(budget: Command): void {
       try {
         await (await routeFor(options.project)).remove(policyId);
         console.log(`Removed budget ${policyId}`);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { ...adminHint(options.project), notFoundMessage: `Budget policy not found: ${policyId}` });
       }
@@ -227,7 +227,7 @@ function registerResume(budget: Command): void {
         const resumed = unwrap<BudgetPolicyDto>(await api.resume(policyId, options.amount === undefined ? {} : { amountUsd: options.amount }));
         if (options.json) console.log(JSON.stringify(resumed, null, 2));
         else printRow('Resumed', resumed);
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { ...adminHint(options.project), notFoundMessage: `Budget policy not found: ${policyId}` });
       }

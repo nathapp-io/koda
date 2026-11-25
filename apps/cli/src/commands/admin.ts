@@ -4,7 +4,7 @@ import {
   adminControllerRetryOutboxEvent,
   sloDashboardControllerGetSloMetrics,
 } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -42,7 +42,7 @@ export function adminCommand(program: Command): void {
           ]);
           table(['ID', 'Type', 'Status', 'Created'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -65,7 +65,7 @@ export function adminCommand(program: Command): void {
         } else {
           console.log(`Event '${options.eventId}' queued for retry.`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Outbox event not found: ${options.eventId}` });
       }
@@ -96,7 +96,7 @@ export function adminCommand(program: Command): void {
           ]);
           table(['Metric', 'Value', 'Target', 'Status'], rows);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }

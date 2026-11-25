@@ -1,3 +1,4 @@
+import { finishSuccess } from '../utils/output';
 import { Command } from 'commander';
 import {
   contextControllerGetContext,
@@ -25,7 +26,7 @@ export function contextCommand(program: Command): void {
         const data = unwrap<Record<string, unknown>>(response);
 
         console.log(JSON.stringify(data, null, 2));
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Project not found: ${options.project}` });
       }
@@ -57,7 +58,7 @@ export function contextCommand(program: Command): void {
         const data = unwrap<Record<string, unknown>>(response);
 
         console.log(JSON.stringify(data, null, 2));
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Project not found: ${options.project}` });
       }

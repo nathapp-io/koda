@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, memoryReadControllerGetMemory, projectsControllerFindBySlug } from '../generated';
-import { table } from '../utils/output';
+import { finishSuccess, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -55,7 +55,7 @@ export function memoryCommand(program: Command): void {
         } else {
           console.log('Decision retired.');
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -97,7 +97,7 @@ export function memoryCommand(program: Command): void {
             console.log(`\nNext: --cursor ${timeline.nextCursor}`);
           }
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -136,7 +136,7 @@ export function memoryCommand(program: Command): void {
         } else {
           console.log('Decision recorded.');
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -174,7 +174,7 @@ export function memoryCommand(program: Command): void {
           const detail = item['kind'] === 'NOTE' ? item['description'] : `${item['subject'] ?? ''} ${item['predicate'] ?? ''}`;
           console.log(`${item['id'] ?? ''} ${item['kind'] ?? ''} ${item['scope'] ?? ''} ${detail ?? ''}`.trim());
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 
@@ -206,7 +206,7 @@ export function memoryCommand(program: Command): void {
           // A result page is not the whole result: say so, and name the page that continues it.
           if (page.hasNext) console.log(`\nNext: --page ${(page.current ?? current ?? 1) + 1}`);
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) { handleApiError(err); }
     });
 
@@ -271,7 +271,7 @@ export function memoryCommand(program: Command): void {
         } else {
           console.log('Memory item created.');
         }
-        process.exit(0);
+        return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err);
       }
