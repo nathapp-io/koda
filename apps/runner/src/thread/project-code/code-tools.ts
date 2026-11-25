@@ -4,7 +4,7 @@ import { runGitRecords } from '../../executor/git-records';
 import { firstLine } from '../../errors';
 import { assertRelativePath } from '../../paths/safe-segment';
 import { CappedLines, checkGlob, fieldOf, FileListing, InvalidToolInput, joinCapped, refused, refuseInvalidInput } from '../tools/shared';
-import { checkFixed, checkMax, checkPattern, collectGrep, SEARCH_MAX_BYTES } from '../tools/grep-output';
+import { checkFixed, checkMax, checkPattern, collectGrep, GREP_ARGS, SEARCH_MAX_BYTES } from '../tools/grep-output';
 import type { ThreadToolResult } from '../tools/types';
 
 /** A repository readable through one of its pinned commits, held in a bare mirror at `gitDir`. */
@@ -83,7 +83,7 @@ async function search(ctx: ProjectCodeToolContext, input: unknown): Promise<Thre
   const startedAt = ctx.nowMs();
   const hits = new CappedLines(SEARCH_MAX_BYTES, max);
   for (const pin of targets) {
-    const args = ['-c', 'core.quotePath=false', 'grep', '-n', '-I', '--no-color', fixed ? '-F' : '-E', '-e', pattern, pin.sha];
+    const args = [...GREP_ARGS, fixed ? '-F' : '-E', '-e', pattern, pin.sha];
     if (glob !== undefined) args.push('--', `:(glob)${glob}`);
     // Replace grep's pinned sha with the repository name.
     const failed = await collectGrep(ctx.git, args, gitOptions(ctx, pin), () => ctx.nowMs() - startedAt >= ctx.searchTimeoutMs,

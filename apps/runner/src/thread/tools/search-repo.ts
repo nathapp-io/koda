@@ -1,5 +1,5 @@
 import { CappedLines, checkGlob, fieldOf, refuseInvalidInput } from './shared';
-import { checkFixed, checkMax, checkPattern, collectGrep, SEARCH_MAX_BYTES } from './grep-output';
+import { checkFixed, checkMax, checkPattern, collectGrep, GREP_ARGS, SEARCH_MAX_BYTES } from './grep-output';
 import { pathspecFor, visitAllowedUntrackedPaths } from './untracked-docs';
 import type { ThreadTool, ThreadToolContext, ThreadToolResult } from './types';
 
@@ -8,7 +8,7 @@ const UNTRACKED_GREP_ARG_BYTES = 24 * 1024;
 
 /** `git grep` flags shared by the tracked and the untracked search. `noIndex` searches files on disk, not the index. */
 function grepFlags(pattern: string, fixed: boolean, noIndex: boolean): string[] {
-  return ['-c', 'core.quotePath=false', 'grep', '-n', '-I', '--no-color', ...(noIndex ? ['--no-index'] : []), fixed ? '-F' : '-E', '-e', pattern];
+  return [...GREP_ARGS, ...(noIndex ? ['--no-index'] : []), fixed ? '-F' : '-E', '-e', pattern];
 }
 
 async function search(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolResult> {
@@ -20,10 +20,11 @@ async function search(ctx: ThreadToolContext, input: unknown): Promise<ThreadToo
 
   const startedAt = ctx.nowMs();
   const hits = new CappedLines(SEARCH_MAX_BYTES, max);
-  const grep = (args: readonly string[]) => collectGrep(ctx.git, args, {
+  const grep = (args: readonly string[], signal?: AbortSignal) => collectGrep(ctx.git, args, {
     cwd: ctx.worktree,
     env: { GIT_CONFIG_NOSYSTEM: '1' },
     timeoutMs: ctx.searchTimeoutMs,
+    signal,
   }, () => ctx.nowMs() - startedAt >= ctx.searchTimeoutMs, hits);
 
   const trackedArgs = grepFlags(pattern, fixed, false);
@@ -37,16 +38,16 @@ async function search(ctx: ThreadToolContext, input: unknown): Promise<ThreadToo
   let batch: string[] = [];
   let bytes = 0;
   let failed: ThreadToolResult | undefined;
-  const grepBatch = async (): Promise<boolean> => {
-    failed = await grep([...grepFlags(pattern, fixed, true), '--', ...batch]);
+  const grepBatch = async (signal?: AbortSignal): Promise<boolean> => {
+    failed = await grep([...grepFlags(pattern, fixed, true), '--', ...batch], signal);
     batch = [];
     bytes = 0;
     return failed === undefined && !hits.cut;
   };
-  const listingFailure = await visitAllowedUntrackedPaths(ctx, pathspecFor(undefined, glob), async (path) => {
+  const listingFailure = await visitAllowedUntrackedPaths(ctx, pathspecFor(undefined, glob), async (path, signal) => {
     const literal = `:(literal)${path}`;
     const size = Buffer.byteLength(literal) + 1;
-    if (batch.length > 0 && bytes + size > UNTRACKED_GREP_ARG_BYTES && !(await grepBatch())) return false;
+    if (batch.length > 0 && bytes + size > UNTRACKED_GREP_ARG_BYTES && !(await grepBatch(signal))) return false;
     batch.push(literal);
     bytes += size;
     return true;

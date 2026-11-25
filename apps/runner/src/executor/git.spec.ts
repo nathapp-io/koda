@@ -91,6 +91,21 @@ describe('createGit', () => {
     expect(result.code).not.toBe(0);
   });
 
+  test('returns the timeout while an asynchronous stdout consumer is still pending', async () => {
+    const cwd = await initRepo();
+    let consumerSignal: AbortSignal | undefined;
+    const result = await git.run(['--version'], {
+      cwd, timeoutMs: 200,
+      onStdout: (_chunk, signal) => {
+        consumerSignal = signal;
+        return new Promise<boolean>(() => {});
+      },
+    });
+    expect(consumerSignal?.aborted).toBe(true);
+    expect(result.timedOut).toBe(true);
+    expect(result.code).not.toBe(0);
+  }, 2_000);
+
   test('ok throws a GitError naming the command and the first stderr line', async () => {
     const error = await git.ok(['rev-parse', '--verify', 'definitely-not-a-ref'], { cwd: process.cwd() }).catch((e) => e);
     expect(error).toBeInstanceOf(GitError);

@@ -19,7 +19,7 @@ export function pathspecFor(dir: string | undefined, glob: string | undefined): 
  * ignored file stays out of list_files and search_repo.
  */
 export async function visitAllowedUntrackedPaths(
-  ctx: ThreadToolContext, pathspec: string | undefined, visit: (path: string) => boolean | Promise<boolean>,
+  ctx: ThreadToolContext, pathspec: string | undefined, visit: (path: string, signal?: AbortSignal) => boolean | Promise<boolean>,
 ): Promise<ThreadToolResult | undefined> {
   const args = pathspec === undefined
     ? ['ls-files', '-z', '--others', '--exclude-standard']
@@ -28,12 +28,16 @@ export async function visitAllowedUntrackedPaths(
   const result = await runGitRecords(ctx.git, args, { cwd: ctx.worktree, timeoutMs: ctx.searchTimeoutMs }, {
     delimiter: '\0',
     maxRecordBytes: 65_536,
-    onRecord(path) {
+    onRecord(path, signal) {
       if (!path || !isAllowedThreadDocPath(path, feature)) return true;
       // A symlink is never a thread doc: git grep --no-index would follow it outside the worktree.
-      return lstat(join(ctx.worktree, path)).catch(() => null).then((info) => info?.isFile() ? visit(path) : true);
+      return lstat(join(ctx.worktree, path)).catch(() => null).then((info) => {
+        if (signal?.aborted) return false;
+        return info?.isFile() ? visit(path, signal) : true;
+      });
     },
   });
+  if (result.timedOut) return refused('search timed out');
   if (result.code !== 0) return refused(firstLine(result.stderr) || `git ls-files exited ${result.code}`);
   return undefined;
 }

@@ -106,11 +106,14 @@ export class EntityStore {
     eventType: string;
     payload: unknown;
   }): Promise<void> {
-    if (event.eventType === 'graphify_import') {
+    if (event.eventType === 'rag_graph_refresh' || event.eventType === 'graphify_import') {
       const payload = event.payload as {
-        projectId: string;
+        projectId?: unknown;
         nodes?: Array<{ id: string; label: string; type: string }>;
-      };
+      } | null;
+      if (typeof payload?.projectId !== 'string' || !payload.projectId.trim()) {
+        throw new Error(`${event.eventType} requires a projectId`);
+      }
       if (this.ragRepository) {
         await this.indexGraphifyEntitiesForProject(payload.projectId);
       } else {

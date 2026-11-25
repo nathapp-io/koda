@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createGit, type Git, type GitOptions, type GitResult } from '../../src/executor/git';
 import { listFilesTool } from '../../src/thread/tools/list-files';
 import { searchRepoTool } from '../../src/thread/tools/search-repo';
+import { visitAllowedUntrackedPaths } from '../../src/thread/tools/untracked-docs';
 import type { ThreadToolContext } from '../../src/thread/tools/types';
 import { git as sh, isolateGit } from '../helpers/git-fixture';
 import { makeTempDirs } from '../helpers/tmp';
@@ -69,12 +70,60 @@ describe('thread tools: git failures and bounds (review)', () => {
     const paths = Array.from({ length: 130 }, (_, index) => `docs/${String(index).padStart(3, '0')}-${'x'.repeat(200)}.md`);
     await Promise.all(paths.map((path, index) => writeFile(join(worktree, path),
       index === 0 || index === paths.length - 1 ? 'needle\n' : 'ignore\n')));
-    const ctx = contextWith(createGit().run, { searchTimeoutMs: 20_000 });
+    const git = createGit();
+    const grepArgs: (readonly string[])[] = [];
+    const ctx = contextWith((args, options) => {
+      if (args.includes('grep')) grepArgs.push(args);
+      return git.run(args, options);
+    }, { searchTimeoutMs: 20_000 });
     ctx.worktree = worktree;
     expect(await searchRepoTool(ctx).run({ pattern: 'needle' }))
       .toEqual({ content: `${paths[0]}:1:needle\n${paths.at(-1)}:1:needle` });
     expect(await searchRepoTool(ctx).run({ pattern: 'needle', max: 1 }))
       .toEqual({ content: `${paths[0]}:1:needle\n[truncated]` });
+    for (const args of grepArgs) expect(args).toContain('--threads=1');
+  });
+
+  test('a listing deadline cancels its active untracked grep batch', async () => {
+    const worktree = await tmp.make('search-untracked-deadline');
+    await sh(worktree, 'init', '-q');
+    await mkdir(join(worktree, 'docs'));
+    const paths = Array.from({ length: 130 }, (_, i) => `docs/${i}-${'x'.repeat(200)}.md`);
+    await Promise.all(paths.map((path) => writeFile(join(worktree, path), 'text')));
+    const real = createGit();
+    let batchSignal: AbortSignal | undefined;
+    let batch: Promise<GitResult> | undefined;
+    const ctx = contextWith((args, options) => {
+      if (!args.includes('--no-index')) return real.run(args, options);
+      batchSignal = options.signal;
+      batch = real.run(['-c', 'alias.waiter=!sleep 10', 'waiter'], { ...options, timeoutMs: 5_000 });
+      return batch;
+    }, { searchTimeoutMs: 500 });
+    ctx.worktree = worktree;
+    expect(await searchRepoTool(ctx).run({ pattern: 'needle' })).toEqual({ isError: true, content: 'search timed out' });
+    expect(batchSignal?.aborted).toBe(true);
+    const result = await batch;
+    expect(result).toBeDefined();
+    expect(result?.code).not.toBe(0);
+    expect(result?.timedOut).toBeUndefined();
+  }, 3_000);
+
+  test('a file check that settles after cancellation never starts a visit', async () => {
+    const worktree = await tmp.make('search-untracked-cancel-visit');
+    await mkdir(join(worktree, 'docs'));
+    await writeFile(join(worktree, 'docs/a.md'), 'text');
+    const ctx = contextWith(async (_args, options) => {
+      const controller = new AbortController();
+      if (!options.onStdout) throw new Error('expected a streaming listing');
+      const pending = options.onStdout(new TextEncoder().encode('docs/a.md\0'), controller.signal);
+      controller.abort();
+      await pending;
+      return { code: 124, timedOut: true, stdout: '', stderr: '' };
+    });
+    ctx.worktree = worktree;
+    const visits: string[] = [];
+    await visitAllowedUntrackedPaths(ctx, undefined, (path) => { visits.push(path); return true; });
+    expect(visits).toEqual([]);
   });
 
   test('list_files passes the search timeout to git for both the tracked and the untracked ls-files calls', async () => {

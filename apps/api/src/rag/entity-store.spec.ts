@@ -15,6 +15,13 @@ describe('EntityStore.handleOutboxEvent', () => {
 });
 
 describe('EntityStore graph refresh', () => {
+  it('rejects an import event without a project before scanning any modules', async () => {
+    const repository = { scanCodeModules: vi.fn() };
+    const store = new EntityStore(repository as never);
+    await expect(store.handleOutboxEvent({ eventType: 'graphify_import', payload: {} })).rejects.toThrow();
+    expect(repository.scanCodeModules).not.toHaveBeenCalled();
+  });
+
   it('replaces the module snapshot, preserves a ticket with the same ID, and ignores old event nodes', async () => {
     const repository = {
       scanCodeModules: vi.fn(async (_projectId: string, consume: (page: Array<{ nodeId: string; label: string }>) => void) => {

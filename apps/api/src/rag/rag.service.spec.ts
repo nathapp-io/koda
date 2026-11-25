@@ -193,7 +193,7 @@ describe('RagService.importGraphify (US-002)', () => {
 
     await expect(service.importGraphify('proj-1', [], [])).resolves.toEqual({ imported: 0, cleared: 3 });
     expect(outbox.record).toHaveBeenCalledExactlyOnceWith({
-      type: 'graphify_import',
+      type: 'rag_graph_refresh',
       payload: { projectId: 'proj-1', nodeCount: 0, linkCount: 0 },
       metadata: { projectId: 'proj-1' },
     });

@@ -5,6 +5,9 @@ import { CappedLines, InvalidToolInput, refused } from './shared';
 import type { ThreadToolResult } from './types';
 
 export const SEARCH_MAX_BYTES = 65_536;
+// Git's parallel grep workers buffer matching files before writing stdout. A single worker
+// streams hits immediately, so the runner can stop Git as soon as the result fills.
+export const GREP_ARGS = ['-c', 'core.quotePath=false', 'grep', '--threads=1', '-n', '-I', '--no-color'] as const;
 const MAX_PATTERN_CHARS = 1_000;
 const DEFAULT_MAX_HITS = 200;
 const MAX_HITS_LIMIT = 200;

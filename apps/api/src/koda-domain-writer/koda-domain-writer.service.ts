@@ -215,7 +215,8 @@ export class KodaDomainWriter {
 
     await this.assertProjectExists(data.projectId);
 
-    const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links);
+    // Domain imports also trigger persistent entity-graph link inference.
+    const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links, 'graphify_import');
 
     return {
       metadata: { imported: result.imported, cleared: result.cleared },

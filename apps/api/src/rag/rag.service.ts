@@ -134,6 +134,7 @@ export class RagService {
     nodes: any[],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     links: any[],
+    eventType: 'rag_graph_refresh' | 'graphify_import' = 'rag_graph_refresh',
   ): Promise<{ imported: number; cleared: number }> {
     await this.vectorStore.validateProjectId(projectId);
 
@@ -154,7 +155,7 @@ export class RagService {
       const recordImport = async () => {
         await this.ragRepository?.updateGraphifyLastImportedAt(projectId);
         await this.outbox?.record({
-          type: 'graphify_import',
+          type: eventType,
           payload: { projectId, nodeCount: typedNodes.length, linkCount: typedLinks.length },
           metadata: { projectId },
         });

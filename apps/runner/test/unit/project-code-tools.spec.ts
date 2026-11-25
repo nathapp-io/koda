@@ -278,9 +278,11 @@ describe('project code tools (US-005)', () => {
 
   test('every git call runs in the pin with an isolated config and the search timeout', async () => {
     const seen: Array<{ cwd: string; env: Readonly<Record<string, string>> | undefined; timeoutMs: number | undefined }> = [];
+    let grepArgs: readonly string[] = [];
     const git: Git = {
       run: async (args, options) => {
         seen.push({ cwd: options.cwd, env: options.env, timeoutMs: options.timeoutMs });
+        if (args.includes('grep')) grepArgs = args;
         return { code: 0, stdout: args.includes('ls-tree') ? 'a.txt\0' : 'needle\n', stderr: '' };
       },
       ok: async () => '',
@@ -289,6 +291,7 @@ describe('project code tools (US-005)', () => {
     const tools = buildProjectCodeTools(context([pin], { git, searchTimeoutMs: 4_321 }));
     await run(tools, 'list_files', { repo: 'o/a' });
     await run(tools, 'search_repo', { repo: 'o/a', pattern: 'needle' });
+    expect(grepArgs).toContain('--threads=1');
     expect(seen).toEqual([
       { cwd: '/mirrors/a.git', env: { GIT_CONFIG_NOSYSTEM: '1' }, timeoutMs: 4_321 },
       { cwd: '/mirrors/a.git', env: { GIT_CONFIG_NOSYSTEM: '1' }, timeoutMs: 4_321 },

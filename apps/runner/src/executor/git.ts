@@ -14,6 +14,8 @@ export interface GitResult {
 export interface GitOptions {
   readonly cwd: string;
   readonly timeoutMs?: number;
+  /** Cancel a nested command when its owning operation ends. */
+  readonly signal?: AbortSignal;
   /** Receives raw stdout instead of capturing it. Return false to stop once enough output has been read. */
   readonly onStdout?: (chunk: Uint8Array, signal: AbortSignal) => boolean | Promise<boolean>;
   readonly env?: Readonly<Record<string, string>>;
@@ -105,8 +107,9 @@ export function createGit(): Git {
     } as const;
     const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const consume = options.onStdout;
+    options.signal?.throwIfAborted();
     if (consume === undefined) {
-      const proc = Bun.spawn(argv, { ...spawnOptions, timeout, killSignal: 'SIGKILL' });
+      const proc = Bun.spawn(argv, { ...spawnOptions, timeout, killSignal: 'SIGKILL', signal: options.signal });
       const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
       return { code, stdout, stderr };
     }
@@ -118,11 +121,15 @@ export function createGit(): Git {
     let stderrLength = 0;
     let stderrCut = false;
     const controller = new AbortController();
+    // A consumer may still be waiting on filesystem I/O after Git exits. Race the stdout loop
+    // once per command, so the deadline still reaps Git without retaining a listener per chunk.
+    const stopped = Promise.withResolvers<void>();
     let timedOut = false;
     let stdoutStopped = false;
     const closePipes = () => Promise.allSettled([stdout.cancel(), stderr.cancel()]);
     const kill = () => {
       controller.abort();
+      stopped.resolve();
       if (!signalGroup(proc.pid, 'SIGKILL')) proc.kill('SIGKILL');
       return closePipes();
     };
@@ -130,11 +137,15 @@ export function createGit(): Git {
       timedOut = true;
       void kill();
     }, timeout);
+    const cancel = () => { void kill(); };
+    options.signal?.addEventListener('abort', cancel, { once: true });
     const readStdout = async () => {
       for (;;) {
         const { done, value } = await stdout.read();
-        if (done || timedOut) return;
-        if (!(await consume(value, controller.signal)) && !timedOut) {
+        if (done || controller.signal.aborted) return;
+        const keepReading = await consume(value, controller.signal);
+        if (controller.signal.aborted) return;
+        if (!keepReading) {
           stdoutStopped = true;
           clearTimeout(timer);
           await kill();
@@ -153,11 +164,15 @@ export function createGit(): Git {
         stderrCut ||= take.byteLength < value.byteLength;
       }
     };
-    const tasks = [readStdout(), readStderr(), proc.exited] as const;
+    const tasks = [Promise.race([readStdout(), stopped.promise]), readStderr(), proc.exited] as const;
     try {
       const [, , code] = await Promise.all(tasks);
+      let exitCode = code;
+      if (timedOut) exitCode = code || 124;
+      else if (options.signal?.aborted) exitCode = code || 130;
+      else if (stdoutStopped && proc.signalCode === 'SIGKILL') exitCode = 0;
       return {
-        code: timedOut ? (code || 124) : stdoutStopped && proc.signalCode === 'SIGKILL' ? 0 : code,
+        code: exitCode,
         stdout: '',
         stderr: new TextDecoder().decode(stderrPrefix.subarray(0, stderrLength), { stream: stderrCut }),
         ...(timedOut ? { timedOut } : {}),
@@ -169,6 +184,7 @@ export function createGit(): Git {
       throw error;
     } finally {
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', cancel);
     }
   };
   return {

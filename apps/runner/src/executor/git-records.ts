@@ -4,7 +4,7 @@ interface RecordOptions {
   readonly delimiter: '\n' | '\0';
   readonly maxRecordBytes: number;
   /** Returning false ends the command. A null record means it exceeded maxRecordBytes. */
-  readonly onRecord: (record: string | null) => boolean | Promise<boolean>;
+  readonly onRecord: (record: string | null, signal?: AbortSignal) => boolean | Promise<boolean>;
   /** Inspect a prefix of the raw stream before decoding records. */
   readonly onChunk?: (chunk: Uint8Array) => boolean;
 }
@@ -20,11 +20,11 @@ export async function runGitRecords(
   let oversized = false;
   let first = true;
 
-  function emit(bytes: Uint8Array | null, eof = false): boolean | Promise<boolean> {
+  function emit(bytes: Uint8Array | null, signal?: AbortSignal, eof = false): boolean | Promise<boolean> {
     const text = bytes === null ? null : decoder.decode(bytes);
     const record = first && text?.startsWith('\uFEFF') ? text.slice(1) : text;
     first = false;
-    return eof && record === '' ? true : records.onRecord(record);
+    return eof && record === '' ? true : records.onRecord(record, signal);
   }
 
   async function onStdout(chunk: Uint8Array, signal?: AbortSignal): Promise<boolean> {
@@ -38,13 +38,13 @@ export async function runGitRecords(
         let accepted: boolean | Promise<boolean> = true;
         if (length + part.length > buffer.byteLength) {
           oversized = true;
-          accepted = emit(null);
+          accepted = emit(null, signal);
         } else if (delimiterAt !== -1 && length === 0) {
-          accepted = emit(part);
+          accepted = emit(part, signal);
         } else {
           buffer.set(part, length);
           length += part.length;
-          if (delimiterAt !== -1) accepted = emit(buffer.subarray(0, length));
+          if (delimiterAt !== -1) accepted = emit(buffer.subarray(0, length), signal);
         }
         if (!(typeof accepted === 'boolean' ? accepted : await accepted)) return false;
       }
@@ -62,7 +62,7 @@ export async function runGitRecords(
   if (result.stdout && !(await onStdout(new TextEncoder().encode(result.stdout)))) {
     return { ...result, stdoutStopped: true };
   }
-  if (!oversized && length > 0 && !(await emit(buffer.subarray(0, length), true))) {
+  if (!oversized && length > 0 && !(await emit(buffer.subarray(0, length), options.signal, true))) {
     return { ...result, stdoutStopped: true };
   }
   return result;

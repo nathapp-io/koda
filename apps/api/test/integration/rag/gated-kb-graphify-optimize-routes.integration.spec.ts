@@ -4,9 +4,11 @@ import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/a
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { RagService } from '../../../src/rag/rag.service';
 import { EntityStore } from '../../../src/rag/entity-store';
+import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
+import { EntityGraphService } from '../../../src/entity-graph/entity-graph.service';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { outboxRecord } from '../../helpers/outbox-record';
-import { fixtureDb } from '../../helpers/action-context';
+import { fixtureDb, withTestActor } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
@@ -20,6 +22,12 @@ import { canRunDbTests } from '../../helpers/test-environment';
   let nodeId: string;
   let serial = 0;
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const importEvents = () => ({ projectId: world.projectId, type: { in: ['rag_graph_refresh', 'graphify_import'] } });
+  const dispatchImport = async (type: string) => {
+    const events = await db.outboxEvent.findMany({ where: importEvents() });
+    expect(events.map(event => event.type)).toEqual([type]);
+    await app.get(FanOutPublisher).publish(outboxRecord(events[0].type, JSON.parse(events[0].payload)));
+  };
   const graph = () => ({ nodes: [{ id: nodeId, label: `Node ${nodeId}`, type: 'code_module' }], links: [] });
   const post = (route: string, token = agent.apiKey) => request(app.getHttpServer()).post(`/api/projects/web/kb/${route}`).set(auth(token)).send(route === 'import/graphify' ? graph() : {});
   const open = async (route = 'import/graphify') => {
@@ -46,7 +54,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await db.approvalDecision.deleteMany(); await db.approvalRequest.deleteMany(); await db.approvalPolicy.deleteMany();
     await db.project.update({ where: { id: world.projectId }, data: { graphifyEnabled: true } });
     await db.auditEntry.deleteMany({ where: { projectId: world.projectId, key: { in: ['kb.graphify.import', 'kb.optimize'] } } });
-    await db.outboxEvent.deleteMany({ where: { projectId: world.projectId, type: 'graphify_import' } });
+    await db.outboxEvent.deleteMany({ where: importEvents() });
     await seedWaitPolicy(db, 'kb.graphify.import', world.projectId);
     await seedWaitPolicy(db, 'kb.optimize', world.projectId);
   });
@@ -59,12 +67,29 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect(await approve(id)).toMatchObject({ status: 'executed', result: { imported: 1 } });
     expect(await db.approvalRequest.findUnique({ where: { id } })).toMatchObject({ status: 'executed', result: { imported: 1 } });
     expect(await app.get(RagService).listDocuments(world.projectId)).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: nodeId, source: 'code' })]));
-    const events = await db.outboxEvent.findMany({ where: { type: 'graphify_import', projectId: world.projectId } });
-    expect(events).toHaveLength(1);
-    await app.get(FanOutPublisher).publish(outboxRecord('graphify_import', JSON.parse(events[0].payload)));
+    const persistentGraph = vi.spyOn(app.get(EntityGraphService), 'onGraphifyImport');
+    await dispatchImport('rag_graph_refresh');
+    expect(persistentGraph).not.toHaveBeenCalled();
     expect(app.get(EntityStore).getAllEntities(world.projectId)).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: nodeId, source: 'code_module' })]),
     );
+  });
+  it('domain-writer imports refresh the cache and retain service-link inference', async () => {
+    const actor = { type: 'AGENT' as const, id: agent.id };
+    const target = `${nodeId}-target`;
+    const nodes = [nodeId, target].map(id => ({ id, label: id, type: 'code_module' }));
+    const links = [{ source: nodeId, target, relation: 'depends_on' }];
+    await db.entityNode.createMany({ data: nodes.map(node => ({
+      projectId: world.projectId, entityId: `service:${node.id}`, entityType: 'service', label: node.label,
+    })) });
+    await withTestActor(actor, () => app.get(KodaDomainWriter).importGraphify({
+      projectId: world.projectId, nodes, links, actorId: actor.id, timestamp: new Date(),
+    }));
+    await dispatchImport('graphify_import');
+    expect(app.get(EntityStore).getAllEntities(world.projectId).map(node => node.id).sort()).toEqual([nodeId, target]);
+    expect(await db.entityLink.count({ where: {
+      projectId: world.projectId, sourceId: `service:${nodeId}`, targetId: `service:${target}`, relation: 'service_to_service',
+    } })).toBe(1);
   });
   it('AC-3: approval records exactly one graphify audit', async () => {
     const id = await open(); expect(await approve(id)).toMatchObject({ status: 'executed' });
