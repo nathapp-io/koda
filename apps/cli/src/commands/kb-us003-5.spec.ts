@@ -92,7 +92,7 @@ describe('US-003-5: kbCommand — resolveContext wiring', () => {
 
     (ragControllerListDocuments as jest.Mock).mockResolvedValue({
       ret: 0,
-      data: { items: [], total: 0 },
+      data: [],
     });
   });
 
