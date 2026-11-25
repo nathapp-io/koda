@@ -336,13 +336,10 @@ describe('kbCommand', () => {
   describe('kb list', () => {
     const mockListResponse = {
       ret: 0,
-      data: {
-        items: [
-          { id: 'doc-1', source: 'README.md', createdAt: '2026-01-10T12:00:00.000Z' },
-          { id: 'doc-2', source: 'CONTRIBUTING.md', createdAt: '2026-02-15T09:30:00.000Z' },
-        ],
-        total: 2,
-      },
+      data: [
+        { id: 'doc-B', source: 'manual', sourceId: 'example.md', content: 'content B', createdAt: '2026-01-11T00:30:00+02:00', score: 0.9, similarity: 'high', metadata: {}, provenance: {} },
+        { id: 'doc-A', source: 'ticket', sourceId: 'KODA-1', content: 'content A', createdAt: '2026-02-15T09:30:00.000Z', score: 0.8, similarity: 'high', metadata: {}, provenance: {} },
+      ],
     };
 
     it('completes a JSON list through the shared output helper', async () => {
@@ -374,9 +371,13 @@ describe('kbCommand', () => {
 
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
-      const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toContain('doc-1');
-      expect(allLogs).toContain('doc-2');
+      const rows = logSpy.mock.calls.map((call) => call.join(' '));
+      expect(rows.map(row => row.trim().split(/\s+/)[0])).toContain('doc-B');
+      expect(rows.map(row => row.trim().split(/\s+/)[0])).toContain('doc-A');
+      const docBIndex = rows.findIndex(row => row.includes('doc-B'));
+      const docAIndex = rows.findIndex(row => row.includes('doc-A'));
+      expect(docBIndex).toBeGreaterThanOrEqual(0);
+      expect(docAIndex).toBeGreaterThan(docBIndex);
     });
 
     it('renders table with Source column', async () => {
@@ -388,8 +389,8 @@ describe('kbCommand', () => {
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
       const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toContain('README.md');
-      expect(allLogs).toContain('CONTRIBUTING.md');
+      expect(allLogs).toContain('manual');
+      expect(allLogs).toContain('ticket');
     });
 
     it('renders table with Created column', async () => {
@@ -420,8 +421,36 @@ describe('kbCommand', () => {
 
       if (!jsonCall) throw new Error('Expected jsonCall to be defined');
       const parsed = JSON.parse(jsonCall[0]);
-      expect(parsed).toHaveProperty('items');
-      expect(Array.isArray(parsed.items)).toBe(true);
+      expect(jsonCall[0]).toBe(JSON.stringify(mockListResponse.data, null, 2));
+      expect(parsed).toEqual(mockListResponse.data);
+    });
+
+    it('prints empty table headings and Shown: 0 for an empty response', async () => {
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue({ ret: 0, data: [] });
+      await program.parseAsync(['node', 'koda', 'kb', 'list']);
+      const lines = logSpy.mock.calls.map(call => String(call[0]));
+      expect(lines[0]).toContain('ID');
+      expect(lines[0]).toContain('Source');
+      expect(lines[0]).toContain('Created');
+      expect(lines.at(-1)).toBe('Shown: 0');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('renders source types, UTC date, shown footer, and all row fields in JSON', async () => {
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);
+      await program.parseAsync(['node', 'koda', 'kb', 'list']);
+      const lines = logSpy.mock.calls.map(call => String(call[0]));
+      expect(lines.at(-1)).toBe('Shown: 2');
+      expect(lines.some(line => line.includes('doc-B') && line.includes('manual') && line.includes('2026-01-10'))).toBe(true);
+      logSpy.mockClear();
+      await program.parseAsync(['node', 'koda', 'kb', 'list', '--json']);
+      expect(logSpy.mock.calls).toEqual([[JSON.stringify(mockListResponse.data, null, 2)]]);
+    });
+
+    it('shows the response row count for 100 documents', async () => {
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue({ ret: 0, data: Array.from({ length: 100 }, (_, i) => ({ id: `doc-${i}`, source: 'manual', createdAt: '2026-01-01T00:00:00Z' })) });
+      await program.parseAsync(['node', 'koda', 'kb', 'list']);
+      expect(logSpy.mock.calls.at(-1)?.[0]).toBe('Shown: 100');
     });
 
     it('exits with code 2 when project is not configured', async () => {
@@ -486,11 +515,11 @@ describe('kbCommand', () => {
   describe('kb add', () => {
     const mockAddResponse = {
       ret: 0,
-      data: {
-        id: 'doc-99',
-        source: 'README.md',
-        docCount: 3,
-      },
+      data: { indexed: true, id: 'doc-1', sourceId: 'stored.md' },
+    };
+    const mockNotIndexedResponse = {
+      ret: 0,
+      data: { indexed: false, sourceId: 'stored.md' },
     };
 
     it('exits 0 and prints success confirmation with file name', async () => {
@@ -514,7 +543,7 @@ describe('kbCommand', () => {
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
 
       const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toContain('README.md');
+      expect(allLogs).toContain('stored.md');
     });
 
     it('prints confirmation message containing the doc count', async () => {
@@ -525,8 +554,17 @@ describe('kbCommand', () => {
 
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
 
-      const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toContain('3');
+      expect(logSpy.mock.calls).toEqual([['Indexed stored.md.']]);
+    });
+
+    it('reports the not-indexed outcome and preserves it in JSON', async () => {
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockNotIndexedResponse);
+      await program.parseAsync(['node', 'koda', 'kb', 'add', '--file', 'example.md']);
+      expect(logSpy.mock.calls).toEqual([['Not indexed: stored.md.']]);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      logSpy.mockClear();
+      await program.parseAsync(['node', 'koda', 'kb', 'add', '--file', 'example.md', '--json']);
+      expect(logSpy.mock.calls).toEqual([[JSON.stringify(mockNotIndexedResponse.data, null, 2)]]);
     });
 
     it('reads the file from disk and sends content, source, and sourceId to the API', async () => {
@@ -583,9 +621,8 @@ describe('kbCommand', () => {
 
       if (!jsonCall) throw new Error('Expected jsonCall to be defined');
       const parsed = JSON.parse(jsonCall[0]);
-      expect(parsed).toHaveProperty('id');
-      expect(parsed).toHaveProperty('source');
-      expect(parsed).toHaveProperty('docCount');
+      expect(jsonCall[0]).toBe(JSON.stringify(mockAddResponse.data, null, 2));
+      expect(parsed).toEqual(mockAddResponse.data);
     });
 
     it('exits with code 2 when project is not configured', async () => {

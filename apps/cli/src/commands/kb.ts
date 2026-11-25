@@ -90,18 +90,20 @@ export function kbCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerListDocuments({ path: { slug: ctx.projectSlug }, query: { limit: 100 }});
-        const data = unwrap<{ items: Array<{ id: string; source: string; createdAt: string }>; total: number }>(response);
+        const data = unwrap<Array<{ id: string; source: string; createdAt: string }>>(response);
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
         } else {
-          console.log('ID          Source              Created');
-          console.log('----------- ------------------- -----------------------');
-          for (const doc of data.items) {
+          const idWidth = Math.max(2, ...data.map((doc) => doc.id.length));
+          const sourceWidth = Math.max(6, ...data.map((doc) => doc.source.length));
+          console.log(`${'ID'.padEnd(idWidth)}  ${'Source'.padEnd(sourceWidth)}  Created`);
+          console.log(`${'-'.repeat(idWidth)}  ${'-'.repeat(sourceWidth)}  -----------------------`);
+          for (const doc of data) {
             const created = new Date(doc.createdAt).toISOString().slice(0, 10);
-            console.log(`${doc.id.padEnd(11)} ${doc.source.padEnd(19)} ${created}`);
+            console.log(`${doc.id.padEnd(idWidth)}  ${doc.source.padEnd(sourceWidth)}  ${created}`);
           }
-          console.log(`\nTotal: ${data.total}`);
+          console.log(`Shown: ${data.length}`);
         }
 
         return finishSuccess();
@@ -141,12 +143,14 @@ export function kbCommand(program: Command): void {
   body: { content, source: options.source, sourceId: fileName },
   path: { slug: ctx.projectSlug }
   });
-        const data = unwrap<{ id: string; source: string; docCount: number }>(response);
+        const data = unwrap<{ indexed: boolean; id?: string; sourceId: string }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
+        } else if (data.indexed) {
+          console.log(`Indexed ${data.sourceId}.`);
         } else {
-          console.log(`Added ${fileName} to knowledge base. Total documents: ${data.docCount}`);
+          console.log(`Not indexed: ${data.sourceId}.`);
         }
 
         return finishSuccess();
