@@ -898,3 +898,88 @@ describe('US-002 thread-controller: a held catch-up snapshot cannot undo newer s
     expect(h.setTimer.mock.calls.length).toBe(timersArmedByStop)
   })
 })
+
+/**
+ * F1 (US-002): two reads can be in flight at once — the ready catch-up and the reload a live event triggers.
+ * The order that matters is when each read *started*, not which response the network delivers first: the
+ * later-started read holds the fresher snapshot, so the earlier one must not commit over it (and must be
+ * discarded itself, not the other way round).
+ */
+describe('US-002 (F1) thread-controller: overlapping reads are ordered by when they started', () => {
+  test('US-002 AC-1: the later-started detail read still lands after the earlier one committed', async () => {
+    const heldDetail: Deferred<ThreadDetailDto>[] = []
+    let threadGets = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) {
+        threadGets += 1
+        if (threadGets === 1) return thread({ title: 'Initial' })
+        // Every later detail read is held, so the test picks the resolution order.
+        const held = deferred<ThreadDetailDto>()
+        heldDetail.push(held)
+        return held.promise
+      }
+      if (path === MESSAGES_PATH) return { items: [message({ id: 'm1', seq: 1, status: 'complete' })] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+
+    // The ready catch-up's detail read starts first; a live event's reload starts second, while it is held.
+    h.handlers.onResync()
+    await settle()
+    h.handlers.onThread?.({ id: 'e3', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'thread' })
+    await settle()
+    expect(heldDetail).toHaveLength(2)
+
+    // The older read answers first: its snapshot is older news than the read already in flight, so it is
+    // discarded rather than shown and then replaced.
+    heldDetail[0].resolve(thread({ title: 'Stale snapshot' }))
+    await settle()
+    expect(h.ctl.thread.value?.title).toBe('Initial')
+
+    // The read that started later answers last: its detail is the fresher one and must be the one held.
+    heldDetail[1].resolve(thread({ title: 'Fresh detail' }))
+    await settle()
+
+    expect(h.ctl.thread.value?.title).toBe('Fresh detail')
+  })
+
+  test('US-002 AC-4: the later-started transcript read still lands after the earlier one committed', async () => {
+    const heldMessages: Deferred<{ items: ChatMessageDto[] }>[] = []
+    let messagesGets = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) return thread()
+      if (path === MESSAGES_PATH) {
+        messagesGets += 1
+        if (messagesGets === 1) return { items: [message({ id: 'm1', seq: 1, status: 'complete' })] }
+        const held = deferred<{ items: ChatMessageDto[] }>()
+        heldMessages.push(held)
+        return held.promise
+      }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+
+    // The catch-up's transcript read starts first; the message event's refetch starts second.
+    h.handlers.onResync()
+    await settle()
+    h.handlers.onMessage?.({ id: 'e2', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'message', messageId: 'm2' })
+    await settle()
+    expect(heldMessages).toHaveLength(2)
+
+    // The older read answers first, with the turn still streaming.
+    heldMessages[0].resolve({ items: [message({ id: 'm2', seq: 2, status: 'streaming', content: 'Partial response' })] })
+    await settle()
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.status).toBe('streaming')
+
+    // The read that started later answers last, having seen the turn finish.
+    heldMessages[1].resolve({ items: [message({ id: 'm2', seq: 2, status: 'complete', content: 'Final response' })] })
+    await settle()
+
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.status).toBe('complete')
+    expect(h.ctl.messages.value.find(item => item.id === 'm2')?.content).toBe('Final response')
+  })
+})
