@@ -1125,6 +1125,9 @@
       }
     },
     "threads": {
+      "detail": {
+        "unavailable": "此线程不可用，或你无权访问。"
+      },
       "kind": {
         "project": "项目线程",
         "workspace": "工作区线程"

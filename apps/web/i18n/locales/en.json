@@ -1125,6 +1125,9 @@
       }
     },
     "threads": {
+      "detail": {
+        "unavailable": "This thread is unavailable or you do not have access to it."
+      },
       "kind": {
         "project": "Project thread",
         "workspace": "Workspace thread"

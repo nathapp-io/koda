@@ -25,6 +25,7 @@ import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
+const { t } = useI18n()
 const slug = route.params.project as string
 const threadId = route.params.id as string
 const controller = useThread(slug, threadId)
@@ -185,5 +186,10 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
       <FleetThreadsThreadStartFlow :slug="slug" :thread="controller.thread.value" />
       <FleetThreadsThreadPreApprovalCard :slug="slug" :thread="controller.thread.value" @changed="controller.reloadThread()" />
     </template>
+    <p v-else-if="controller.unavailable.value" role="status" class="text-sm text-muted-foreground">
+      {{ t('fleet.threads.detail.unavailable') }}
+    </p>
+    <ErrorState v-else-if="controller.loadFailed.value" @retry="controller.loadThread()" />
+    <LoadingState v-else-if="controller.loading.value" />
   </div>
 </template>

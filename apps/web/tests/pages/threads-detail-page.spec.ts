@@ -158,14 +158,19 @@ interface CapturedHead {
  * fleet-approval-badge.spec.ts does, so the running-turn title is observable.
  */
 function mountPage(over: {
-  thread?: ThreadDetailDto
+  thread?: ThreadDetailDto | null
   messages?: ChatMessageDto[]
   runners?: FleetRunnerSummary[]
   job?: Record<string, unknown> | null
   /** The caller's project permission keys (Permissions P1); the archive and mode gates read them. */
   permissions?: string[]
+  loadFailed?: boolean
+  unavailable?: boolean
+  retry?: () => Promise<void>
 } = {}) {
-  const thread = ref(over.thread ?? threadDetail())
+  const thread = ref(over.thread === undefined ? threadDetail() : over.thread)
+  const loadFailed = ref(over.loadFailed ?? false)
+  const retry = over.retry ?? jest.fn(async () => undefined)
   const messages = ref(over.messages ?? [])
   const runners = ref(over.runners ?? [])
   let head: CapturedHead = {}
@@ -208,6 +213,8 @@ function mountPage(over: {
       FleetThreadsThreadPreApprovalCard: { props: ['slug', 'thread'], emits: ['changed'], template: '<button data-testid="thread-preapproval-card" :data-slug="slug" :data-thread-id="thread.id" @click="$emit(\'changed\')" />' },
       FleetThreadsThreadControls: { props: ['maxCostUsd'], template: '<div data-testid="page-controls" :data-max-cost="maxCostUsd" />' },
       FleetThreadsThreadComposer: { template: '<div data-testid="page-composer" />' },
+      ErrorState: { emits: ['retry'], template: '<section data-testid="thread-load-error"><button data-testid="thread-retry" @click="$emit(\'retry\')">retry</button></section>' },
+      LoadingState: { template: '<section data-testid="thread-loading" />' },
       ThreadTimeline: timeline,
       FleetThreadsThreadTimeline: timeline,
       ThreadMessage: threadMessage,
@@ -228,6 +235,9 @@ function mountPage(over: {
       useThread: () => ({
         thread,
         messages,
+        loadFailed,
+        unavailable: ref(over.unavailable ?? false),
+        loadThread: retry,
         live: ref(true),
         load: jest.fn(async () => undefined),
         start: jest.fn(),
@@ -265,13 +275,43 @@ function mountPage(over: {
       await Vue.nextTick()
     }
   }
-  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval, thread }
+  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval, thread, loadFailed }
 }
 
 /** The resolved title useHead received: `title` may be a value or a function. */
 function headTitle(head: CapturedHead): unknown {
   return typeof head.title === 'function' ? (head.title as () => unknown)() : head.title
 }
+
+describe('US-003 project-thread load recovery', () => {
+  test.each([403, 404])('AC-1/AC-2: a %i response shows the same unavailable state without private detail', async () => {
+    const m = mountPage({ thread: null, unavailable: true })
+    expect(m.app.one('[role="status"]')).toBeDefined()
+    expect(m.app.text()).toContain('fleet.threads.detail.unavailable')
+    expect(m.app.text()).not.toContain('Auth spec')
+    expect(m.app.text()).not.toContain('thread-timeline')
+    m.app.unmount()
+  })
+
+  test('AC-3/AC-4: a transient failure has a visible retry which renders recovered detail and clears the failure', async () => {
+    const holder: { current?: ReturnType<typeof mountPage> } = {}
+    const retry = jest.fn(async () => {
+      if (holder.current === undefined) return
+      holder.current.thread.value = threadDetail({ title: 'Recovered thread' })
+      holder.current.loadFailed.value = false
+    })
+    const m = mountPage({ thread: null, loadFailed: true, retry })
+    holder.current = m
+    const button = m.app.one('[data-testid="thread-retry"]')
+    expect(button).toBeDefined()
+    if (button?.props.onClick) (button.props.onClick as () => void)()
+    await m.settle()
+    expect(retry).toHaveBeenCalledTimes(1)
+    expect(m.app.text()).toContain('Recovered thread')
+    expect(m.app.one('[data-testid="thread-load-error"]')).toBeUndefined()
+    m.app.unmount()
+  })
+})
 
 describe('US-004 queued-turn notice and refresh', () => {
   test('AC-6: project thread page renders queued-turn notice', async () => {

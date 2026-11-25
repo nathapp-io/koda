@@ -15,6 +15,10 @@ const controller = useThread('web', 'th1')
 
 <template>
   <div data-testid="thread-client-probe">
+    <p v-if="controller.loadFailed.value && !controller.unavailable.value" data-testid="thread-load-failed">Failed</p>
+    <p v-if="controller.unavailable.value" data-testid="thread-unavailable">Unavailable</p>
+    <button v-if="controller.loadFailed.value && !controller.unavailable.value" data-testid="thread-retry" @click="controller.loadThread()">Retry</button>
+    <p v-if="controller.thread.value">{{ controller.thread.value.title }}</p>
     <p
       v-for="message in controller.messages.value"
       :key="message.id"
