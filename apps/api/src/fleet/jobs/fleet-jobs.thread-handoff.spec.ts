@@ -5,6 +5,7 @@ describe('FleetJobsService thread handoff dispatch', () => {
   it('AC-12: checks thread idleness transactionally before creating a thread plan', async () => {
     const repo = {
       findRepo: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', defaultBranch: 'main' }),
+      lockLiveProject: vi.fn().mockResolvedValue(true),
       lockIdleThread: vi.fn().mockResolvedValue(false),
       createJob: vi.fn(),
     };

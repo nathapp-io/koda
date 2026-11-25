@@ -425,6 +425,17 @@ export interface IFleetJobRepository {
   findReviewJobIdBetween(repoId: string, prNumber: number, from: Date, to: Date): Promise<string | null>;
   /** Lock a thread row and return whether it has no active jobs; call inside the dispatch transaction. */
   lockIdleThread(threadId: string): Promise<boolean>;
+  /**
+   * US-008 (review finding 4): takes the project's row lock and answers whether the project is still live.
+   *
+   * The lock is `FOR NO KEY UPDATE`, so it conflicts with the soft-delete UPDATE both delete paths issue
+   * (`softDeleteById`'s `updateManyAndReturn` and `updateBySlug`'s `update`), which take that same mode on a
+   * row whose key columns it leaves alone. `FOR KEY SHARE` would not: it is compatible with them, so a delete
+   * could commit between the read and the insert. Call inside the job-insertion transaction, before the job
+   * and its dependent rows are written: a delete that already committed reads as `false` here, and one that
+   * starts afterwards waits for that transaction to end.
+   */
+  lockLiveProject(projectId: string): Promise<boolean>;
   findById(id: string): Promise<FleetJobRecord | null>;
   /**
    * US-004: links an existing job to a flow step — one conditional UPDATE that only matches a job whose `flowId`

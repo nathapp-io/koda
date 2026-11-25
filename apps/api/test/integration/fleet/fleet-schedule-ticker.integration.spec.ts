@@ -11,9 +11,12 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { ROLE_KEY_FOR_LEGACY_ROLE, type LegacyProjectRole } from '../../../src/permissions/legacy-project-roles';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
+import { ProjectsService } from '../../../src/projects/projects.service';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -37,10 +40,10 @@ describeIntegration('schedule ticker (PG)', () => {
     },
   });
   /** A fresh owner with the given project role (null = not a member). */
-  const owner = async (role: string | null, over: Partial<Prisma.UserUncheckedCreateInput> = {}): Promise<string> => {
+  const owner = async (role: string | null, over: Partial<Prisma.UserUncheckedCreateInput> = {}, projectId = world.projectId): Promise<string> => {
     const user = await prisma.user.create({ data: { email: `owner${++n}@koda.test`, passwordHash: 'x',  ...over } });
     await grantBaseline(prisma, { type: 'USER', id: user.id });
-    if (role) await grantRole(prisma, { type: 'USER', id: user.id }, ROLE_KEY_FOR_LEGACY_ROLE[role as LegacyProjectRole], world.projectId);
+    if (role) await grantRole(prisma, { type: 'USER', id: user.id }, ROLE_KEY_FOR_LEGACY_ROLE[role as LegacyProjectRole], projectId);
     return user.id;
   };
   const reload = (id: string) => prisma.jobSchedule.findUniqueOrThrow({ where: { id } });
@@ -248,5 +251,223 @@ describeIntegration('schedule ticker (PG)', () => {
     await tick(new Date('2026-10-02T00:30:10.000Z'));
     expect(await jobsOf(s.id)).toHaveLength(1);
     expect((await reload(s.id)).nextFireAt).toEqual(new Date('2026-10-03T00:30:00.000Z'));
+  });
+
+  /**
+   * US-008 (review finding 4) — the reviewed controls put the two sides of this race side by side; these tests
+   * run its interleaving on disposable PostgreSQL, with two connections and no runner attached.
+   *
+   * Each test owns its project, repo and schedule: the delete under test must not touch the shared world.
+   */
+  describe('US-008 project-deletion fence', () => {
+    let observer: PrismaClient;
+    let projects: ProjectsService;
+    let jobRepo: PrismaFleetJobRepository;
+
+    const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => { resolve = r; });
+      return { promise, resolve };
+    };
+
+    /** Awaits `promise`, failing loudly instead of hanging the whole file when the interleaving never happens. */
+    const within = async <T>(promise: Promise<T>, what: string, ms = 5_000): Promise<T> => {
+      let timer: NodeJS.Timeout | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms waiting for ${what}`)), ms);
+      });
+      try {
+        return await Promise.race([promise, deadline]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    /** A live project with a repo of its own and a developer owner, so the tick and its delete are its own. */
+    const ownProject = async (): Promise<{ projectId: string; repoId: string; createdById: string }> => {
+      const slug = `fence${++n}`;
+      const project = await prisma.project.create({ data: { name: slug, slug, key: `F${n}` } });
+      const repo = await prisma.fleetRepo.create({
+        data: {
+          projectId: project.id, provider: 'github', owner: 'acme', name: slug, defaultBranch: 'main',
+          githubInstallationId: BigInt(90), createdById: world.ids.root,
+        },
+      });
+      return { projectId: project.id, repoId: repo.id, createdById: await owner('DEVELOPER', {}, project.id) };
+    };
+
+    /** The delete under test: the application's own soft-delete path, and the listener it announces to. */
+    const softDelete = (projectId: string) =>
+      withTestActor({ type: 'USER', id: world.ids.root }, () => projects.softDeleteById(projectId));
+
+    /** Committed state, read on a connection of the observer's own — what a fresh request would see. */
+    const committedJobs = (scheduleId: string) => observer.fleetJob.count({ where: { scheduleId } });
+    const committedAssigns = (scheduleId: string) => observer.fleetCommand.count({ where: { type: 'ASSIGN', job: { scheduleId } } });
+
+    /** Non-granted lock requests in this database: a statement PostgreSQL is holding on a lock for. */
+    const lockWaits = async (): Promise<number> => (await observer.$queryRaw<Array<{ n: number }>>`
+      SELECT count(*)::int AS n
+        FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+       WHERE NOT l.granted AND a.datname = current_database()`)[0].n;
+
+    const waitForLockWait = async (timeoutMs = 4_000): Promise<number> => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const waits = await lockWaits();
+        if (waits > 0 || Date.now() > deadline) return waits;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+
+    /**
+     * The AC-3/AC-4 interleaving: the tick's insertion transaction pauses right after its in-transaction
+     * live-project read — so it holds the project's row lock — and the application's delete then starts on
+     * another connection and blocks on that lock until the insert is released.
+     */
+    const insertAgainstDelete = async () => {
+      const own = await ownProject();
+      const s = await schedule({ projectId: own.projectId, repoId: own.repoId, createdById: own.createdById, updatedById: world.ids.root });
+      const original = jobRepo.lockLiveProject.bind(jobRepo);
+      const locked = deferred();
+      const release = deferred();
+      const spy = vi.spyOn(jobRepo, 'lockLiveProject').mockImplementation(async (projectId: string) => {
+        const live = await original(projectId);   // the real SELECT … FOR NO KEY UPDATE, inside the transaction
+        locked.resolve();
+        await release.promise;
+        return live;
+      });
+      const ticked = tick(NOW);
+      try {
+        await within(locked.promise, 'the insertion transaction to read the live project under its lock');
+      } catch (error) {
+        spy.mockRestore();
+        void ticked.catch(() => undefined);
+        throw error;
+      }
+      let settled = false;
+      const deletion = softDelete(s.projectId).then((deleted) => { settled = true; return deleted; });
+      return {
+        ...own, scheduleId: s.id, deletion,
+        deleteSettled: () => settled,
+        /** Lets the insert commit; the delete's own wait then ends. */
+        releaseInsert: async () => { release.resolve(); await ticked; spy.mockRestore(); },
+      };
+    };
+
+    beforeAll(() => {
+      observer = createTestPrismaClient();
+      projects = app.get(ProjectsService);
+      jobRepo = app.get(PrismaFleetJobRepository);
+    });
+
+    afterAll(async () => {
+      await observer.$disconnect();
+    });
+
+    it('US-008 AC-1: a delete committed while the tick waits after owner authorization leaves zero jobs for the schedule', async () => {
+      const own = await ownProject();
+      const s = await schedule({ projectId: own.projectId, repoId: own.repoId, createdById: own.createdById, updatedById: world.ids.root });
+      const jobs = app.get(FleetJobsService);
+      const original = jobs.dispatch.bind(jobs);
+      const authorized = deferred();
+      const resume = deferred();
+      const spy = vi.spyOn(jobs, 'dispatch').mockImplementationOnce(async (...args) => {
+        authorized.resolve();   // the tick's owner authorization already succeeded
+        await resume.promise;   // … and the tick waits here, before its insertion transaction opens
+        return original(...args);
+      });
+      let result: Awaited<ReturnType<ScheduleTicker['tick']>>;
+      try {
+        const ticked = tick(NOW);
+        await within(authorized.promise, 'the tick to finish owner authorization');
+        await softDelete(own.projectId);
+        resume.resolve();
+        result = await ticked;
+      } finally {
+        resume.resolve();   // never leave a paused tick behind, even when an expectation above failed
+        spy.mockRestore();
+      }
+
+      expect(result).toEqual(expect.objectContaining({ claimed: 1, dispatched: 0 }));
+      expect(await committedJobs(s.id)).toBe(0);
+      expect(await observer.fleetJob.count({ where: { projectId: own.projectId } })).toBe(0);
+    });
+
+    it('US-008 AC-2: the resumed tick leaves no assignment command for the schedule it could not dispatch', async () => {
+      const own = await ownProject();
+      const s = await schedule({ projectId: own.projectId, repoId: own.repoId, createdById: own.createdById, updatedById: world.ids.root });
+      const jobs = app.get(FleetJobsService);
+      const original = jobs.dispatch.bind(jobs);
+      const authorized = deferred();
+      const resume = deferred();
+      const spy = vi.spyOn(jobs, 'dispatch').mockImplementationOnce(async (...args) => {
+        authorized.resolve();
+        await resume.promise;
+        return original(...args);
+      });
+      try {
+        const ticked = tick(NOW);
+        await within(authorized.promise, 'the tick to finish owner authorization');
+        await softDelete(own.projectId);
+        resume.resolve();
+        await ticked;
+      } finally {
+        resume.resolve();
+        spy.mockRestore();
+      }
+
+      expect(await committedAssigns(s.id)).toBe(0);
+      expect(await observer.fleetCommand.count()).toBe(0);
+      // …because the refused tick dispatched nothing at all: no linked job, no dispatch activity.
+      expect((await observer.jobSchedule.findUniqueOrThrow({ where: { id: s.id } })).lastJobId).toBeNull();
+      expect(await observer.fleetActivity.count({ where: { entityId: s.id, action: 'schedule.tick_dispatched' } })).toBe(0);
+    });
+
+    it('US-008 AC-3: a soft deletion started while the authorized insert holds the project lock waits for it', async () => {
+      const race = await insertAgainstDelete();
+      let waits = 0;
+      try {
+        // The delete was started before this observation and has not finished: a waiting statement is what
+        // is left in PostgreSQL's lock table.
+        expect(race.deleteSettled()).toBe(false);
+        waits = await waitForLockWait();
+        expect(race.deleteSettled()).toBe(false);
+      } finally {
+        await race.releaseInsert();
+      }
+      expect(waits).toBeGreaterThan(0);
+      await race.deletion;
+      expect(await observer.fleetJob.count({ where: { projectId: race.projectId } })).toBe(1);
+    });
+
+    it('US-008 AC-4: the delete that waited for the insert cancels the queued job through its listener', async () => {
+      const race = await insertAgainstDelete();
+      try {
+        expect(await waitForLockWait()).toBeGreaterThan(0);
+      } finally {
+        await race.releaseInsert();
+      }
+      await race.deletion;
+
+      const jobs = await observer.fleetJob.findMany({ where: { projectId: race.projectId } });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toEqual(expect.objectContaining({
+        state: 'CANCELLED', stateReason: 'project_deleted', cancelReason: 'project_deleted',
+      }));
+      expect(jobs[0].scheduleId).toBe(race.scheduleId);
+    });
+
+    it('US-008 AC-5: a live project with an authorized owner still dispatches one job, including two tickers racing for one occurrence', async () => {
+      const live = await ownProject();
+      const s = await schedule({ projectId: live.projectId, repoId: live.repoId, createdById: live.createdById, updatedById: world.ids.root });
+      expect(await tick(NOW)).toEqual(expect.objectContaining({ dispatched: 1 }));
+      expect(await committedJobs(s.id)).toBe(1);
+
+      const raced = await ownProject();
+      const r = await schedule({ projectId: raced.projectId, repoId: raced.repoId, createdById: raced.createdById, updatedById: world.ids.root });
+      const [a, b] = await Promise.all([tick(NOW), tick(NOW)]);
+      expect(a.claimed + b.claimed).toBe(1);
+      expect(await committedJobs(r.id)).toBe(1);
+    });
   });
 });

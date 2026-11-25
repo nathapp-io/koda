@@ -124,6 +124,11 @@ export class FleetJobsService {
     let job: FleetJobRecord;
     try {
       job = await this.txManager.run(async () => {
+        // US-008 (review finding 4): a caller authorized this dispatch before the transaction opened, and a
+        // project soft delete may have committed since. The project is locked and its liveness decided here,
+        // before the job and every row that depends on it, so a delete either already reads as gone (refuse)
+        // or waits for this transaction to end.
+        if (!(await this.repo.lockLiveProject(projectId))) throw new NotFoundAppException({}, 'projects');
         if (opts.threadId && !(await this.repo.lockIdleThread(opts.threadId))) throw new ConflictAppException({}, 'threads.busy');
         const created = await this.repo.createJob({
           ...(prRulings !== undefined ? { prRulings } : {}),

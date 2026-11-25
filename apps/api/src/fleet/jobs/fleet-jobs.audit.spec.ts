@@ -8,8 +8,11 @@ describe('FleetJobsService transactional audit', () => {
   function setup(current = job) {
     let inside = false;
     const order: string[] = [];
+    const at: { lockInside: boolean | null } = { lockInside: null };
     const repo = {
       findRepo: vi.fn().mockResolvedValue({ id: 'r', projectId: 'p', defaultBranch: 'main' }),
+      // US-008: the insertion transaction's live-project lock, which records whether it ran inside the transaction.
+      lockLiveProject: vi.fn(async () => { at.lockInside = inside; return true; }),
       createJob: vi.fn(async () => { order.push('create'); return current; }),
       lockIdleThread: vi.fn().mockResolvedValue(true),
       lockById: vi.fn().mockResolvedValue(current), findById: vi.fn().mockResolvedValue(current),
@@ -27,8 +30,16 @@ describe('FleetJobsService transactional audit', () => {
       { selectForReview: vi.fn().mockResolvedValue([]) }, { snapshotForFix: vi.fn().mockResolvedValue(undefined) }];
     // Include the new dependency before implementation, without hiding missing calls.
     const service = new FleetJobsService(...args as unknown as ConstructorParameters<typeof FleetJobsService>);
-    return { service, record, repo, order };
+    return { service, record, repo, order, at };
   }
+
+  it('US-008: takes the live-project lock inside the insertion transaction, before the insert', async () => {
+    const { service, repo, at } = setup();
+    await service.dispatch('u', 'p', { repoId: 'r', command: 'RUN', feature: 'secret', maxCostUsd: 5 });
+    expect(repo.lockLiveProject).toHaveBeenCalledWith('p');
+    expect(at.lockInside).toBe(true);
+    expect(repo.lockLiveProject.mock.invocationCallOrder[0]).toBeLessThan(repo.createJob.mock.invocationCallOrder[0]);
+  });
 
   it.each([undefined, 'thread.plan', 'thread.run'] as const)('AC-4/5: records dispatch once, in transaction after activity, key %s', async (auditKey) => {
     const { service, record, order } = setup();
