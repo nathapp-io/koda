@@ -1,5 +1,6 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { Database } from 'bun:sqlite';
 import type { CommandAck } from '@nathapp/fleet-protocol';
 import { configureCredentials as defaultConfigureCredentials, type CredentialsConfig } from '@nathapp/nax-agent';
 import { uploadWithRetry } from '../bundle/upload-bundle';
@@ -11,7 +12,7 @@ import { NaxJobCheck, StaticJobCheck, type JobCheck } from '../capabilities/job-
 import { RetryingJobCheck } from '../capabilities/job-check-retry';
 import { vaultHelperEnabled } from '../commands/vault';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
-import { errorMessage } from '../errors';
+import { errorMessage, StartupError } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
 import { ProviderKeyCache } from '../credentials/provider-key-cache';
 import { TokenCache } from '../credentials/token-cache';
@@ -114,19 +115,142 @@ async function pruneJobs(journal: Journal, config: RunnerConfig, log: Logger): P
 
 const SHUTDOWN_NOTICE_MS = 5_000;
 
+/**
+ * US-001: the ownership database of a runner home, beside the journal and inside the private home directory.
+ * A file of its own, so the owner keeps committing job events to the journal normally and `status` keeps reading it.
+ */
+export const RUNNER_HOME_LOCK_FILE = 'daemon-lock.db';
+
+/**
+ * US-001: a start that may not have the home. `kind` separates a home another live daemon owns from a lock
+ * database this process cannot use, so no caller has to match on the message. Both stop the start.
+ */
+export class HomeOwnershipError extends StartupError {
+  constructor(readonly kind: 'occupied' | 'unusable', message: string) {
+    super(message);
+    this.name = 'HomeOwnershipError';
+  }
+}
+
+/** US-001: the ownership interval of one home; `release` is idempotent and never throws. */
+interface HomeOwnership {
+  release(): void;
+}
+
+const LOCK_BUSY = /SQLITE_BUSY|SQLITE_LOCKED|database is locked/i;
+
+function isLockBusy(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code;
+  return (typeof code === 'string' && (code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')))
+    || LOCK_BUSY.test(errorMessage(error));
+}
+
+/**
+ * US-001: ownership is a live write transaction on a dedicated connection, so it is the transaction that claims the
+ * home, never a pid string, the file's existence or its age. `busy_timeout = 0` makes a contender answer at once
+ * instead of waiting behind the owner: a contending invocation does not retry, and a later one retries normally.
+ *
+ * The diagnostic uses the caller's own spelling of the home, resolved against the working directory: an alias names
+ * the home the operator passed, while the lock itself follows the physical directory the alias points at.
+ */
+async function acquireHomeOwnership(homeDir: string, log: Logger): Promise<HomeOwnership> {
+  const absoluteHome = resolve(homeDir);
+  const lockPath = join(absoluteHome, RUNNER_HOME_LOCK_FILE);
+  let db: Database;
+  try {
+    db = new Database(lockPath, { create: true });
+  } catch (error) {
+    throw new HomeOwnershipError('unusable', `cannot open the runner home lock database ${lockPath}: ${errorMessage(error)}`);
+  }
+  try {
+    db.exec('PRAGMA busy_timeout = 0');
+    // The table makes the lock database a real database on the first start, so the transaction below always contends
+    // on the file itself rather than on an unused zero-length one.
+    db.exec('CREATE TABLE IF NOT EXISTS home_owner (acquired_at TEXT NOT NULL)');
+    db.exec('BEGIN IMMEDIATE');   // held for the whole ownership interval; nothing is ever committed
+  } catch (error) {
+    try { db.close(); } catch { /* the connection is being refused anyway */ }
+    if (isLockBusy(error)) throw new HomeOwnershipError('occupied', `Runner home is already in use: ${absoluteHome}`);
+    throw new HomeOwnershipError('unusable', `cannot use the runner home lock database ${lockPath}: ${errorMessage(error)}`);
+  }
+  // SEC-1: the same mode as the journal — it holds no secrets, but it sits in the home the journal lives in.
+  await chmod(lockPath, 0o600).catch(() => undefined);
+  let released = false;
+  return {
+    release: () => {
+      if (released) return;
+      released = true;
+      try {
+        db.exec('ROLLBACK');
+      } catch (error) {
+        log.warn('could not roll back the runner home lock', { error: errorMessage(error) });
+      }
+      try {
+        db.close();   // closing drops the OS lock with the connection, and rolls the transaction back with it
+      } catch (error) {
+        log.warn('could not close the runner home lock database', { error: errorMessage(error) });
+      }
+    },
+  };
+}
+
+/** US-001: how a start lets go of one resource it opened; it never throws at the caller. */
+type StartupResource = () => Promise<void> | void;
+
+/**
+ * US-001: retire what a failed start opened, newest first, so the journal (opened first) closes last. Every entry is
+ * attempted: one resource that cannot be released must not leave the others open on a home another daemon will take.
+ */
+async function retireStartup(opened: readonly StartupResource[], log: Logger): Promise<void> {
+  for (const retire of [...opened].reverse()) {
+    try {
+      await retire();
+    } catch (error) {
+      log.warn('could not retire a resource of the failed start', { error: errorMessage(error) });
+    }
+  }
+}
+
 export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle> {
-  const { config, identity, home } = options;
+  const { home } = options;
   const tuning: Tuning = { ...TUNING, ...options.tuning };
   const log = options.log ?? createConsoleLogger();
   const now = options.now ?? systemNow;
   const sleep = options.sleep ?? systemSleep;
   const git = options.git ?? createGit();
   await assertMinGitVersion(git);   // D69: refuse to start before anything is created
-  await mkdir(join(config.workspaceRoot, '.jobs'), { recursive: true });
   // SEC-1: the home dir holds the journal (which carries clone URLs and runner metadata) — match identity.json's
   // 0o700 so a local user on a multi-tenant host cannot list the directory.
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
   await chmod(home.dir, 0o700).catch(() => undefined);
+  // US-001: one live daemon per physical home. Taken after the Git preflight and the home-directory preparation, and
+  // before every daemon-owned startup side effect: workspace preparation, log rotation, socket preparation, the
+  // writable journal and sync. A failure below relinquishes it once what this attempt opened has been retired.
+  const ownership = await acquireHomeOwnership(home.dir, log);
+  const opened: StartupResource[] = [];
+  try {
+    return await startOwnedDaemon(options, ownership, { tuning, log, now, sleep, git }, opened);
+  } catch (error) {
+    // US-001: partial startup cleanup happens here, before the home is handed back: a start that failed after the
+    // journal opened must not leave that connection (or a relay, a socket, an upload or the sync loop) open on a home
+    // the replacement is about to take. The order is the entry point's: retire, then release.
+    await retireStartup(opened, log);
+    ownership.release();
+    throw error;
+  }
+}
+
+/** US-001: the daemon proper; it runs only while `ownership` holds the home, and releases it when it retires. */
+async function startOwnedDaemon(
+  options: DaemonOptions,
+  ownership: HomeOwnership,
+  runner: { readonly tuning: Tuning; readonly log: Logger; readonly now: Now; readonly sleep: Sleep; readonly git: Git },
+  /** What this attempt opens, in the order it opens it: the entry point's cleanup retires them if it fails. */
+  opened: StartupResource[],
+): Promise<DaemonHandle> {
+  const { config, identity, home } = options;
+  const { tuning, log, now, sleep, git } = runner;
+  await mkdir(join(config.workspaceRoot, '.jobs'), { recursive: true });
   // OPS-1: launchd appends every stdout/stderr line to runner.log and never rotates it, so the daemon bounds it
   // here and every `runnerLogCheckMs`. A rotation failure (a directory in the way, permissions, a full disk) is a
   // warning: runner.log is not worth stopping the daemon for.
@@ -143,7 +267,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await ensureSocketDir(socketDir, uid);
 
   const journal = Journal.open(home.journalPath, now);
+  opened.push(() => { journal.close(); });   // pushed first: the journal retires last
   const approvals = new ApprovalRelay({ journal, log, now });
+  opened.push(() => { approvals.stopAll(); });
   const bootId = options.bootId ?? newBootId();
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
@@ -158,13 +284,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const reporter = new CapabilityReporter(
     createCapabilityProbe(config, now, nax, options.acpProbe, () => vaultHelperEnabled(config.naxHome, self)), journal, log,
   );
-  try {
-    await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
-    if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
-  } catch (error) {
-    journal.close();
-    throw error;
-  }
+  // US-001: no cleanup of its own — a probe or trust failure is retired with everything else by the entry point.
+  await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
+  if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
   if (!naxMode) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   approvals.sweepOrphans(journal.activeJobs());
@@ -214,6 +336,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs, providerKeyWaitMs: tuning.providerKeyServeWaitMs },
     uid,
   });
+  opened.push(() => broker.closeAll());
 
   // C10 US-009: `providerKey` resolves a provider through the job's own provider-key socket, so the post-checkout check
   // does not refuse a vault-only job for a key koda holds (branch review B1).
@@ -246,6 +369,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     log, nowMs: () => now().getTime(), sleep, random: Math.random,
     tuning: { chunkBytes: tuning.logChunkBytes, maxInFlight: tuning.logMaxInFlight, putTimeoutMs: tuning.logPutTimeoutMs, backoffMaxMs: tuning.logBackoffMaxMs },
   });
+  opened.push(() => shipper.close());
   // Fleet S5a §3: the thread host. `threadSessions` is the session factory (or a test's fake); the native
   // models a session may name come from the nax home, filtered by the last capability report.
   const threads: ThreadRunSetup | undefined = naxMode ? {
@@ -278,6 +402,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // threadBackends, so its THREAD rows fail `backend_unavailable` in the supervisor.
     ...(threads ? { threads } : {}),
   });
+  opened.push(() => { supervisor.shutdown(); });
   /**
    * US-001: an ABANDON's ack is offered when its retirement's outcome is durable. The loop is wired once it exists,
    * so the ack rides a later request instead of being lost.
@@ -333,6 +458,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const stopNeedListener = tokens.onNeed(() => loop.wake());
   const stopProviderKeyNeedListener = providerKeys.onNeed(() => loop.wake());   // US-008: a new request wakes the poll
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
+  opened.push(async () => {
+    stopNeedListener();
+    stopProviderKeyNeedListener();
+    loop.stop();
+    await running;
+  });
 
   const timers = [
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),
@@ -341,6 +472,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     setInterval(() => { void rotateLog(); }, tuning.runnerLogCheckMs),
   ];
   for (const timer of timers) timer.unref();
+  opened.push(() => { for (const timer of timers) clearInterval(timer); });
 
   let stopping: Promise<void> | null = null;
   let crashed = false;
@@ -367,6 +499,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         clearTimeout(notice);
       }
       journal.close();
+      // US-001: the home is held through the last journal writer, and only then released. A stop repeated on this
+      // retired handle is a no-op above, so it can never release a successor's ownership.
+      ownership.release();
     })();
     return stopping;
   };
@@ -383,6 +518,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot
     void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();
+    ownership.release();   // US-001: the crash stand-in retires the home as it retires the journal
   };
   return { bootId, journal, supervisor, stopped: running, stop, crash, reprobe };
 }
