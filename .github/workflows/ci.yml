@@ -74,7 +74,8 @@ jobs:
           # string, not per line, so a fragment can never be mistaken for a changed path.
           changed_list=$(mktemp)
           trap 'rm -f "$changed_list"' EXIT
-          git diff --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_list"
+          # Report both the deleted and added paths when a file moves in or out of scope.
+          git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_list"
           printf 'Changed files:\n'
           code=false
           while IFS= read -r -d '' changed_path; do

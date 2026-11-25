@@ -97,6 +97,26 @@ describe('CI change filter workflow step', () => {
     expect(runFilter('pull_request', [file]).output).toBe('code=true');
   });
 
+  it('validates a PR that renames a supported Compose file to an unmatched path', () => {
+    const env = { PATH: process.env.PATH, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...args: string[]) => execFileSync('git', [
+      '-c', 'user.name=CI Test', '-c', 'user.email=test@example.invalid', ...args,
+    ], { cwd: tempRoot, env });
+    git('init', '--quiet', '--template=');
+    writeFileSync(join(tempRoot, 'docker-compose.dev.yml'), 'services: {}\n');
+    git('add', 'docker-compose.dev.yml');
+    git('commit', '--quiet', '-m', 'Add dev Compose');
+    git('mv', 'docker-compose.dev.yml', 'archived.yml');
+    git('commit', '--quiet', '-m', 'Rename dev Compose');
+
+    const output = join(tempRoot, 'github-output');
+    execFileSync('/bin/bash', ['-c', body], {
+      cwd: tempRoot,
+      env: { ...env, EVENT_NAME: 'pull_request', BASE_SHA: 'HEAD~1', HEAD_SHA: 'HEAD', GITHUB_OUTPUT: output },
+    });
+    expect(readFileSync(output, 'utf8').trim()).toBe('code=true');
+  });
+
   it('recognizes a deployment file whose path Git would quote', () => {
     // `git diff --name-only` prints `"deployments/caf\303\251.sh"`, which matches no path pattern, so the
     // filter must read the raw NUL-separated listing (review B7).
