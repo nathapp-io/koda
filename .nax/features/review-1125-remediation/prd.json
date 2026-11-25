@@ -3,7 +3,7 @@
   "feature": "review-1125-remediation",
   "branchName": "feat/review-1125-remediation",
   "createdAt": "2026-11-25T15:05:00.807Z",
-  "updatedAt": "2026-11-25T16:28:40.383Z",
+  "updatedAt": "2026-11-25T16:38:30.429Z",
   "userStories": [
     {
       "id": "US-001",
@@ -375,14 +375,17 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A small shared-helper and page change directly implements effective access-control gating, so strict security TDD overrides the default strategy."
+        "reasoning": "A small shared-helper and page change directly implements effective access-control gating, so strict security TDD overrides the default strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/permissions.ts",
@@ -425,7 +428,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "096a8896f516026f89e3aa316620a23fd9dfa469"
     },
     {
       "id": "US-006",
