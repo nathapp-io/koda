@@ -324,3 +324,124 @@ describe('ThreadJobRun turns, idle, caps and failure (US-004)', () => {
     context.run.halt(); await started; context.journal.close();
   });
 });
+
+/**
+ * Review-1125 finding 9. A turn's transcript finalizer is held (the session's `send` never returns until the test
+ * releases it), so `turnSettled` never resolves on its own. The close has one `threadCloseTimeoutMs` budget for
+ * settling that turn and for the session close after it, and it seals the stream when the budget runs out.
+ */
+describe('ThreadJobRun close budget (review-1125 US-007)', () => {
+  const textDelta = (text: string) => ({ type: 'text_delta', sessionId: 'thread-1', turnId: 'turn-1', at: new Date(0).toISOString(), round: 1, text });
+  const snapshots = (journal: Journal): number => journal.pendingEvents(jobId, leaseEpoch, 200).filter((event) => event.type === 'snapshot').length;
+  const terminalStates = (journal: Journal): Array<{ to: string; reason?: string }> =>
+    stateEvents(journal).filter((event) => event.to !== 'RUNNING');
+
+  test('review-1125 US-007 AC-1: a held finalizer does not stop the close from sealing the stream', async () => {
+    const gate = deferred();
+    let finalized = false;
+    const context = setup({ send: async function* () {
+      yield textDelta('partial transcript ');
+      await gate.promise;
+      finalized = true;
+      yield completed;
+    } });
+    const { started } = await running(context);
+    try {
+      expect(context.run.command('THREAD_CLOSE', {})).toEqual({ result: 'ok' });
+      // The close arms its settlement wait off the command's own microtask chain, so the clock waits for it.
+      expect(await eventually(() => context.clock.sleepingFor(tuning.threadCloseTimeoutMs))).toBe(true);
+      context.clock.advance(tuning.threadCloseTimeoutMs);
+      expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'COMPLETED')).toBe(true);
+      // The finalizer is still held: the line went out without it.
+      expect(finalized).toBe(false);
+      expect((await streamLines(context)).at(-1)).toMatchObject({ type: 'session_closed', reason: 'closed' });
+    } finally {
+      gate.resolve();
+      context.run.halt();
+      await started;
+      context.journal.close();
+    }
+  });
+
+  test('review-1125 US-007 AC-2: the close budget marks the row done while the finalizer is still held', async () => {
+    const gate = deferred();
+    let finalized = false;
+    const context = setup({ send: async function* () {
+      yield textDelta('partial transcript ');
+      await gate.promise;
+      finalized = true;
+      yield completed;
+    } });
+    const { started } = await running(context);
+    try {
+      expect(context.run.command('THREAD_CLOSE', {})).toEqual({ result: 'ok' });
+      // The close arms its settlement wait off the command's own microtask chain, so the clock waits for it.
+      expect(await eventually(() => context.clock.sleepingFor(tuning.threadCloseTimeoutMs))).toBe(true);
+      context.clock.advance(tuning.threadCloseTimeoutMs);
+      expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.doneAt != null)).toBe(true);
+      expect(finalized).toBe(false);
+      expect(terminalStates(context.journal).at(-1)).toEqual({ to: 'COMPLETED', reason: 'closed' });
+    } finally {
+      gate.resolve();
+      context.run.halt();
+      await started;
+      context.journal.close();
+    }
+  });
+
+  test('review-1125 US-007 AC-3: heartbeats stop once the close budget seals the run', async () => {
+    const gate = deferred();
+    const context = setup({ send: async function* () {
+      yield textDelta('partial transcript ');
+      await gate.promise;
+      yield completed;
+    } });
+    const { started } = await running(context);
+    try {
+      expect(context.run.command('THREAD_CLOSE', {})).toEqual({ result: 'ok' });
+      // The close arms its settlement wait off the command's own microtask chain, so the clock waits for it.
+      expect(await eventually(() => context.clock.sleepingFor(tuning.threadCloseTimeoutMs))).toBe(true);
+      context.clock.advance(tuning.threadCloseTimeoutMs);
+      expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'COMPLETED')).toBe(true);
+      const before = { snapshots: snapshots(context.journal), events: context.journal.pendingEvents(jobId, leaseEpoch, 200).length };
+      context.clock.advance(tuning.threadHeartbeatMs * 2);
+      await Bun.sleep(25);
+      expect({ snapshots: snapshots(context.journal), events: context.journal.pendingEvents(jobId, leaseEpoch, 200).length }).toEqual(before);
+    } finally {
+      gate.resolve();
+      context.run.halt();
+      await started;
+      context.journal.close();
+    }
+  });
+
+  test('review-1125 US-007 AC-9: a timely turn\'s final transcript precedes the single close marker', async () => {
+    const gate = deferred();
+    const context = setup({ send: async function* () {
+      yield textDelta('first words ');
+      await gate.promise;
+      yield textDelta('final transcript');
+      yield completed;
+    } });
+    const { started } = await running(context);
+    try {
+      expect(context.run.command('THREAD_CLOSE', {})).toEqual({ result: 'ok' });
+      gate.resolve();   // the turn settles well inside the budget
+      expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'COMPLETED')).toBe(true);
+      const lines = await streamLines(context);
+      expect(lines.filter((line) => line.type === 'session_closed')).toHaveLength(1);
+      expect(lines.at(-1)?.type).toBe('session_closed');
+      const transcript = lines.filter((line) => line.type === 'text_delta').map((line) => line.text).join('');
+      expect(transcript).toContain('final transcript');
+      // Every transcript line the close kept is written before that one marker.
+      const lastTranscript = lines.reduce((last, line, index) => (line.type === 'text_delta' ? index : last), -1);
+      expect(lastTranscript).toBeGreaterThan(-1);
+      expect(lastTranscript).toBeLessThan(lines.findIndex((line) => line.type === 'session_closed'));
+    } finally {
+      gate.resolve();
+      context.run.halt();
+      await started;
+      context.journal.close();
+    }
+  });
+});

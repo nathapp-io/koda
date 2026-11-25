@@ -106,6 +106,10 @@ export interface ThreadRunTuning {
   readonly threadSkillFetchTimeoutMs: number;
   readonly projectCodeFetchTimeoutMs?: number;
   readonly logDrainTimeoutMs: number;
+  /**
+   * B3b: how long a wait on a hung `session.close()` gets before the run gives up on it. Review-1125 finding 9: the
+   * run's own close arms one budget from it, spends it first on the cancelled turn and then waits only its remainder.
+   */
   readonly threadCloseTimeoutMs: number;
   /**
    * Fleet S5b US-006 (review B3): how often, and for how long, a proxied koda tool call waits for the server to
@@ -233,6 +237,20 @@ export class ThreadJobRun {
   private settleStartup: (() => void) | null = null;
   /** The window's failure: a stream that never came up owns the row, and the run fails with it. */
   private startupFailure: string | null = null;
+  /**
+   * Review-1125 finding 9: the run's one close budget, armed by `openCloseBudget` after the startup window and any
+   * live publish. Settling the cancelled turn and then closing the session both spend it, so a turn that never
+   * settles cannot hold the run past `threadCloseTimeoutMs`.
+   */
+  private closeDeadlineMs: number | null = null;
+  /**
+   * Review-1125 finding 9: the terminal stream line is written. From then on a turn that settles late writes nothing,
+   * re-arms no timer, counts no spend and journals nothing — it is fenced, not merely unreferenced.
+   */
+  private terminalWritten = false;
+  /** Resolves on a halt, so a bounded close wait never outlives the daemon stop that made it pointless. */
+  private haltWait: Promise<void> | null = null;
+  private settleHalt: (() => void) | null = null;
   /**
    * US-011: the row whose provider keys this run serves. Kept here because `abandon` deletes the journal row before the
    * run ends, and the final release still needs the job it releases.
@@ -367,7 +385,7 @@ export class ThreadJobRun {
           searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
           nowMs: () => this.deps.now().getTime(),
           feature: thread.feature,
-          onDocWritten: (path, bytes) => { if (!this.halted) this.writer?.docWritten(path, bytes); },
+          onDocWritten: (path, bytes) => { if (this.accepting()) this.writer?.docWritten(path, bytes); },
         }),
         ...this.kodaToolProxies(thread),
       ],
@@ -406,7 +424,7 @@ export class ThreadJobRun {
         feature: thread.feature, threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity, mode: thread.mode ?? 'read' },
       writer: () => this.writer,
       turnRunning: () => this.turnRunning,
-      stopped: () => this.halted,
+      stopped: () => !this.accepting(),
       stopIdle: () => this.stopIdle(),
       armIdle: () => this.armIdle(),
     });
@@ -701,16 +719,63 @@ export class ThreadJobRun {
   }
 
   /** A session the run no longer needs is closed, bounded by `threadCloseTimeoutMs`; a throwing `close` is logged, never fatal. */
-  private async closeSession(session: AgentSession): Promise<void> {
+  private async closeSession(session: AgentSession, deadlineMs?: number): Promise<void> {
     this.startSessionClose(session);
-    await this.awaitSessionClose();
+    await this.awaitSessionClose(deadlineMs);
   }
 
-  /** The session does not outlive the run: it is closed through the same bounded path as every other exit. */
-  private async closeHeldSession(): Promise<void> {
+  /**
+   * The session does not outlive the run: it is closed through the same bounded path as every other exit, with what
+   * is left of the close budget when the close is the run's own.
+   */
+  private async closeHeldSession(deadlineMs?: number): Promise<void> {
     const session = this.session;
     this.session = null;
-    if (session !== null) await this.closeSession(session);
+    if (session !== null) await this.closeSession(session, deadlineMs);
+  }
+
+  /**
+   * Review-1125 finding 9: the run's one close budget, armed once and read by every step of the close. A turn that is
+   * still settling and the session close that follows it share `threadCloseTimeoutMs` instead of each taking one.
+   */
+  private openCloseBudget(): number {
+    if (this.closeDeadlineMs === null) this.closeDeadlineMs = this.deps.now().getTime() + this.deps.tuning.threadCloseTimeoutMs;
+    return this.closeDeadlineMs;
+  }
+
+  /** A fresh budget for a wait that is not the close (an abandon, a close before RUNNING): it is not part of one. */
+  private freshCloseDeadline(): number {
+    return this.deps.now().getTime() + this.deps.tuning.threadCloseTimeoutMs;
+  }
+
+  /**
+   * Waits for `pending` for what is left of the close budget, and never past a halt: a daemon stop ends the wait at
+   * once instead of leaving a timer to fire for a row nobody will read. False when the wait ran out, the run halted,
+   * or the budget was already spent — the caller then goes on without it.
+   */
+  private async settleWithin(pending: Promise<void>, deadlineMs: number): Promise<boolean> {
+    if (this.halted) return false;
+    const remaining = deadlineMs - this.deps.now().getTime();
+    if (remaining <= 0) return false;
+    const abort = new AbortController();
+    const ranOut = this.deps.sleep(remaining, abort.signal).then(() => false);
+    try {
+      return await Promise.race([pending.then(() => true), ranOut, this.awaitHalt().then(() => false)]);
+    } finally {
+      abort.abort();
+    }
+  }
+
+  /** Resolves when this run halts; `halt` settles it once, and every later caller sees the same answer. */
+  private awaitHalt(): Promise<void> {
+    if (this.halted) return Promise.resolve();
+    if (this.haltWait === null) this.haltWait = new Promise<void>((resolve) => { this.settleHalt = resolve; });
+    return this.haltWait;
+  }
+
+  /** No turn writes, no timer re-arms and no spend counts once the run halted or its terminal line is written. */
+  private accepting(): boolean {
+    return !this.halted && !this.terminalWritten;
   }
 
   /**
@@ -827,16 +892,17 @@ export class ThreadJobRun {
       // A resolved void means the adapter has no more events for this turn, not a failed session.
       const stream = await session.send(text);
       if (stream !== undefined && stream !== null) for await (const event of stream) {
-        if (this.halted) break;
+        if (!this.accepting()) break;
         this.consume(event, writer);
       }
-      if (!this.halted) writer.flush();
+      if (this.accepting()) writer.flush();
     } catch (error) {
       failure = error;
     } finally {
       this.releaseTurn();
     }
-    if (this.halted) return;
+    // A halted or sealed run is fenced, not fed: no idle timer, no failure of its own, and nothing on the stream.
+    if (!this.accepting()) return;
     if (failure !== null) {
       if (!this.closing) await this.failSession();
       return;
@@ -847,9 +913,10 @@ export class ThreadJobRun {
   /**
    * Every event of a turn is streamed; the cost of a `usage` event is added to the job's spend and may close it.
    * The writer drops a malformed chunk (a null or non-object event) with a warning, and the cost read must not
-   * take the job down in its place.
+   * take the job down in its place. A halted or sealed run counts nothing: the row it would close is already closed.
    */
   private consume(event: SessionEvent, writer: ThreadEventWriter): void {
+    if (!this.accepting()) return;
     writer.event(event);
     if (typeof event !== 'object' || event === null || event.type !== 'usage') return;
     // External nax-agent data: a cost that is not a finite, non-negative number is not a cost. A NaN would disable
@@ -870,7 +937,7 @@ export class ThreadJobRun {
   /** The idle timer runs only while no turn does; its expiry closes the run. */
   private armIdle(): void {
     this.stopIdle();
-    if (this.halted || this.closing) return;
+    if (!this.accepting() || this.closing) return;
     const abort = new AbortController();
     this.idleAbort = abort;
     const dueAtMs = this.deps.now().getTime() + this.deps.tuning.threadIdleMs;
@@ -891,7 +958,7 @@ export class ThreadJobRun {
   private startHeartbeat(): void {
     this.stopHeartbeat();
     // A run that has already ended (a close that landed while the stream was coming up) never starts one.
-    if (this.ended || this.closing || this.halted) return;
+    if (this.ended || this.closing || !this.accepting()) return;
     const abort = new AbortController();
     this.heartbeatAbort = abort;
     void this.heartbeat(abort.signal);
@@ -909,7 +976,7 @@ export class ThreadJobRun {
       // Same rule as the idle timer: a wait that returns before the clock reaches its deadline cannot pace the
       // heartbeat, and re-arming it would spin.
       if (signal.aborted || this.deps.now().getTime() < dueAtMs) return;
-      if (this.halted) return;
+      if (!this.accepting()) return;
       // A run that has ended stamps nothing more: its close already sealed the row.
       if (this.ended) return;
       try {
@@ -968,9 +1035,14 @@ export class ThreadJobRun {
   }
 
   /**
-   * The one close and the one fail: the idle timer stops, a running turn is cancelled and waited out, the session
-   * is closed, the stream is sealed, the logs drain under the transition, the heartbeat stops, and the row ends
-   * `UPLOADING` → the terminal state. `failed` seals the stream with `session_failed` and ends `FAILED`.
+   * The one close and the one fail: the idle timer stops, a running turn is cancelled and waited out inside the one
+   * close budget, the session is closed with what is left of it, the stream is sealed, the logs drain under the
+   * transition, the heartbeat stops, and the row ends `UPLOADING` → the terminal state. `failed` seals the stream
+   * with `session_failed` and ends `FAILED`.
+   *
+   * Review-1125 finding 9: the budget starts here, after the startup window and any live publish — coordination, not
+   * settlement — so a transcript finalizer that is still held when it runs out cannot keep the run from sealing its
+   * stream, ending its row and stopping its timers. The session close is started either way; only its wait is cut.
    */
   private async finishRun(reason: ThreadCloseReason | typeof SESSION_ERROR, failed: boolean): Promise<void> {
     try {
@@ -990,6 +1062,7 @@ export class ThreadJobRun {
       if (this.halted) return;
       await this.livePublish?.wait();
       if (this.halted) return;
+      const deadlineMs = this.openCloseBudget();
       if (this.turnRunning) {
         // A cancel that throws must not abandon the close: the stream still gets sealed and the row still ends.
         try {
@@ -997,9 +1070,13 @@ export class ThreadJobRun {
         } catch (error) {
           this.deps.log.warn('thread session cancel failed', { jobId: this.jobId, error: errorMessage(error) });
         }
-        await this.turnSettled;
+        if (!(await this.settleWithin(this.turnSettled, deadlineMs))) {
+          // The turn is fenced, not waited for: the close goes on without its transcript.
+          this.deps.log.warn('thread turn did not settle within the close budget', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
+        }
       }
-      await this.closeHeldSession();
+      if (this.halted) return;
+      await this.closeHeldSession(deadlineMs);
       // A halt that landed while the turn settled or the session closed: nothing after this writes a stream line.
       if (this.halted) return;
       const writer = this.writer;
@@ -1008,6 +1085,8 @@ export class ThreadJobRun {
         if (failed) writer.failed(reason);
         else writer.closed(reason);
       }
+      // The stream is sealed. A turn that settles from here writes no line, re-arms no timer and journals nothing.
+      this.terminalWritten = true;
       await this.awaitLogs(this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs));
       this.stopHeartbeat();
       if (this.halted) return;
@@ -1173,6 +1252,10 @@ export class ThreadJobRun {
     this.halted = true;
     this.stopIdle();
     this.stopHeartbeat();
+    // A bounded close wait races this, so a halt never leaves a timer behind for a row nobody will read.
+    const settleHalt = this.settleHalt;
+    this.settleHalt = null;
+    settleHalt?.();
     if (this.turnRunning) {
       try {
         this.session?.cancel('halted');
@@ -1216,14 +1299,22 @@ export class ThreadJobRun {
   }
 
   /**
-   * Waits for the stored session close, for at most `threadCloseTimeoutMs`; a timeout is reported and never fatal.
-   * With `open` still pending there is no close to await — the session `open` resolves is closed then, unawaited.
+   * Waits for the stored session close for at most what is left of `deadlineMs` — a full `threadCloseTimeoutMs` when
+   * the wait is not part of the run's close. An exhausted budget still starts nothing less: the close was already
+   * started by its one owner, and this only reports that the run is not waiting for it any longer. A timeout is
+   * reported and never fatal. With `open` still pending there is no close to await — the session `open` resolves is
+   * closed then, unawaited.
    */
-  private async awaitSessionClose(): Promise<void> {
+  private async awaitSessionClose(deadlineMs: number = this.freshCloseDeadline()): Promise<void> {
     const close = this.sessionClose;
     if (close === null) return;
+    const remaining = deadlineMs - this.deps.now().getTime();
+    if (remaining <= 0) {
+      this.deps.log.warn('thread session close timed out', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
+      return;
+    }
     const abort = new AbortController();
-    const timedOut = this.deps.sleep(this.deps.tuning.threadCloseTimeoutMs, abort.signal).then(() => true);
+    const timedOut = this.deps.sleep(remaining, abort.signal).then(() => true);
     try {
       if (await Promise.race([close.then(() => false), timedOut])) {
         this.deps.log.warn('thread session close timed out', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
