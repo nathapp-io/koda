@@ -88,6 +88,18 @@ describe('cancel', () => {
       expect(b.journal.pendingEvents('j1', 1, 10)).toEqual([]);
     }
   });
+
+  test('the cutoff is a RUN rule: a journal-only non-RUN job in UPLOADING still accepts a fresh CANCEL (F1)', async () => {
+    for (const command of ['PLAN', 'AGENT', 'REVIEW', 'THREAD', 'CONFIG_EDIT'] as const) {
+      const b = build();
+      b.add({}, 1, command);
+      b.journal.updateJob('j1', 1, { state: 'UPLOADING', pid: 4242, pgid: 4242 });
+      expect(b.supervisor.cancel('j1', 1)).toBe('ok');
+      expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).not.toBeNull();
+      expect(b.journal.getJob('j1', 1)?.state).toBe('UPLOADING');
+      expect(b.journal.pendingEvents('j1', 1, 10)).toEqual([]);
+    }
+  });
 });
 
 describe('abandon (D49, Review focus 4)', () => {

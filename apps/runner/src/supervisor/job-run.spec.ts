@@ -1155,6 +1155,13 @@ describe('resume (readopt)', () => {
     await started;
     expect(stateNames(b)).toEqual(['UPLOADING', 'CANCELLED']);       // one cutoff step, then one terminal event
   });
+  test.each(['PLAN', 'AGENT', 'REVIEW'] as const)('F1: the UPLOADING cutoff is a RUN rule: a live %s run still accepts a cancel', async (command) => {
+    const b = build(command);
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', pid: 4242, pgid: 4242 });
+    expect(b.run.requestCancel()).toBe(true);
+    expect(b.journal.getJob('j1', 1)?.cancelRequestedAt).not.toBeNull();
+    expect(b.journal.getJob('j1', 1)?.state).toBe('UPLOADING');
+  });
   test('a job whose terminal event was journaled before the crash is only cleaned up', async () => {
     const b = build();
     b.journal.updateJob('j1', 1, { state: 'COMPLETED' });

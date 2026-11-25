@@ -1,4 +1,4 @@
-import { CONFIG_COMPLETED_OUTCOMES, isConfigKind, type ConfigJobKind, type FleetJobStateName, type SnapshotEventPayload, type StateEventPayload } from '@nathapp/fleet-protocol';
+import { CONFIG_COMPLETED_OUTCOMES, isConfigKind, type ConfigJobKind, type SnapshotEventPayload, type StateEventPayload } from '@nathapp/fleet-protocol';
 import type { BundleFile } from '../bundle/build-bundle';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { errorMessage } from '../errors';
@@ -71,13 +71,16 @@ function terminalReason(verdict: Verdict, outcome: UploadOutcome): string | unde
 }
 
 /**
- * Finding 8 (US-006): the cancellation cutoff. A run's finish path commits the durable cancellation check and the
- * RUNNING -> UPLOADING transition as one journal step; from that point a CANCEL is refused, so an acknowledged
- * cancellation can never be followed by a run that finishes on its own verdict. Before it — ASSIGNED, a row still
- * queued for the repo mutex, RUNNING — the request is accepted and durable.
+ * Finding 8 (US-006): the cancellation cutoff, which is a RUN rule. A RUN's finish path commits the durable
+ * cancellation check and the RUNNING -> UPLOADING transition as one journal step; from that point a CANCEL is refused,
+ * so an acknowledged cancellation can never be followed by a run that finishes on its own verdict. Before it —
+ * ASSIGNED, a row still queued for the repo mutex, RUNNING — the request is accepted and durable. Every other command
+ * kind keeps its previous rule: any non-terminal row accepts (their verdicts and CONFIG's authoritative result are
+ * decided elsewhere, and non-RUN behavior is out of this story's scope).
  */
-export function canAcceptCancel(state: FleetJobStateName): boolean {
-  return !isTerminalState(state) && state !== 'UPLOADING';
+export function canAcceptCancel(row: Pick<JobRow, 'command' | 'state'>): boolean {
+  if (isTerminalState(row.state)) return false;
+  return row.command !== 'RUN' || row.state !== 'UPLOADING';
 }
 
 /** One job, from ASSIGN to cleanup (design §2). Only legal S1 §5.4 transitions are ever emitted (JobEvents refuses the rest). */
@@ -193,7 +196,7 @@ export class JobRun {
 
   requestCancel(): boolean {
     const row = this.row();
-    if (!row || !canAcceptCancel(row.state)) return false;
+    if (!row || !canAcceptCancel(row)) return false;
     if (this.queued && row.state === 'ASSIGNED') {
       this.endWhileQueued();
       return true;

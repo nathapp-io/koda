@@ -169,9 +169,10 @@ export class Supervisor {
     const row = this.deps.journal.getJob(jobId, leaseEpoch);
     if (!row) return 'unknown';
     // No run yet (the daemon just restarted): record the cancel; READOPT validates the process before anything is
-    // signalled. Finding 8 (US-006): only a row before the upload cutoff may record it — an UPLOADING or terminal row
-    // refuses, without mutating the journal (it is turned into CANCELLED server-side only when it takes effect).
-    if (!canAcceptCancel(row.state)) return 'refused';
+    // signalled. Finding 8 (US-006): a RUN past its upload cutoff (UPLOADING, terminal) refuses without mutating the
+    // journal — it is turned into CANCELLED server-side only when the cancellation takes effect. No other command kind
+    // is cut off; a terminal row of any kind refuses.
+    if (!canAcceptCancel(row)) return 'refused';
     if (row.cancelRequestedAt === null) {
       this.deps.journal.updateJob(jobId, leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
     }
