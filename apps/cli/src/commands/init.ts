@@ -1,6 +1,7 @@
 import { finishSuccess } from '../utils/output';
-import { promises as fs } from 'fs';
-import { join } from 'path';
+import { constants, promises as fs } from 'fs';
+import { join, resolve } from 'path';
+import { getGlobalConfigPath } from '../config';
 import { resolveAuth } from '../utils/auth';
 import { projectsControllerFindBySlug } from '../generated';
 import { configureApiClient } from '../utils/api-client';
@@ -30,8 +31,32 @@ export interface InitDeps {
   cwd: () => string;
 }
 
+async function writeProjectConfig(filePath: string, content: string): Promise<void> {
+  const globalPath = getGlobalConfigPath();
+  const collisionMessage = 'Cannot initialize over the global config. Choose a project directory with --cwd.';
+  if (resolve(filePath) === globalPath) throw new Error(collisionMessage);
+
+  // Open without truncating. Check and write the same file descriptor so a linked
+  // destination cannot redirect a subsequent write to the credential store.
+  const file = await fs.open(filePath, constants.O_WRONLY | constants.O_CREAT);
+  try {
+    const globalStat = await fs.stat(globalPath, { bigint: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return undefined;
+      throw err;
+    });
+    if (globalStat) {
+      const target = await file.stat({ bigint: true });
+      if (target.dev === globalStat.dev && target.ino === globalStat.ino) throw new Error(collisionMessage);
+    }
+    await file.truncate(0);
+    await file.writeFile(content, 'utf8');
+  } finally {
+    await file.close();
+  }
+}
+
 export const _initDeps: InitDeps = {
-  writeFile: (filePath: string, content: string) => fs.writeFile(filePath, content, 'utf-8'),
+  writeFile: writeProjectConfig,
   mkdir: (dirPath: string, opts: { recursive: boolean }) => fs.mkdir(dirPath, opts).then(() => undefined),
   fetchProject: async (apiUrl: string, apiKey: string, slug: string) => {
     configureApiClient(apiUrl.replace(/\/api\/?$/, ''), apiKey);
