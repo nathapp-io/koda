@@ -40,7 +40,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-koda}
       POSTGRES_DB: ${POSTGRES_DB:-koda}
     ports:
-      - "5432:5432"
+      - target: 5432
+        published: "5432"
+        host_ip: "${KODA_POSTGRES_BIND_IP:-127.0.0.1}"
     volumes:
       - koda_pg_dev:/var/lib/postgresql/data
     healthcheck:

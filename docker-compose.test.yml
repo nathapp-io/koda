@@ -10,7 +10,9 @@ services:
       POSTGRES_PASSWORD: koda
       POSTGRES_DB: koda_test
     ports:
-      - "5433:5432"
+      - target: 5432
+        published: "5433"
+        host_ip: "${KODA_POSTGRES_BIND_IP:-127.0.0.1}"
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:

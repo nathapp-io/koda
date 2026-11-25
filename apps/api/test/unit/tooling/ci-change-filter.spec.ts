@@ -93,8 +93,8 @@ describe('CI change filter workflow step', () => {
     expect(runFilter('pull_request', ['deployments/example/rollback.sh']).output).toBe('code=true');
   });
 
-  it('recognizes the root Compose file as code', () => {
-    expect(runFilter('pull_request', ['docker-compose.yml']).output).toBe('code=true');
+  it.each(['docker-compose.yml', 'docker-compose.dev.yml', 'docker-compose.test.yml'])('recognizes a change to %s alone as code', (file) => {
+    expect(runFilter('pull_request', [file]).output).toBe('code=true');
   });
 
   it('recognizes a deployment file whose path Git would quote', () => {
@@ -132,9 +132,9 @@ describe('CI change filter workflow step', () => {
     }
   });
 
-  it('includes deployment, root compose, and OpenAPI config paths in push filters', () => {
+  it('includes deployment, Compose, and OpenAPI config paths in push filters', () => {
     const pushBlock = workflow.slice(workflow.indexOf('  push:'), workflow.indexOf('  # No workflow-level path filter'));
-    for (const path of ['openapi-ts.config.ts', 'docker-compose.yml', 'deployments/**']) {
+    for (const path of ['openapi-ts.config.ts', 'docker-compose.yml', 'docker-compose.dev.yml', 'docker-compose.test.yml', 'deployments/**']) {
       expect(pushBlock).toContain(`- "${path}"`);
     }
   });
