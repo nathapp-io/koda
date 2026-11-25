@@ -66,6 +66,42 @@ describeIntegration('MemoryGovernanceService paging (M21)', () => {
     expect(await prismaService.client.memoryItem.count({ where: { projectId, status: 'active' } })).toBe(0);
   });
 
+  it('downranks only eligible rows and counts each changed row once', async () => {
+    const prisma = prismaService.client;
+    const other = await prisma.project.create({ data: { name: 'Other', slug: `other-${Date.now()}`, key: 'OTHER' } });
+    const stale = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000);
+    const base = { projectId, kind: MemoryKind.FACT, predicate: 'status', createdAt: stale, confidence: 0.2 };
+    await prisma.memoryItem.createMany({
+      data: [
+        ...Array.from({ length: 125 }, (_, i) => ({ ...base, subject: `eligible:${i}` })),
+        { ...base, subject: 'below-target', confidence: 0.05 },
+        { ...base, subject: 'already-target', confidence: 0.1 },
+        { ...base, subject: 'threshold', confidence: 0.3 },
+        { ...base, subject: 'recent', createdAt: past },
+        { ...base, subject: 'inactive', status: 'rejected' },
+        { ...base, subject: 'deleted', deletedAt: past },
+        { ...base, subject: 'other-project', projectId: other.id },
+      ],
+    });
+
+    expect(await service.downrankStaleLowConfidence(projectId)).toEqual({ count: 126 });
+    expect(await service.downrankStaleLowConfidence(projectId)).toEqual({ count: 0 });
+    expect(await prisma.memoryItem.count({ where: { projectId, confidence: 0.1 } })).toBe(127);
+    const rows = await prisma.memoryItem.findMany({
+      where: { projectId: { in: [projectId, other.id] }, subject: { not: { startsWith: 'eligible:' } } },
+      select: { subject: true, confidence: true },
+    });
+    expect(Object.fromEntries(rows.map(({ subject, confidence }) => [subject, confidence]))).toEqual({
+      'below-target': 0.1,
+      'already-target': 0.1,
+      threshold: 0.3,
+      recent: 0.2,
+      inactive: 0.2,
+      deleted: 0.2,
+      'other-project': 0.2,
+    });
+  });
+
   it('deduplicates rows with the same key that sit more than a page apart', async () => {
     // A legacy active row without activeKey (the unique index allows one keyed row per key).
     const winner = await prismaService.client.memoryItem.create({

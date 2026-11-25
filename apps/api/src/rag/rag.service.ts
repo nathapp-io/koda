@@ -1,5 +1,7 @@
 import type { LanceRecord } from './lance-table-manager';
 import { Injectable, Optional, Inject } from '@nestjs/common';
+import { OutboxService } from '@nathapp/nestjs-outbox';
+import { KeyedMutex } from '../common/utils/keyed-mutex';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { GraphStoreService } from './graph-store.service';
@@ -32,12 +34,15 @@ export interface KbDocumentWriteSession {
 
 @Injectable()
 export class RagService {
+  private readonly graphImportLock = new KeyedMutex();
+
   constructor(
     private readonly vectorStore: VectorStore,
     @Optional() private readonly ragRepository?: PrismaRagRepository,
     @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
     @Optional() private readonly graphStore?: GraphStoreService,
     @Optional() private readonly incrementalDiff?: IncrementalGraphDiffService,
+    @Optional() private readonly outbox?: OutboxService,
   ) {}
 
   withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true; additionRecovery?: true }): Promise<T> {
@@ -120,8 +125,7 @@ export class RagService {
    * Imports a Graphify knowledge graph into the knowledge base for a project.
    * Uses incremental diff-and-apply when IncrementalGraphDiffService is available,
    * falling back to full re-import otherwise.
-   * Updates graphifyLastImportedAt on the project atomically with the import to
-   * ensure the timestamp is never out-of-sync with actual graph content.
+   * Records the import timestamp and refresh event after the graph and vectors have been written.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
   async importGraphify(
@@ -130,26 +134,35 @@ export class RagService {
     nodes: any[],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     links: any[],
+    eventType: 'rag_graph_refresh' | 'graphify_import' = 'rag_graph_refresh',
   ): Promise<{ imported: number; cleared: number }> {
     await this.vectorStore.validateProjectId(projectId);
 
     const typedNodes = nodes as GraphifyNodeDto[];
     const typedLinks = links as GraphifyLinkDto[];
 
-    let result: { imported: number; cleared: number };
+    return this.graphImportLock.run(projectId, async () => {
+      let result: { imported: number; cleared: number };
+      if (this.incrementalDiff) {
+        const diffResult = await this.incrementalDiff.diffAndApply(projectId, typedNodes, typedLinks);
+        result = { imported: typedNodes.length, cleared: diffResult.removed };
+      } else {
+        result = await this.importGraphifyFull(projectId, typedNodes, typedLinks);
+      }
 
-    if (this.incrementalDiff) {
-      const diffResult = await this.incrementalDiff.diffAndApply(projectId, typedNodes, typedLinks);
-      result = { imported: typedNodes.length, cleared: diffResult.removed };
-    } else {
-      result = await this.importGraphifyFull(projectId, typedNodes, typedLinks);
-    }
-
-    // Update the timestamp immediately after the import completes so it is always
-    // in sync with the graph content (best-effort single write, no cross-store txn).
-    await this.ragRepository?.updateGraphifyLastImportedAt(projectId);
-
-    return result;
+      // The graph and vector stores have their own boundaries. Commit the timestamp
+      // and event together, after those writes succeed, for every import caller.
+      const recordImport = async () => {
+        await this.ragRepository?.updateGraphifyLastImportedAt(projectId);
+        await this.outbox?.record({
+          type: eventType,
+          payload: { projectId, nodeCount: typedNodes.length, linkCount: typedLinks.length },
+          metadata: { projectId },
+        });
+      };
+      await (this.txManager ? this.txManager.run(recordImport) : recordImport());
+      return result;
+    });
   }
 
   private async importGraphifyFull(

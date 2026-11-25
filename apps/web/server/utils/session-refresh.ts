@@ -29,7 +29,7 @@ function cookieValues(header: string | undefined): Map<string, string> {
 export function shouldRefreshSession(event: SessionRefreshRequest): boolean {
   const { req } = event.node
   const path = req.url?.split('?')[0] ?? ''
-  if (req.method !== 'GET') return false
+  if (req.method !== 'GET' || path === '/healthz') return false
   if (path.startsWith('/api/') || path.startsWith('/_nuxt/') || path.startsWith('/__nuxt')) return false
 
   const accept = Array.isArray(req.headers.accept) ? req.headers.accept.join(',') : req.headers.accept ?? ''

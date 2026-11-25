@@ -7,7 +7,7 @@
  * It is not a database lock: two processes still need a database constraint behind it.
  */
 export class KeyedMutex {
-  private tails: ReadonlyMap<string, Promise<unknown>> = new Map();
+  private readonly tails = new Map<string, Promise<void>>();
 
   get size(): number {
     return this.tails.size;
@@ -17,12 +17,10 @@ export class KeyedMutex {
     const previous = this.tails.get(key) ?? Promise.resolve();
     const result = previous.then(() => fn(), () => fn());
     const tail = result.then(() => undefined, () => undefined);
-    this.tails = new Map([...this.tails, [key, tail]]);
+    this.tails.set(key, tail);
     void tail.then(() => {
       if (this.tails.get(key) !== tail) return;
-      const next = new Map(this.tails);
-      next.delete(key);
-      this.tails = next;
+      this.tails.delete(key);
     });
     return result;
   }

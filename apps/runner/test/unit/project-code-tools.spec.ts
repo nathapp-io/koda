@@ -14,6 +14,7 @@ afterAll(() => tmp.cleanup());
 /** README.md and src/b.md are Markdown; big.txt is 200000 bytes over 2000 lines. */
 const A_FILES = {
   'README.md': '# a\n',
+  'oversized-search.txt': `oversized ${'界'.repeat(80_000)}\nnext line`,
   'big.txt': `${'x'.repeat(99)}\n`.repeat(2_000),
   'bin.dat': 'before\u0000after\n',
   'docs/readme.md': 'needle in docs\n',
@@ -107,7 +108,7 @@ describe('project code tools (US-005)', () => {
     const result = await run(tools, 'list_files', { repo: 'o/a' });
     expect(result.isError).toBeUndefined();
     expect(result.content.split('\n')).toEqual([
-      'README.md', 'big.txt', 'bin.dat', 'docs/readme.md', 'empty.txt', 'src/a.ts', 'src/b.md', 'src/日本語.txt',
+      'README.md', 'big.txt', 'bin.dat', 'docs/readme.md', 'empty.txt', 'oversized-search.txt', 'src/a.ts', 'src/b.md', 'src/日本語.txt',
     ]);
     expect(result.content).not.toContain('later.txt');
   });
@@ -160,6 +161,60 @@ describe('project code tools (US-005)', () => {
     const tools = buildProjectCodeTools(context([fixture.c]));
     expect((await run(tools, 'search_repo', { pattern: 'x', max: 2 })).content)
       .toBe('o/c:x.txt:1:x1\no/c:x.txt:2:x2\n[truncated]');
+  });
+
+  test('search marks oversized hits and stops before opening another pin', async () => {
+    const missing = { ...fixture.b, gitDir: join(fixture.b.gitDir, 'missing') };
+    const tools = buildProjectCodeTools(context([fixture.a, missing]));
+    expect(await run(tools, 'search_repo', { pattern: 'oversized' })).toEqual({ content: '[truncated]' });
+  });
+
+  test('search stops after confirming one hit beyond the requested count', async () => {
+    const missing = { ...fixture.b, gitDir: join(fixture.b.gitDir, 'missing') };
+    const tools = buildProjectCodeTools(context([fixture.c, missing]));
+    expect(await run(tools, 'search_repo', { pattern: 'x', max: 1 }))
+      .toEqual({ content: 'o/c:x.txt:1:x1\n[truncated]' });
+  });
+
+  test('search accepts a byte-exact formatted line even when the raw git sha makes the line larger', async () => {
+    const base = await tmp.make('project-search-byte-exact');
+    const prefix = 'o/s:fit.txt:1:';
+    const line = `needle ${'x'.repeat(65_536 - prefix.length - 'needle '.length)}`;
+    const { dir } = await makeOrigin(base, 'fit', { files: { 'fit.txt': line } });
+    const pin = { repo: 'o/s', sha: await sh(dir, 'rev-parse', 'main'), gitDir: dir };
+    const tools = buildProjectCodeTools(context([pin]));
+    const result = await run(tools, 'search_repo', { pattern: 'needle', max: 1 });
+    expect(result.content === `${prefix}${line}`).toBe(true);
+  });
+
+  test('read_file keeps exact line numbers after a giant skipped line', async () => {
+    const tools = buildProjectCodeTools(context([fixture.a]));
+    expect(await run(tools, 'read_file', { repo: 'o/a', path: 'oversized-search.txt', startLine: 2 }))
+      .toEqual({ content: `o/a:oversized-search.txt@${sha7(fixture.a)} lines 2-2 of 2\nnext line` });
+  });
+
+  test('read_file detects binary content before the requested range in an oversized first line', async () => {
+    const base = await tmp.make('project-read-binary');
+    const { dir } = await makeOrigin(base, 'binary', {
+      files: { 'binary.txt': `${'界'.repeat(7_999)}\0${'x'.repeat(70_000)}\nnext line\n` },
+    });
+    const pin = { repo: 'o/binary', sha: await sh(dir, 'rev-parse', 'main'), gitDir: dir };
+    const tools = buildProjectCodeTools(context([pin]));
+    expect(await run(tools, 'read_file', { repo: pin.repo, path: 'binary.txt', startLine: 2 }))
+      .toEqual({ content: 'binary file', isError: true });
+  });
+
+  test('read_file marks a giant final line with no trailing newline', async () => {
+    const base = await tmp.make('project-read-eof');
+    const { dir } = await makeOrigin(base, 'eof', {
+      files: { 'big.txt': `first\n${'界'.repeat(30_000)}`, 'bom.txt': '\uFEFF' },
+    });
+    const pin = { repo: 'o/eof', sha: await sh(dir, 'rev-parse', 'main'), gitDir: dir };
+    const tools = buildProjectCodeTools(context([pin]));
+    expect(await run(tools, 'read_file', { repo: pin.repo, path: 'big.txt' }))
+      .toEqual({ content: `o/eof:big.txt@${sha7(pin)} lines 1-2 of 2\nfirst\n[truncated]` });
+    expect(await run(tools, 'read_file', { repo: pin.repo, path: 'bom.txt' }))
+      .toEqual({ content: `o/eof:bom.txt@${sha7(pin)} lines 0-0 of 0` });
   });
 
   test('AC-10: a grep past the search timeout answers search timed out', async () => {
@@ -223,9 +278,11 @@ describe('project code tools (US-005)', () => {
 
   test('every git call runs in the pin with an isolated config and the search timeout', async () => {
     const seen: Array<{ cwd: string; env: Readonly<Record<string, string>> | undefined; timeoutMs: number | undefined }> = [];
+    let grepArgs: readonly string[] = [];
     const git: Git = {
       run: async (args, options) => {
         seen.push({ cwd: options.cwd, env: options.env, timeoutMs: options.timeoutMs });
+        if (args.includes('grep')) grepArgs = args;
         return { code: 0, stdout: args.includes('ls-tree') ? 'a.txt\0' : 'needle\n', stderr: '' };
       },
       ok: async () => '',
@@ -234,6 +291,7 @@ describe('project code tools (US-005)', () => {
     const tools = buildProjectCodeTools(context([pin], { git, searchTimeoutMs: 4_321 }));
     await run(tools, 'list_files', { repo: 'o/a' });
     await run(tools, 'search_repo', { repo: 'o/a', pattern: 'needle' });
+    expect(grepArgs).toContain('--threads=1');
     expect(seen).toEqual([
       { cwd: '/mirrors/a.git', env: { GIT_CONFIG_NOSYSTEM: '1' }, timeoutMs: 4_321 },
       { cwd: '/mirrors/a.git', env: { GIT_CONFIG_NOSYSTEM: '1' }, timeoutMs: 4_321 },

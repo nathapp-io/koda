@@ -55,3 +55,55 @@ export function joinCapped(lines: readonly string[], maxBytes: number, cut: bool
   }
   return [...kept, TRUNCATED].join('\n');
 }
+
+/** Retain only whole leading lines under a byte and entry budget. */
+export class CappedLines {
+  readonly lines: string[] = [];
+  bytes = 0;
+  cut = false;
+
+  constructor(readonly maxBytes: number, readonly maxEntries = Infinity) {}
+
+  add(line: string | null): boolean {
+    if (this.cut) return false;
+    if (line === null || this.lines.length === this.maxEntries) {
+      this.cut = true;
+      return false;
+    }
+    const next = this.bytes + (this.lines.length > 0 ? 1 : 0) + encoder.encode(line).byteLength;
+    if (next > this.maxBytes) {
+      this.cut = true;
+      return false;
+    }
+    this.lines.push(line);
+    this.bytes = next;
+    return true;
+  }
+
+  content(): string {
+    return joinCapped(this.lines, this.maxBytes, this.cut);
+  }
+}
+
+/** Keep an exact count for listings even after the returned prefix fills up. */
+export class FileListing {
+  private readonly prefix: CappedLines;
+  private count = 0;
+
+  constructor(readonly maxEntries: number, readonly maxBytes: number) {
+    this.prefix = new CappedLines(maxBytes);
+  }
+
+  add(path: string | null): void {
+    this.count++;
+    if (this.count <= this.maxEntries) this.prefix.add(path);
+  }
+
+  content(): string {
+    const lines = this.prefix.lines;
+    if (!this.prefix.cut && this.count > this.maxEntries) {
+      return joinCapped([...lines, `[truncated: ${this.count - this.maxEntries} more]`], this.maxBytes, false);
+    }
+    return this.prefix.content();
+  }
+}

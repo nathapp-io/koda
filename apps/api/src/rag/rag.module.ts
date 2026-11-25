@@ -30,7 +30,7 @@ import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Injectable()
-class EntityStoreWarmup implements OnModuleInit {
+export class EntityStoreWarmup implements OnModuleInit {
   private readonly logger = new Logger(EntityStoreWarmup.name);
 
   constructor(
@@ -40,13 +40,12 @@ class EntityStoreWarmup implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    this.outboxFanOutRegistry.register('graphify_import', async (payload: unknown) => {
-      await this.entityStore.handleOutboxEvent({
-        eventType: 'graphify_import',
-        payload,
+    for (const eventType of ['rag_graph_refresh', 'graphify_import']) {
+      this.outboxFanOutRegistry.register(eventType, async (payload: unknown) => {
+        await this.entityStore.handleOutboxEvent({ eventType, payload });
+        this.logger.debug(`EntityStore index updated from ${eventType} event`);
       });
-      this.logger.debug('EntityStore index updated from graphify_import event');
-    });
+    }
 
     this.outboxFanOutRegistry.register('ticket_event', async (payload: unknown) => {
       await this.entityStore.handleOutboxEvent({
@@ -60,14 +59,22 @@ class EntityStoreWarmup implements OnModuleInit {
 
     if (this.ragRepository) {
       try {
-        const projects = await this.ragRepository.findAllActiveProjectIds();
-        const projectIds = projects.map(p => p.id);
-        if (projectIds.length > 0) {
-          for (const projectId of projectIds) {
-            await this.entityStore.indexGraphifyEntitiesForProject(projectId);
+        let after: string | undefined;
+        let count = 0;
+        for (;;) {
+          const projects = await this.ragRepository.findActiveProjectIdsPage(after);
+          if (projects.length === 0) break;
+          for (const project of projects) {
+            try {
+              await this.entityStore.indexGraphifyEntitiesForProject(project.id);
+              count++;
+            } catch (err) {
+              this.logger.warn(`EntityStore warmup failed for project ${project.id}: ${(err as Error).message}`);
+            }
           }
-          this.logger.log(`EntityStore warmup completed for ${projectIds.length} projects`);
+          after = projects[projects.length - 1].id;
         }
+        if (count > 0) this.logger.log(`EntityStore warmup completed for ${count} projects`);
       } catch (err) {
         this.logger.warn(`EntityStore warmup skipped: ${(err as Error).message}`);
       }

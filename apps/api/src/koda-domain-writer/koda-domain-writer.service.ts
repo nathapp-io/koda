@@ -215,15 +215,8 @@ export class KodaDomainWriter {
 
     await this.assertProjectExists(data.projectId);
 
-    const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links);
-
-    // The import spans the vector store and Prisma, which cannot share one Prisma
-    // transaction; the event is recorded once the import has succeeded.
-    await this.outbox.record({
-      type: 'graphify_import',
-      payload: { projectId: data.projectId, nodeCount: data.nodes.length, linkCount: data.links.length },
-      metadata: { projectId: data.projectId, eventId: `${data.projectId}:${Date.now()}` },
-    });
+    // Domain imports also trigger persistent entity-graph link inference.
+    const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links, 'graphify_import');
 
     return {
       metadata: { imported: result.imported, cleared: result.cleared },

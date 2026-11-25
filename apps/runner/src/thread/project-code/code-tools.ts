@@ -1,8 +1,10 @@
 import type { EmbedderTool } from '@nathapp/nax-agent';
-import type { Git, GitResult } from '../../executor/git';
+import type { Git, GitOptions } from '../../executor/git';
+import { runGitRecords } from '../../executor/git-records';
 import { firstLine } from '../../errors';
 import { assertRelativePath } from '../../paths/safe-segment';
-import { checkGlob, fieldOf, InvalidToolInput, joinCapped, refused, refuseInvalidInput } from '../tools/shared';
+import { CappedLines, checkGlob, fieldOf, FileListing, InvalidToolInput, joinCapped, refused, refuseInvalidInput } from '../tools/shared';
+import { checkFixed, checkMax, checkPattern, collectGrep, GREP_ARGS, SEARCH_MAX_BYTES } from '../tools/grep-output';
 import type { ThreadToolResult } from '../tools/types';
 
 /** A repository readable through one of its pinned commits, held in a bare mirror at `gitDir`. */
@@ -23,10 +25,6 @@ export interface ProjectCodeToolContext {
 
 const LIST_MAX_ENTRIES = 2_000;
 const LIST_MAX_BYTES = 262_144;
-const SEARCH_MAX_BYTES = 65_536;
-const MAX_PATTERN_CHARS = 1_000;
-const DEFAULT_MAX_HITS = 200;
-const MAX_HITS_LIMIT = 200;
 /** A NUL in this many leading characters marks the content binary. */
 const BINARY_SCAN_CHARS = 8_000;
 const SYMLINK_MODE = '120000';
@@ -36,8 +34,8 @@ function pinFor(ctx: ProjectCodeToolContext, repo: unknown): ProjectCodePin | un
 }
 
 /** Every git call reads a pin: the mirror as cwd, no system config, and the search timeout. */
-function runGit(ctx: ProjectCodeToolContext, pin: ProjectCodePin, args: readonly string[]): Promise<GitResult> {
-  return ctx.git.run(args, { cwd: pin.gitDir, env: { GIT_CONFIG_NOSYSTEM: '1' }, timeoutMs: ctx.searchTimeoutMs });
+function gitOptions(ctx: ProjectCodeToolContext, pin: ProjectCodePin): GitOptions {
+  return { cwd: pin.gitDir, env: { GIT_CONFIG_NOSYSTEM: '1' }, timeoutMs: ctx.searchTimeoutMs };
 }
 
 async function listRepos(ctx: ProjectCodeToolContext): Promise<ThreadToolResult> {
@@ -56,43 +54,19 @@ async function listFiles(ctx: ProjectCodeToolContext, input: unknown): Promise<T
   const rawGlob = fieldOf(input, 'glob');
   const glob = rawGlob === undefined ? undefined : checkGlob(rawGlob);
 
-  const result = await runGit(ctx, pin, ['ls-tree', '-r', '-z', '--name-only', pin.sha]);
-  if (result.code !== 0) return refused(firstLine(result.stderr) || `git ls-tree exited ${result.code}`);
   const matcher = glob === undefined ? undefined : new Bun.Glob(glob);
-  const entries = result.stdout.split('\0').filter((path) => path.length > 0
-    && (dir === undefined || path.startsWith(`${dir}/`))
-    && (matcher === undefined || matcher.match(path)));
-  const lines = entries.slice(0, LIST_MAX_ENTRIES);
-  if (entries.length > LIST_MAX_ENTRIES) lines.push(`[truncated: ${entries.length - LIST_MAX_ENTRIES} more]`);
-  return { content: joinCapped(lines, LIST_MAX_BYTES, false) };
-}
-
-function checkPattern(value: unknown): string {
-  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_PATTERN_CHARS) throw new InvalidToolInput('invalid pattern');
-  return value;
-}
-
-function checkMax(value: unknown): number {
-  if (value === undefined) return DEFAULT_MAX_HITS;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_HITS_LIMIT) throw new InvalidToolInput('invalid max');
-  return value;
-}
-
-function checkFixed(value: unknown): boolean {
-  if (value === undefined) return false;
-  if (typeof value !== 'boolean') throw new InvalidToolInput('invalid fixed');
-  return value;
-}
-
-/** One `git grep`: its hit lines (none on exit 1, no match), or the refusal to return to the agent. */
-type GrepOutcome = { hits: string[] } | { failed: ThreadToolResult };
-
-async function grepPin(ctx: ProjectCodeToolContext, pin: ProjectCodePin, args: readonly string[], startedAt: number): Promise<GrepOutcome> {
-  const result = await runGit(ctx, pin, args);
-  if (result.code === 0) return { hits: result.stdout.split('\n').filter((line) => line.length > 0) };
-  if (result.code === 1) return { hits: [] };
-  if (ctx.nowMs() - startedAt >= ctx.searchTimeoutMs) return { failed: refused('search timed out') };
-  return { failed: refused(firstLine(result.stderr) || `git grep exited ${result.code}`) };
+  const listing = new FileListing(LIST_MAX_ENTRIES, LIST_MAX_BYTES);
+  const result = await runGitRecords(ctx.git, ['ls-tree', '-r', '-z', '--name-only', pin.sha], gitOptions(ctx, pin), {
+    delimiter: '\0',
+    maxRecordBytes: LIST_MAX_BYTES,
+    onRecord(path) {
+      if (path === null || (path.length > 0 && (dir === undefined || path.startsWith(`${dir}/`))
+        && (matcher === undefined || matcher.match(path)))) listing.add(path);
+      return true;
+    },
+  });
+  if (result.code !== 0) return refused(firstLine(result.stderr) || `git ls-tree exited ${result.code}`);
+  return { content: listing.content() };
 }
 
 async function search(ctx: ProjectCodeToolContext, input: unknown): Promise<ThreadToolResult> {
@@ -107,18 +81,17 @@ async function search(ctx: ProjectCodeToolContext, input: unknown): Promise<Thre
   const targets = named === undefined ? ctx.pins : [named];
 
   const startedAt = ctx.nowMs();
-  const hits: string[] = [];
+  const hits = new CappedLines(SEARCH_MAX_BYTES, max);
   for (const pin of targets) {
-    // Without a named repo the search walks every pin in order, so a hit line carries its repo.
-    const args = ['-c', 'core.quotePath=false', 'grep', '-n', '-I', '--no-color', fixed ? '-F' : '-E', '-e', pattern, pin.sha];
+    const args = [...GREP_ARGS, fixed ? '-F' : '-E', '-e', pattern, pin.sha];
     if (glob !== undefined) args.push('--', `:(glob)${glob}`);
-    const outcome = await grepPin(ctx, pin, args, startedAt);
-    if ('failed' in outcome) return outcome.failed;
-    // grep prefixes each hit with the sha it searched; the repo the caller knows replaces it.
-    hits.push(...outcome.hits.map((line) => `${pin.repo}:${line.slice(line.indexOf(':') + 1)}`));
+    // Replace grep's pinned sha with the repository name.
+    const failed = await collectGrep(ctx.git, args, gitOptions(ctx, pin), () => ctx.nowMs() - startedAt >= ctx.searchTimeoutMs,
+      hits, { from: `${pin.sha}:`, to: `${pin.repo}:` });
+    if (failed !== undefined) return failed;
+    if (hits.cut) break;
   }
-  if (hits.length === 0) return { content: 'no matches' };
-  return { content: joinCapped(hits.slice(0, max), SEARCH_MAX_BYTES, hits.length > max) };
+  return { content: hits.lines.length === 0 && !hits.cut ? 'no matches' : hits.content() };
 }
 
 function checkStartLine(value: unknown): number {
@@ -133,13 +106,6 @@ function checkEndLine(value: unknown): number | undefined {
   return value;
 }
 
-/** The file's lines: a trailing newline ends the last line rather than opening an empty one. */
-function splitLines(content: string): string[] {
-  const lines = content.split('\n');
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-  return lines;
-}
-
 async function readFile(ctx: ProjectCodeToolContext, input: unknown): Promise<ThreadToolResult> {
   const pin = pinFor(ctx, fieldOf(input, 'repo'));
   if (pin === undefined) return refused('unknown repo');
@@ -148,28 +114,57 @@ async function readFile(ctx: ProjectCodeToolContext, input: unknown): Promise<Th
   const endLine = checkEndLine(fieldOf(input, 'endLine'));
   if (endLine !== undefined && endLine < startLine) throw new InvalidToolInput('invalid lines');
 
-  const tree = await runGit(ctx, pin, ['ls-tree', '-z', pin.sha, '--', path]);
+  const options = gitOptions(ctx, pin);
+  const treeEntry: { line: string | null } = { line: null };
+  const tree = await runGitRecords(ctx.git, ['ls-tree', '-z', pin.sha, '--', path], options, {
+    delimiter: '\0',
+    maxRecordBytes: LIST_MAX_BYTES,
+    onRecord(line) {
+      treeEntry.line = line;
+      return false;
+    },
+  });
   if (tree.code !== 0) return refused(firstLine(tree.stderr) || `git ls-tree exited ${tree.code}`);
-  const entry = tree.stdout.split('\0').find((line) => line.length > 0);
-  if (entry === undefined) return refused('not found');
-  const [meta] = entry.split('\t');
+  if (!treeEntry.line) return refused('not found');
+  const [meta] = treeEntry.line.split('\t');
   const [mode, type] = meta.split(' ');
   // A symlink is a blob whose content is a path, not a file of the pinned commit.
   if (type !== 'blob' || mode === SYMLINK_MODE) return refused('not a file');
 
-  const blob = await runGit(ctx, pin, ['cat-file', 'blob', `${pin.sha}:${path}`]);
+  const selected = new CappedLines(SEARCH_MAX_BYTES);
+  // UTF-8 needs at most three bytes per UTF-16 code unit, plus a possible BOM.
+  const sample = new Uint8Array(BINARY_SCAN_CHARS * 3 + 3);
+  let sampleLength = 0;
+  let binary = false;
+  let total = 0;
+  const isBinary = () => new TextDecoder().decode(sample.subarray(0, sampleLength)).slice(0, BINARY_SCAN_CHARS).includes('\0');
+  const blob = await runGitRecords(ctx.git, ['cat-file', 'blob', `${pin.sha}:${path}`], options, {
+    delimiter: '\n',
+    maxRecordBytes: SEARCH_MAX_BYTES,
+    onChunk(chunk) {
+      if (sampleLength < sample.length) {
+        const take = chunk.subarray(0, sample.length - sampleLength);
+        sample.set(take, sampleLength);
+        sampleLength += take.length;
+        if (sampleLength === sample.length) binary = isBinary();
+      }
+      return !binary;
+    },
+    onRecord(line) {
+      total++;
+      if (total >= startLine && (endLine === undefined || total <= endLine) && !selected.cut) selected.add(line);
+      return true;
+    },
+  });
   if (blob.code !== 0) return refused(firstLine(blob.stderr) || `git cat-file exited ${blob.code}`);
-  if (blob.stdout.slice(0, BINARY_SCAN_CHARS).includes('\0')) return refused('binary file');
+  if (binary || (sampleLength < sample.length && isBinary())) return refused('binary file');
 
-  const lines = splitLines(blob.stdout);
-  const total = lines.length;
   // An empty file has no line 1: only the default start defaults to its 0-0 window.
   if (total === 0 ? startLine > 1 : startLine > total) return refused('invalid lines');
   const first = total === 0 ? 0 : startLine;
   const last = total === 0 ? 0 : Math.min(endLine ?? total, total);
   const header = `${pin.repo}:${path}@${pin.sha.slice(0, 7)} lines ${first}-${last} of ${total}`;
-  const slice = total === 0 ? [] : lines.slice(first - 1, last);
-  return { content: joinCapped([header, ...slice], SEARCH_MAX_BYTES, false) };
+  return { content: joinCapped([header, ...selected.lines], SEARCH_MAX_BYTES, selected.cut) };
 }
 
 function listReposTool(ctx: ProjectCodeToolContext): EmbedderTool {

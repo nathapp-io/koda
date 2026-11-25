@@ -37,6 +37,10 @@ describe('shouldRefreshSession', () => {
     expect(shouldRefreshSession(event('GET', '/projects', 'text/html', 'koda_refresh=r1; koda_token=opaque'))).toBe(false)
   })
 
+  test('skips session refresh for the health probe even with HTML and a refresh cookie', () => {
+    expect(shouldRefreshSession(event('GET', '/healthz', 'text/html', 'koda_refresh=r1'))).toBe(false)
+  })
+
   test.each([
     ['access cookie exists', event('GET', '/projects', 'text/html', 'koda_refresh=r1; koda_token=a1')],
     ['refresh cookie is absent', event('GET', '/projects', 'text/html')],

@@ -504,6 +504,7 @@ describe('KodaDomainWriter Integration Tests', () => {
         'proj-koda-123',
         importData.nodes,
         importData.links,
+        'graphify_import',
       );
 
       expect(result).toHaveProperty('provenance');

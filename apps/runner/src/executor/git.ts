@@ -1,16 +1,23 @@
 import { errorMessage, firstLine } from '../errors';
 import { sanitizeDiagnostic } from '../diagnostics';
 import type { LogFields } from '../logger';
+import { signalGroup } from './nax-process';
 
 export interface GitResult {
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
+  readonly timedOut?: boolean;
+  readonly stdoutStopped?: boolean;
 }
 
 export interface GitOptions {
   readonly cwd: string;
   readonly timeoutMs?: number;
+  /** Cancel a nested command when its owning operation ends. */
+  readonly signal?: AbortSignal;
+  /** Receives raw stdout instead of capturing it. Return false to stop once enough output has been read. */
+  readonly onStdout?: (chunk: Uint8Array, signal: AbortSignal) => boolean | Promise<boolean>;
   readonly env?: Readonly<Record<string, string>>;
   /** D86: this call may authenticate, through the job's helper; every other call keeps an empty helper list. */
   readonly credentialHelper?: string | null;
@@ -40,6 +47,8 @@ export function gitFailureFields(error: unknown): LogFields {
     ? { command: sanitizeDiagnostic(`git ${error.args.join(' ')}`), exitCode: error.result.code, stderr: sanitizeDiagnostic(error.result.stderr) }
     : { error: sanitizeDiagnostic(errorMessage(error)) };
 }
+
+const MAX_STREAMED_STDERR_BYTES = 64 * 1024;
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 export const NO_CREDENTIALS_REASON = 'git auth failed';
@@ -91,13 +100,92 @@ export async function assertMinGitVersion(git: Git): Promise<void> {
 
 export function createGit(): Git {
   const run: Git['run'] = async (args, options) => {
-    const proc = Bun.spawn(['git', ...HARDENING_ARGS, ...fileProtocolArgs(options.fileProtocol), ...helperArgs(options.credentialHelper), ...args], {
+    const argv = ['git', ...HARDENING_ARGS, ...fileProtocolArgs(options.fileProtocol), ...helperArgs(options.credentialHelper), ...args];
+    const spawnOptions = {
       cwd: options.cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
-      timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, killSignal: 'SIGKILL',
       env: { ...process.env, ...options.env, ...NO_PROMPT_ENV },
-    });
-    const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-    return { code, stdout, stderr };
+    } as const;
+    const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const consume = options.onStdout;
+    options.signal?.throwIfAborted();
+    if (consume === undefined) {
+      const proc = Bun.spawn(argv, { ...spawnOptions, timeout, killSignal: 'SIGKILL', signal: options.signal });
+      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      return { code, stdout, stderr };
+    }
+
+    const proc = Bun.spawn(argv, { ...spawnOptions, detached: true });
+    const stdout = proc.stdout.getReader();
+    const stderr = proc.stderr.getReader();
+    const stderrPrefix = new Uint8Array(MAX_STREAMED_STDERR_BYTES);
+    let stderrLength = 0;
+    let stderrCut = false;
+    const controller = new AbortController();
+    // A consumer may still be waiting on filesystem I/O after Git exits. Race the stdout loop
+    // once per command, so the deadline still reaps Git without retaining a listener per chunk.
+    const stopped = Promise.withResolvers<void>();
+    let timedOut = false;
+    let stdoutStopped = false;
+    const closePipes = () => Promise.allSettled([stdout.cancel(), stderr.cancel()]);
+    const kill = () => {
+      controller.abort();
+      stopped.resolve();
+      if (!signalGroup(proc.pid, 'SIGKILL')) proc.kill('SIGKILL');
+      return closePipes();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void kill();
+    }, timeout);
+    const cancel = () => { void kill(); };
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    const readStdout = async () => {
+      for (;;) {
+        const { done, value } = await stdout.read();
+        if (done || controller.signal.aborted) return;
+        const keepReading = await consume(value, controller.signal);
+        if (controller.signal.aborted) return;
+        if (!keepReading) {
+          stdoutStopped = true;
+          clearTimeout(timer);
+          await kill();
+          return;
+        }
+      }
+    };
+    const readStderr = async () => {
+      for (;;) {
+        const { done, value } = await stderr.read();
+        if (done || timedOut) return;
+        // Keep reading after the prefix so a noisy child cannot block on its stderr pipe.
+        const take = value.subarray(0, stderrPrefix.byteLength - stderrLength);
+        stderrPrefix.set(take, stderrLength);
+        stderrLength += take.byteLength;
+        stderrCut ||= take.byteLength < value.byteLength;
+      }
+    };
+    const tasks = [Promise.race([readStdout(), stopped.promise]), readStderr(), proc.exited] as const;
+    try {
+      const [, , code] = await Promise.all(tasks);
+      let exitCode = code;
+      if (timedOut) exitCode = code || 124;
+      else if (options.signal?.aborted) exitCode = code || 130;
+      else if (stdoutStopped && proc.signalCode === 'SIGKILL') exitCode = 0;
+      return {
+        code: exitCode,
+        stdout: '',
+        stderr: new TextDecoder().decode(stderrPrefix.subarray(0, stderrLength), { stream: stderrCut }),
+        ...(timedOut ? { timedOut } : {}),
+        ...(stdoutStopped ? { stdoutStopped } : {}),
+      };
+    } catch (error) {
+      await kill();
+      await Promise.allSettled(tasks);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', cancel);
+    }
   };
   return {
     run,

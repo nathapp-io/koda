@@ -626,7 +626,7 @@ describe('KodaDomainWriter Unit Tests', () => {
       await expect(service.importGraphify(data)).rejects.toThrow(ForbiddenAppException);
     });
 
-    it('should accept empty nodes array', async () => {
+    it('delegates empty imports without recording a second refresh event', async () => {
       const data = {
         projectId: 'proj-123',
         nodes: [],
@@ -639,6 +639,8 @@ describe('KodaDomainWriter Unit Tests', () => {
       mockRagService.importGraphify.mockResolvedValue({ imported: 0, cleared: 0 });
 
       await expect(service.importGraphify(data)).resolves.toBeDefined();
+      expect(mockRagService.importGraphify).toHaveBeenCalledExactlyOnceWith(data.projectId, [], [], 'graphify_import');
+      expect(outbox.record).not.toHaveBeenCalled();
     });
   });
 
