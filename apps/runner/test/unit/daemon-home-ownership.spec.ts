@@ -385,6 +385,11 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
         } finally {
           journal.close();
         }
+        // The contender's empty log only means something if the same instrumentation records an owner's startup:
+        // retire the owner cleanly (its own probe runs as it exits) and look at what it recorded.
+        await owner.stop();
+        const ownerAttempts = (await owner.records<AttemptEntry>('attempts')).map((attempt) => attempt.name);
+        expect(ownerAttempts).toEqual(expect.arrayContaining(['journal-open', 'workspace-jobs', 'socket-dir']));
       } finally {
         await contender.kill();
       }
@@ -438,6 +443,8 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       expect(b.gone).toBe(false);
       expect((await a.state())?.ok).toBe(true);
       expect((await b.state())?.ok).toBe(true);
+      // The new path: each independent home holds its own ownership interval.
+      expect([existsSync(join(one.dir, RUNNER_HOME_LOCK_FILE)), existsSync(join(two.dir, RUNNER_HOME_LOCK_FILE))]).toEqual([true, true]);
     } finally {
       await a.kill();
       await b.kill();
@@ -456,6 +463,8 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       expect(status.code).toBe(0);
       const report = JSON.parse(status.stdout) as { journal?: { jobs?: Array<{ jobId: string }> } };
       expect(report.journal?.jobs?.map((job) => job.jobId)).toContain('j1');
+      // The owner that holds this journal also holds the home.
+      expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
       await owner.kill();
     }
@@ -511,6 +520,8 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
     second = await startDaemon(await daemonOptions(home, recordingTransport(), new FakeExecutor()));
     try {
       expect(second.journal.getJob('j1', 1)?.jobId).toBe('j1');
+      // The replacement owns the home again: this start could only resolve because the first stop released it.
+      expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
       await second.stop();
     }
@@ -536,6 +547,7 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       await replacement.release();
       await replacement.waitForRecord<SyncEntry>('syncs', 20_000, (entry) => entry.path === '/api/fleet/runner/sync');
       expect((await replacement.state())?.ok).toBe(true);
+      expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
       await owner.kill();
       await replacement.kill();
@@ -562,6 +574,8 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
       await fresh.release();
       await fresh.waitForRecord<SyncEntry>('syncs', 20_000, (entry) => entry.path === '/api/fleet/runner/sync');
       expect((await fresh.state())?.ok).toBe(true);
+      // The failed start had acquired the home (it writes the lock database) and handed it back.
+      expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
       await failing.kill();
       await fresh.kill();
@@ -597,6 +611,8 @@ describe('US-001 ownership across daemon startup, recovery and shutdown', () => 
     try {
       expect(replacement.bootId).not.toBe(first.bootId);
       expect(replacement.journal.getMeta('boot_id')).toBe(replacement.bootId);
+      // Only the crash stand-in's release lets this replacement own the home.
+      expect(existsSync(join(home.dir, RUNNER_HOME_LOCK_FILE))).toBe(true);
     } finally {
       await replacement.stop();
     }
