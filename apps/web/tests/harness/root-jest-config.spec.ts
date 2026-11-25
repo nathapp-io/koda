@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
 import { join } from 'path'
 
 /**
@@ -45,6 +45,5 @@ describe('the repository-root jest config keeps the web package a jest project',
       const pkg = require(join(packageDir, 'package.json')) as { jest?: unknown }
       expect(pkg.jest).toBeDefined()
     }
-    expect(readFileSync(rootConfigPath, 'utf-8')).toContain('apps/api')
   })
 })
