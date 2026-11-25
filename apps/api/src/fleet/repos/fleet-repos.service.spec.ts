@@ -18,7 +18,7 @@ vi.mock('node:dns', async (importOriginal) => {
 });
 
 describe('FleetReposService', () => {
-  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), findAutoReviewPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn(), findGitLabByRemote: vi.fn() };
+  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), findAutoReviewPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn(), findGitLabByRemote: vi.fn(), captureCleanupTargets: vi.fn() };
   const github = { verifyRepo: vi.fn() };
   const gitlab = { getTokenSelf: vi.fn(), getCurrentUser: vi.fn(), findProject: vi.fn() };
   /** US-004: the per-repo credential store replaces the old project-wide token source. */
@@ -349,6 +349,37 @@ describe('FleetReposService', () => {
     repo.findById.mockResolvedValue(created());
     repo.countUnfinishedJobs.mockResolvedValue(1);
     await expect(make().remove('u9', 'fr1')).rejects.toBeInstanceOf(ConflictAppException);
+    expect(repo.delete).not.toHaveBeenCalled();
+    // US-009: a refused removal captures nothing either.
+    expect(repo.captureCleanupTargets).not.toHaveBeenCalled();
+  });
+
+  /**
+   * US-009 (finding 5): the cascade below the repository delete erases the job, log and artifact rows, which
+   * are the only lookup for the repo's stored files. The targets are copied first, in the delete's own
+   * transaction (so the copy commits or rolls back with it) and before the cascade (so there is something
+   * left to copy).
+   */
+  it('captures the cleanup targets of the terminal jobs before the cascade', async () => {
+    repo.findById.mockResolvedValue(created());
+    repo.countUnfinishedJobs.mockResolvedValue(0);
+    const order: string[] = [];
+    repo.lockForDelete.mockImplementationOnce(async () => { order.push('lock'); });
+    repo.captureCleanupTargets.mockImplementationOnce(async (repoId: string) => { order.push(`capture:${repoId}`); return 2; });
+    repo.delete.mockImplementationOnce(async () => { order.push('delete'); });
+
+    await make().remove('u9', 'fr1');
+
+    expect(repo.captureCleanupTargets).toHaveBeenCalledWith('fr1');
+    expect(order).toEqual(['lock', 'capture:fr1', 'delete']);
+  });
+
+  it('leaves the delete to fail when the capture fails, so nothing is deleted without its cleanup work', async () => {
+    repo.findById.mockResolvedValue(created());
+    repo.countUnfinishedJobs.mockResolvedValue(0);
+    repo.captureCleanupTargets.mockRejectedValueOnce(new Error('capture failed'));
+
+    await expect(make().remove('u9', 'fr1')).rejects.toThrow('capture failed');
     expect(repo.delete).not.toHaveBeenCalled();
   });
 

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TERMINAL_STATES } from '../jobs/job-state';
-import type { ILogRetentionRepository, RetentionCandidate, RetentionCursor } from './domain/log-retention.domain';
+import type { ILogRetentionRepository, RetiredCleanupCursor, RetiredCleanupRecord, RetentionCandidate, RetentionCursor } from './domain/log-retention.domain';
 
 @Injectable()
 export class PrismaLogRetentionRepository implements ILogRetentionRepository {
@@ -45,5 +45,29 @@ export class PrismaLogRetentionRepository implements ILogRetentionRepository {
     const logs = await this.db.fleetJobLog.updateMany({ where: { ...older, expiredAt: null }, data: { expiredAt: now } });
     const artifacts = await this.db.fleetJobArtifact.updateMany({ where: { ...older, expiredAt: null }, data: { expiredAt: now } });
     return { events: events.count, logs: logs.count, artifacts: artifacts.count };
+  }
+
+  /**
+   * US-009: the cleanup work a repository delete captured, due under the same cutoff as the live jobs and
+   * paged the same way — (finishedAt, id), strictly after the cursor of the previous page, at most `limit`.
+   * A record that failed stays here (it is still owed), and the cursor is the page's last record, so a
+   * record that keeps failing cannot hold the pass on one page.
+   */
+  async findRetiredCleanups(before: Date, after: RetiredCleanupCursor | null, limit: number): Promise<RetiredCleanupRecord[]> {
+    const rows = await this.db.fleetRetiredJobCleanup.findMany({
+      where: {
+        finishedAt: { lt: before },
+        ...(after ? { AND: [{ OR: [{ finishedAt: { gt: after.finishedAt } }, { finishedAt: after.finishedAt, id: { gt: after.id } }] }] } : {}),
+      },
+      orderBy: [{ finishedAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+      select: { id: true, jobId: true, leaseEpoch: true, finishedAt: true, bundleKeys: true },
+    });
+    return rows.map((row) => ({ id: row.id, jobId: row.jobId, leaseEpoch: row.leaseEpoch, finishedAt: row.finishedAt, bundleKeys: row.bundleKeys }));
+  }
+
+  /** US-009: the acknowledgement of one cleanup record, after every one of its targets is deleted. */
+  async deleteRetiredCleanup(id: string): Promise<void> {
+    await this.db.fleetRetiredJobCleanup.delete({ where: { id } });
   }
 }

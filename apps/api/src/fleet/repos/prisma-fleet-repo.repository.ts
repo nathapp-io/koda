@@ -4,7 +4,7 @@ import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
-import { ACTIVE_STATES } from '../jobs/job-state';
+import { ACTIVE_STATES, TERMINAL_STATES } from '../jobs/job-state';
 import type { RuleOverrideInput } from './rule-override';
 import type {
   AutoReviewPatch,
@@ -59,6 +59,12 @@ const REPO_WRITE_INCLUDE = {
  * identity the lookup asked for, so it can never hide a registered repo behind same-named rows.
  */
 export const MAX_GITLAB_REMOTE_CANDIDATES = 500;
+
+/**
+ * US-009: the bound of one capture page. A repository delete copies the cleanup targets of its terminal jobs
+ * in pages of this size, so a long job history is read in bounded statements and still captured completely.
+ */
+export const CLEANUP_CAPTURE_PAGE = 200;
 
 /** The rule-override summary columns as a repo row carries them. */
 interface RuleOverrideSummaryRow {
@@ -295,6 +301,53 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
 
   async delete(id: string): Promise<void> {
     await this.db.fleetRepo.delete({ where: { id } });
+  }
+
+  /**
+   * US-009 (finding 5): the file cleanup work of the repo's terminal jobs, copied out of the rows the delete
+   * cascade is about to erase. Every page is bounded (the API data rule); the id cursor makes the read both
+   * complete for a repo with a long history and stable while rows are already gone.
+   *
+   * A job without a finish time is not captured: the retention pass decides eligibility by `finishedAt`
+   * against its cutoff, so such a job has nothing to compare and the existing pass never expires it either.
+   */
+  async captureCleanupTargets(repoId: string): Promise<number> {
+    let after: string | null = null;
+    let captured = 0;
+    for (;;) {
+      const jobs = await this.db.fleetJob.findMany({
+        where: {
+          repoId,
+          state: { in: [...TERMINAL_STATES] },
+          finishedAt: { not: null },
+          ...(after === null ? {} : { id: { gt: after } }),
+        },
+        orderBy: { id: 'asc' },
+        take: CLEANUP_CAPTURE_PAGE,
+        select: {
+          id: true,
+          leaseEpoch: true,
+          finishedAt: true,
+          artifacts: { select: { storageKey: true }, orderBy: { leaseEpoch: 'asc' } },
+        },
+      });
+      if (jobs.length > 0) {
+        // One record per job (unique jobId), so a capture that is retried in a second transaction adds
+        // nothing rather than doubling the work.
+        await this.db.fleetRetiredJobCleanup.createMany({
+          data: jobs.map((job) => ({
+            jobId: job.id,
+            leaseEpoch: job.leaseEpoch,
+            finishedAt: job.finishedAt as Date,
+            bundleKeys: job.artifacts.map((artifact) => artifact.storageKey),
+          })),
+          skipDuplicates: true,
+        });
+        captured += jobs.length;
+      }
+      if (jobs.length < CLEANUP_CAPTURE_PAGE) return captured;
+      after = jobs[jobs.length - 1].id;
+    }
   }
 
   /**

@@ -672,6 +672,11 @@ export class FleetReposService {
       const row = await this.repo.findById(id);
       if (!row) throw new NotFoundAppException({}, 'fleet.repos');
       if ((await this.repo.countUnfinishedJobs(id)) > 0) throw new ConflictAppException({}, 'fleet.repoBusy');
+      // US-009 (finding 5): this delete cascades away the job, log and artifact rows, which are the only
+      // lookup for the repo's stored log prefixes and bundle keys. The targets are copied into the
+      // independent cleanup records first — inside this transaction, so the copy commits or rolls back with
+      // the delete — and the nightly retention pass deletes the files afterwards.
+      await this.repo.captureCleanupTargets(id);
       await this.repo.delete(id);
       await this.activity.record({
         actorType: 'USER', actorId, action: 'repo.deleted', entityType: 'repo', entityId: id,
