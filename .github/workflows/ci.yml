@@ -11,6 +11,8 @@ on:
       - "scripts/**"
       - "deployments/**"
       - "docker-compose.yml"
+      - "docker-compose.dev.yml"
+      - "docker-compose.test.yml"
       - "openapi-ts.config.ts"
       - "test/**"
       - "bun.lock"
@@ -61,7 +63,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|deployments/|test/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|openapi-ts\.config\.ts|docker-compose\.yml|turbo\.json)$|^tsconfig[^/]*\.json$'
+          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|deployments/|test/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|openapi-ts\.config\.ts|docker-compose(\.(dev|test))?\.yml|turbo\.json)$|^tsconfig[^/]*\.json$'
           # `-z` keeps the paths Git's raw bytes: without it Git C-quotes a non-ASCII path
           # ("deployments/caf\303\251.sh"), which no path pattern matches, so a deployment-only PR would
           # count as no change (review B7). The listing goes to a file first so a Git failure is the step's
@@ -72,7 +74,8 @@ jobs:
           # string, not per line, so a fragment can never be mistaken for a changed path.
           changed_list=$(mktemp)
           trap 'rm -f "$changed_list"' EXIT
-          git diff --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_list"
+          # Report both the deleted and added paths when a file moves in or out of scope.
+          git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changed_list"
           printf 'Changed files:\n'
           code=false
           while IFS= read -r -d '' changed_path; do

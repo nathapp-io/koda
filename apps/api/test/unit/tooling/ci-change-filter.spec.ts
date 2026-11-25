@@ -93,8 +93,28 @@ describe('CI change filter workflow step', () => {
     expect(runFilter('pull_request', ['deployments/example/rollback.sh']).output).toBe('code=true');
   });
 
-  it('recognizes the root Compose file as code', () => {
-    expect(runFilter('pull_request', ['docker-compose.yml']).output).toBe('code=true');
+  it.each(['docker-compose.yml', 'docker-compose.dev.yml', 'docker-compose.test.yml'])('recognizes a change to %s alone as code', (file) => {
+    expect(runFilter('pull_request', [file]).output).toBe('code=true');
+  });
+
+  it('validates a PR that renames a supported Compose file to an unmatched path', () => {
+    const env = { PATH: process.env.PATH, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...args: string[]) => execFileSync('git', [
+      '-c', 'user.name=CI Test', '-c', 'user.email=test@example.invalid', ...args,
+    ], { cwd: tempRoot, env });
+    git('init', '--quiet', '--template=');
+    writeFileSync(join(tempRoot, 'docker-compose.dev.yml'), 'services: {}\n');
+    git('add', 'docker-compose.dev.yml');
+    git('commit', '--quiet', '-m', 'Add dev Compose');
+    git('mv', 'docker-compose.dev.yml', 'archived.yml');
+    git('commit', '--quiet', '-m', 'Rename dev Compose');
+
+    const output = join(tempRoot, 'github-output');
+    execFileSync('/bin/bash', ['-c', body], {
+      cwd: tempRoot,
+      env: { ...env, EVENT_NAME: 'pull_request', BASE_SHA: 'HEAD~1', HEAD_SHA: 'HEAD', GITHUB_OUTPUT: output },
+    });
+    expect(readFileSync(output, 'utf8').trim()).toBe('code=true');
   });
 
   it('recognizes a deployment file whose path Git would quote', () => {
@@ -132,9 +152,9 @@ describe('CI change filter workflow step', () => {
     }
   });
 
-  it('includes deployment, root compose, and OpenAPI config paths in push filters', () => {
+  it('includes deployment, Compose, and OpenAPI config paths in push filters', () => {
     const pushBlock = workflow.slice(workflow.indexOf('  push:'), workflow.indexOf('  # No workflow-level path filter'));
-    for (const path of ['openapi-ts.config.ts', 'docker-compose.yml', 'deployments/**']) {
+    for (const path of ['openapi-ts.config.ts', 'docker-compose.yml', 'docker-compose.dev.yml', 'docker-compose.test.yml', 'deployments/**']) {
       expect(pushBlock).toContain(`- "${path}"`);
     }
   });
