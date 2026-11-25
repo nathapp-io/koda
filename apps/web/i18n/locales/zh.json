@@ -1125,9 +1125,6 @@
       }
     },
     "threads": {
-      "detail": {
-        "unavailable": "此线程不可用，或你无权访问。"
-      },
       "kind": {
         "project": "项目线程",
         "workspace": "工作区线程"
@@ -1241,6 +1238,7 @@
       },
       "detail": {
         "title": "线程",
+        "unavailable": "此线程不可用，或你无权访问。",
         "contextReset": "上下文已重置",
         "streaming": "流式生成中…",
         "tokens": "个 token",

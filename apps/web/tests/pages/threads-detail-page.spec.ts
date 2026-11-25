@@ -1,7 +1,10 @@
 import { describe, test, expect, jest } from '@jest/globals'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import * as Vue from 'vue'
 import { ref } from 'vue'
 import { createRequire } from 'node:module'
+import { createI18n } from 'vue-i18n'
 import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder, enI18n } from '../helpers/fleet-harness'
@@ -96,6 +99,21 @@ function renderedHtmlText(app: { root: FakeNode }): string {
 
 const pageFile = webFile('pages', '[project]', 'threads', '[id].vue')
 
+/** The committed messages, parsed exactly as the app imports them (a duplicate key is silently dropped). */
+const localeMessages = Object.fromEntries(
+  (['en', 'zh'] as const).map((locale) => [locale, JSON.parse(readFileSync(join(__dirname, '../../i18n/locales', `${locale}.json`), 'utf-8'))]),
+) as Record<'en' | 'zh', { fleet: { threads: { detail: { unavailable?: unknown } } } }>
+
+/**
+ * Branch fix B3: the copy is asserted through the installed translator, not a `t` stub. A stub cannot notice
+ * that the message is missing from the parsed locale (a second `fleet.threads.detail` object in the same file
+ * shadows the first, and JSON keeps only the later one) — the page then renders the raw key.
+ */
+function realI18n(locale: 'en' | 'zh'): { useI18n: () => { t: (key: string, params?: Record<string, unknown>) => string } } {
+  const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: localeMessages, missingWarn: false, fallbackWarn: false })
+  return { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params ?? {}) }) }
+}
+
 const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   id: 'th1',
   kind: 'REPO',
@@ -170,6 +188,8 @@ function mountPage(over: {
   creatorId?: string
   viewerId?: string
   permissionPending?: boolean
+  /** Replaces the page's `useI18n` — the real translator when a test asserts rendered copy (B3). */
+  i18n?: () => { t: (key: string, params?: Record<string, unknown>) => string }
 } = {}) {
   const thread = ref(over.thread === undefined ? threadDetail({ createdById: over.creatorId ?? 'u1' }) : over.thread)
   const permissionKeys = ref(over.permissions ?? ['thread.archive'])
@@ -240,7 +260,7 @@ function mountPage(over: {
     },
     globals: {
       definePageMeta: () => undefined,
-      useI18n: () => i18nStub(),
+      useI18n: over.i18n ?? (() => i18nStub()),
       useAppToast: () => toastRecorder(),
       useRoute: () => ({ params: { project: 'web', id: 'th1' } }),
       useAuth: () => ({ user: ref({ id: over.viewerId ?? 'u1', email: 'owner@k.t', role: 'MEMBER' }) }),
@@ -350,6 +370,23 @@ describe('US-003 project-thread load recovery', () => {
     expect(m.app.text()).not.toContain('Auth spec')
     expect(m.app.text()).not.toContain('thread-timeline')
     m.app.unmount()
+  })
+
+  test('B3: both locales carry the unavailable copy and the page renders it through the real translator', () => {
+    const rendered = (['en', 'zh'] as const).map((locale) => {
+      const expected = localeMessages[locale].fleet.threads.detail.unavailable
+      // A duplicate `fleet.threads.detail` object in the file shadows the earlier one, and the parse keeps
+      // only the later object — so the key is absent from the messages the app actually imports.
+      expect(typeof expected).toBe('string')
+      const m = mountPage({ thread: null, unavailable: true, i18n: realI18n(locale).useI18n })
+      const notice = m.app.one('[role="status"]')
+      const text = notice ? m.app.textOf(notice) : m.app.text()
+      m.app.unmount()
+      return { locale, text, expected }
+    })
+
+    expect(rendered.map(({ text }) => text)).toEqual(rendered.map(({ expected }) => expected))
+    expect(rendered[0].text).not.toBe('fleet.threads.detail.unavailable')
   })
 
   test('AC-3/AC-4: a transient failure has a visible retry which renders recovered detail and clears the failure', async () => {

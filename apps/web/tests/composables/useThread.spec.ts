@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
+import { ref } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { EventSourceLike } from '~/lib/project-event-stream'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
@@ -249,6 +250,91 @@ describe('useThread (US-003): failed loads recover without another stream', () =
     StubEventSource.instances[0].emit('thread', { id: 'event-1', threadId: 'th1', type: 'thread', at: '2026-10-14T00:00:00.000Z' })
     await settle()
     expect(app.text()).toContain('Live recovery')
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
+    app.unmount()
+  })
+})
+
+describe('useThread (US-003): the adapter’s own failure shapes are classified', () => {
+  /**
+   * ofetch's non-2xx contract: an error carrying `status` and the parsed envelope under `data`. This is the
+   * shape the page really receives — the earlier fixtures hand-made `{ statusCode }`, which is neither what
+   * `useApi` throws nor what it throws *for* an enveloped answer (an `ApiError` whose `code` is the envelope
+   * `ret`: a refused permission is `40003`, not 403).
+   */
+  function failingFetch(status: number, body: unknown) {
+    return jest.fn(async () => {
+      throw Object.assign(new Error('Request failed'), { status, data: body })
+    })
+  }
+
+  async function mountOverRealAdapter(): Promise<ReturnType<typeof mountSfc>> {
+    const useApiModule = await import(webFile('composables', 'useApi.ts'))
+    // The real adapter reads the locale and the fetch instance from the Nuxt auto-import scope.
+    g.useI18n = () => ({ locale: ref('en') })
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+    g.EventSource = StubEventSource
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    return mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: useApiModule.useApi, useAuth: g.useAuth },
+    })
+  }
+
+  afterEach(() => {
+    StubEventSource.instances = []
+    delete g.EventSource
+    delete g.useApi
+    delete g.useAuth
+    delete g.useI18n
+    delete g.useRuntimeConfig
+    delete g.$fetch
+  })
+
+  test.each([
+    [403, { ret: 40003, message: 'permissions' }],
+    [404, { ret: 404, message: 'threads.notFound' }],
+  ])('AC-1/AC-2: an enveloped %i answered through useApi is unavailable, not retryable', async (status, body) => {
+    g.$fetch = failingFetch(status, body)
+    const app = await mountOverRealAdapter()
+    await settle()
+
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeDefined()
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
+    expect(app.one('[data-testid="thread-retry"]')).toBeUndefined()
+    expect(app.text()).not.toContain('Plan the auth flow')
+    // The failed initial read must still leave the one live subscription (US-002/US-003 seam).
+    expect(StubEventSource.instances).toHaveLength(1)
+    app.unmount()
+  })
+
+  test('AC-3: a transient 503 through useApi is retryable rather than unavailable', async () => {
+    g.$fetch = failingFetch(503, { ret: 50000, message: 'downstream down' })
+    const app = await mountOverRealAdapter()
+    await settle()
+
+    expect(app.one('[data-testid="thread-load-failed"]')).toBeDefined()
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeUndefined()
+    expect(app.one('[data-testid="thread-retry"]')).toBeDefined()
+    app.unmount()
+  })
+
+  test.each([
+    ['a normalized forbidden ApiError', 40003],
+    ['an HTTP-status forbidden ApiError', 403],
+    ['a normalized missing ApiError', 404],
+    ['the mirrored missing code', 40004],
+  ])('AC-1/AC-2: %s is unavailable', async (_label, code) => {
+    const useApiModule = await import(webFile('composables', 'useApi.ts'))
+    const get = jest.fn(async () => { throw new useApiModule.ApiError(code, 'refused') })
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+
+    expect(app.one('[data-testid="thread-unavailable"]')).toBeDefined()
     expect(app.one('[data-testid="thread-load-failed"]')).toBeUndefined()
     app.unmount()
   })

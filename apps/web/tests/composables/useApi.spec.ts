@@ -747,3 +747,89 @@ describe('US-001 AC-14: a 202 is delivered whatever its body is', () => {
     await expect(mod.useApi().$api.post('/projects/web/tickets', { title: 'Proof ticket' })).resolves.toEqual(APPROVAL_SUMMARY)
   })
 })
+
+/**
+ * US-003 branch fix B2: the classifier that decides "unavailable" reads the errors this adapter actually
+ * throws. An enveloped failure is an `ApiError` whose `code` is the API's `ret` (a refused permission is
+ * `40003`, answered with HTTP 403), so the HTTP status has to travel with it — a 403 and a 404 must reach
+ * the same presentation, and neither may be told apart from a retryable 503.
+ */
+describe('US-003 B2: a failed request keeps both the envelope code and the HTTP status', () => {
+  const g = globalThis as Record<string, unknown>
+
+  /** ofetch's contract: a non-2xx throws an error carrying `status` and the parsed body under `data`. */
+  function fetchAnswering(status: number, body: unknown) {
+    return jest.fn(async () => {
+      const response = new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+      if (!response.ok) throw Object.assign(new Error(response.statusText), { status: response.status, data: body })
+      return body
+    })
+  }
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({ public: { apiBaseUrl: '/api' }, apiInternalUrl: 'http://localhost:3100' })
+    g.useNuxtApp = () => ({ $i18n: { locale: ref('en') } })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    delete g.$fetch
+    delete g.useNuxtApp
+    delete g.useRuntimeConfig
+  })
+
+  test('an enveloped 403 (ret 40003) is an unavailable ApiError carrying status 403', async () => {
+    g.$fetch = fetchAnswering(403, { ret: 40003, message: 'permissions' })
+    const mod = await import(`${composablePath}`)
+
+    const error = await mod.useApi().$api.get('/projects/web/threads/th1').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(mod.ApiError)
+    expect(error).toMatchObject({ code: 40003, status: 403 })
+    expect(mod.isUnavailableError(error)).toBe(true)
+  })
+
+  test('an enveloped 404 (ret 404) is an unavailable ApiError carrying status 404', async () => {
+    g.$fetch = fetchAnswering(404, { ret: 404, message: 'threads.notFound' })
+    const mod = await import(`${composablePath}`)
+
+    const error = await mod.useApi().$api.get('/projects/web/threads/th1').catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 404, status: 404 })
+    expect(mod.isUnavailableError(error)).toBe(true)
+  })
+
+  test('an enveloped 503 stays retryable, not unavailable', async () => {
+    g.$fetch = fetchAnswering(503, { ret: 50000, message: 'downstream down' })
+    const mod = await import(`${composablePath}`)
+
+    const error = await mod.useApi().$api.get('/projects/web/threads/th1').catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 50000, status: 503 })
+    expect(mod.isUnavailableError(error)).toBe(false)
+  })
+})
+
+describe('US-003 B2: isUnavailableError recognizes every shape a caller receives', () => {
+  test('forbidden and missing envelope codes count, whatever their HTTP status', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.isUnavailableError(new mod.ApiError(40003, 'permissions'))).toBe(true)
+    expect(mod.isUnavailableError(new mod.ApiError(404, 'threads.notFound'))).toBe(true)
+    expect(mod.isUnavailableError(new mod.ApiError(40004, 'projects'))).toBe(true)
+  })
+
+  test('a raw fetch failure is read from status, statusCode or response.status', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.isUnavailableError({ status: 403 })).toBe(true)
+    expect(mod.isUnavailableError({ statusCode: 404 })).toBe(true)
+    expect(mod.isUnavailableError({ response: { status: 403 } })).toBe(true)
+  })
+
+  test('anything else is not unavailable', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.isUnavailableError(new mod.ApiError(503, 'threads.unavailable'))).toBe(false)
+    expect(mod.isUnavailableError({ status: 503 })).toBe(false)
+    expect(mod.isUnavailableError({ status: '403' })).toBe(false)
+    expect(mod.isUnavailableError(new Error('boom'))).toBe(false)
+    expect(mod.isUnavailableError(null)).toBe(false)
+    expect(mod.isUnavailableError('403')).toBe(false)
+  })
+})

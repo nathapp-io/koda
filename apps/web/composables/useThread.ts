@@ -7,6 +7,7 @@
  */
 import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { isUnavailableError } from '~/composables/useApi'
 import { createThreadController, type ThreadController } from '~/lib/thread-controller'
 import { createThreadEventStream } from '~/lib/thread-event-stream'
 import type { EventSourceLike } from '~/lib/project-event-stream'
@@ -61,10 +62,11 @@ export function useThread(slug: string, threadId: string): ProjectThreadControll
       unavailable.value = false
     } catch (error) {
       loadFailed.value = true
-      const status = error !== null && typeof error === 'object'
-        ? (error as { statusCode?: unknown; status?: unknown }).statusCode ?? (error as { status?: unknown }).status
-        : undefined
-      unavailable.value = status === 403 || status === 404
+      // The API answers a refused permission with `ret: 40003` (HTTP 403) and an unknown/foreign thread with
+      // `ret: 404`: both must look the same here, so this never discloses whether a forbidden thread exists.
+      // `useApi` normalizes an enveloped failure into an `ApiError` carrying both the envelope code and the
+      // HTTP status, and a failure that never reached the envelope keeps only its status (see the helper).
+      unavailable.value = isUnavailableError(error)
     } finally {
       loading.value = false
     }
