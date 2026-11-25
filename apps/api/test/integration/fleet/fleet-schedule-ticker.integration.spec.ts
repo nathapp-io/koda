@@ -8,6 +8,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { ROLE_KEY_FOR_LEGACY_ROLE, type LegacyProjectRole } from '../../../src/permissions/legacy-project-roles';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
@@ -263,6 +264,7 @@ describeIntegration('schedule ticker (PG)', () => {
     let observer: PrismaClient;
     let projects: ProjectsService;
     let jobRepo: PrismaFleetJobRepository;
+    let prismaService: PrismaService<PrismaClient>;
 
     const deferred = (): { promise: Promise<void>; resolve: () => void } => {
       let resolve!: () => void;
@@ -304,19 +306,40 @@ describeIntegration('schedule ticker (PG)', () => {
     const committedJobs = (scheduleId: string) => observer.fleetJob.count({ where: { scheduleId } });
     const committedAssigns = (scheduleId: string) => observer.fleetCommand.count({ where: { type: 'ASSIGN', job: { scheduleId } } });
 
-    /** Non-granted lock requests in this database: a statement PostgreSQL is holding on a lock for. */
-    const lockWaits = async (): Promise<number> => (await observer.$queryRaw<Array<{ n: number }>>`
-      SELECT count(*)::int AS n
-        FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-       WHERE NOT l.granted AND a.datname = current_database()`)[0].n;
+    /**
+     * Fix round 1 (finding F1): one blocked statement in this database, and the sessions PostgreSQL names as
+     * blocking it (`pg_blocking_pids`, which reports row-level waits as well as heavyweight lock waits).
+     */
+    interface BlockedBackend { pid: number; query: string; waitEventType: string | null; blockers: number[] }
 
-    const waitForLockWait = async (timeoutMs = 4_000): Promise<number> => {
+    const blockedBackends = (): Promise<BlockedBackend[]> => observer.$queryRaw`
+      SELECT a.pid, a.query, a.wait_event_type AS "waitEventType", pg_blocking_pids(a.pid) AS blockers
+        FROM pg_stat_activity a
+       WHERE a.datname = current_database() AND cardinality(pg_blocking_pids(a.pid)) > 0`;
+
+    /**
+     * The wait AC-3 and AC-4 assert on: the backends blocked by one identified backend — the tick's insertion
+     * transaction — never any waiter this database happens to hold.
+     */
+    const deletionWaits = async (insertionPid: number): Promise<BlockedBackend[]> =>
+      (await blockedBackends()).filter((waiter) => waiter.blockers.includes(insertionPid));
+
+    const waitFor = async <T>(probe: () => Promise<T[]>, timeoutMs = 4_000): Promise<T[]> => {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
-        const waits = await lockWaits();
-        if (waits > 0 || Date.now() > deadline) return waits;
+        const found = await probe();
+        if (found.length > 0 || Date.now() > deadline) return found;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
+    };
+
+    /**
+     * The pid of the backend serving the caller's active transaction. Called from inside `txManager.run` (or a
+     * Prisma `$transaction` callback), so the read runs on that transaction's own connection.
+     */
+    const ownBackendPid = async (): Promise<number> => {
+      const [row] = await prismaService.client.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      return row.pid;
     };
 
     /**
@@ -330,7 +353,10 @@ describeIntegration('schedule ticker (PG)', () => {
       const original = jobRepo.lockLiveProject.bind(jobRepo);
       const locked = deferred();
       const release = deferred();
+      let insertionPid = 0;
       const spy = vi.spyOn(jobRepo, 'lockLiveProject').mockImplementation(async (projectId: string) => {
+        // Before the lock statement, so that statement stays the last one this backend is seen running.
+        insertionPid = await ownBackendPid();
         const live = await original(projectId);   // the real SELECT … FOR NO KEY UPDATE, inside the transaction
         locked.resolve();
         await release.promise;
@@ -348,7 +374,11 @@ describeIntegration('schedule ticker (PG)', () => {
       const deletion = softDelete(s.projectId).then((deleted) => { settled = true; return deleted; });
       return {
         ...own, scheduleId: s.id, deletion,
+        /** The insertion transaction's own PostgreSQL backend. */
+        insertionPid: () => insertionPid,
         deleteSettled: () => settled,
+        /** Waits on this exact insertion backend: the deletion, when the fence holds. */
+        waitForDeletion: () => waitFor(() => deletionWaits(insertionPid)),
         /** Lets the insert commit; the delete's own wait then ends. */
         releaseInsert: async () => { release.resolve(); await ticked; spy.mockRestore(); },
       };
@@ -358,6 +388,7 @@ describeIntegration('schedule ticker (PG)', () => {
       observer = createTestPrismaClient();
       projects = app.get(ProjectsService);
       jobRepo = app.get(PrismaFleetJobRepository);
+      prismaService = app.get(PrismaService, { strict: false });
     });
 
     afterAll(async () => {
@@ -425,28 +456,38 @@ describeIntegration('schedule ticker (PG)', () => {
 
     it('US-008 AC-3: a soft deletion started while the authorized insert holds the project lock waits for it', async () => {
       const race = await insertAgainstDelete();
-      let waits = 0;
+      let waits: BlockedBackend[] = [];
       try {
-        // The delete was started before this observation and has not finished: a waiting statement is what
-        // is left in PostgreSQL's lock table.
+        // The insert holds the row lock and is paused outside the database: its backend is idle in its
+        // transaction, and the last statement it ran is the live-project lock itself.
+        const [insertion] = await observer.$queryRaw<Array<{ state: string; query: string }>>`
+          SELECT a.state, a.query FROM pg_stat_activity a WHERE a.pid = ${race.insertionPid()}`;
+        expect(insertion.state).toBe('idle in transaction');
+        expect(insertion.query).toContain('FOR NO KEY UPDATE');
+        // The delete was started before this observation and has not finished.
         expect(race.deleteSettled()).toBe(false);
-        waits = await waitForLockWait();
+        waits = await race.waitForDeletion();
         expect(race.deleteSettled()).toBe(false);
       } finally {
         await race.releaseInsert();
       }
-      expect(waits).toBeGreaterThan(0);
+      // Exactly the deletion waits on the insertion, and the statement it is held on is its own Project UPDATE.
+      expect(waits).toHaveLength(1);
+      expect(waits[0].waitEventType).toBe('Lock');
+      expect(waits[0].query).toMatch(/"Project"/);
       await race.deletion;
       expect(await observer.fleetJob.count({ where: { projectId: race.projectId } })).toBe(1);
     });
 
     it('US-008 AC-4: the delete that waited for the insert cancels the queued job through its listener', async () => {
       const race = await insertAgainstDelete();
+      let waits: BlockedBackend[] = [];
       try {
-        expect(await waitForLockWait()).toBeGreaterThan(0);
+        waits = await race.waitForDeletion();
       } finally {
         await race.releaseInsert();
       }
+      expect(waits).toHaveLength(1);
       await race.deletion;
 
       const jobs = await observer.fleetJob.findMany({ where: { projectId: race.projectId } });
@@ -455,6 +496,48 @@ describeIntegration('schedule ticker (PG)', () => {
         state: 'CANCELLED', stateReason: 'project_deleted', cancelReason: 'project_deleted',
       }));
       expect(jobs[0].scheduleId).toBe(race.scheduleId);
+    });
+
+    /**
+     * Fix round 1 (finding F1): the observation AC-3 relies on must name its waiter, not count the database's
+     * ungranted locks. Here an unrelated waiter exists and nothing in the tick holds a lock: a database-wide
+     * count sees it, while a wait on any backend other than the row holder's does not.
+     */
+    it('US-008 AC-3 control: an unrelated waiter is attributed to its own blocker only, never to another backend', async () => {
+      const own = await ownProject();
+      const holder = createTestPrismaClient();
+      const waiter = createTestPrismaClient();
+      let releaseHolder: () => void = () => undefined;
+      const pending: Promise<unknown>[] = [];
+      try {
+        const released = new Promise<void>((resolve) => { releaseHolder = resolve; });
+        const held = deferred();
+        let holderPid = 0;
+        pending.push(holder.$transaction(async (tx) => {
+          const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+          holderPid = row.pid;
+          await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${own.projectId} FOR UPDATE`;
+          held.resolve();
+          await released;   // hold the row lock until the observation is made
+        }));
+        await within(held.promise, 'the unrelated row lock to be held');
+
+        // An async IIFE: a bare Prisma raw promise runs only when awaited.
+        pending.push((async () => await waiter.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${own.projectId} FOR UPDATE`)());
+        const blocked = await waitFor(blockedBackends);
+        // A waiter exists and belongs to the backend holding the row …
+        expect(blocked.length).toBeGreaterThan(0);
+        expect(blocked.filter((b) => b.blockers.includes(holderPid))).toHaveLength(1);
+        // … and no backend that blocks nothing — the insertion's place in AC-3 — owns it.
+        const [self] = await observer.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+        expect(blocked.filter((b) => b.blockers.includes(self.pid))).toHaveLength(0);
+        expect(await deletionWaits(self.pid)).toHaveLength(0);
+      } finally {
+        releaseHolder();
+        await Promise.allSettled(pending);
+        await holder.$disconnect();
+        await waiter.$disconnect();
+      }
     });
 
     it('US-008 AC-5: a live project with an authorized owner still dispatches one job, including two tickers racing for one occurrence', async () => {
