@@ -1,4 +1,4 @@
-# ARGS: BUN_VERSION, BUILD_APP, BUILD_APP_PACKAGE, TURBO_VERSION, TURBO_TEAM, TURBO_API, DO_NOT_TRACK
+# ARGS: BUN_VERSION, BUILD_APP, BUILD_APP_PACKAGE, TURBO_VERSION, DO_NOT_TRACK
 
 ARG BUN_VERSION=1.4.5
 FROM oven/bun:${BUN_VERSION}-alpine AS base
@@ -48,20 +48,14 @@ RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
 # Build app
 FROM base AS builder
 WORKDIR /app
-ARG TURBO_TEAM
-ARG TURBO_API
 ARG NUXT_API_INTERNAL_URL=http://api:3100
-ENV TURBO_TEAM=$TURBO_TEAM \
-    TURBO_API=$TURBO_API \
-    NUXT_API_INTERNAL_URL=$NUXT_API_INTERNAL_URL \
+ENV NUXT_API_INTERNAL_URL=$NUXT_API_INTERNAL_URL \
     DO_NOT_TRACK=1
 
 COPY --from=installer /app .
 COPY --from=prune /app/out/full .
 
-RUN --mount=type=secret,id=TURBO_TOKEN \
-    TURBO_TOKEN=$(cat /run/secrets/TURBO_TOKEN) \
-    bun run build
+RUN bun run build
 
 
 # Final image
