@@ -75,7 +75,9 @@ clean main pushes the existing local tag.
 | `vX.Y.Z`, older patch | `:vX.Y.Z` | `backport-X.Y.Z` |
 | `vX.Y.Z-canary.N` | `:canary` | `canary` |
 
-Docker tags keep the `v` (`nathapp/koda-api:v0.5.0`); the `X.Y` alias does not. Deployments pin the exact
+Docker tags keep the `v` (`nathapp/koda-api:v0.5.0`); the `X.Y` alias does not. Each image is labelled with
+koda's own OCI labels (`org.opencontainers.image.version`, `.revision` = the tagged commit, `.created` = its commit
+time, `.source`), replacing the ones it would inherit from the bun base image. Deployments pin the exact
 `:vX.Y.Z` tag, never `:latest` or `:canary`.
 
 A canary is the safe way to exercise the whole pipeline: it moves only `:canary` and npm `canary`.
