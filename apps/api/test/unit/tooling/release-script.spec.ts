@@ -40,6 +40,10 @@ function makeFixture(version = '0.4.2', overrides: Record<string, string> = {}):
   writeFileSync(globalConfig, '');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    // No inherited gh login (CI has none, a developer machine does): every gh call in a test goes to a stub.
+    GH_CONFIG_DIR: join(dir, 'gh-config'),
+    GH_TOKEN: '',
+    GITHUB_TOKEN: '',
     GIT_CONFIG_GLOBAL: globalConfig,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_AUTHOR_NAME: 'Release Test',
@@ -79,6 +83,44 @@ function release(fixture: Fixture, args: string[], input = '', env: NodeJS.Proce
 
 function originTag(fixture: Fixture, tag: string): string {
   return git(fixture, fixture.origin, 'tag', '--list', tag);
+}
+
+/**
+ * Stubs on PATH: `gh` records its arguments (`auth status` exits GH_AUTH_EXIT, `pr create` exits GH_PR_EXIT);
+ * `bun install` rewrites bun.lock from the api manifest; any other `bun` call runs the real bun.
+ */
+function withStubs(fixture: Fixture, opts: { authExit?: number; prExit?: number } = {}): NodeJS.ProcessEnv {
+  const bin = join(fixture.work, '..', 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    join(bin, 'gh'),
+    [
+      '#!/bin/bash',
+      `echo "$*" >> "${join(fixture.work, '..', 'gh-calls')}"`,
+      `[ "$1 $2" = "auth status" ] && exit ${opts.authExit ?? 0}`,
+      `[ "$1 $2" = "pr create" ] && exit ${opts.prExit ?? 0}`,
+      'exit 0',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(bin, 'bun'),
+    [
+      '#!/bin/bash',
+      'if [ "$1" = "install" ]; then',
+      `  "${REAL_BUN}" -e "const v=require(process.cwd()+'/apps/api/package.json').version;require('fs').writeFileSync('bun.lock','lock '+v+'\\\\n')"`,
+      '  exit $?',
+      'fi',
+      `exec "${REAL_BUN}" "$@"`,
+    ].join('\n'),
+  );
+  chmodSync(join(bin, 'gh'), 0o755);
+  chmodSync(join(bin, 'bun'), 0o755);
+  return { ...fixture.env, PATH: `${bin}:${process.env.PATH ?? ''}` };
+}
+
+function ghCalls(fixture: Fixture): string {
+  const file = join(fixture.work, '..', 'gh-calls');
+  return existsSync(file) ? readFileSync(file, 'utf8') : '';
 }
 
 beforeAll(() => {
@@ -174,7 +216,7 @@ describe('release script: planning the version bump', () => {
 
   it('stops without changes when the confirmation is declined', () => {
     const fixture = makeFixture();
-    const run = release(fixture, ['patch'], 'n\n');
+    const run = release(fixture, ['patch'], 'n\n', withStubs(fixture));
     expect(run.output).toContain('Aborted');
     expect(git(fixture, fixture.work, 'branch', '--list', 'release/v0.4.3')).toBe('');
     expect(git(fixture, fixture.work, 'status', '--porcelain')).toBe('');
@@ -182,44 +224,6 @@ describe('release script: planning the version bump', () => {
 });
 
 describe('release script: preparing the release PR', () => {
-  /**
-   * Stubs on PATH: `gh` records its arguments (`auth status` exits GH_AUTH_EXIT, `pr create` exits GH_PR_EXIT);
-   * `bun install` rewrites bun.lock from the api manifest; any other `bun` call runs the real bun.
-   */
-  function withStubs(fixture: Fixture, opts: { authExit?: number; prExit?: number } = {}): NodeJS.ProcessEnv {
-    const bin = join(fixture.work, '..', 'bin');
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(
-      join(bin, 'gh'),
-      [
-        '#!/bin/bash',
-        `echo "$*" >> "${join(fixture.work, '..', 'gh-calls')}"`,
-        `[ "$1 $2" = "auth status" ] && exit ${opts.authExit ?? 0}`,
-        `[ "$1 $2" = "pr create" ] && exit ${opts.prExit ?? 0}`,
-        'exit 0',
-      ].join('\n'),
-    );
-    writeFileSync(
-      join(bin, 'bun'),
-      [
-        '#!/bin/bash',
-        'if [ "$1" = "install" ]; then',
-        `  "${REAL_BUN}" -e "const v=require(process.cwd()+'/apps/api/package.json').version;require('fs').writeFileSync('bun.lock','lock '+v+'\\\\n')"`,
-        '  exit $?',
-        'fi',
-        `exec "${REAL_BUN}" "$@"`,
-      ].join('\n'),
-    );
-    chmodSync(join(bin, 'gh'), 0o755);
-    chmodSync(join(bin, 'bun'), 0o755);
-    return { ...fixture.env, PATH: `${bin}:${process.env.PATH ?? ''}` };
-  }
-
-  function ghCalls(fixture: Fixture): string {
-    const file = join(fixture.work, '..', 'gh-calls');
-    return existsSync(file) ? readFileSync(file, 'utf8') : '';
-  }
-
   it('pushes release/vX.Y.Z with one commit of the four manifests and bun.lock, opens the PR, returns to main', () => {
     const fixture = makeFixture();
     const run = release(fixture, ['patch'], 'y\n', withStubs(fixture));
