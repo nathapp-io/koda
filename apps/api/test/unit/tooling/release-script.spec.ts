@@ -235,6 +235,8 @@ describe('release script: preparing the release PR', () => {
     expect(git(fixture, fixture.origin, 'log', '-1', '--format=%s', 'release/v0.4.3')).toBe('chore: release v0.4.3');
     expect(git(fixture, fixture.origin, 'show', 'release/v0.4.3:bun.lock')).toBe('lock 0.4.3');
     expect(ghCalls(fixture)).toMatch(/pr create .*--head release\/v0\.4\.3/);
+    // Release PRs stay out of the generated release notes (.github/release.yml excludes this label).
+    expect(ghCalls(fixture)).toMatch(/pr create .*--label skip-changelog/);
     expect(git(fixture, fixture.work, 'branch', '--show-current')).toBe('main');
     expect(git(fixture, fixture.work, 'status', '--porcelain')).toBe('');
   });

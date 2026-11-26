@@ -105,7 +105,21 @@ function openPullRequest(current: string, next: string, branch: string): void {
     );
     execFileSync(
       'gh',
-      ['pr', 'create', '--title', `chore: release v${next}`, '--body-file', bodyFile, '--base', 'main', '--head', branch],
+      [
+        'pr',
+        'create',
+        '--title',
+        `chore: release v${next}`,
+        '--body-file',
+        bodyFile,
+        '--base',
+        'main',
+        '--head',
+        branch,
+        // Like nax: .github/release.yml leaves PRs with this label out of the generated release notes.
+        '--label',
+        'skip-changelog',
+      ],
       { cwd: REPO, stdio: 'inherit' },
     );
   } finally {
@@ -157,7 +171,7 @@ async function bumpRelease(kind: string, dryRun: boolean): Promise<void> {
 /** What to run after a failure partway through preparing the release branch. */
 function recoveryHint(branch: string, pushed: boolean): string {
   if (pushed) {
-    return `${branch} is pushed but has no PR. Finish with: gh pr create --base main --head ${branch} --fill`;
+    return `${branch} is pushed but has no PR. Finish with: gh pr create --base main --head ${branch} --fill --label skip-changelog`;
   }
   return [
     `${branch} was not pushed. To start over:`,
