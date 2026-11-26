@@ -13,6 +13,7 @@ import {
 } from '@nathapp/nax-agent';
 import { acpBackend, type AcpBackendOptions } from '@nathapp/nax-agent-acp/client';
 import type { ThreadAssign, ThreadBackend, ThreadFailReason } from '@nathapp/fleet-protocol';
+import type { ProcessRecorder } from '../daemon/owned-processes';
 import { selfCommand as defaultSelfCommand } from '../self-command';
 import { threadTranscriptDir } from './thread-paths';
 import type { NativeModelSet } from './native-models';
@@ -39,6 +40,11 @@ interface ThreadSessionFactoryOptions {
    * Optional so an existing construction keeps working: it defaults to `selfCommand()`.
    */
   selfCommand?: readonly string[];
+  /**
+   * #518: the daemon's process ledger. An ACP agent is launched by the ACP client (not nax-agent's runtime), so its
+   * process reaches the ledger through the backend's `onProcess` hooks. Absent: the ACP options carry no hooks.
+   */
+  processes?: ProcessRecorder;
 }
 
 /**
@@ -109,13 +115,20 @@ function approvalTimeoutMsFor(approvalTimeoutSec: number): number {
  * thread-agents-modes US-003: the ACP backend's own options, exactly as `nax chat` opens an agent — unsandboxed on the
  * runner host, with the runner's environment — plus the thread's model and effort when it pinned them.
  */
-function acpBackendOptions(backend: AcpThreadBackend): AcpBackendOptions {
+function acpBackendOptions(backend: AcpThreadBackend, processes: ProcessRecorder | undefined): AcpBackendOptions {
   return {
     agent: backend.agent,
     allowUnsandboxed: true,
     inheritEnv: true,
     ...(backend.model === undefined ? {} : { model: backend.model }),
     ...(backend.effort === undefined ? {} : { effort: backend.effort }),
+    // #518: the ACP client launches every agent process (a reconnect's too) detached, so each leads its own group.
+    ...(processes === undefined ? {} : {
+      onProcess: {
+        spawned: (pid: number) => { processes.spawned(pid, { group: true, source: 'acp' }); },
+        exited: (pid: number) => { processes.exited(pid); },
+      },
+    }),
   };
 }
 
@@ -148,7 +161,7 @@ export class ThreadSessionFactory {
       // native id, so `nativeModels()` has nothing to say about it and is never consulted.
       if (thread.backend.kind === 'acp') {
         if (!SESSION_ID_RE.test(thread.threadId)) return { ok: false, reason: 'session_error' };
-        return await this.start(input, this.acp(acpBackendOptions(thread.backend)));
+        return await this.start(input, this.acp(acpBackendOptions(thread.backend, this.options.processes)));
       }
 
       const models = await this.options.nativeModels();

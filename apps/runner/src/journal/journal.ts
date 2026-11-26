@@ -3,7 +3,7 @@ import { chmodSync } from 'node:fs';
 import type { FleetJobKindName, RunnerEvent, RunnerEventType } from '@nathapp/fleet-protocol';
 import { systemNow, type Now } from '../time';
 import { SCHEMA_SQL } from './schema';
-import type { ApprovalReceiverRow, CommandRecord, EventRow, JobPatch, JobRow, NewJob, PendingAskRow } from './types';
+import type { ApprovalReceiverRow, CommandRecord, EventRow, JobPatch, JobRow, NewJob, OwnedProcessRow, OwnedProcessSource, PendingAskRow } from './types';
 
 type Row = Record<string, unknown>;
 const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
@@ -226,6 +226,26 @@ export class Journal {
     const result = this.db.query('INSERT OR IGNORE INTO pending_asks (job_id, lease_epoch, nax_ask_id, callback_url, deadline_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(row.jobId, row.leaseEpoch, row.naxAskId, row.callbackUrl, row.deadlineAt, this.now().toISOString());
     return result.changes > 0;
+  }
+
+  /** #518: written synchronously at spawn, before the process can outlive a daemon that is killed outright. */
+  recordOwnedProcess(row: OwnedProcessRow): void {
+    this.db.query('INSERT OR REPLACE INTO owned_processes (pid, spawned_at_ms, is_group, boot_id, host_boot, source) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(row.pid, row.spawnedAtMs, row.group ? 1 : 0, row.bootId, row.hostBoot, row.source);
+  }
+
+  forgetOwnedProcess(pid: number, spawnedAtMs: number): void {
+    this.db.query('DELETE FROM owned_processes WHERE pid = ? AND spawned_at_ms = ?').run(pid, spawnedAtMs);
+  }
+
+  /** #518: the processes recorded by every boot except `bootId`, oldest first. */
+  ownedProcessesOutside(bootId: string): OwnedProcessRow[] {
+    const rows = this.db.query('SELECT pid, spawned_at_ms, is_group, boot_id, host_boot, source FROM owned_processes WHERE boot_id <> ? ORDER BY spawned_at_ms, pid')
+      .all(bootId) as Row[];
+    return rows.map((r) => ({
+      pid: r['pid'] as number, group: r['is_group'] === 1, spawnedAtMs: r['spawned_at_ms'] as number,
+      bootId: r['boot_id'] as string, hostBoot: r['host_boot'] as string, source: r['source'] as OwnedProcessSource,
+    }));
   }
 
   getPendingAsk(jobId: string, leaseEpoch: number, naxAskId: string): PendingAskRow | null {

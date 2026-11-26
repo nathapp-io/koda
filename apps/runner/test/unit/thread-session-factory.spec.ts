@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
 import { createFileTranscriptStore, createMemoryTranscriptStore, nativeBackend, type AgentSession, type CreateAgentSessionOptions, type NativeBackendOptions, type SessionBackend } from '@nathapp/nax-agent';
 import type { AcpBackendOptions } from '@nathapp/nax-agent-acp/client';
+import type { ProcessRecorder } from '../../src/daemon/owned-processes';
 
 const factoryModule = await import('../../src/thread/session-factory').catch(() => undefined);
 
@@ -39,6 +40,7 @@ function setup(overrides: {
   resumeError?: Error;
   tools?: CreateAgentSessionOptions['tools'];
   createStore?: typeof createFileTranscriptStore;
+  processes?: ProcessRecorder;
 } = {}) {
   const calls: {
     create: Array<{ options: CreateAgentSessionOptions }>;
@@ -90,6 +92,7 @@ function setup(overrides: {
       return { models: overrides.models ?? ['m/x', 'm/b'], defaultModel: overrides.defaultModel === undefined ? 'm/b' : overrides.defaultModel };
     },
     agent,
+    ...(overrides.processes ? { processes: overrides.processes } : {}),
   });
   // `resume` and `backend` seed the thread handed to open(), so a test can vary the assign either
   // here or, for a single call, through open()'s second argument.
@@ -275,6 +278,21 @@ test('US-003 AC-1: opens an acp thread through the injected acp backend factory'
   if (!result.ok) throw new Error(result.reason);
   expect(result.session).toBe(session);
   expect(result.resumed).toBe(false);
+});
+
+test('#518: an acp open reports the agent process to the ledger as a group leader, and its exit', async () => {
+  const seen: string[] = [];
+  const processes: ProcessRecorder = {
+    spawned: (pid, how) => { seen.push(`spawned:${pid}:${how.group}:${how.source}`); },
+    exited: (pid) => { seen.push(`exited:${pid}`); },
+  };
+  const h = setup({ processes });
+  await h.open('job-1', thread({ backend: { kind: 'acp', agent: 'codex' } }));
+  const hooks = h.calls.acp[0]?.onProcess;
+  expect(hooks).toBeDefined();
+  hooks?.spawned?.(4242);
+  hooks?.exited?.(4242);
+  expect(seen).toEqual(['spawned:4242:true:acp', 'exited:4242']);
 });
 
 test('US-003 AC-2: forwards an acp effort to the backend factory', async () => {

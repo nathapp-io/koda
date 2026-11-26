@@ -44,6 +44,7 @@ import type { ThreadRunSetup } from '../thread/thread-job-run';
 import { pruneThreads } from '../thread/thread-prune';
 import { pruneProjectCode } from '../thread/project-code/mirror-prune';
 import { systemNow, systemSleep, type Now, type Sleep } from '../time';
+import { installProcessRecording, OwnedProcessLedger, readHostBootId, reapPreviousBootProcesses } from './owned-processes';
 import { CapacityTracker, freeSlots } from './capacity';
 import { DAEMON_VERSION } from '../version';
 import { TUNING, type Tuning } from './tuning';
@@ -274,6 +275,15 @@ async function startOwnedDaemon(
   const bootId = options.bootId ?? newBootId();
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
+  // #518: a daemon killed outright (SIGKILL, OOM, a host crash) leaves its thread backends' process groups running,
+  // and no thread session survives a restart. This daemon owns the home now, so it kills them before taking work,
+  // then records every process its own backends start.
+  const hostBoot = await readHostBootId();
+  if (hostBoot === '') log.warn('cannot read the host boot identity; thread backend processes left by an earlier boot are not killed');
+  await reapPreviousBootProcesses({ journal, bootId, hostBoot, log });
+  const ownedProcesses = new OwnedProcessLedger({ journal, bootId, hostBoot, nowMs: Date.now, log });
+  const restoreProcessRecording = installProcessRecording(ownedProcesses);
+  opened.push(restoreProcessRecording);
   // Fleet S5a §3: nax-agent reads the credential store through this process-wide config, so a thread session
   // sees the runner's nax home. Once, before the first sync — never the runner's own key or a git token.
   (options.configureCredentials ?? defaultConfigureCredentials)(naxCredentialsConfig(config.naxHome));
@@ -381,6 +391,7 @@ async function startOwnedDaemon(
     homeDir: home.dir, naxHome: config.naxHome,
     nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
     selfCommand: self,
+    processes: ownedProcesses,
   })) : undefined;
   const threads: ThreadRunSetup | undefined = sessions ? {
     host: {
@@ -524,6 +535,7 @@ async function startOwnedDaemon(
       } finally {
         clearTimeout(notice);
       }
+      restoreProcessRecording();   // #518: every session has closed; a later spawn is no thread backend's
       journal.close();
       // US-001: the home is held through the last journal writer, and only then released. A stop repeated on this
       // retired handle is a no-op above, so it can never release a successor's ownership.
@@ -543,6 +555,7 @@ async function startOwnedDaemon(
     void shipper.close();   // a killed daemon's uploads die with it; the next daemon resumes at the server's size (R3)
     approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot
     void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
+    restoreProcessRecording();   // #518: the ledger rows stay for the next daemon to reap; only this process stops recording
     journal.close();
     // A real process death stops its housekeeping. The in-process stand-in keeps the
     // lock for any filesystem operation already submitted, even though its journal has closed.

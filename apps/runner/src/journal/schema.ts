@@ -59,4 +59,13 @@ CREATE TABLE IF NOT EXISTS pending_asks (
   created_at TEXT NOT NULL,
   PRIMARY KEY (job_id, lease_epoch, nax_ask_id)
 );
+CREATE TABLE IF NOT EXISTS owned_processes (
+  pid INTEGER NOT NULL,
+  spawned_at_ms INTEGER NOT NULL,
+  is_group INTEGER NOT NULL,
+  boot_id TEXT NOT NULL,
+  host_boot TEXT NOT NULL,
+  source TEXT NOT NULL,
+  PRIMARY KEY (pid, spawned_at_ms)
+);
 `;
