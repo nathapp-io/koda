@@ -125,6 +125,8 @@ async function bumpRelease(kind: string, dryRun: boolean): Promise<void> {
   }
   requireCleanMain();
   rejectExistingTag(tag);
+  rejectExistingBranch(branch);
+  requireGhAuth();
   if (!(await confirm('Prepare and push the release PR? This does not publish.'))) {
     console.log('Aborted.');
     return;
@@ -133,14 +135,50 @@ async function bumpRelease(kind: string, dryRun: boolean): Promise<void> {
   requireCleanMain();
   if (currentVersion() !== current) throw new Error('The version changed after pull; rerun to review the new plan');
   git('checkout', '-b', branch);
-  writeVersion(REPO, next);
-  execFileSync('bun', ['install'], { cwd: REPO, stdio: 'inherit' });
-  git('add', 'bun.lock', ...RELEASE_MANIFESTS);
-  git('commit', '-m', `chore: release ${tag}`);
-  git('push', '-u', 'origin', branch);
-  openPullRequest(current, next, branch);
-  git('checkout', 'main');
+  let pushed = false;
+  try {
+    writeVersion(REPO, next);
+    execFileSync('bun', ['install'], { cwd: REPO, stdio: 'inherit' });
+    git('add', 'bun.lock', ...RELEASE_MANIFESTS);
+    git('commit', '-m', `chore: release ${tag}`);
+    git('push', '-u', 'origin', branch);
+    pushed = true;
+    openPullRequest(current, next, branch);
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${recoveryHint(branch, pushed)}`);
+  } finally {
+    // Back to main whenever the branch holds the work (committed, or never started); a half-written tree stays
+    // on the release branch for inspection, as the recovery hint says.
+    if (git('status', '--porcelain') === '') git('checkout', 'main');
+  }
   console.log('Review and merge the PR, then run `bun run release tag` on clean main.');
+}
+
+/** What to run after a failure partway through preparing the release branch. */
+function recoveryHint(branch: string, pushed: boolean): string {
+  if (pushed) {
+    return `${branch} is pushed but has no PR. Finish with: gh pr create --base main --head ${branch} --fill`;
+  }
+  return [
+    `${branch} was not pushed. To start over:`,
+    `  git checkout -- . && git checkout main && git branch -D ${branch}`,
+    'then rerun `bun run release <kind>`.',
+  ].join('\n');
+}
+
+function rejectExistingBranch(branch: string): void {
+  if (git('branch', '--list', branch)) throw new Error(`Branch ${branch} already exists locally`);
+  if (git('ls-remote', '--heads', 'origin', `refs/heads/${branch}`)) {
+    throw new Error(`Branch ${branch} already exists on origin; merge or close its PR, or delete it first`);
+  }
+}
+
+function requireGhAuth(): void {
+  try {
+    execFileSync('gh', ['auth', 'status'], { cwd: REPO, stdio: 'ignore' });
+  } catch {
+    throw new Error('gh is not signed in (needed to open the release PR); run `gh auth login` first');
+  }
 }
 
 async function tagRelease(dryRun: boolean): Promise<void> {

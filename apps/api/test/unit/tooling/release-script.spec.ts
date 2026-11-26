@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './helpers/workflow-steps';
@@ -55,6 +55,7 @@ function makeFixture(version = '0.4.2', overrides: Record<string, string> = {}):
     mkdirSync(join(fixture.work, file, '..'), { recursive: true });
     writeFileSync(join(fixture.work, file), manifest(file, overrides[file] ?? version));
   }
+  writeFileSync(join(fixture.work, 'bun.lock'), `lock ${version}\n`);
   cpSync(join(REPO_ROOT, 'scripts/release.ts'), join(fixture.work, 'scripts/release.ts'));
   cpSync(join(REPO_ROOT, 'scripts/lib'), join(fixture.work, 'scripts/lib'), { recursive: true });
   git(fixture, fixture.work, 'add', '.');
@@ -64,10 +65,12 @@ function makeFixture(version = '0.4.2', overrides: Record<string, string> = {}):
   return fixture;
 }
 
-function release(fixture: Fixture, args: string[], input = ''): Run {
-  const result = spawnSync('bun', ['scripts/release.ts', ...args], {
+const REAL_BUN = spawnSync('which', ['bun'], { encoding: 'utf8' }).stdout.trim();
+
+function release(fixture: Fixture, args: string[], input = '', env: NodeJS.ProcessEnv = fixture.env): Run {
+  const result = spawnSync(REAL_BUN, ['scripts/release.ts', ...args], {
     cwd: fixture.work,
-    env: fixture.env,
+    env,
     input,
     encoding: 'utf8',
   });
@@ -175,6 +178,95 @@ describe('release script: planning the version bump', () => {
     expect(run.output).toContain('Aborted');
     expect(git(fixture, fixture.work, 'branch', '--list', 'release/v0.4.3')).toBe('');
     expect(git(fixture, fixture.work, 'status', '--porcelain')).toBe('');
+  });
+});
+
+describe('release script: preparing the release PR', () => {
+  /**
+   * Stubs on PATH: `gh` records its arguments (`auth status` exits GH_AUTH_EXIT, `pr create` exits GH_PR_EXIT);
+   * `bun install` rewrites bun.lock from the api manifest; any other `bun` call runs the real bun.
+   */
+  function withStubs(fixture: Fixture, opts: { authExit?: number; prExit?: number } = {}): NodeJS.ProcessEnv {
+    const bin = join(fixture.work, '..', 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, 'gh'),
+      [
+        '#!/bin/bash',
+        `echo "$*" >> "${join(fixture.work, '..', 'gh-calls')}"`,
+        `[ "$1 $2" = "auth status" ] && exit ${opts.authExit ?? 0}`,
+        `[ "$1 $2" = "pr create" ] && exit ${opts.prExit ?? 0}`,
+        'exit 0',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(bin, 'bun'),
+      [
+        '#!/bin/bash',
+        'if [ "$1" = "install" ]; then',
+        `  "${REAL_BUN}" -e "const v=require(process.cwd()+'/apps/api/package.json').version;require('fs').writeFileSync('bun.lock','lock '+v+'\\\\n')"`,
+        '  exit $?',
+        'fi',
+        `exec "${REAL_BUN}" "$@"`,
+      ].join('\n'),
+    );
+    chmodSync(join(bin, 'gh'), 0o755);
+    chmodSync(join(bin, 'bun'), 0o755);
+    return { ...fixture.env, PATH: `${bin}:${process.env.PATH ?? ''}` };
+  }
+
+  function ghCalls(fixture: Fixture): string {
+    const file = join(fixture.work, '..', 'gh-calls');
+    return existsSync(file) ? readFileSync(file, 'utf8') : '';
+  }
+
+  it('pushes release/vX.Y.Z with one commit of the four manifests and bun.lock, opens the PR, returns to main', () => {
+    const fixture = makeFixture();
+    const run = release(fixture, ['patch'], 'y\n', withStubs(fixture));
+    expect(run.status).toBe(0);
+    expect(git(fixture, fixture.origin, 'branch', '--list', 'release/v0.4.3')).toContain('release/v0.4.3');
+    expect(git(fixture, fixture.origin, 'rev-list', '--count', 'main..release/v0.4.3')).toBe('1');
+    const changed = git(fixture, fixture.origin, 'diff', '--name-only', 'main', 'release/v0.4.3').split('\n').sort();
+    expect(changed).toEqual(['apps/api/package.json', 'apps/cli/package.json', 'apps/web/package.json', 'bun.lock', 'package.json']);
+    expect(git(fixture, fixture.origin, 'log', '-1', '--format=%s', 'release/v0.4.3')).toBe('chore: release v0.4.3');
+    expect(git(fixture, fixture.origin, 'show', 'release/v0.4.3:bun.lock')).toBe('lock 0.4.3');
+    expect(ghCalls(fixture)).toMatch(/pr create .*--head release\/v0\.4\.3/);
+    expect(git(fixture, fixture.work, 'branch', '--show-current')).toBe('main');
+    expect(git(fixture, fixture.work, 'status', '--porcelain')).toBe('');
+  });
+
+  it('refuses before changing anything when gh is not signed in', () => {
+    const fixture = makeFixture();
+    const run = release(fixture, ['patch'], 'y\n', withStubs(fixture, { authExit: 1 }));
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('gh auth login');
+    expect(git(fixture, fixture.work, 'branch', '--list', 'release/v0.4.3')).toBe('');
+  });
+
+  it('refuses before changing anything when the release branch exists on origin', () => {
+    const fixture = makeFixture();
+    git(fixture, fixture.work, 'push', '--quiet', 'origin', 'main:refs/heads/release/v0.4.3');
+    const run = release(fixture, ['patch'], 'y\n', withStubs(fixture));
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('release/v0.4.3 already exists on origin');
+    expect(git(fixture, fixture.work, 'branch', '--show-current')).toBe('main');
+  });
+
+  it('refuses before changing anything when the release branch exists locally', () => {
+    const fixture = makeFixture();
+    git(fixture, fixture.work, 'branch', 'release/v0.4.3');
+    const run = release(fixture, ['patch'], 'y\n', withStubs(fixture));
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('release/v0.4.3 already exists locally');
+  });
+
+  it('when opening the PR fails after the push, says how to finish and leaves main checked out', () => {
+    const fixture = makeFixture();
+    const run = release(fixture, ['patch'], 'y\n', withStubs(fixture, { prExit: 1 }));
+    expect(run.status).not.toBe(0);
+    expect(git(fixture, fixture.origin, 'branch', '--list', 'release/v0.4.3')).toContain('release/v0.4.3');
+    expect(run.output).toContain('gh pr create --base main --head release/v0.4.3');
+    expect(git(fixture, fixture.work, 'branch', '--show-current')).toBe('main');
   });
 });
 

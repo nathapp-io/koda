@@ -72,76 +72,132 @@ describe('release workflow: every published manifest matches the tag', () => {
 describe('release workflow: CI must have passed on the release commit', () => {
   const SHA = '1234567890abcdef1234567890abcdef12345678';
 
+  interface CiRun {
+    status: string;
+    conclusion: string | null;
+    event: string;
+  }
+
+  const push = (status: string, conclusion: string | null = null): CiRun => ({ status, conclusion, event: 'push' });
+
   /**
-   * Each gh call prints the next entry of `responses` (a `|`-separated list of "status conclusion" lines; `-` is no
-   * runs at all). Past the last entry, the last one repeats.
+   * Stub gh: a `compare` call answers `{"status": <compare>}`; each runs call answers the next entry of `responses`
+   * (a list of runs, or 'ERR' for an API failure), the last one repeating. Like the real gh, `--jq` is applied, by
+   * jq, so the workflow's filter is what decides which runs count.
    */
-  function gate(responses: string[], opts: { ghExit?: number; waitSeconds?: string } = {}): StepRun & { calls: number } {
+  function gate(
+    responses: Array<CiRun[] | 'ERR'>,
+    opts: { compare?: string; compareExit?: number; waitSeconds?: string } = {},
+  ): StepRun & { calls: number } {
     return withTempDir((dir) => {
-      writeFileSync(join(dir, 'responses'), responses.join('\n') + '\n');
+      const lines = responses.map((r) => (r === 'ERR' ? 'ERR' : JSON.stringify({ workflow_runs: r })));
+      writeFileSync(join(dir, 'responses'), lines.join('\n') + '\n');
       writeFileSync(join(dir, 'count'), '0');
       stub(dir, 'git', `if [[ "$1" == "rev-parse" ]]; then echo ${SHA}; exit 0; fi\nexit 2`);
       stub(
         dir,
         'gh',
         [
-          `count=$(cat "${dir}/count"); count=$((count + 1)); echo "$count" > "${dir}/count"`,
+          'jq_expr=""; prev=""',
+          'for arg in "$@"; do [ "$prev" = "--jq" ] && jq_expr="$arg"; prev="$arg"; done',
           `echo "$*" >> "${dir}/args"`,
-          `[ "${opts.ghExit ?? 0}" = 0 ] || exit ${opts.ghExit ?? 0}`,
+          'case "$*" in',
+          `  */compare/*) [ "${opts.compareExit ?? 0}" = 0 ] || exit ${opts.compareExit ?? 0}`,
+          `    printf '%s' '{"status":"${opts.compare ?? 'identical'}"}' | jq -r "$jq_expr"; exit 0 ;;`,
+          'esac',
+          `count=$(cat "${dir}/count"); count=$((count + 1)); echo "$count" > "${dir}/count"`,
           `line=$(sed -n "\${count}p" "${dir}/responses")`,
           `[ -z "$line" ] && line=$(tail -n 1 "${dir}/responses")`,
-          `[ "$line" = "-" ] && exit 0`,
-          `printf '%s' "$line" | tr '|' '\\n'`,
+          '[ "$line" = "ERR" ] && exit 1',
+          'printf \'%s\' "$line" | jq -r "$jq_expr"',
         ].join('\n'),
       );
       const run = runStep(stepBody(release, 'id: ci-gate'), dir, {
         REPOSITORY: 'nathapp-io/koda',
+        TAG: 'v0.5.0',
         CI_WAIT_SECONDS: opts.waitSeconds ?? '30',
         CI_POLL_SECONDS: '0',
       });
       const args = existsSync(join(dir, 'args')) ? readFileSync(join(dir, 'args'), 'utf8') : '';
-      expect(args).toContain(`head_sha=${SHA}`);
+      if (run.status === 0) expect(args).toContain(`head_sha=${SHA}`);
       return { ...run, calls: Number(readFileSync(join(dir, 'count'), 'utf8').trim()) };
     });
   }
 
-  it('passes when a CI run for the commit succeeded', () => {
-    const run = gate(['completed success']);
+  it('passes when a push run for the commit succeeded', () => {
+    const run = gate([[push('completed', 'success')]]);
     expect(run.status).toBe(0);
     expect(run.calls).toBe(1);
   });
 
+  it('passes on a successful manual run (workflow_dispatch) of CI', () => {
+    expect(gate([[{ status: 'completed', conclusion: 'success', event: 'workflow_dispatch' }]]).status).toBe(0);
+  });
+
   it('passes when one run succeeded even though an earlier run failed', () => {
-    expect(gate(['completed failure|completed success']).status).toBe(0);
+    expect(gate([[push('completed', 'failure'), push('completed', 'success')]]).status).toBe(0);
+  });
+
+  it('does not count a pull_request run: it tested the merge ref, not this commit', () => {
+    const run = gate([[{ status: 'completed', conclusion: 'success', event: 'pull_request' }]], { waitSeconds: '0' });
+    expect(run.status).not.toBe(0);
   });
 
   it('waits for a run that is still in progress, then passes', () => {
-    const run = gate(['in_progress none', 'queued none', 'completed success']);
+    const run = gate([[push('in_progress')], [push('queued')], [push('completed', 'success')]]);
     expect(run.status).toBe(0);
     expect(run.calls).toBe(3);
   });
 
   it('waits for the CI run to appear after the tag push', () => {
-    const run = gate(['-', 'in_progress none', 'completed success']);
+    const run = gate([[], [push('in_progress')], [push('completed', 'success')]]);
     expect(run.status).toBe(0);
     expect(run.calls).toBe(3);
   });
 
-  it('fails at once when every run for the commit finished without success', () => {
-    const run = gate(['completed failure|completed cancelled']);
+  it('keeps waiting after a run main CI cancelled, so a re-run can land', () => {
+    const run = gate([[push('completed', 'cancelled')], [push('completed', 'cancelled'), push('completed', 'success')]]);
+    expect(run.status).toBe(0);
+    expect(run.calls).toBe(2);
+  });
+
+  it('fails at once when a run for the commit failed and none is pending', () => {
+    const run = gate([[push('completed', 'failure'), push('completed', 'cancelled')]]);
     expect(run.status).not.toBe(0);
     expect(run.calls).toBe(1);
-    expect(run.stdout).toContain('gh workflow run ci.yml');
+    expect(run.stdout).toContain('gh workflow run ci.yml --ref v0.5.0');
   });
 
-  it('fails when no CI run appears before the deadline', () => {
-    const run = gate(['-'], { waitSeconds: '0' });
+  it('fails when no CI run appears before the deadline, naming the commit and the re-run command', () => {
+    const run = gate([[]], { waitSeconds: '0' });
     expect(run.status).not.toBe(0);
     expect(run.stdout).toContain(SHA);
+    expect(run.stdout).toContain('gh workflow run ci.yml --ref v0.5.0');
   });
 
-  it('fails closed when the GitHub API call fails', () => {
-    expect(gate(['completed success'], { ghExit: 1 }).status).not.toBe(0);
+  it('retries a transient API error within the deadline', () => {
+    const run = gate(['ERR', [push('completed', 'success')]]);
+    expect(run.status).toBe(0);
+    expect(run.calls).toBe(2);
+  });
+
+  it('fails closed when the API keeps failing until the deadline', () => {
+    expect(gate(['ERR'], { waitSeconds: '0' }).status).not.toBe(0);
+  });
+
+  it.each(['ahead', 'diverged'])('refuses a commit that is not on main (compare status %s)', (compare) => {
+    const run = gate([[push('completed', 'success')]], { compare });
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toContain('not on main');
+    expect(run.calls).toBe(0);
+  });
+
+  it('accepts an older commit of main (compare status behind)', () => {
+    expect(gate([[push('completed', 'success')]], { compare: 'behind' }).status).toBe(0);
+  });
+
+  it('fails closed when main cannot be compared (unknown commit)', () => {
+    expect(gate([[push('completed', 'success')]], { compareExit: 1 }).status).not.toBe(0);
   });
 
   it('runs in the info job, before any publishing job, with read access to Actions', () => {

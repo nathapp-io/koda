@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { RELEASE_MANIFESTS } from '../../../../../scripts/lib/release-manifests';
 import { REPO_ROOT } from './helpers/workflow-steps';
 
 // The published packages release under one version (RELEASING.md). The runner is versioned on its own and is
@@ -24,7 +25,8 @@ describe('release version lockstep', () => {
     expect(match?.[1]).toBe(rootVersion);
   });
 
-  it('the runner keeps its own version', () => {
-    expect(manifestVersion('apps/runner')).toBeTruthy();
+  it('the release command sets exactly the root, api, cli and web manifests, never the runner', () => {
+    expect([...RELEASE_MANIFESTS]).toEqual(['package.json', ...WORKSPACES.map((dir) => `${dir}/package.json`)]);
+    expect(RELEASE_MANIFESTS).not.toContain('apps/runner/package.json');
   });
 });

@@ -31,9 +31,11 @@ above the current version:
 | `promote` | refused | 0.5.0 |
 | `0.5.0-canary.1` | 0.5.0-canary.1 | refused (not above) |
 
-It sets the version in the four manifests, refreshes `bun.lock`, commits `chore: release vX.Y.Z` on
-`release/vX.Y.Z`, pushes that branch and opens a PR. It never tags. main is protected, so the version only lands
-through that reviewed PR.
+Before asking for confirmation it checks that the tag and the `release/vX.Y.Z` branch exist neither locally nor on
+`origin`, and that `gh` is signed in. It then sets the version in the four manifests, refreshes `bun.lock`, commits
+`chore: release vX.Y.Z` on `release/vX.Y.Z`, pushes that branch, opens a PR and returns to main. It never tags.
+main is protected, so the version only lands through that reviewed PR. If a step fails partway, the error says
+what state it left and the command to finish or start over.
 
 A test (`apps/api/test/unit/tooling/release-lockstep.spec.ts`) fails any commit whose manifests or `bun.lock`
 disagree on the version. Never bump one manifest alone.
@@ -54,9 +56,11 @@ clean main pushes the existing local tag.
 
 `.github/workflows/release.yml` then runs:
 
-1. `info`: validates the tag, checks that all four manifests carry its version, and waits (up to 45 minutes) for
-   main's CI run on the tagged commit to pass. The release runs no tests itself, so it refuses a commit that CI
-   did not pass. It then works out the release channels below from the tags on `origin`.
+1. `info`: validates the tag and checks that all four manifests carry its version. The release runs no tests
+   itself, so it then requires the tagged commit to be on main and to have a passing CI run, waiting up to 45
+   minutes for one. Only push and manual CI runs count: a pull_request run tests the PR's merge ref, not this
+   commit. A run cancelled by main's CI concurrency (a later merge) is not a result, so it keeps waiting for a
+   re-run. It then works out the release channels below from the tags on `origin`.
 2. `cli`: publishes `@nathapp/koda-cli` with provenance. A version already on npm is skipped.
 3. `docker-api`, `docker-web`: build and push both images. They start only after the CLI job succeeded.
 4. `release`: creates the GitHub Release.
@@ -77,9 +81,12 @@ A canary is the safe way to exercise the whole pipeline: it moves only `:canary`
 
 ## When something fails
 
-- **CI gate: CI did not pass.** Fix main and release a new version, or re-run CI and re-dispatch the release.
-- **CI gate: no CI run.** CI's push trigger skips commits that change no code path. Start CI for main with
-  `gh workflow run ci.yml --ref main` while main is still at the tagged commit, then re-dispatch.
+- **CI gate: not on main.** The tag points at an unmerged commit. Delete the tag, merge, and tag main.
+- **CI gate: CI did not pass.** Fix main and release a new version, or re-run CI on exactly the tagged commit
+  with `gh workflow run ci.yml --ref vX.Y.Z` and re-dispatch the release.
+- **CI gate: no passing run before the deadline.** The run was cancelled by a later merge, or CI's push trigger
+  skipped a commit that changes no code path. Run `gh workflow run ci.yml --ref vX.Y.Z` (its own concurrency
+  group, so later merges do not cancel it), then re-dispatch.
 - **Any later job.** Re-run the failed jobs, or dispatch the workflow with the tag (Actions -> Release ->
   "Run workflow", or `gh workflow run release.yml -f tag=vX.Y.Z`). A re-publish builds the tag's commit, skips an
   npm version that is already out and pushes the same Docker tags again.

@@ -110,40 +110,64 @@ jobs:
           fi
           echo "All release manifests are at ${TAG}"
 
-      # The release runs no tests of its own: it publishes only a commit that main's CI passed. A tag pushed right
-      # after a merge waits here for that run. CI's push trigger skips commits that change no code paths; for such
-      # a commit, start CI by hand (`gh workflow run ci.yml --ref main`) and re-dispatch the release.
+      # The release runs no tests of its own: it publishes only a commit on main that main's CI passed. Only push and
+      # manual (workflow_dispatch) CI runs count: a pull_request run tests the PR's merge ref, not this commit, and
+      # succeeds without testing anything when the PR changes no code path. A tag pushed right after a merge waits
+      # here for its run; a run that main's CI concurrency cancelled is not a result, so it waits for a re-run. To
+      # run CI on exactly the tagged commit: `gh workflow run ci.yml --ref <tag>`, then re-dispatch the release.
       - name: CI passed on the release commit
         id: ci-gate
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          TAG: ${{ steps.info.outputs.tag }}
           CI_WAIT_SECONDS: "2700"
           CI_POLL_SECONDS: "30"
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
+          rerun="gh workflow run ci.yml --ref ${TAG}, then re-dispatch this release (gh workflow run release.yml -f tag=${TAG})"
+
+          # identical: main is at this commit; behind: main has moved past it. Anything else is off main.
+          if ! on_main="$(gh api "repos/${REPOSITORY}/compare/main...${sha}" --jq '.status')"; then
+            echo "::error::Could not compare ${sha} with main"
+            echo "Could not compare ${sha} with main; a release must be a commit on main."
+            exit 1
+          fi
+          case "$on_main" in
+            identical|behind) ;;
+            *)
+              echo "::error::${TAG} (${sha}) is not on main (compare status: ${on_main})"
+              echo "${TAG} (${sha}) is not on main (compare status: ${on_main}). Release only merged commits."
+              exit 1
+              ;;
+          esac
+
           deadline=$(( $(date +%s) + CI_WAIT_SECONDS ))
           while true; do
-            runs="$(gh api "repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100" \
-              --jq '.workflow_runs[] | "\(.status) \(.conclusion // "none")"')"
+            if ! runs="$(gh api "repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100" \
+              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch") | "\(.status) \(.conclusion // "none")"')"; then
+              runs="api-error"
+            fi
             if printf '%s\n' "$runs" | grep -qx 'completed success'; then
               echo "CI passed on ${sha}"
               exit 0
             fi
-            if [ -n "$runs" ] && ! printf '%s\n' "$runs" | grep -qv '^completed '; then
+            pending="$(printf '%s\n' "$runs" | grep -v '^completed ' | grep -c . || true)"
+            failed="$(printf '%s\n' "$runs" | grep '^completed ' | grep -vc '^completed cancelled$' || true)"
+            if [ "$pending" = 0 ] && [ "$failed" != 0 ]; then
               echo "::error::CI did not pass on ${sha}"
               echo "CI did not pass on ${sha}:"
               printf '%s\n' "$runs"
-              echo "Fix main and release a new version, or re-run CI (gh run rerun <id>, or gh workflow run ci.yml --ref main while main is at ${sha}) and re-dispatch this release."
+              echo "Fix main and release a new version, or re-run CI: ${rerun}"
               exit 1
             fi
             if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "::error::No passing CI run for ${sha} after ${CI_WAIT_SECONDS}s"
-              echo "No passing CI run for ${sha} after ${CI_WAIT_SECONDS}s. Start one with gh workflow run ci.yml --ref main, then re-dispatch this release."
+              echo "No passing CI run for ${sha} after ${CI_WAIT_SECONDS}s (last seen: ${runs:-no runs}). Run CI: ${rerun}"
               exit 1
             fi
-            echo "Waiting for CI on ${sha}..."
+            echo "Waiting for CI on ${sha} (${runs:-no runs yet})"
             sleep "$CI_POLL_SECONDS"
           done
 
