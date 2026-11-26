@@ -20,7 +20,8 @@
     "api:export-spec": "bash -c 'cd apps/api && bun run build && bun scripts/export-spec.cjs'",
     "generate:cli": "openapi-ts",
     "generate": "bun run api:export-spec && bun run generate:cli",
-    "generate:spec": "bun run api:export-spec"
+    "generate:spec": "bun run api:export-spec",
+    "release": "bun scripts/release.ts"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",

@@ -27,6 +27,9 @@ on:
   # applies the same filter instead; the required jobs skip (= pass) without code changes.
   pull_request:
     branches: [main]
+  # A release publishes only a commit that CI passed (release.yml, `CI passed on the release commit`). The push
+  # trigger skips commits that change no code path, so a maintainer can start CI for main by hand.
+  workflow_dispatch:
 
 permissions:
   contents: read
