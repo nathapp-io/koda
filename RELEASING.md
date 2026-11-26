@@ -1,0 +1,100 @@
+# Releasing koda
+
+One version is shared by the root `package.json` and the api, cli and web apps. One `vX.Y.Z` tag publishes:
+
+- `@nathapp/koda-cli` to npm
+- `nathapp/koda-api` and `nathapp/koda-web` to Docker Hub (linux/amd64 and linux/arm64)
+- a GitHub Release with generated notes
+
+The runner (`apps/runner`) is versioned on its own and is not published by a release. Its version is what
+`koda-runner --version` and the sync `daemonVersion` report, so a release never changes it.
+
+Releases are maintainer-initiated only, and every tag push needs its own approval.
+
+## Prepare
+
+On clean, up-to-date main, from the repo root:
+
+```sh
+bun run release --dry-run minor
+bun run release minor
+```
+
+The command accepts `patch`, `minor`, `major`, `canary`, `promote`, or an explicit `X.Y.Z` / `X.Y.Z-canary.N`
+above the current version:
+
+| Argument | From 0.4.2 | From 0.5.0-canary.1 |
+|---|---|---|
+| `patch` | 0.4.3 | 0.5.1 |
+| `minor` | 0.5.0 | 0.6.0 |
+| `canary` | 0.4.3-canary.1 | 0.5.0-canary.2 |
+| `promote` | refused | 0.5.0 |
+| `0.5.0-canary.1` | 0.5.0-canary.1 | refused (not above) |
+
+It sets the version in the four manifests, refreshes `bun.lock`, commits `chore: release vX.Y.Z` on
+`release/vX.Y.Z`, pushes that branch and opens a PR. It never tags. main is protected, so the version only lands
+through that reviewed PR.
+
+A test (`apps/api/test/unit/tooling/release-lockstep.spec.ts`) fails any commit whose manifests or `bun.lock`
+disagree on the version. Never bump one manifest alone.
+
+## Publish
+
+After the PR merges, on clean main:
+
+```sh
+bun run release --dry-run tag
+bun run release tag
+```
+
+The command reads `origin` before pushing: it refuses when `origin` already holds the tag, and it refuses unless
+`origin/main` is the commit it is about to tag, so an unpushed local commit cannot be released. It creates and
+pushes the tag at exactly that commit. If the tag push itself fails, rerunning `bun run release tag` on the same
+clean main pushes the existing local tag.
+
+`.github/workflows/release.yml` then runs:
+
+1. `info`: validates the tag, checks that all four manifests carry its version, and waits (up to 45 minutes) for
+   main's CI run on the tagged commit to pass. The release runs no tests itself, so it refuses a commit that CI
+   did not pass. It then works out the release channels below from the tags on `origin`.
+2. `cli`: publishes `@nathapp/koda-cli` with provenance. A version already on npm is skipped.
+3. `docker-api`, `docker-web`: build and push both images. They start only after the CLI job succeeded.
+4. `release`: creates the GitHub Release.
+5. `notify`: posts to Telegram for stable releases, when the `release` environment has `TELEGRAM_BOT_TOKEN` and
+   `TELEGRAM_CHAT_ID`.
+
+| Tag | Docker | npm dist-tag |
+|---|---|---|
+| `vX.Y.Z`, newest release | `:vX.Y.Z`, `:X.Y`, `:latest` | `latest` |
+| `vX.Y.Z`, newest of its minor only | `:vX.Y.Z`, `:X.Y` | `release-X.Y` |
+| `vX.Y.Z`, older patch | `:vX.Y.Z` | `backport-X.Y.Z` |
+| `vX.Y.Z-canary.N` | `:canary` | `canary` |
+
+Docker tags keep the `v` (`nathapp/koda-api:v0.5.0`); the `X.Y` alias does not. Deployments pin the exact
+`:vX.Y.Z` tag, never `:latest` or `:canary`.
+
+A canary is the safe way to exercise the whole pipeline: it moves only `:canary` and npm `canary`.
+
+## When something fails
+
+- **CI gate: CI did not pass.** Fix main and release a new version, or re-run CI and re-dispatch the release.
+- **CI gate: no CI run.** CI's push trigger skips commits that change no code path. Start CI for main with
+  `gh workflow run ci.yml --ref main` while main is still at the tagged commit, then re-dispatch.
+- **Any later job.** Re-run the failed jobs, or dispatch the workflow with the tag (Actions -> Release ->
+  "Run workflow", or `gh workflow run release.yml -f tag=vX.Y.Z`). A re-publish builds the tag's commit, skips an
+  npm version that is already out and pushes the same Docker tags again.
+
+## Trusted publishing and secrets
+
+The CLI publishes through npm trusted publishing (OIDC), with no token. The npm settings of `@nathapp/koda-cli`
+must list this trusted publisher:
+
+| Field | Value |
+|---|---|
+| Organization | `nathapp-io` |
+| Repository | `koda` |
+| Workflow filename | `release.yml` |
+| Environment | `release` |
+
+The `release` environment holds `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `TURBO_TEAM`, `TURBO_TOKEN`,
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Its deployment policy allows `main` and `v*` tags.

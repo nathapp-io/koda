@@ -9,37 +9,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readWorkflow, stepBody } from './helpers/workflow-steps';
 
-const workflow = readFileSync(
-  join(__dirname, '../../../../..', '.github/workflows/release.yml'),
-  'utf8',
-);
-
-function stepBody(identity: string): string {
-  const lines = workflow.split('\n');
-  let stepStart = -1;
-  let stepEnd = -1;
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].startsWith('      - ')) continue;
-    let end = index + 1;
-    while (end < lines.length && !/^      - /.test(lines[end]) && !/^    [^ ]/.test(lines[end])) end += 1;
-    if (lines.slice(index, end).some((line) => line.trim() === identity)) {
-      stepStart = index;
-      stepEnd = end;
-      break;
-    }
-  }
-  if (stepStart < 0) throw new Error(`Workflow step ${identity} not found`);
-  const runIndex = lines.findIndex((line, index) => index > stepStart && index < stepEnd && /^        run: \|$/.test(line));
-  if (runIndex < 0) throw new Error(`Run body not found for ${identity}`);
-  const bodyLines: string[] = [];
-  for (let index = runIndex + 1; index < stepEnd; index += 1) {
-    const line = lines[index];
-    if (line.trim() && !line.startsWith('          ')) break;
-    bodyLines.push(line.startsWith('          ') ? line.slice(10) : '');
-  }
-  return bodyLines.join('\n').replace(/^\n+|\n+$/g, '');
-}
+const workflow = readWorkflow('release.yml');
 
 interface ChannelRun {
   status: number;
@@ -55,7 +27,7 @@ function runChannels(tag: string, remoteTags: string[], gitExit = 0): ChannelRun
     const scriptFile = join(dir, 'step.sh');
     const gitFile = join(bin, 'git');
     mkdirSync(bin);
-    writeFileSync(scriptFile, stepBody('id: channels'));
+    writeFileSync(scriptFile, stepBody(workflow, 'id: channels'));
     writeFileSync(
       gitFile,
       `#!/bin/bash\nif [[ "$1" == "ls-remote" ]]; then\n  printf '%s\\n' "$REMOTE_TAGS"\n  exit "$GIT_EXIT"\nfi\nexit 2\n`,

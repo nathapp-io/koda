@@ -44,8 +44,11 @@ concurrency:
 jobs:
   info:
     runs-on: ubuntu-latest
+    # Covers the CI wait in `CI passed on the release commit` (CI_WAIT_SECONDS) with room to spare.
+    timeout-minutes: 60
     permissions:
       contents: read
+      actions: read # read main's CI runs for the release commit
     outputs:
       tag: ${{ steps.info.outputs.tag }}
       version: ${{ steps.info.outputs.version }}
@@ -85,16 +88,64 @@ jobs:
         with:
           ref: refs/tags/${{ steps.info.outputs.tag }}
 
+      # Every manifest that ships under the release version must carry the tag (RELEASING.md). The runner is
+      # versioned on its own and is not checked. This stays inline: a re-publish runs main's workflow against an
+      # old tag's checkout, where a newer script would not exist.
       - name: Validate version
         env:
           TAG: ${{ steps.info.outputs.tag }}
         run: |
-          PKG_VERSION="v$(node -p "require('./package.json').version")"
-          if [ "$TAG" != "$PKG_VERSION" ]; then
-            echo "❌ Tag $TAG does not match package.json version $PKG_VERSION"
+          set -euo pipefail
+          status=0
+          for manifest in package.json apps/api/package.json apps/cli/package.json apps/web/package.json; do
+            version="v$(node -p "require('./${manifest}').version")"
+            if [ "$version" != "$TAG" ]; then
+              echo "::error::${manifest} is at ${version}, not ${TAG}"
+              echo "${manifest} is at ${version}, not ${TAG}"
+              status=1
+            fi
+          done
+          if [ "$status" != 0 ]; then
             exit 1
           fi
-          echo "✅ Version match: $TAG"
+          echo "All release manifests are at ${TAG}"
+
+      # The release runs no tests of its own: it publishes only a commit that main's CI passed. A tag pushed right
+      # after a merge waits here for that run. CI's push trigger skips commits that change no code paths; for such
+      # a commit, start CI by hand (`gh workflow run ci.yml --ref main`) and re-dispatch the release.
+      - name: CI passed on the release commit
+        id: ci-gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CI_WAIT_SECONDS: "2700"
+          CI_POLL_SECONDS: "30"
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          deadline=$(( $(date +%s) + CI_WAIT_SECONDS ))
+          while true; do
+            runs="$(gh api "repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100" \
+              --jq '.workflow_runs[] | "\(.status) \(.conclusion // "none")"')"
+            if printf '%s\n' "$runs" | grep -qx 'completed success'; then
+              echo "CI passed on ${sha}"
+              exit 0
+            fi
+            if [ -n "$runs" ] && ! printf '%s\n' "$runs" | grep -qv '^completed '; then
+              echo "::error::CI did not pass on ${sha}"
+              echo "CI did not pass on ${sha}:"
+              printf '%s\n' "$runs"
+              echo "Fix main and release a new version, or re-run CI (gh run rerun <id>, or gh workflow run ci.yml --ref main while main is at ${sha}) and re-dispatch this release."
+              exit 1
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::No passing CI run for ${sha} after ${CI_WAIT_SECONDS}s"
+              echo "No passing CI run for ${sha} after ${CI_WAIT_SECONDS}s. Start one with gh workflow run ci.yml --ref main, then re-dispatch this release."
+              exit 1
+            fi
+            echo "Waiting for CI on ${sha}..."
+            sleep "$CI_POLL_SECONDS"
+          done
 
       - name: Compute release channels
         id: channels
@@ -397,17 +448,23 @@ jobs:
 
   notify:
     needs: [info, release]
-    if: needs.info.outputs.notify == 'true' && vars.TELEGRAM_CHAT_ID != ''
+    if: needs.info.outputs.notify == 'true'
     runs-on: ubuntu-latest
+    # The bot token and the chat id are secrets of the `release` environment, so the job runs in it.
+    environment: release
     permissions: {}
     steps:
       - name: Send Telegram notification
         env:
           VERSION: ${{ needs.info.outputs.tag }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          MSG="🚀 *Koda ${VERSION} released*
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram is not configured for the release environment; no notification sent."
+            exit 0
+          fi
+          MSG="*Koda ${VERSION} released*
 
           \`\`\`
           npm install -g @nathapp/koda-cli
