@@ -14,15 +14,16 @@ const OPTIMISTIC_PREFIX = 'local:'
 
 const isOptimistic = (message: ChatMessageDto): boolean => message.id.startsWith(OPTIMISTIC_PREFIX)
 
-/** A new array whose message `messageId` has `text` appended to its content; null when no such message exists. */
-export function applyDelta(messages: readonly ChatMessageDto[], messageId: string, text: string): ChatMessageDto[] | null {
+/** Append to a streaming message. A terminal row ignores late text, and an unknown id needs a GET. */
+export function applyDelta<T extends readonly ChatMessageDto[]>(messages: T, messageId: string, text: string): T | ChatMessageDto[] | null {
   const index = messages.findIndex(message => message.id === messageId)
   if (index === -1) return null
+  if (messages[index].status !== STREAMING) return messages
   return messages.map((message, i) => (i === index ? { ...message, content: message.content + text } : message))
 }
 
 /**
- * Union by `id`; `incoming` wins, except when live text extends a snapshot that is still streaming. Real messages sort ascending by
+ * Union by `id`; `incoming` wins, except when a delta received during the read extends a streaming snapshot. Real messages sort ascending by
  * `seq`; an optimistic entry is dropped when `incoming` holds a message with its `clientMessageId`,
  * and remaining optimistic entries sort after every real message.
  *
@@ -32,26 +33,23 @@ export function applyDelta(messages: readonly ChatMessageDto[], messageId: strin
 export function mergeMessages(
   current: readonly ChatMessageDto[],
   incoming: readonly ChatMessageDto[],
-  staleIds?: ReadonlySet<string>,
+  { staleIds, liveTextIds }: { staleIds?: ReadonlySet<string>; liveTextIds?: ReadonlySet<string> } = {},
 ): ChatMessageDto[] {
   const inComingClientIds = new Set(incoming.map(message => message.clientMessageId).filter((id): id is string => id !== null))
   const byId = new Map<string, ChatMessageDto>()
   for (const message of incoming) byId.set(message.id, message)
   for (const message of current) {
-    if (byId.has(message.id)) {
+    const snapshot = byId.get(message.id)
+    if (snapshot) {
       if (staleIds?.has(message.id)) byId.set(message.id, message)
+      else if (liveTextIds?.has(message.id) && snapshot.status === STREAMING && message.status === STREAMING &&
+          message.content.length > snapshot.content.length && message.content.startsWith(snapshot.content)) {
+        byId.set(message.id, { ...snapshot, content: message.content })
+      }
       continue
     }
     if (isOptimistic(message) && message.clientMessageId !== null && inComingClientIds.has(message.clientMessageId)) continue
     byId.set(message.id, message)
-  }
-  // A delta can extend a snapshot in flight. A different prefix can also be a runner stream reset.
-  for (const message of current) {
-    const merged = byId.get(message.id)
-    if (merged?.status === STREAMING && message.status === STREAMING &&
-        message.content.length > merged.content.length && message.content.startsWith(merged.content)) {
-      byId.set(message.id, { ...merged, content: message.content })
-    }
   }
   return [...byId.values()].sort((a, b) => {
     const aReal = !isOptimistic(a)

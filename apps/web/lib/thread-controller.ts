@@ -9,6 +9,8 @@
  */
 import { ref, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { extractErrorStatus, isUnavailableError } from '~/composables/useApi'
+import { backoffMs } from '~/lib/project-event-stream'
 import { pendingApproval } from '~/lib/approval-requests'
 import type { ApprovalRequestSummary } from '~/lib/approval-requests'
 import type { ThreadEventHandlers } from '~/lib/thread-event-stream'
@@ -114,9 +116,13 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   // Incremental refreshes and full transcript pages can cover different messages.
   const committedMessageReads = new Map<string, number>()
   const lastTextDelta = new Map<string, number>()
+  let lastDeltaAt = 0
+  let textRepairFailures = 0
+  let textRepairTimer: unknown = null
+  let repairingText = false
   let epoch = 0
 
-  const messagesPage = (afterSeq: number) => ({ query: { afterSeq: String(afterSeq), limit: String(MESSAGES_PAGE_SIZE) } })
+  const messagesPage = (afterSeq: number, limit = MESSAGES_PAGE_SIZE) => ({ query: { afterSeq: String(afterSeq), limit: String(limit) } })
 
   /**
    * US-002 (finding 11): a read the page is not awaiting. Its rejection is handled here instead of escaping
@@ -136,40 +142,75 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     thread.value = next
   }
 
-  /** Merge a page while preserving newer snapshots of overlapping rows and any live streaming text. */
-  const readMessages = async (afterSeq: number): Promise<ChatMessageDto[]> => {
-    const session = epoch
-    let verifyingText = false
-    while (session === epoch) {
-      const readSeq = ++transcriptRevision
-      const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(afterSeq))
-      if (session !== epoch) return []
+  // Text events have no offsets: even a GET that finished before a delta arrived can already
+  // include it. Once streaming quiets, confirm only rows that still carry unverified deltas.
+  const scheduleTextRepair = (): void => {
+    if (lastTextDelta.size === 0) {
+      if (textRepairTimer !== null) deps.clearTimer(textRepairTimer)
+      textRepairTimer = null
+      textRepairFailures = 0
+    } else if (textRepairTimer === null && !repairingText) {
+      textRepairTimer = deps.setTimer(repairText, backoffMs(textRepairFailures + 1))
+    }
+  }
 
-      let missingText = false
-      const staleIds = new Set<string>()
-      for (const item of items) {
-        if ((committedMessageReads.get(item.id) ?? 0) > readSeq) {
-          staleIds.add(item.id)
-          continue
-        }
-        committedMessageReads.set(item.id, readSeq)
-        if (item.status === 'streaming' && (lastTextDelta.get(item.id) ?? 0) > readSeq) {
-          const current = messages.value.find(row => row.id === item.id)
-          if (current && !item.content.startsWith(current.content) && !current.content.startsWith(item.content)) {
-            // A reconnect can miss text before the delta. Without event offsets neither string
-            // identifies the complete transcript. Read again after observing this delta.
-            missingText = true
+  const repairText = (): void => {
+    const untilQuiet = lastDeltaAt + POLL_INTERVAL_MS - deps.now()
+    if (untilQuiet > 0) {
+      textRepairTimer = deps.setTimer(repairText, untilQuiet)
+      return
+    }
+    textRepairTimer = null
+    const session = epoch
+    repairingText = true
+    inBackground(async () => {
+      let failed = false
+      const rows = messages.value.filter(row => lastTextDelta.has(row.id))
+      try {
+        for (const row of rows) {
+          if (session !== epoch) return
+          if (!lastTextDelta.has(row.id)) continue
+          try {
+            const items = await readMessages(row.seq - 1, 1)
+            if (session === epoch && items[0]?.id !== row.id) lastTextDelta.delete(row.id)
+          } catch (error) {
+            if (session !== epoch) return
+            const status = extractErrorStatus(error) ?? errorCode(error)
+            if (isUnavailableError(error) || (status === 401 || status === 400)) lastTextDelta.delete(row.id)
+            else failed = true
           }
-        } else {
-          lastTextDelta.delete(item.id)
+        }
+      } finally {
+        if (session === epoch) {
+          repairingText = false
+          textRepairFailures = failed ? textRepairFailures + 1 : 0
+          scheduleTextRepair()
         }
       }
-      messages.value = mergeMessages(messages.value, items, staleIds)
-      // A second divergent delta belongs to a subsequent event refresh. Keep this load bounded.
-      if (!missingText || verifyingText) return items
-      verifyingText = true
+    })
+  }
+
+  /** Only a newer snapshot of the same row supersedes it. Deltas protect text alone. */
+  const readMessages = async (afterSeq: number, limit = MESSAGES_PAGE_SIZE): Promise<ChatMessageDto[]> => {
+    const session = epoch
+    const readSeq = ++transcriptRevision
+    const { items } = await deps.api.get<{ items: ChatMessageDto[] }>(messagesPath, messagesPage(afterSeq, limit))
+    if (session !== epoch) return []
+
+    const staleIds = new Set<string>()
+    const liveTextIds = new Set<string>()
+    for (const item of items) {
+      if ((committedMessageReads.get(item.id) ?? 0) > readSeq) {
+        staleIds.add(item.id)
+        continue
+      }
+      committedMessageReads.set(item.id, readSeq)
+      if (item.status === 'streaming' && (lastTextDelta.get(item.id) ?? 0) > readSeq) liveTextIds.add(item.id)
+      else lastTextDelta.delete(item.id)
     }
-    return []
+    messages.value = mergeMessages(messages.value, items, { staleIds, liveTextIds })
+    scheduleTextRepair()
+    return items
   }
 
   const refreshMessages = async (): Promise<void> => {
@@ -229,9 +270,11 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
       if (next === null) {
         // A delta for a message we do not hold: the load raced the stream, refetch the gap.
         inBackground(refreshMessages)
-      } else {
+      } else if (next !== messages.value) {
         lastTextDelta.set(event.messageId, ++transcriptRevision)
+        lastDeltaAt = deps.now()
         messages.value = next
+        scheduleTextRepair()
       }
     },
     onMessage: () => {
@@ -271,6 +314,9 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     started = false
     // A read still in flight finishes after this: its completion must not resume what the teardown closed.
     epoch += 1
+    lastTextDelta.clear()
+    repairingText = false
+    scheduleTextRepair()
     stream?.close()
     stream = null
     stopPolling()

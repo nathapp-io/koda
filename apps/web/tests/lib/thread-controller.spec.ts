@@ -129,8 +129,7 @@ const settle = async (): Promise<void> => {
 
 /**
  * A controller wired to a fake API (jest fns), a captured openStream handler object and a fake
- * timer/clock: `advance(ms)` moves the fake clock by `ms` and fires every timer armed for
- * exactly that many milliseconds, once each (a re-armed timer is not re-run in the same advance).
+ * timer/clock: `advance(ms)` moves the fake clock by `ms` and fires every timer due by then, once each (a re-armed timer is not re-run in the same advance).
  */
 function makeHarness(over: { get?: jest.Mock; post?: jest.Mock; patch?: jest.Mock } = {}): Harness {
   const get = over.get ?? jest.fn()
@@ -144,10 +143,10 @@ function makeHarness(over: { get?: jest.Mock; post?: jest.Mock; patch?: jest.Moc
   })
   let time = 0
   let seq = 0
-  const timers = new Map<object, { fn: () => void; ms: number }>()
+  const timers = new Map<object, { fn: () => void; dueAt: number }>()
   const setTimer = jest.fn((fn: () => void, ms: number) => {
     const handle = { n: ++seq }
-    timers.set(handle, { fn, ms })
+    timers.set(handle, { fn, dueAt: time + ms })
     return handle
   })
   const clearTimer = jest.fn((handle: unknown) => {
@@ -179,7 +178,7 @@ function makeHarness(over: { get?: jest.Mock; post?: jest.Mock; patch?: jest.Moc
     messageCalls: () => get.mock.calls.filter(([path]) => path === MESSAGES_PATH),
     advance: (ms: number) => {
       time += ms
-      const due = [...timers.entries()].filter(([, timer]) => timer.ms === ms)
+      const due = [...timers.entries()].filter(([, timer]) => timer.dueAt <= time)
       for (const [handle] of due) timers.delete(handle)
       due.forEach(([, timer]) => timer.fn())
     },
@@ -1045,18 +1044,21 @@ describe('thread detail and transcript snapshot ordering', () => {
     // The initial GET missed " there". The reconnect GET took its snapshot before "!" arrived.
     h.handlers.onDelta?.({ id: 'e', type: 'delta', threadId: 'th1', messageId: 'a', at: '', text: '!' })
     server.setLive([{ ...partial, content: 'Hello there!' }])
+    h.handlers.onLiveChange(true)
     await server.release([{ ...partial, content: 'Hello there' }])
+    h.advance(2000)
+    await settle()
     expect(h.ctl.messages.value[0].content).toBe('Hello there!')
   })
 
-  test('a busy stream can trigger only one verification read per page refresh', async () => {
+  test('a page refresh settles while busy deltas coalesce into one quiet read of the affected row', async () => {
     const row = message({ id: 'a', seq: 1, status: 'streaming', content: 'a' })
     const first = deferred<{ items: ChatMessageDto[] }>()
     const verification = deferred<{ items: ChatMessageDto[] }>()
     const reads = [Promise.resolve({ items: [row] }), first.promise, verification.promise]
     const get = jest.fn(async (path: string) => path === THREAD_PATH
       ? thread()
-      : reads.shift() ?? { items: [{ ...row, content: 'settled' }] })
+      : reads.shift() ?? { items: [{ ...row, content: 'abcdefg', costUsd: '0.20' }] })
     const h = makeHarness({ get })
     await h.ctl.load()
     h.ctl.start()
@@ -1065,17 +1067,111 @@ describe('thread detail and transcript snapshot ordering', () => {
     await settle()
     h.handlers.onDelta?.({ id: '1', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'c' })
     first.resolve({ items: [{ ...row, content: 'ab' }] })
+    await refreshing
+    expect(h.messageCalls()).toHaveLength(2)
+    h.advance(2000)
     await settle()
     h.handlers.onDelta?.({ id: '2', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'd' })
     verification.resolve({ items: [{ ...row, content: 'abc', costUsd: '0.20' }] })
-    await refreshing
-    expect(h.messageCalls()).toHaveLength(3) // initial, refresh, verification
+    await settle()
+    expect(h.messageCalls()).toHaveLength(3) // initial, refresh, one quiet read
     expect(h.ctl.messages.value[0].costUsd).toBe('0.20')
 
-    // A later stream event can still fetch the authoritative final state.
-    h.handlers.onMessage?.({ id: '3', type: 'message', messageId: 'a', threadId: 'th1', at: '' })
+    // Additional deltas cannot start another eager read. The stream then goes quiet.
+    for (const text of ['e', 'f', 'g']) {
+      h.advance(1000)
+      h.handlers.onDelta?.({ id: text, type: 'delta', messageId: 'a', threadId: 'th1', at: '', text })
+    }
     await settle()
-    expect(h.ctl.messages.value[0].content).toBe('settled')
+    expect(h.messageCalls()).toHaveLength(3)
+    h.advance(2000)
+    await settle()
+    expect(h.ctl.messages.value[0].content).toBe('abcdefg')
+    expect(h.messageCalls()).toHaveLength(4)
+    expect(h.get).toHaveBeenLastCalledWith(MESSAGES_PATH, { query: { afterSeq: '0', limit: '1' } })
+    h.advance(2000)
+    await settle()
+    expect(h.messageCalls()).toHaveLength(4)
+  })
+
+  test.each([false, true])('teardown cancels a text repair (already fetching: %s)', async fetching => {
+    const row = message({ id: 'a', seq: 1, status: 'streaming', content: 'a' })
+    const { h, server } = await upToHeldCatchUp([row])
+    h.handlers.onLiveChange(true)
+    h.handlers.onDelta?.({ id: '1', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'b' })
+    await server.release([row])
+    const reads = h.messageCalls().length
+    server.hold()
+    if (fetching) {
+      h.advance(2000)
+      await settle()
+      expect(h.messageCalls()).toHaveLength(reads + 1)
+    }
+    h.ctl.stop()
+    h.ctl.start()
+    h.handlers.onLiveChange(true)
+    if (fetching) await server.release([{ ...row, content: 'from closed stream' }])
+    h.advance(2000)
+    await settle()
+    expect(h.messageCalls()).toHaveLength(reads + Number(fetching))
+    expect(h.ctl.messages.value[0].content).toBe('ab')
+  })
+
+  test('a delta already included in a successful GET is corrected after quiet, including a transient repair outage', async () => {
+    const row = message({ id: 'a', seq: 1, status: 'streaming', content: 'a' })
+    let messagesGets = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) return thread()
+      messagesGets += 1
+      if (messagesGets === 3) throw new ApiError(503, 'unavailable')
+      return { items: [{ ...row, content: messagesGets === 1 ? 'a' : 'ab' }] }
+    })
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+    h.handlers.onLiveChange(true)
+    h.handlers.onMessage?.({ id: 'tool', type: 'message', messageId: 'a', threadId: 'th1', at: '' })
+    await settle()
+    h.handlers.onDelta?.({ id: 'b', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'b' })
+    h.advance(2000)
+    await settle()
+    expect(messagesGets).toBe(3)
+    h.advance(2000)
+    await settle()
+    expect(messagesGets).toBe(3)
+    h.advance(2000)
+    await settle()
+    expect(h.ctl.messages.value[0].content).toBe('ab')
+    expect(messagesGets).toBe(4)
+  })
+
+  test('a delta delivered after a terminal snapshot cannot change its final text', async () => {
+    const row = message({ id: 'a', seq: 1, status: 'complete', content: 'finished' })
+    const server = heldCatchUpServer()
+    server.setLive([row])
+    const h = makeHarness({ get: server.get })
+    await h.ctl.load()
+    h.ctl.start()
+    h.handlers.onLiveChange(true)
+    h.handlers.onDelta?.({ id: 'late', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: 'ed' })
+    h.advance(2000)
+    await settle()
+    expect(h.ctl.messages.value[0].content).toBe('finished')
+    expect(h.messageCalls()).toHaveLength(1)
+  })
+
+  test('a fresh reset to a shorter prefix is authoritative before the following delta', async () => {
+    const longer = message({ id: 'a', seq: 1, status: 'streaming', content: 'start old' })
+    const server = heldCatchUpServer()
+    server.setLive([longer])
+    const h = makeHarness({ get: server.get })
+    await h.ctl.load()
+    h.ctl.start()
+    server.setLive([{ ...longer, content: 'start' }])
+    h.handlers.onMessage?.({ id: 'reset', type: 'message', messageId: 'a', threadId: 'th1', at: '' })
+    await settle()
+    h.handlers.onDelta?.({ id: 'delta', type: 'delta', messageId: 'a', threadId: 'th1', at: '', text: ' new' })
+    expect(h.ctl.messages.value[0].content).toBe('start new')
   })
 
   test('stopping during a held full page keeps its rows and subsequent requests out of the next lifecycle', async () => {
