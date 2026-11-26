@@ -1,0 +1,66 @@
+diff --git a/dist/client/open.js b/dist/client/open.js
+--- a/dist/client/open.js
++++ b/dist/client/open.js
+@@ -46,6 +46,8 @@
+     // OPENCODE_CONFIG_CONTENT cannot weaken a read-only session. A rejection here refuses the
+     // open before anything is launched (rule-policy.ts, US-004).
+     const env = { ...options.env, ...(await policyLaunchEnv(ctx.profile, options)) };
++    if (ctx.openSignal.aborted)
++        throw closedDuringOpen(ctx.sessionId);
+     const launched = launch({ command: candidate.command, args: candidate.args, cwd: ctx.workdir, env });
+     watchProcess(options.onProcess, launched);
+     const link = openConnection(launched.target, handlers);
+@@ -56,6 +58,7 @@
+     catch (err) {
+         launched.kill();
+         link.close();
++        await launched.exited;
+         throw err;
+     }
+ }
+diff --git a/dist/client/backend.js b/dist/client/backend.js
+--- a/dist/client/backend.js
++++ b/dist/client/backend.js
+@@ -220,13 +220,15 @@
+         s.lost = true;
+         throw sessionLost(s.ctx.sessionId, "its agent process is gone and the agent supports neither session/resume nor session/load");
+     }
+-    return reconnect(s, signal);
++    s.reconnecting ??= reconnect(s, signal).finally(() => { s.reconnecting = undefined; });
++    return s.reconnecting;
+ }
+ /** D6-g: a new process restores the session; a stopped attempt may be retried, a failed one ends the session. */
+ async function reconnect(s, signal) {
+     const old = s.live;
+     old.acp.launched.kill();
+     old.acp.link.close();
++    await old.acp.launched.exited;
+     // The old tool host stops and its token is revoked (§6.6).
+     await old.host?.stop();
+     const restore = {
+@@ -328,6 +330,9 @@
+     }
+ }
+ async function shutdown(s) {
++    // A reconnect may already be opening a replacement process when the close aborts it.
++    // Retire that attempt before reading s.live so no replacement escapes shutdown.
++    await s.reconnecting?.catch(() => {});
+     const { acp, options, status, host } = s.live;
+     if (!status.disconnected && acp.record.close) {
+         await race(acp.link.closeSession(acp.agentSessionId), { timeoutMs: options.cancelGraceMs });
+@@ -336,7 +341,14 @@
+     acp.link.close();
+     // §6.3 close step 4: stop the tool host and revoke its token.
+     await host?.stop();
+-    await saveFinal(s.ctx.transcriptStore, s.ctx.sessionId);
++    try {
++        await saveFinal(s.ctx.transcriptStore, s.ctx.sessionId);
++    }
++    catch (cause) {
++        // The process and tool host have already retired. A caller retaining the working
++        // directory can report the storage error while safely releasing its ownership.
++        throw Object.assign(new Error("ACP final transcript save failed", { cause }), { code: "ACP_FINAL_TRANSCRIPT_FAILED" });
++    }
+ }
+ /** §6.3 step 4.5: the document with its final savedAt. Load-merge keeps the facade's turn marker and the baseline. */
+ async function saveFinal(store, sessionId) {

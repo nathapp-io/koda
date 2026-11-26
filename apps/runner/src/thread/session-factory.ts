@@ -16,6 +16,7 @@ import type { ThreadAssign, ThreadBackend, ThreadFailReason } from '@nathapp/fle
 import { selfCommand as defaultSelfCommand } from '../self-command';
 import { threadTranscriptDir } from './thread-paths';
 import type { NativeModelSet } from './native-models';
+import type { ThreadWorktreeLease } from './thread-worktree-owners';
 
 type AcpThreadBackend = Extract<ThreadBackend, { kind: 'acp' }>;
 
@@ -58,6 +59,7 @@ export interface OpenThreadSessionOptions {
   approvalTimeoutSec: number;
   /** Ends transcript access after finalization or a halt. */
   transcriptSignal?: AbortSignal;
+  worktreeLease?: ThreadWorktreeLease;
   /**
    * US-011: the job's provider keys, when this runner serves any. Absent (a runner without a vault, or a job whose
    * socket could not be served) keeps today's backend options: nax's process-wide store — the machine's own
@@ -255,7 +257,7 @@ export class ThreadSessionFactory {
   private async start(input: OpenThreadSessionOptions, backend: SessionBackend): Promise<OpenThreadSessionResult> {
     const { thread } = input;
     const sessionOptions: CreateAgentSessionOptions = {
-      backend,
+      backend: input.worktreeLease?.backend(backend, input.transcriptSignal) ?? backend,
       profile: thread.mode ?? 'read',
       workdir: input.worktree,
       instructions: thread.instructions,

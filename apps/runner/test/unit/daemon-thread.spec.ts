@@ -5,7 +5,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentSession } from '@nathapp/nax-agent';
+import { createAgentSession, createFileTranscriptStore, nativeBackend, resumeAgentSession, type AgentSession } from '@nathapp/nax-agent';
+import { ThreadSessionFactory } from '../../src/thread/session-factory';
 import type { AssignPayload, FleetCommandOut, SyncRequest, SyncResponse, ThreadAssign } from '@nathapp/fleet-protocol';
 import { parseRunnerConfig, resolveHome } from '../../src/config/runner-config';
 import { startDaemon, type DaemonHandle, type DaemonOptions } from '../../src/daemon/daemon';
@@ -194,6 +195,50 @@ describe('project code daemon prune', () => {
 });
 
 describe('startDaemon thread wiring (US-007)', () => {
+  for (const retire of ['stop', 'crash'] as const) {
+    test(`a timed-out thread retains the home through backend cleanup on ${retire}`, async () => {
+      const f = await fixture();
+      let release!: () => void;
+      const pendingWrite = new Promise<void>((resolve) => { release = resolve; });
+      let closing = false;
+      const sessions = new ThreadSessionFactory({
+        homeDir: f.home.dir, naxHome: f.config.naxHome,
+        nativeModels: async () => ({ defaultModel: 'openai/gpt-5', models: ['openai/gpt-5'] }),
+        agent: { createAgentSession, createFileTranscriptStore, resumeAgentSession, nativeBackend: (opts) => {
+          const backend = nativeBackend(opts);
+          return { ...backend, open: async (ctx) => {
+            const handle = await backend.open(ctx);
+            let close: Promise<void> | undefined;
+            return { ...handle, close: () => {
+              closing = true;
+              close ??= pendingWrite.then(async () => {
+                await writeFile(join(ctx.workdir, 'retired.txt'), 'finished');
+                await handle.close();
+              });
+              return close;
+            } };
+          } };
+        } },
+      });
+      const daemon = await f.daemon({ threadSessions: sessions, tuning: { syncMinGapMs: 10, threadCloseTimeoutMs: 10 } });
+      try {
+        f.fleet.queue.push({ commandId: 'a', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1,
+          payload: f.assign('j1', { kind: 'WORKSPACE', initialMessage: null, backend: { kind: 'native', model: 'openai/gpt-5' } }) });
+        await waitFor(() => daemon.journal.getJob('j1', 1)?.state === 'RUNNING');
+        await daemon.supervisor.threadCommand({ commandId: 'c', type: 'THREAD_CLOSE', jobId: 'j1', leaseEpoch: 1, payload: {} });
+        await waitFor(() => closing && daemon.journal.getJob('j1', 1)?.state === 'COMPLETED');
+        void daemon[retire]();
+        await expect(f.daemon()).rejects.toMatchObject({ kind: 'occupied' });
+        release();
+        await daemon.stop();
+        const successor = await f.daemon();
+        await successor.stop();
+      } finally {
+        release();
+        await daemon.stop();
+      }
+    }, 15000);
+  }
   test('project code AC-14: thread host uses the daemon CredentialBroker for repository tokens', async () => {
     const f = await fixture();
     const daemon = await f.daemon({ tuning: { projectCodeFetchTimeoutMs: 4321 } });

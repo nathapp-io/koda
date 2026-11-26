@@ -19,6 +19,7 @@ import { runThreadAction, type ThreadDiscardInput, type ThreadDiscardResult } fr
 import { isTerminalState } from '../supervisor/transitions';
 import { ensureSkills as defaultEnsureSkills, type EnsureSkillsOptions } from './skill-fetch';
 import type { OpenThreadSessionOptions, ThreadProviderKeys } from './session-factory';
+import type { ThreadWorktreeLease, ThreadWorktreeOwners } from './thread-worktree-owners';
 import { ThreadEventWriter } from './thread-event-writer';
 import { prepareThreadWorktree as defaultPrepareThreadWorktree, type PrepareThreadWorktreeInput } from './thread-worktree';
 import { threadScratchDir } from './thread-paths';
@@ -70,6 +71,7 @@ export type ThreadLogShipping = Omit<LogShipping, 'register'> & { register(job: 
 /** What a thread run needs from the daemon (daemon.ts). */
 export interface ThreadHostDeps {
   readonly sessions: ThreadSessionOpener;
+  readonly worktrees?: ThreadWorktreeOwners;
   readonly credentials: CredentialProvider;
   readonly repoCredentials?: RepoCredentialProvider;
   readonly refreshMirror?: typeof refreshMirror;
@@ -249,6 +251,7 @@ export class ThreadJobRun {
    */
   private terminalWritten = false;
   private readonly toolLifetime = new AbortController();
+  private worktreeLease?: ThreadWorktreeLease;
   private readonly transcriptLifetime = new AbortController();
   /** Resolves on a halt, so a bounded close wait never outlives the daemon stop that made it pointless. */
   private haltWait: Promise<void> | null = null;
@@ -295,6 +298,7 @@ export class ThreadJobRun {
       this.transcriptLifetime.abort();
       // A halt releases the turn immediately. A publish already changing the shared worktree still owns it.
       await this.livePublish?.wait();
+      this.worktreeLease?.release();
       // Every exit gives up the job's log streams, including a halt, an abandon and a failure whose own recording failed.
       this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
       // US-011: and its provider-key socket. It outlives the git socket by design (a model call needs it to the last
@@ -319,6 +323,10 @@ export class ThreadJobRun {
       return;
     }
     if (this.stopped()) return;
+    if (this.deps.host.worktrees) {
+      this.worktreeLease = await this.deps.host.worktrees.acquire(thread.threadId, this.toolLifetime.signal);
+      if (this.stopped()) return;
+    }
 
     if (thread.action === 'PUBLISH' || thread.action === 'DISCARD') {
       this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
@@ -382,6 +390,7 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: prepared.worktree,
+      worktreeLease: this.worktreeLease,
       transcriptSignal: this.transcriptLifetime.signal,
       tools: [
         ...buildThreadTools({
@@ -464,6 +473,7 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: scratch,
+      worktreeLease: this.worktreeLease,
       transcriptSignal: this.transcriptLifetime.signal,
       tools: [
         ...buildProjectThreadTools({
@@ -1047,6 +1057,7 @@ export class ThreadJobRun {
     if (this.closeStarted) return;
     this.closeStarted = true;
     this.toolLifetime.abort();
+    this.worktreeLease?.revoke();
     void this.finishRun(this.closeReason, this.closeFailed);
   }
 
@@ -1257,6 +1268,7 @@ export class ThreadJobRun {
       this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
     }
     const action = row.assign.thread?.action;
+    if (this.events.currentState() !== 'RUNNING') this.toolLifetime.abort();
     if (this.events.currentState() === 'RUNNING' && action !== 'PUBLISH' && action !== 'DISCARD') this.requestClose('cancelled');
     return true;
   }
@@ -1268,6 +1280,7 @@ export class ThreadJobRun {
   halt(): void {
     this.halted = true;
     this.toolLifetime.abort();
+    this.worktreeLease?.revoke();
     this.transcriptLifetime.abort();
     this.stopIdle();
     this.stopHeartbeat();

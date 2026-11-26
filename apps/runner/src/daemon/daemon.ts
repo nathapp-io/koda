@@ -38,6 +38,7 @@ import { ServerClient, type FetchFn } from '../sync/http';
 import { SyncLoop, type StopReason } from '../sync/sync-loop';
 import { naxCredentialsConfig } from '../thread/nax-credentials';
 import { ThreadSessionFactory } from '../thread/session-factory';
+import { ThreadWorktreeOwners } from '../thread/thread-worktree-owners';
 import { threadNativeModels } from '../thread/thread-host';
 import type { ThreadRunSetup } from '../thread/thread-job-run';
 import { pruneThreads } from '../thread/thread-prune';
@@ -294,6 +295,10 @@ async function startOwnedDaemon(
   // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.
   const mutex = new RepoMutex();
+  const worktrees = new ThreadWorktreeOwners((threadId, stage, error) => {
+    const message = stage === 'shutdown' ? 'thread backend shutdown failed; retaining its worktree' : 'thread final transcript save failed';
+    log.error(message, { threadId, error: errorMessage(error) });
+  });
   let archivedThreadIds: readonly string[] = [];
   /**
    * Review B1: the live THREAD job ids. The mirror prune reads this again under each mirror's mutex, so a job
@@ -314,9 +319,9 @@ async function startOwnedDaemon(
     try {
       await pruneThreads({
         git, homeDir: home.dir, archivedThreadIds, now,
-        activeThreadIds: journal.activeJobs()
+        activeThreadIds: [...worktrees.activeIds(), ...journal.activeJobs()
           .filter((job) => job.command === 'THREAD')
-          .flatMap((job) => (job.assign.thread ? [job.assign.thread.threadId] : [])),
+          .flatMap((job) => (job.assign.thread ? [job.assign.thread.threadId] : []))],
       });
     } catch (error) {
       log.warn('thread prune failed', { error: errorMessage(error) });
@@ -379,7 +384,7 @@ async function startOwnedDaemon(
   })) : undefined;
   const threads: ThreadRunSetup | undefined = sessions ? {
     host: {
-      sessions,
+      sessions, worktrees,
       credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
       kodaTools: { call: (args) => client.callKodaTool(args) },
@@ -468,7 +473,7 @@ async function startOwnedDaemon(
   // ticks, but its last invocation can still be copying the log or pruning a mirror.
   const housekeeping = new Map<() => Promise<void>, Promise<void>>();
   const pendingHomeWork = (): Promise<void>[] => {
-    const pending = [...housekeeping.values()];
+    const pending = [...housekeeping.values(), ...worktrees.pending()];
     const transcript = sessions?.pendingTranscripts?.();
     if (transcript) pending.push(transcript);
     return pending;
