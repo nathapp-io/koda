@@ -64,3 +64,20 @@ export interface PendingAskRow {
   readonly callbackUrl: string;
   readonly deadlineAt: string;
 }
+
+/** #518: who started a process the ledger tracks: nax-agent's runtime (native sessions) or an ACP agent launch. */
+export type OwnedProcessSource = 'native' | 'acp';
+
+/**
+ * #518: one process a thread backend started under this runner home. `group` is true when the process leads its own
+ * process group (spawned detached), so a reap signals `-pid` and reaches everything it started.
+ */
+export interface OwnedProcessRow {
+  readonly pid: number;
+  readonly group: boolean;
+  readonly spawnedAtMs: number;
+  readonly bootId: string;
+  /** The host's boot identity when the row was written; '' when it could not be read. A row is signalled only in the host boot it was written in. */
+  readonly hostBoot: string;
+  readonly source: OwnedProcessSource;
+}

@@ -30,7 +30,7 @@ export function parsePidEntries(text: string): PidEntry[] {
  * The slack is now 5s because lstart has 1s precision while the entry's `spawnedAt` is millisecond-accurate, and a
  * slow `Date.now()` NTP step between spawn and reap is no longer the dominant source of error.
  */
-const REGISTRATION_SLACK_MS = 5_000;
+export const REGISTRATION_SLACK_MS = 5_000;
 
 /** D37: nax itself refuses to signal stale entries because pids recycle; so does the runner. */
 export async function selectReapable(
