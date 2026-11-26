@@ -1,6 +1,6 @@
 {
   "name": "koda",
-  "version": "0.4.2",
+  "version": "0.5.0-canary.1",
   "private": true,
   "packageManager": "bun@1.4.5",
   "workspaces": [
