@@ -58,6 +58,7 @@ function fakeFleet(): FakeFleet {
       const response: SyncResponse = {
         jobAcks: body.jobs.map((job) => ({ jobId: job.jobId, ackedSeq: job.events.at(-1)?.seq ?? 0 })),
         commands, gitTokens: tokens, gitTokenErrors: [], unknownJobIds: [],
+        providerKeyErrors: body.providerRequests?.map(({ jobId, providerId }) => ({ jobId, providerId, reason: 'vault_off' })),
         ...(fleet.archivedThreadIds === undefined ? {} : { archivedThreadIds: fleet.archivedThreadIds }),
       };
       return envelope(response);
