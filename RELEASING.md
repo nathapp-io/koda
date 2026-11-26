@@ -33,7 +33,8 @@ above the current version:
 
 Before asking for confirmation it checks that the tag and the `release/vX.Y.Z` branch exist neither locally nor on
 `origin`, and that `gh` is signed in. It then sets the version in the four manifests, refreshes `bun.lock`, commits
-`chore: release vX.Y.Z` on `release/vX.Y.Z`, pushes that branch, opens a PR and returns to main. It never tags.
+`chore: release vX.Y.Z` on `release/vX.Y.Z`, pushes that branch, opens a PR labelled `skip-changelog` (so
+`.github/release.yml` leaves it out of the release notes) and returns to main. It never tags.
 main is protected, so the version only lands through that reviewed PR. If a step fails partway, the error says
 what state it left and the command to finish or start over.
 
