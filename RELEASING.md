@@ -50,6 +50,9 @@ bun run release --dry-run tag
 bun run release tag
 ```
 
+Tag once main's CI run for the merge commit is green (`gh run list --workflow ci.yml --branch main -L 1`):
+the release's CI gate otherwise waits for it, about 8 minutes.
+
 The command reads `origin` before pushing: it refuses when `origin` already holds the tag, and it refuses unless
 `origin/main` is the commit it is about to tag, so an unpushed local commit cannot be released. It creates and
 pushes the tag at exactly that commit. If the tag push itself fails, rerunning `bun run release tag` on the same
@@ -63,9 +66,15 @@ clean main pushes the existing local tag.
    commit. A run cancelled by main's CI concurrency (a later merge) is not a result, so it keeps waiting for a
    re-run. It then works out the release channels below from the tags on `origin`.
 2. `cli`: publishes `@nathapp/koda-cli` with provenance. A version already on npm is skipped.
-3. `docker-api`, `docker-web`: build and push both images. They start only after the CLI job succeeded.
-4. `release`: creates the GitHub Release.
-5. `notify`: posts to Telegram for stable releases, when the `release` environment has `TELEGRAM_BOT_TOKEN` and
+3. `docker-build`: builds each image once per platform, each on its native runner (`ubuntu-latest` for amd64,
+   `ubuntu-24.04-arm` for arm64; no QEMU), and pushes it by digest only. These jobs start only after the CLI job
+   succeeded. No layer cache is kept: Actions caches are scoped to the ref that wrote them, so a tag's cache could
+   never serve the next tag.
+4. `docker`: per app, publishes the tags below as one multi-arch image over the two platform digests, then checks
+   that the published image has both platforms. It refuses unless both digests arrived and every tag names that
+   app's image. The digests are kept 7 days: re-running a failed `docker` job later finds none, so re-dispatch.
+5. `release`: creates the GitHub Release.
+6. `notify`: posts to Telegram for stable releases, when the `release` environment has `TELEGRAM_BOT_TOKEN` and
    `TELEGRAM_CHAT_ID`.
 
 | Tag | Docker | npm dist-tag |
@@ -106,5 +115,5 @@ must list this trusted publisher:
 | Workflow filename | `release.yml` |
 | Environment | `release` |
 
-The `release` environment holds `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `TURBO_TEAM`, `TURBO_TOKEN`,
+The `release` environment holds `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Its deployment policy allows `main` and `v*` tags.

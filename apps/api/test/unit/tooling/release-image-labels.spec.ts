@@ -27,26 +27,31 @@ function imageLabels(job: string): Map<string, string> {
 }
 
 describe('release image labels', () => {
-  for (const app of ['api', 'web']) {
-    const job = `docker-${app}`;
+  // One build job per app and platform (release-docker-jobs.spec.ts); the labels are templated per app.
+  const job = 'docker-build';
 
-    it(`${job} overrides every OCI label the base image sets`, () => {
-      const labels = imageLabels(job);
-      expect([...labels.keys()].sort()).toEqual(BASE_IMAGE_LABELS.map((name) => `org.opencontainers.image.${name}`));
-    });
+  it(`${job} overrides every OCI label the base image sets`, () => {
+    const labels = imageLabels(job);
+    expect([...labels.keys()].sort()).toEqual(BASE_IMAGE_LABELS.map((name) => `org.opencontainers.image.${name}`));
+  });
 
-    it(`${job} labels the image with koda's own commit, version and source`, () => {
-      const labels = imageLabels(job);
-      expect(labels.get('org.opencontainers.image.title')).toBe(`koda-${app}`);
-      expect(labels.get('org.opencontainers.image.version')).toBe('${{ needs.info.outputs.version }}');
-      expect(labels.get('org.opencontainers.image.revision')).toBe('${{ needs.info.outputs.revision }}');
-      expect(labels.get('org.opencontainers.image.created')).toBe('${{ needs.info.outputs.created }}');
-      expect(labels.get('org.opencontainers.image.source')).toBe('https://github.com/${{ github.repository }}');
-      expect(labels.get('org.opencontainers.image.url')).toBe('https://github.com/${{ github.repository }}');
-      expect(labels.get('org.opencontainers.image.licenses')).toBe('MIT');
-      expect(labels.get('org.opencontainers.image.description')).not.toBe('');
-    });
-  }
+  it(`${job} labels the image with koda's own commit, version and source`, () => {
+    const labels = imageLabels(job);
+    expect(labels.get('org.opencontainers.image.title')).toBe('koda-${{ matrix.app }}');
+    expect(labels.get('org.opencontainers.image.description')).toBe('${{ matrix.description }}');
+    expect(labels.get('org.opencontainers.image.version')).toBe('${{ needs.info.outputs.version }}');
+    expect(labels.get('org.opencontainers.image.revision')).toBe('${{ needs.info.outputs.revision }}');
+    expect(labels.get('org.opencontainers.image.created')).toBe('${{ needs.info.outputs.created }}');
+    expect(labels.get('org.opencontainers.image.source')).toBe('https://github.com/${{ github.repository }}');
+    expect(labels.get('org.opencontainers.image.url')).toBe('https://github.com/${{ github.repository }}');
+    expect(labels.get('org.opencontainers.image.licenses')).toBe('MIT');
+  });
+
+  it('every app has a description for its label', () => {
+    const block = jobBlock(release, job);
+    expect(block).toMatch(/- app: api\n\s+description: \S/);
+    expect(block).toMatch(/- app: web\n\s+description: \S/);
+  });
 
   it('info exports the release commit as revision and created', () => {
     const info = jobBlock(release, 'info');
