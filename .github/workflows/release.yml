@@ -58,6 +58,8 @@ jobs:
       docker_tags_api: ${{ steps.channels.outputs.tags_api }}
       docker_tags_web: ${{ steps.channels.outputs.tags_web }}
       latest: ${{ steps.channels.outputs.latest }}
+      revision: ${{ steps.commit.outputs.revision }}
+      created: ${{ steps.commit.outputs.created }}
     steps:
       # Review E/SEC-9: workflow inputs reach scripts through env, never through ${{ }} inside run:.
       - name: Set release info
@@ -87,6 +89,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ steps.info.outputs.tag }}
+
+      # The tagged commit and its commit time, for the image labels. Not github.sha: a re-dispatch runs from main,
+      # while this job checked out the tag. The commit time, not the build time, so a re-publish labels alike.
+      - name: Release commit
+        id: commit
+        run: |
+          set -euo pipefail
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       # Every manifest that ships under the release version must carry the tag (RELEASING.md). The runner is
       # versioned on its own and is not checked. This stays inline: a re-publish runs main's workflow against an
@@ -398,6 +409,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ needs.info.outputs.docker_tags_api }}
+          # Each label the bun base image sets is set again here, or the image reports bun's (release-image-labels.spec.ts).
+          labels: |
+            org.opencontainers.image.title=koda-api
+            org.opencontainers.image.description=koda API server (NestJS)
+            org.opencontainers.image.version=${{ needs.info.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.info.outputs.revision }}
+            org.opencontainers.image.created=${{ needs.info.outputs.created }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
           build-args: |
             BUN_VERSION=1.4.5
             TURBO_VERSION=2.11.4
@@ -440,6 +461,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ needs.info.outputs.docker_tags_web }}
+          # Each label the bun base image sets is set again here, or the image reports bun's (release-image-labels.spec.ts).
+          labels: |
+            org.opencontainers.image.title=koda-web
+            org.opencontainers.image.description=koda web app (Nuxt)
+            org.opencontainers.image.version=${{ needs.info.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.info.outputs.revision }}
+            org.opencontainers.image.created=${{ needs.info.outputs.created }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
           build-args: |
             BUN_VERSION=1.4.5
             TURBO_VERSION=2.11.4
