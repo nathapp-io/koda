@@ -98,6 +98,30 @@ describe.skipIf(!enabled)('runner 3a against the real API: RUN, PLAN, cancel', (
     expect(run.resultSha).toBe(await sh(world.origin.dir, 'rev-parse', 'feat/fb'));
   });
 
+  test('a CANCEL queued after the local upload cutoff preserves the successful runner verdict', async () => {
+    const gate = join(world.base, 'late-cancel-gate');
+    const id = await world.withFake({ FAKE_NAX_GATE: gate }, async () => {
+      const jobId = await world.dispatch({ feature: 'fd' });
+      await world.waitForJob(jobId, (j) => j.state === 'RUNNING' && j.naxRunId !== null);
+      return jobId;
+    });
+    runner.net.beforeSync = async (request) => {
+      if (!request.jobs.some((job) => job.jobId === id && job.events.some((event) =>
+        event.type === 'state' && 'to' in event.payload && event.payload.to === 'UPLOADING'))) return;
+      // The RUN is uploading locally; the API still sees RUNNING and accepts the cancellation.
+      delete runner.net.beforeSync;
+      await world.cancel(id);
+    };
+    try {
+      await writeFile(gate, '');
+      const job = await world.waitForJob(id, (j) => ['COMPLETED', 'CANCELLED', 'FAILED', 'ESCALATED'].includes(j.state));
+      expect(job).toMatchObject({ state: 'COMPLETED', cancelRequestedAt: null, finishResult: 'opened' });
+      expect(await world.prisma.fleetCommand.count({ where: { jobId: id, type: 'CANCEL', ackResult: 'rejected' } })).toBe(1);
+    } finally {
+      delete runner.net.beforeSync;
+    }
+  });
+
   test('cancel: SIGTERM reaches the process group, the partial bundle is uploaded, the job ends CANCELLED', async () => {
     const id = await world.withFake({ FAKE_NAX_SCENARIO: 'hang' }, async () => {
       const jobId = await world.dispatch({ feature: 'fc' });

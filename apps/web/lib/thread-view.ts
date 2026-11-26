@@ -14,54 +14,42 @@ const OPTIMISTIC_PREFIX = 'local:'
 
 const isOptimistic = (message: ChatMessageDto): boolean => message.id.startsWith(OPTIMISTIC_PREFIX)
 
-/** A new array whose message `messageId` has `text` appended to its content; null when no such message exists. */
-export function applyDelta(messages: readonly ChatMessageDto[], messageId: string, text: string): ChatMessageDto[] | null {
+/** Append to a streaming message. A terminal row ignores late text, and an unknown id needs a GET. */
+export function applyDelta<T extends readonly ChatMessageDto[]>(messages: T, messageId: string, text: string): T | ChatMessageDto[] | null {
   const index = messages.findIndex(message => message.id === messageId)
   if (index === -1) return null
+  if (messages[index].status !== STREAMING) return messages
   return messages.map((message, i) => (i === index ? { ...message, content: message.content + text } : message))
 }
 
-export interface MergeMessagesOptions {
-  /**
-   * US-002: the page is a snapshot read that started before the transcript last changed — a catch-up GET
-   * held while a newer read or a live delta landed, say. It may add messages the transcript does not hold
-   * yet, but it never rewrites one it does: the held copy already carries the newer news.
-   */
-  stale?: boolean
-}
-
 /**
- * Union by `id`; `incoming` wins, except that a message `streaming` on both sides keeps the longer
- * `content` (an older in-flight GET never shortens streamed text). Real messages sort ascending by
+ * Union by `id`; `incoming` wins, except when a delta received during the read extends a streaming snapshot. Real messages sort ascending by
  * `seq`; an optimistic entry is dropped when `incoming` holds a message with its `clientMessageId`,
  * and remaining optimistic entries sort after every real message.
  *
- * A `stale` page (US-002) keeps every message the transcript already holds and only contributes the
- * ones it does not know, so a snapshot taken before a newer read or a text delta cannot undo either.
+ * For rows already covered by a newer snapshot, `staleIds` preserves that snapshot in its entirety.
+ * A live text delta only changes content, so a server read can still supply new tool and usage metadata.
  */
 export function mergeMessages(
   current: readonly ChatMessageDto[],
   incoming: readonly ChatMessageDto[],
-  options: MergeMessagesOptions = {},
+  { staleIds, liveTextIds }: { staleIds?: ReadonlySet<string>; liveTextIds?: ReadonlySet<string> } = {},
 ): ChatMessageDto[] {
   const inComingClientIds = new Set(incoming.map(message => message.clientMessageId).filter((id): id is string => id !== null))
   const byId = new Map<string, ChatMessageDto>()
   for (const message of incoming) byId.set(message.id, message)
   for (const message of current) {
-    if (byId.has(message.id)) {
-      // The transcript already holds this sequence: a stale page's copy of it is older than what is held.
-      if (options.stale) byId.set(message.id, message)
+    const snapshot = byId.get(message.id)
+    if (snapshot) {
+      if (staleIds?.has(message.id)) byId.set(message.id, message)
+      else if (liveTextIds?.has(message.id) && snapshot.status === STREAMING && message.status === STREAMING &&
+          message.content.length > snapshot.content.length && message.content.startsWith(snapshot.content)) {
+        byId.set(message.id, { ...snapshot, content: message.content })
+      }
       continue
     }
     if (isOptimistic(message) && message.clientMessageId !== null && inComingClientIds.has(message.clientMessageId)) continue
     byId.set(message.id, message)
-  }
-  // Streaming on both sides: keep the longer content (the in-flight GET is older than the stream).
-  for (const message of current) {
-    const merged = byId.get(message.id)
-    if (merged && merged.status === STREAMING && message.status === STREAMING && merged.content.length < message.content.length) {
-      byId.set(message.id, { ...merged, content: message.content })
-    }
   }
   return [...byId.values()].sort((a, b) => {
     const aReal = !isOptimistic(a)

@@ -1,0 +1,78 @@
+diff --git a/dist/session/native-backend.js b/dist/session/native-backend.js
+--- a/dist/session/native-backend.js
++++ b/dist/session/native-backend.js
+@@ -113,9 +113,24 @@
+         // can offer Bash's per-call escape without turning the sandbox off.
+         ...(allowUnsandboxedCommands ? { unsandboxedCommands: true } : {}),
+     });
++    // A turn's abort may resolve its interaction before the physical tool settles.
++    // Closing the backend revokes fresh calls and retains already admitted calls.
++    const closing = new AbortController();
++    const pending = new Set();
++    const runtime = {
++        callTool(name, input, context) {
++            closing.signal.throwIfAborted();
++            const signal = context.signal ? AbortSignal.any([context.signal, closing.signal]) : closing.signal;
++            const work = support.runtime.callTool(name, input, { ...context, signal });
++            pending.add(work);
++            const done = () => pending.delete(work);
++            work.then(done, done);
++            return work;
++        },
++    };
+     const interactionHandler = createSessionInteractionHandler({
+         sessionId: ctx.sessionId,
+-        runtime: support.runtime,
++        runtime,
+         unavailableTools: new Set((support.declaredTools ?? []).filter((name) => !support.tools.some((tool) => tool.name === name))),
+         embedderTools: new Map(ctx.tools.map((tool) => [tool.name, tool])),
+         asks: ctx.asks,
+@@ -188,9 +203,10 @@
+             loopHandlerContext,
+             ...(raw.loopHandlers !== undefined ? { loopHandlers: raw.loopHandlers } : {}),
+         }),
+-        // Native owns no per-session resource beyond the adapter, which
+-        // closeSession (the facade's step before this) already releases.
+-        close: async () => { },
++        close: async () => {
++            closing.abort();
++            await Promise.allSettled(pending);
++        },
+     };
+ }
+ export function nativeBackend(options) {
+diff --git a/dist/tools/write.js b/dist/tools/write.js
+--- a/dist/tools/write.js
++++ b/dist/tools/write.js
+@@ -34,7 +34,9 @@
+             };
+         }
+         try {
++            ctx.signal?.throwIfAborted();
+             await mkdir(dirname(target), { recursive: true });
++            ctx.signal?.throwIfAborted();
+             await writeFile(target, content, "utf8");
+             return { content: `wrote ${Buffer.byteLength(content, "utf8")} bytes` };
+         }
+diff --git a/dist/tools/edit.js b/dist/tools/edit.js
+--- a/dist/tools/edit.js
++++ b/dist/tools/edit.js
+@@ -99,6 +99,7 @@
+             // `indexOf` is that match.
+             const matchIndex = source.indexOf(oldString);
+             const updated = replaceUniqueLiteral(source, oldString, newString, matchIndex);
++            ctx.signal?.throwIfAborted();
+             await _editDeps.writeFile(target, updated, "utf8");
+             // The view is composed only after the write resolves: a write error
+             // returns the error, never a view. It is a bounded Read-compatible
+diff --git a/dist/tools/delete.js b/dist/tools/delete.js
+--- a/dist/tools/delete.js
++++ b/dist/tools/delete.js
+@@ -144,6 +144,7 @@
+             }
+         }
+         try {
++            ctx.signal?.throwIfAborted();
+             await unlink(target);
+             return { content: `deleted ${shown} -- stage the removal by passing the same path to GitCommit` };
+         }

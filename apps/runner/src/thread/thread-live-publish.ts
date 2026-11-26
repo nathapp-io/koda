@@ -33,6 +33,7 @@ export class ThreadLivePublish {
 
   private async execute(): Promise<void> {
     try {
+      if (this.options.stopped()) return;
       let result: ThreadPublishResult;
       try { result = await this.options.publish(this.options.input); }
       catch { result = { ok: false, reason: 'git_error' }; }

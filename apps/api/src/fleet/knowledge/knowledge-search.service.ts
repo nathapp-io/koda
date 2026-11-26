@@ -316,7 +316,11 @@ export class KnowledgeSearchService {
     if (window.jobIds.length > 0) {
       for (const job of await this.index.describeJobs(input.projectId, window.jobIds)) described.set(job.jobId, job);
     }
+    // A repository can be removed while embeddings or outcome descriptions are being fetched.
+    const currentRepos = candidates.length > 0 ? await this.index.listProjectRepos(input.projectId) : [];
+    const currentRepoIds = new Set(currentRepos.map((repo) => repo.id));
     const hits = candidates
+      .filter((entry) => currentRepoIds.has(entry.row.repoId))
       // S5b 3c-2-D9: an outcome hit is kept only when the project still has its job — a job of another project,
       // a deleted one and one past the description window are all dropped here (US-005).
       .filter((entry) => !isOutcomeRow(entry.row)

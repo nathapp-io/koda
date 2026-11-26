@@ -1,4 +1,4 @@
-import type { CommandAck, FleetCommandOut } from '@nathapp/fleet-protocol';
+import { CANCEL_CUTOFF_DETAIL, type CommandAck, type FleetCommandOut } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
 import { errorMessage } from '../errors';
 import type { Journal } from '../journal/journal';
@@ -184,7 +184,7 @@ export class CommandHandler {
         const decision = supervisor.cancel(command.jobId, command.leaseEpoch);
         const outcome: Outcome = decision === 'ok'
           ? { result: 'ok' }
-          : { result: 'rejected', detail: decision === 'refused' ? 'cancel cutoff passed' : 'does not hold job' };
+          : { result: 'rejected', detail: decision === 'refused' ? CANCEL_CUTOFF_DETAIL : 'does not hold job' };
         this.record(command, outcome);
         return outcome;
       }

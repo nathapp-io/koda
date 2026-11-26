@@ -9,12 +9,14 @@ import {
   type CredentialSource,
   type NativeBackendOptions,
   type SessionBackend,
+  type TranscriptStore,
 } from '@nathapp/nax-agent';
 import { acpBackend, type AcpBackendOptions } from '@nathapp/nax-agent-acp/client';
 import type { ThreadAssign, ThreadBackend, ThreadFailReason } from '@nathapp/fleet-protocol';
 import { selfCommand as defaultSelfCommand } from '../self-command';
 import { threadTranscriptDir } from './thread-paths';
 import type { NativeModelSet } from './native-models';
+import type { ThreadWorktreeLease } from './thread-worktree-owners';
 
 type AcpThreadBackend = Extract<ThreadBackend, { kind: 'acp' }>;
 
@@ -55,6 +57,9 @@ export interface OpenThreadSessionOptions {
   worktree: string;
   tools: CreateAgentSessionOptions['tools'];
   approvalTimeoutSec: number;
+  /** Ends transcript access after finalization or a halt. */
+  transcriptSignal?: AbortSignal;
+  worktreeLease?: ThreadWorktreeLease;
   /**
    * US-011: the job's provider keys, when this runner serves any. Absent (a runner without a vault, or a job whose
    * socket could not be served) keeps today's backend options: nax's process-wide store — the machine's own
@@ -119,6 +124,7 @@ export class ThreadSessionFactory {
   private readonly acp: typeof acpBackend;
   /** US-011: the argv the exec helper runs the runner again with. */
   private readonly self: readonly string[];
+  private readonly transcriptTails = new Map<string, Promise<void>>();
 
   constructor(private readonly options: ThreadSessionFactoryOptions) {
     this.agent = options.agent ?? {
@@ -211,6 +217,39 @@ export class ThreadSessionFactory {
     };
   }
 
+  /** Pending filesystem calls still own their paths during a daemon handover. */
+  pendingTranscripts(): Promise<void> | undefined {
+    if (this.transcriptTails.size === 0) return undefined;
+    return Promise.all(this.transcriptTails.values()).then(() => undefined);
+  }
+
+  private transcriptStore(threadId: string, signal?: AbortSignal): TranscriptStore {
+    const store = this.agent.createFileTranscriptStore(threadTranscriptDir(this.options.homeDir, threadId));
+    // A timed-out adapter may finish a save or markTurn after its run has closed. Only this
+    // thread's next store call waits for an admitted operation; other threads proceed independently.
+    const access = <T>(operation: () => Promise<T>): Promise<T> => {
+      if (signal?.aborted) return Promise.reject(signal.reason);
+      const previous = this.transcriptTails.get(threadId) ?? Promise.resolve();
+      const result = previous.then(() => {
+        signal?.throwIfAborted();
+        return operation();
+      });
+      const release = () => {
+        if (this.transcriptTails.get(threadId) === done) this.transcriptTails.delete(threadId);
+      };
+      const done = result.then(release, release);
+      this.transcriptTails.set(threadId, done);
+      return result;
+    };
+    return {
+      load: (id) => access(() => store.load(id)),
+      save: (id, doc) => access(() => store.save(id, doc)),
+      markTurn: (id, marker) => access(() => store.markTurn(id, marker)),
+      retainFailed: (id) => access(() => store.retainFailed(id)),
+      delete: (id) => access(() => store.delete(id)),
+    };
+  }
+
   /**
    * The session itself, on a backend the caller built: one set of options for native and ACP alike, then the
    * resume/create fallback. Errors escape to `open`, which maps the agent-session codes to a failure reason.
@@ -218,12 +257,12 @@ export class ThreadSessionFactory {
   private async start(input: OpenThreadSessionOptions, backend: SessionBackend): Promise<OpenThreadSessionResult> {
     const { thread } = input;
     const sessionOptions: CreateAgentSessionOptions = {
-      backend,
+      backend: input.worktreeLease?.backend(backend, input.transcriptSignal) ?? backend,
       profile: thread.mode ?? 'read',
       workdir: input.worktree,
       instructions: thread.instructions,
       tools: input.tools,
-      transcriptStore: this.agent.createFileTranscriptStore(threadTranscriptDir(this.options.homeDir, thread.threadId)),
+      transcriptStore: this.transcriptStore(thread.threadId, input.transcriptSignal),
       approvalTimeoutMs: approvalTimeoutMsFor(input.approvalTimeoutSec),
       turnTimeoutSeconds: 900,
       metadata: { threadId: thread.threadId, jobId: input.jobId },

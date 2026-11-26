@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createGit } from '../../src/executor/git';
 import { buildThreadTools } from '../../src/thread/tools';
@@ -47,6 +47,18 @@ function contextFor(worktree: string, overrides: Partial<ThreadToolContext> = {}
 }
 
 describe('write_doc (US-003)', () => {
+  test('a turn cancelled while the path is checked cannot create its document directory', async () => {
+    const worktree = await makeWorktree();
+    const turn = new AbortController();
+    const write = buildThreadTools(contextFor(worktree)).find((tool) => tool.name === 'write_doc');
+    if (!write) throw new Error('missing write_doc');
+    const pending = write.run({ path: 'docs/new/late.md', content: 'too late' },
+      { sessionId: 's', toolCallId: 'c', signal: turn.signal });
+    turn.abort();
+    expect((await pending).isError).toBe(true);
+    await expect(stat(join(worktree, 'docs/new'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   test('US-003 AC-1: writes the content to an allowlisted feature spec in the worktree', async () => {
     const worktree = await makeWorktree();
     await writeDocTool(contextFor(worktree)).run({ path: '.nax/features/divide/spec.md', content: '# Divide' });

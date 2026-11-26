@@ -38,6 +38,7 @@ import { ServerClient, type FetchFn } from '../sync/http';
 import { SyncLoop, type StopReason } from '../sync/sync-loop';
 import { naxCredentialsConfig } from '../thread/nax-credentials';
 import { ThreadSessionFactory } from '../thread/session-factory';
+import { ThreadWorktreeOwners } from '../thread/thread-worktree-owners';
 import { threadNativeModels } from '../thread/thread-host';
 import type { ThreadRunSetup } from '../thread/thread-job-run';
 import { pruneThreads } from '../thread/thread-prune';
@@ -73,7 +74,7 @@ export interface DaemonOptions {
    */
   readonly acpProbe?: AcpAgentProbe;
   /** Fleet S5a §3: the thread session factory's `open`; tests inject a fake. Default: `ThreadSessionFactory`. */
-  readonly threadSessions?: Pick<ThreadSessionFactory, 'open'>;
+  readonly threadSessions?: Pick<ThreadSessionFactory, 'open'> & Partial<Pick<ThreadSessionFactory, 'pendingTranscripts'>>;
   /** Fleet S5a §3: nax-agent's process-wide credential config; tests inject a spy. Default: nax-agent's own. */
   readonly configureCredentials?: (config: CredentialsConfig) => void;
   /**
@@ -294,6 +295,10 @@ async function startOwnedDaemon(
   // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.
   const mutex = new RepoMutex();
+  const worktrees = new ThreadWorktreeOwners((threadId, stage, error) => {
+    const message = stage === 'shutdown' ? 'thread backend shutdown failed; retaining its worktree' : 'thread final transcript save failed';
+    log.error(message, { threadId, error: errorMessage(error) });
+  });
   let archivedThreadIds: readonly string[] = [];
   /**
    * Review B1: the live THREAD job ids. The mirror prune reads this again under each mirror's mutex, so a job
@@ -314,9 +319,9 @@ async function startOwnedDaemon(
     try {
       await pruneThreads({
         git, homeDir: home.dir, archivedThreadIds, now,
-        activeThreadIds: journal.activeJobs()
+        activeThreadIds: [...worktrees.activeIds(), ...journal.activeJobs()
           .filter((job) => job.command === 'THREAD')
-          .flatMap((job) => (job.assign.thread ? [job.assign.thread.threadId] : [])),
+          .flatMap((job) => (job.assign.thread ? [job.assign.thread.threadId] : []))],
       });
     } catch (error) {
       log.warn('thread prune failed', { error: errorMessage(error) });
@@ -372,15 +377,14 @@ async function startOwnedDaemon(
   opened.push(() => shipper.close());
   // Fleet S5a §3: the thread host. `threadSessions` is the session factory (or a test's fake); the native
   // models a session may name come from the nax home, filtered by the last capability report.
-  const threads: ThreadRunSetup | undefined = naxMode ? {
+  const sessions = naxMode ? (options.threadSessions ?? new ThreadSessionFactory({
+    homeDir: home.dir, naxHome: config.naxHome,
+    nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
+    selfCommand: self,
+  })) : undefined;
+  const threads: ThreadRunSetup | undefined = sessions ? {
     host: {
-      sessions: options.threadSessions ?? new ThreadSessionFactory({
-        homeDir: home.dir, naxHome: config.naxHome,
-        nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
-        // US-011: the same argv the broker's helpers and the probe use, so a thread's `provider-cred` helper is this
-        // runner again — and the one the vault-enabled `config.json` names.
-        selfCommand: self,
-      }),
+      sessions, worktrees,
       credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
       kodaTools: { call: (args) => client.callKodaTool(args) },
@@ -465,21 +469,42 @@ async function startOwnedDaemon(
     await running;
   });
 
+  // One outstanding invocation of each filesystem task. Clearing an interval prevents future
+  // ticks, but its last invocation can still be copying the log or pruning a mirror.
+  const housekeeping = new Map<() => Promise<void>, Promise<void>>();
+  const pendingHomeWork = (): Promise<void>[] => {
+    const pending = [...housekeeping.values(), ...worktrees.pending()];
+    const transcript = sessions?.pendingTranscripts?.();
+    if (transcript) pending.push(transcript);
+    return pending;
+  };
+  const runHousekeeping = (task: () => Promise<void>): void => {
+    if (housekeeping.has(task)) return;
+    const done = task()
+      .catch((error: unknown) => { log.warn('runner housekeeping failed', { error: errorMessage(error) }); })
+      .finally(() => { housekeeping.delete(task); });
+    housekeeping.set(task, done);
+  };
+  const pruneJobDirs = () => pruneJobs(journal, config, log);
   const timers = [
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),
-    setInterval(() => { void pruneJobs(journal, config, log); void pruneThreadAssets(); }, tuning.pruneIntervalMs),
+    setInterval(() => { runHousekeeping(pruneJobDirs); runHousekeeping(pruneThreadAssets); }, tuning.pruneIntervalMs),
     setInterval(() => { void reprobe(); }, tuning.capabilityProbeMs),
-    setInterval(() => { void rotateLog(); }, tuning.runnerLogCheckMs),
+    setInterval(() => { runHousekeeping(rotateLog); }, tuning.runnerLogCheckMs),
   ];
   for (const timer of timers) timer.unref();
-  opened.push(() => { for (const timer of timers) clearInterval(timer); });
+  const stopTimers = (): void => { for (const timer of timers) clearInterval(timer); };
+  opened.push(async () => {
+    stopTimers();
+    await Promise.all(housekeeping.values());
+  });
 
   let stopping: Promise<void> | null = null;
   let crashed = false;
   const stop = (): Promise<void> => {
-    if (crashed) return Promise.resolve();
+    if (crashed) return stopping ?? Promise.resolve();
     stopping ??= (async () => {
-      for (const timer of timers) clearInterval(timer);
+      stopTimers();
       loop.stop();
       stopNeedListener();
       stopProviderKeyNeedListener();
@@ -495,6 +520,7 @@ async function startOwnedDaemon(
         // US-001: the command-outcome writers settle too: a retiring ABANDON writes its outcome after its cleanup,
         // and that write must reach the journal before the journal closes.
         await handler.idle();
+        await Promise.all(pendingHomeWork());
       } finally {
         clearTimeout(notice);
       }
@@ -509,7 +535,7 @@ async function startOwnedDaemon(
   const crash = (): void => {
     if (crashed || stopping) return;
     crashed = true;
-    for (const timer of timers) clearInterval(timer);
+    stopTimers();
     loop.stop();
     stopNeedListener();
     stopProviderKeyNeedListener();
@@ -518,7 +544,11 @@ async function startOwnedDaemon(
     approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot
     void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();
-    ownership.release();   // US-001: the crash stand-in retires the home as it retires the journal
+    // A real process death stops its housekeeping. The in-process stand-in keeps the
+    // lock for any filesystem operation already submitted, even though its journal has closed.
+    const pending = pendingHomeWork();
+    if (pending.length === 0) ownership.release();
+    else stopping = Promise.all(pending).then(() => ownership.release());
   };
   return { bootId, journal, supervisor, stopped: running, stop, crash, reprobe };
 }

@@ -7,7 +7,7 @@ import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FleetApprovalAskStore } from '../approvals/fleet-approval-ask.store';
-import type { CommandAck } from '../common/protocol';
+import { CANCEL_CUTOFF_DETAIL, type CommandAck } from '../common/protocol';
 import { canTransition } from '../jobs/job-state';
 import { JobTransitionsService } from '../jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
@@ -109,6 +109,12 @@ export class CommandAckProcessor {
       await this.recordTransition(job, r.job);
       return { live: r.live };
     }
+    if (command.type === FleetCommandType.CANCEL && detail === CANCEL_CUTOFF_DETAIL) {
+      // The runner still owns the lease. Its upload and terminal reports can arrive in this same sync.
+      await this.repo.update(job.id, { cancelRequestedAt: null, cancelReason: null });
+      await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: 'cancellation refused after the upload cutoff' });
+      return { live: this.jobLive(job, now) };
+    }
     if (command.type === FleetCommandType.CANCEL && canTransition(job.state, FleetJobState.CANCELLED, 'runner')) {
       const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'runner', now, actor, reason: 'cancel: runner does not hold job' });
       await this.recordTransition(job, r.job);
@@ -118,9 +124,7 @@ export class CommandAckProcessor {
   }
 
   /**
-   * The fleet_job live event of an ack that left the job where it was: its only purpose is to carry the thread event
-   * this ack produced (a decision's delivery outcome, B3), which the thread bus routes after the commit. Reusing the
-   * job's current state keeps every other consumer's reload harmless.
+   * A refresh for an acknowledgement that updated job or thread details without transitioning the job.
    */
   private jobLive(job: { id: string; projectId: string; state: string }, now: Date): FleetJobLiveEvent {
     return { id: randomUUID(), type: 'fleet_job', projectId: job.projectId, jobId: job.id, state: job.state, at: now.toISOString() };

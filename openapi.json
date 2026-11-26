@@ -25090,6 +25090,10 @@
               },
               "state": {
                 "type": "string"
+              },
+              "requesterUserId": {
+                "type": "string",
+                "nullable": true
               }
             }
           },
@@ -25465,6 +25469,10 @@
               },
               "state": {
                 "type": "string"
+              },
+              "requesterUserId": {
+                "type": "string",
+                "nullable": true
               }
             }
           },
@@ -25962,6 +25970,10 @@
               },
               "state": {
                 "type": "string"
+              },
+              "requesterUserId": {
+                "type": "string",
+                "nullable": true
               }
             }
           },
@@ -26198,6 +26210,10 @@
               },
               "state": {
                 "type": "string"
+              },
+              "requesterUserId": {
+                "type": "string",
+                "nullable": true
               }
             }
           },

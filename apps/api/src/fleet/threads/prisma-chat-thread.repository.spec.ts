@@ -210,11 +210,11 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
   }
 
   /** The repository's thread mapping, driven through get() with a stub Prisma row. */
-  function repoOfThreadRow(threadRow: Record<string, unknown>): PrismaChatThreadRepository {
+  function repoOfThreadRow(threadRow: Record<string, unknown>, job: Record<string, unknown> | null = null): PrismaChatThreadRepository {
     const prisma = {
       client: {
         chatThread: { findFirst: vi.fn(async () => threadRow) },
-        fleetJob: { findFirst: vi.fn(async () => null) },
+        fleetJob: { findFirst: vi.fn(async () => job) },
       },
     } as never;
     return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
@@ -241,6 +241,12 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const [priced, unpriced] = await repo.messages('T', 0, 100);
     expect(priced?.costUsd).toBe('0.0123');
     expect(unpriced?.costUsd).toBeNull();
+  });
+
+  it.each([['USER', 'U2'], ['AGENT', null]])('identifies the human requester on a %s job', async (type, expected) => {
+    const repo = repoOfThreadRow(threadRow(), { id: 'J', state: 'RUNNING', requestedByType: type, requestedById: 'U2' });
+    const thread = await repo.get({ kind: 'project', projectId: 'P' }, 'T');
+    expect(thread?.activeJob).toEqual({ id: 'J', state: 'RUNNING', requesterUserId: expected });
   });
 
   it('US-004 AC15: get() maps the stored session JSON onto the thread record', async () => {

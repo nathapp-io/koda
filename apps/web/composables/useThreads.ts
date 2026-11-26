@@ -49,6 +49,7 @@ export function useThreads(slug: string): ThreadList {
    */
   const load = async (next: ThreadStatus = 'ACTIVE'): Promise<boolean> => {
     const mine = ++generation
+    loadingMore.value = false
     const response = await $api.get<{ items: ThreadDto[]; threadsEnabled: boolean }>(
       apiPath`/projects/${slug}/threads`,
       { query: { status: next, size: String(PAGE_SIZE) } },
@@ -78,8 +79,10 @@ export function useThreads(slug: string): ThreadList {
       threadsEnabled.value = response.threadsEnabled
       current.value = next
       hasNext.value = response.items.length === PAGE_SIZE
+    } catch (error) {
+      if (generation === mine) throw error
     } finally {
-      loadingMore.value = false
+      if (generation === mine) loadingMore.value = false
     }
   }
 

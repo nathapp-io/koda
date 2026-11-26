@@ -48,8 +48,9 @@ const toast = useAppToast()
 
 const isCreator = computed(() => controller.thread.value !== null && controller.thread.value.createdById === auth.user.value?.id)
 const canManage = computed(() => permissions.value.has('thread.archive'))
-const canSend = computed(() => permissions.value.has('thread.message.send')
-  || (isCreator.value && permissions.value.hasOwn('thread.message.send')))
+const mayActOnThread = (key: string) => isCreator.value ? permissions.value.hasOwn(key) : permissions.value.has(key)
+const canSend = computed(() => mayActOnThread('thread.message.send'))
+const canStop = computed(() => mayActOnThread('thread.stop'))
 
 /**
  * US-012 (F1): the modes this viewer may switch to. Mirrors the API — the target key counts in its own-or-any-row form
@@ -59,15 +60,12 @@ const allowedModes = computed<ThreadMode[]>(() => allowedThreadModes(permissions
 /** Only a REPO thread has a worktree to publish, so only it can run in a mode other than `read`. */
 const showModeControl = computed(() => controller.thread.value?.kind === 'REPO')
 const pendingApprovals = computed(() => controller.thread.value?.pendingApprovals ?? [])
-/**
- * Deciding a session approval needs `thread.answer` on the thread (US-008 gates the route with that key and the service
- * with the creator), but it is the live session's REQUESTER who answers: any-row holder or the thread's creator with the
- * own-row grant (`own` means "my threads"). Branch fix B4: an any-row holder who started the turn in somebody else's
- * thread must get the controls too, or that turn has no answerable UI. The server still checks the requester, and its
- * refusal is shown on the card. Never a role name.
- */
-const canDecideApprovals = computed(() =>
-  permissions.value.has('thread.answer') || (isCreator.value && permissions.value.hasOwn('thread.answer')))
+// Both questions and session approvals steer the running job on its requester's behalf.
+const canAnswer = computed(() => {
+  const job = controller.thread.value?.activeJob
+  return job?.state === 'RUNNING' && Boolean(job.requesterUserId)
+    && job.requesterUserId === auth.user.value?.id && mayActOnThread('thread.answer')
+})
 
 let queuedRefreshTimer: ReturnType<typeof setInterval> | null = null
 watch(() => controller.thread.value?.activeJob?.state === 'QUEUED', (queued) => {
@@ -165,6 +163,7 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         :thread="controller.thread.value"
         :messages="controller.messages.value"
         :is-creator="isCreator"
+        :can-answer="canAnswer"
         :jobs="handoffJobs.jobs.value"
         :slug="slug"
         @answer="onAnswer"
@@ -174,13 +173,13 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
           v-for="pending in pendingApprovals"
           :key="pending.requestId"
           :approval="pending"
-          :can-decide="canDecideApprovals"
+          :can-decide="canAnswer"
           :decide="onDecideApproval"
         />
       </div>
       <FleetThreadsThreadComposer
         :composer-state="composerState(controller.thread.value, controller.messages.value, { canSend })"
-        :turn-running="isTurnRunning(controller.messages.value)"
+        :show-stop="canStop && isTurnRunning(controller.messages.value)"
         :send="onSend"
         @stop="onStop"
       />

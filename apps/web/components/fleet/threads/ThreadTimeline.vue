@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
   thread: ThreadDetailDto
   messages: ChatMessageDto[]
   isCreator: boolean
+  canAnswer: boolean
   /** The loaded PLAN and RUN job details; a detail for another job is ignored by the builder. */
   jobs?: { plan: FleetJobDto | null; run: FleetJobDto | null }
   /** The project slug, for the links on the job cards. */
@@ -46,7 +47,7 @@ function onAnswer(requestId: string, text: string): void {
     <FleetThreadsThreadQuestionCard
       v-if="props.thread.pendingQuestion"
       :question="props.thread.pendingQuestion"
-      :is-creator="props.isCreator"
+      :can-answer="props.canAnswer"
       @answer="onAnswer"
     />
     <FleetThreadsThreadActionCard

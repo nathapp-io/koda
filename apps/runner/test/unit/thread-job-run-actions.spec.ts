@@ -5,6 +5,7 @@ import type { ThreadAssign } from '@nathapp/fleet-protocol';
 import { createGit, type Git } from '../../src/executor/git';
 import { RepoMutex } from '../../src/supervisor/repo-mutex';
 import { repoDirFor } from '../../src/paths/safe-segment';
+import { ThreadWorktreeOwners } from '../../src/thread/thread-worktree-owners';
 import { threadWorktreeDir } from '../../src/thread/thread-paths';
 import { git, isolateGit } from '../helpers/git-fixture';
 import { Journal } from '../../src/journal/journal';
@@ -20,7 +21,7 @@ const leaseEpoch = 1;
 const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0 };
 const threadBase = { threadId: 'thread-1', feature: 'divide', resume: false, instructions: 'help', backend: { kind: 'native' as const, model: 'minimax/MiniMax-M3' }, skills: [], initialMessage: null };
 
-function setup(action: 'PUBLISH' | 'DISCARD', overrides: { publish?: (input: Record<string, unknown>) => Promise<unknown>; discard?: (input: Record<string, unknown>) => Promise<unknown>; title?: string; git?: Git; mutex?: RepoMutex; mode?: 'read' | 'ask' | 'full' } = {}) {
+function setup(action: 'PUBLISH' | 'DISCARD', overrides: { worktrees?: ThreadWorktreeOwners; publish?: (input: Record<string, unknown>) => Promise<unknown>; discard?: (input: Record<string, unknown>) => Promise<unknown>; title?: string; git?: Git; mutex?: RepoMutex; mode?: 'read' | 'ask' | 'full' } = {}) {
   const journal = Journal.open(':memory:');
   const thread: ThreadAssign = { ...threadBase, action, ...(overrides.title === undefined ? {} : { title: overrides.title }), ...(overrides.mode === undefined ? {} : { mode: overrides.mode }) };
   const assign = assignFor('THREAD', { jobId, ref: 'refs/heads/main', thread });
@@ -31,7 +32,7 @@ function setup(action: 'PUBLISH' | 'DISCARD', overrides: { publish?: (input: Rec
     sessions: { async open() { calls.push('sessions.open'); throw new Error('should not open'); } },
     credentials: { async acquire() { calls.push('credentials.acquire'); return { ok: true as const, credentials: { helper: 'unused', binDir: null } }; }, async release() {} },
     git: overrides.git ?? { async run() { return { code: 0, stdout: '', stderr: '' }; }, async ok() { return ''; } } as Git,
-    homeDir, workspaceRoot,
+    homeDir, workspaceRoot, worktrees: overrides.worktrees,
     async prepareWorktree() { calls.push('prepareWorktree'); throw new Error('should not prepare'); },
     async ensureSkills() { calls.push('ensureSkills'); throw new Error('should not fetch skills'); },
     ...(overrides.publish ? { async publish(input: Record<string, unknown>) { observed.publish = input; calls.push('publish'); return overrides.publish?.(input) ?? Promise.resolve({ ok: false, reason: 'unexpected' }); } } : {}),
@@ -61,6 +62,33 @@ async function realWorktree(): Promise<{ repoDir: string; worktree: string }> {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('Thread action jobs (US-007)', () => {
+  for (const action of ['PUBLISH', 'DISCARD'] as const) {
+    test(`${action} waits for the previous thread's worktree while other threads remain independent`, async () => {
+      const owners = new ThreadWorktreeOwners(() => {});
+      const signal = new AbortController().signal;
+      const previous = await owners.acquire('thread-1', signal);
+      if (!previous) throw new Error('missing worktree lease');
+      const ctx = setup(action, { worktrees: owners, publish: async () => ({ ok: false, reason: 'nothing_to_publish' }),
+        discard: async () => ({ ok: true, tipSha: 'ccc' }) });
+      const running = (await ctx.run()).start('prepare');
+      try {
+        await Bun.sleep(5);
+        expect(ctx.calls).toEqual([]);
+        expect(states(ctx.journal)).toEqual([]);
+        const independent = await owners.acquire('thread-2', signal);
+        expect(independent).toBeDefined();
+        independent?.release();
+        previous.release();
+        await running;
+        expect(ctx.calls).toEqual([action.toLowerCase()]);
+      } finally {
+        previous.release();
+        await running;
+        ctx.journal.close();
+      }
+    });
+  }
+
   test('PUBLISH performs only the action, streams one result, and transitions through UPLOADING', async () => {
     const ctx = setup('PUBLISH', { title: 'Divide brainstorm', mode: 'full', publish: async () => ({ ok: true, sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: true }) });
     await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });

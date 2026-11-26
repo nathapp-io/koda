@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'bun:test';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
@@ -9,6 +9,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { ThreadJobRun, type ThreadOpenInput, type ThreadPublishResult } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { manualClock } from '../helpers/manual-clock';
+import { waitFor } from '../helpers/wait';
 import { startThreadRun } from '../helpers/thread-running';
 
 const roots: string[] = [];
@@ -67,6 +68,37 @@ test('US-006 AC-2: running write_doc writes and announces docs/a.md', async () =
   ctx.run.halt(); await startedRun; ctx.journal.close();
 });
 
+test('a retained write_doc cannot overwrite a resumed worktree after a timed-out turn', async () => {
+  const turn = deferred<void>();
+  const ctx = setup({ send: async function* () { await turn.promise; yield turnEnd; } });
+  const { started: run } = await started(ctx);
+  try {
+    const tools = (ctx.calls[0] as ThreadOpenInput).tools;
+    const write = tools?.find((tool) => tool.name === 'write_doc');
+    if (!write) throw new Error('missing write_doc');
+    ctx.run.command('THREAD_INPUT', { messageId: 'm1', text: 'edit' });
+    ctx.run.command('THREAD_CLOSE', {});
+    await waitFor(() => ctx.clock.sleepingFor(tuning.threadCloseTimeoutMs));
+    const transcript = (ctx.calls[0] as ThreadOpenInput).transcriptSignal;
+    expect(transcript?.aborted).toBe(false);
+    ctx.clock.advance(tuning.threadCloseTimeoutMs);
+    await run;
+    expect(transcript?.aborted).toBe(true);
+    const docs = join(ctx.root, 'worktree', 'docs');
+    await mkdir(docs, { recursive: true });
+    await writeFile(join(docs, 'guide.md'), 'new session');
+    const reply = await write.run({ path: 'docs/guide.md', content: 'old session' },
+      { sessionId: 'thread-1', toolCallId: 'late', signal: new AbortController().signal });
+    expect(await readFile(join(docs, 'guide.md'), 'utf8')).toBe('new session');
+    expect(reply.isError).toBe(true);
+  } finally {
+    turn.resolve();
+    ctx.run.halt();
+    await run;
+    ctx.journal.close();
+  }
+});
+
 test('publish during ask-mode SESSION forwards assign mode', async () => {
   const ctx = setup({ mode: 'ask' });
   const { started: startedRun } = await started(ctx);
@@ -75,6 +107,25 @@ test('publish during ask-mode SESSION forwards assign mode', async () => {
   await Bun.sleep(0);
   expect(ctx.calls.at(-1)).toMatchObject({ mode: 'ask' });
   ctx.gate.resolve(); ctx.run.halt(); await startedRun; ctx.journal.close();
+});
+
+test('halt waits for an already-started publish before retiring the worktree', async () => {
+  const ctx = setup();
+  const { started: run } = await started(ctx);
+  let retired = false;
+  try {
+    ctx.run.command('THREAD_PUBLISH', {});
+    await waitFor(() => ctx.calls.length === 2);
+    ctx.run.halt();
+    void run.then(() => { retired = true; });
+    await Bun.sleep(0);
+    expect(retired).toBe(false);
+  } finally {
+    ctx.gate.resolve();
+    ctx.run.halt();
+    await run;
+    ctx.journal.close();
+  }
 });
 
 test('US-006 AC-3, AC-4, AC-5, AC-6: publish acknowledges, passes assignment and writes result', async () => {

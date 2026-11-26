@@ -312,7 +312,7 @@ function mountTimeline(
   })
   return mountSfc(timelineFile, {
     props: {
-      thread, messages, isCreator: extra.isCreator ?? true,
+      thread, messages, isCreator: extra.isCreator ?? true, canAnswer: true,
       jobs: extra.jobs ?? { plan: null, run: null }, slug: extra.slug ?? 'web',
     },
     components: {

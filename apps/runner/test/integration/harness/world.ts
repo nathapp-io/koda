@@ -50,6 +50,7 @@ export interface NetControl {
   down: boolean;
   dropResponse: boolean;
   readonly syncs: SyncRecord[];
+  beforeSync?: (request: SyncRequest) => Promise<void>;
 }
 
 export interface TestRunner {
@@ -277,11 +278,14 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
           const [config, identity] = [await loadRunnerConfig(home.configPath, {}), await readIdentity(home.identityPath)];
           if (!identity) throw new Error('runner is not enrolled');
           const fetchFn = async (url: string, init?: RequestInit): Promise<Response> => {
-            const seen = recordSync(url, init);
+            const sync = url.endsWith('/fleet/runner/sync') && typeof init?.body === 'string'
+              ? JSON.parse(init.body) as SyncRequest : null;
+            const seen = sync?.jobs.map((job) => ({ jobId: job.jobId, seqs: job.events.map((event) => event.seq) }));
             if (net.down) {
               if (seen) net.syncs.push({ outcome: 'refused', jobs: seen });
               throw new TypeError('network down');
             }
+            if (sync) await net.beforeSync?.(sync);
             const response = await fetch(url, init);
             if (net.dropResponse) {
               await response.arrayBuffer().catch(() => undefined);      // the server did its work; the runner never hears
@@ -341,11 +345,4 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     },
   };
   return world;
-}
-
-/** The seqs a sync request carries, per job (D71); null for any other request. */
-function recordSync(url: string, init?: RequestInit): SyncRecord['jobs'] | null {
-  if (!url.endsWith('/fleet/runner/sync') || typeof init?.body !== 'string') return null;
-  const body = JSON.parse(init.body) as SyncRequest;
-  return body.jobs.map((job) => ({ jobId: job.jobId, seqs: job.events.map((event) => event.seq) }));
 }

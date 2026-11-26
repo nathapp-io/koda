@@ -165,13 +165,19 @@ describe('US-002 thread-view', () => {
     expect(mergeMessages(current, incoming)).toEqual(incoming)
   })
 
-  test('US-002: mergeMessages never shortens a message streaming on both sides', () => {
+  test('a delta received during the snapshot preserves its longer streaming text', () => {
     const current: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'Hello world' })]
     const incoming: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'Hello' })]
 
-    const result = mergeMessages(current, incoming)
+    const result = mergeMessages(current, incoming, { liveTextIds: new Set(['m1']) })
     expect(result).toHaveLength(1)
     expect(result[0].content).toBe('Hello world')
+  })
+
+  test('a corrected streaming snapshot replaces a longer, divergent local round', () => {
+    const current = message({ id: 'm1', status: 'streaming', content: 'discarded reasoning' })
+    const corrected = message({ id: 'm1', status: 'streaming', content: 'new round' })
+    expect(mergeMessages([current], [corrected])).toEqual([corrected])
   })
 
   test('US-002: a stale page adds messages the transcript does not hold yet', () => {
@@ -181,7 +187,7 @@ describe('US-002 thread-view', () => {
       message({ id: 'm2', seq: 2, status: 'streaming', content: 'Partial response' }),
     ]
 
-    const result = mergeMessages(current, incoming, { stale: true })
+    const result = mergeMessages(current, incoming, { staleIds: new Set(['m2']) })
 
     expect(result.map(item => item.id)).toEqual(['m1', 'm2'])
     expect(result.find(item => item.id === 'm2')).toEqual(current[0])
@@ -191,13 +197,13 @@ describe('US-002 thread-view', () => {
     const current: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'Hello' })]
     const incoming: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming', content: 'He' })]
 
-    expect(mergeMessages(current, incoming, { stale: true })[0].content).toBe('Hello')
+    expect(mergeMessages(current, incoming, { staleIds: new Set(['m1']) })[0].content).toBe('Hello')
   })
 
   test('US-002: a stale page still replaces the optimistic echo the server has recorded', () => {
     const sent = message({ id: 'm5', seq: 5, clientMessageId: 'c1', status: 'pending', role: 'user' })
 
-    expect(mergeMessages([optimistic('c1')], [sent], { stale: true })).toEqual([sent])
+    expect(mergeMessages([optimistic('c1')], [sent], { staleIds: new Set(['m5']) })).toEqual([sent])
   })
 
   test('US-002: isTurnRunning is true while any message is pending or streaming', () => {

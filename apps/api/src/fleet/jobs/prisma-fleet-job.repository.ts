@@ -207,14 +207,12 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   /**
-   * US-008 (review finding 4): the project's row lock, and its liveness under it. `FOR NO KEY UPDATE` is the
-   * mode the soft-delete UPDATEs themselves take (they change `deletedAt`, no key column), so the two conflict:
-   * a delete that already committed leaves no row matching `deletedAt IS NULL` here, and one that starts while
-   * this transaction runs waits for it. `FOR KEY SHARE` would not conflict and would let the delete through.
+   * Dispatches can share this lock. Updating deletedAt requires a conflicting row lock, so a soft delete
+   * that arrives first makes this read return false and a later delete waits for the dispatch to commit.
    */
   async lockLiveProject(projectId: string): Promise<boolean> {
     const rows = await this.db.$queryRaw<Array<{ id: string }>>`
-      SELECT "id" FROM "Project" WHERE "id" = ${projectId} AND "deletedAt" IS NULL FOR NO KEY UPDATE`;
+      SELECT "id" FROM "Project" WHERE "id" = ${projectId} AND "deletedAt" IS NULL FOR SHARE`;
     return rows.length > 0;
   }
 

@@ -178,7 +178,7 @@ export interface ThreadDto {
   lastActivityAt: string
   createdAt: string
   /** The thread's current THREAD job, when one is not terminal. */
-  activeJob: { id: string; state: string } | null
+  activeJob: { id: string; state: string; requesterUserId?: string | null } | null
   /** Distinct paths write_doc touched since the last publish. */
   writtenPaths: string[]
   publishedSha: string | null

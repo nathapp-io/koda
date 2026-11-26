@@ -19,6 +19,7 @@ import { runThreadAction, type ThreadDiscardInput, type ThreadDiscardResult } fr
 import { isTerminalState } from '../supervisor/transitions';
 import { ensureSkills as defaultEnsureSkills, type EnsureSkillsOptions } from './skill-fetch';
 import type { OpenThreadSessionOptions, ThreadProviderKeys } from './session-factory';
+import type { ThreadWorktreeLease, ThreadWorktreeOwners } from './thread-worktree-owners';
 import { ThreadEventWriter } from './thread-event-writer';
 import { prepareThreadWorktree as defaultPrepareThreadWorktree, type PrepareThreadWorktreeInput } from './thread-worktree';
 import { threadScratchDir } from './thread-paths';
@@ -70,6 +71,7 @@ export type ThreadLogShipping = Omit<LogShipping, 'register'> & { register(job: 
 /** What a thread run needs from the daemon (daemon.ts). */
 export interface ThreadHostDeps {
   readonly sessions: ThreadSessionOpener;
+  readonly worktrees?: ThreadWorktreeOwners;
   readonly credentials: CredentialProvider;
   readonly repoCredentials?: RepoCredentialProvider;
   readonly refreshMirror?: typeof refreshMirror;
@@ -248,6 +250,9 @@ export class ThreadJobRun {
    * re-arms no timer, counts no spend and journals nothing — it is fenced, not merely unreferenced.
    */
   private terminalWritten = false;
+  private readonly toolLifetime = new AbortController();
+  private worktreeLease?: ThreadWorktreeLease;
+  private readonly transcriptLifetime = new AbortController();
   /** Resolves on a halt, so a bounded close wait never outlives the daemon stop that made it pointless. */
   private haltWait: Promise<void> | null = null;
   private settleHalt: (() => void) | null = null;
@@ -289,6 +294,11 @@ export class ThreadJobRun {
     } catch (error) {
       await this.failSafe(error);
     } finally {
+      this.toolLifetime.abort();
+      this.transcriptLifetime.abort();
+      // A halt releases the turn immediately. A publish already changing the shared worktree still owns it.
+      await this.livePublish?.wait();
+      this.worktreeLease?.release();
       // Every exit gives up the job's log streams, including a halt, an abandon and a failure whose own recording failed.
       this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
       // US-011: and its provider-key socket. It outlives the git socket by design (a model call needs it to the last
@@ -313,6 +323,10 @@ export class ThreadJobRun {
       return;
     }
     if (this.stopped()) return;
+    if (this.deps.host.worktrees) {
+      this.worktreeLease = await this.deps.host.worktrees.acquire(thread.threadId, this.toolLifetime.signal);
+      if (this.stopped()) return;
+    }
 
     if (thread.action === 'PUBLISH' || thread.action === 'DISCARD') {
       this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
@@ -376,6 +390,8 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: prepared.worktree,
+      worktreeLease: this.worktreeLease,
+      transcriptSignal: this.transcriptLifetime.signal,
       tools: [
         ...buildThreadTools({
           worktree: prepared.worktree,
@@ -385,6 +401,7 @@ export class ThreadJobRun {
           searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
           nowMs: () => this.deps.now().getTime(),
           feature: thread.feature,
+          sessionSignal: this.toolLifetime.signal,
           onDocWritten: (path, bytes) => { if (this.accepting()) this.writer?.docWritten(path, bytes); },
         }),
         ...this.kodaToolProxies(thread),
@@ -456,6 +473,8 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: scratch,
+      worktreeLease: this.worktreeLease,
+      transcriptSignal: this.transcriptLifetime.signal,
       tools: [
         ...buildProjectThreadTools({
           worktree: scratch,
@@ -672,8 +691,12 @@ export class ThreadJobRun {
     // running yet.
     const gated: KodaToolCaller = {
       call: async (args) => {
-        if (!(await this.awaitRunningAck(args.signal))) return { content: UNAVAILABLE_NOT_RUNNING, isError: true };
-        return caller.call(args);
+        const lifetime = this.toolLifetime.signal;
+        const signal = args.signal ? AbortSignal.any([lifetime, args.signal]) : lifetime;
+        if (!(await this.awaitRunningAck(signal)) || signal.aborted) {
+          return { content: UNAVAILABLE_NOT_RUNNING, isError: true };
+        }
+        return caller.call({ ...args, signal });
       },
     };
     return buildKodaToolProxies(descriptors, { jobId: this.jobId, leaseEpoch: this.leaseEpoch, caller: gated });
@@ -694,16 +717,18 @@ export class ThreadJobRun {
    * wait ends without the ack (it ran out, the run halted or the turn aborted); the caller then sends nothing, since
    * a call that reaches the API before RUNNING is applied is refused and never retried.
    */
-  private async awaitRunningAck(signal: AbortSignal | undefined): Promise<boolean> {
+  private async awaitRunningAck(signal: AbortSignal): Promise<boolean> {
     const { threadRunningAckPollMs: pollMs, threadRunningAckWaitMs: waitMs } = this.deps.tuning;
-    if (waitMs <= 0 || !this.runningAckPending()) return true;
+    if (signal.aborted) return false;
+    if (waitMs <= 0) return true;
     const interval = Math.max(1, pollMs);
     const deadline = this.deps.now().getTime() + waitMs;
-    for (let polls = 0; polls < Math.ceil(waitMs / interval) && this.runningAckPending(); polls += 1) {
-      if (this.halted || signal?.aborted || this.deps.now().getTime() >= deadline) return false;
+    for (let polls = 0; this.runningAckPending(); polls += 1) {
+      if (polls >= Math.ceil(waitMs / interval) || this.deps.now().getTime() >= deadline) return false;
       await this.deps.sleep(interval, signal);
+      if (signal.aborted) return false;
     }
-    return !this.runningAckPending();
+    return true;
   }
 
   /** Step 5: the assigned skill sources, fetched into the runner's own skill cache. */
@@ -1031,6 +1056,8 @@ export class ThreadJobRun {
   private startClose(): void {
     if (this.closeStarted) return;
     this.closeStarted = true;
+    this.toolLifetime.abort();
+    this.worktreeLease?.revoke();
     void this.finishRun(this.closeReason, this.closeFailed);
   }
 
@@ -1087,6 +1114,7 @@ export class ThreadJobRun {
       }
       // The stream is sealed. A turn that settles from here writes no line, re-arms no timer and journals nothing.
       this.terminalWritten = true;
+      this.transcriptLifetime.abort();
       await this.awaitLogs(this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs));
       this.stopHeartbeat();
       if (this.halted) return;
@@ -1240,6 +1268,7 @@ export class ThreadJobRun {
       this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
     }
     const action = row.assign.thread?.action;
+    if (this.events.currentState() !== 'RUNNING') this.toolLifetime.abort();
     if (this.events.currentState() === 'RUNNING' && action !== 'PUBLISH' && action !== 'DISCARD') this.requestClose('cancelled');
     return true;
   }
@@ -1250,6 +1279,9 @@ export class ThreadJobRun {
    */
   halt(): void {
     this.halted = true;
+    this.toolLifetime.abort();
+    this.worktreeLease?.revoke();
+    this.transcriptLifetime.abort();
     this.stopIdle();
     this.stopHeartbeat();
     // A bounded close wait races this, so a halt never leaves a timer behind for a row nobody will read.
@@ -1279,7 +1311,7 @@ export class ThreadJobRun {
   }
 
   /**
-   * B3b-R1: no mutex, and the only wait is the session close — never longer than `threadCloseTimeoutMs`. A refused release is logged and never held against a row that is already gone.
+   * Retire the epoch's credentials, bounded session close and any publish already mutating its worktree.
    */
   async abandon(): Promise<void> {
     this.halt();
@@ -1295,7 +1327,7 @@ export class ThreadJobRun {
     // US-011: the row is read before `abandon` drops it, and the run's retained one covers a row it read even earlier;
     // this is the release `start()`'s own finally then repeats once a still-pending `open` has settled.
     await this.releaseProviderKeys(row);
-    await this.awaitSessionClose();
+    await Promise.all([this.awaitSessionClose(), this.livePublish?.wait()]);
   }
 
   /**
