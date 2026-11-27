@@ -1,28 +1,32 @@
-const projectSpy = vi.hoisted(() => ({ count: 0 }));
-vi.mock('ts-morph', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('ts-morph')>();
-  return {
-    ...actual,
-    Project: class extends actual.Project {
-      constructor(...args: ConstructorParameters<typeof actual.Project>) {
-        projectSpy.count += 1;
-        super(...args);
-      }
-    },
-  };
-});
 import { CodeGraphService } from './code-graph.service';
 
 describe('CodeGraphService.extractBatch()', () => {
   let service: CodeGraphService;
 
+  // The synchronous lazy loader uses the CommonJS export. Wrap it before the service caches it.
+  const morph = require('ts-morph') as { Project: typeof import('ts-morph').Project };
+  const RealProject = morph.Project;
+  let constructions = 0;
+  beforeAll(() => {
+    morph.Project = class extends RealProject {
+      constructor(...args: ConstructorParameters<typeof RealProject>) {
+        super(...args);
+        constructions++;
+      }
+    };
+  });
+
+  afterAll(() => {
+    morph.Project = RealProject;
+  });
+
   beforeEach(() => {
+    constructions = 0;
     service = new CodeGraphService();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    projectSpy.count = 0;
   });
 
   it('AC-1: accepts a decorated constructor parameter in parseSourceFile', () => {
@@ -99,13 +103,13 @@ describe('CodeGraphService.extractBatch()', () => {
       { path: 'src/b.ts', content: 'function b() {}' },
       { path: 'src/c.ts', content: 'function c() {}' },
     ]);
-    expect(projectSpy.count).toBe(1);
+    expect(constructions).toBe(1);
   });
 
   it('AC-9: creates a fresh Project for each batch call', () => {
     service.extractBatch([{ path: 'src/a.ts', content: 'function a() {}' }]);
     service.extractBatch([{ path: 'src/b.ts', content: 'function b() {}' }]);
-    expect(projectSpy.count).toBe(2);
+    expect(constructions).toBe(2);
   });
 
   it('AC-10: turns an extraction TypeError into a result and continues', () => {
