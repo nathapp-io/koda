@@ -1,16 +1,3 @@
-const projectSpy = vi.hoisted(() => ({ count: 0 }));
-vi.mock('ts-morph', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('ts-morph')>();
-  return {
-    ...actual,
-    Project: class extends actual.Project {
-      constructor(...args: ConstructorParameters<typeof actual.Project>) {
-        projectSpy.count += 1;
-        super(...args);
-      }
-    },
-  };
-});
 import { CodeGraphService } from './code-graph.service';
 
 describe('CodeGraphService.extractBatch()', () => {
@@ -22,7 +9,6 @@ describe('CodeGraphService.extractBatch()', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    projectSpy.count = 0;
   });
 
   it('AC-1: accepts a decorated constructor parameter in parseSourceFile', () => {
@@ -94,18 +80,24 @@ describe('CodeGraphService.extractBatch()', () => {
   });
 
   it('AC-8: creates one real Project for all files in a batch', () => {
+    const extract = vi.spyOn(service, 'extractSymbols');
     service.extractBatch([
       { path: 'src/a.ts', content: 'function a() {}' },
       { path: 'src/b.ts', content: 'function b() {}' },
       { path: 'src/c.ts', content: 'function c() {}' },
     ]);
-    expect(projectSpy.count).toBe(1);
+    const projects = extract.mock.calls.map(([file]) => file.ast.getProject());
+    expect(projects).toHaveLength(3);
+    expect(new Set(projects).size).toBe(1);
   });
 
   it('AC-9: creates a fresh Project for each batch call', () => {
+    const extract = vi.spyOn(service, 'extractSymbols');
     service.extractBatch([{ path: 'src/a.ts', content: 'function a() {}' }]);
     service.extractBatch([{ path: 'src/b.ts', content: 'function b() {}' }]);
-    expect(projectSpy.count).toBe(2);
+    const projects = extract.mock.calls.map(([file]) => file.ast.getProject());
+    expect(projects).toHaveLength(2);
+    expect(projects[0]).not.toBe(projects[1]);
   });
 
   it('AC-10: turns an extraction TypeError into a result and continues', () => {

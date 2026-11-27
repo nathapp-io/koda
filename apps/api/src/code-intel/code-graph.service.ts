@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Project, SourceFile } from 'ts-morph';
+import type { Project, SourceFile } from 'ts-morph';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyNode = any;
 
@@ -29,12 +29,20 @@ export type FileExtraction =
   | { path: string; symbols: ExtractedSymbol[] }
   | { path: string; error: string };
 
+let projectConstructor: typeof Project | undefined;
+
+function createProject(): Project {
+  // Loading ts-morph also loads its TypeScript compiler. Defer both until the first parse.
+  projectConstructor ??= (require('ts-morph') as typeof import('ts-morph')).Project;
+  return new projectConstructor({ useInMemoryFileSystem: true });
+}
+
 @Injectable()
 export class CodeGraphService {
   private readonly logger = new Logger(CodeGraphService.name);
 
   parseSourceFile(path: string, content: string): ParsedSourceFile {
-    const project = new Project({ useInMemoryFileSystem: true });
+    const project = createProject();
     const sourceFile = project.createSourceFile(path, content);
     this.rejectSyntacticErrors(project, sourceFile);
     return { path, content, ast: sourceFile };
@@ -43,7 +51,7 @@ export class CodeGraphService {
   extractBatch(files: ReadonlyArray<{ path: string; content: string }>): FileExtraction[] {
     if (files.length === 0) return [];
 
-    const project = new Project({ useInMemoryFileSystem: true });
+    const project = createProject();
     const results: FileExtraction[] = [];
 
     for (const { path, content } of files) {
