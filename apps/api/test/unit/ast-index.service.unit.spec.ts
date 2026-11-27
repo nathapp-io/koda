@@ -17,8 +17,7 @@ describe('AstIndexService', () => {
   };
 
   const mockCodeGraph = {
-    parseSourceFile: vi.fn(),
-    extractSymbols: vi.fn(),
+    extractBatch: vi.fn((files: Array<{ path: string }>) => files.map(({ path }) => ({ path, symbols: [] }))),
     extractCallers: vi.fn(),
     extractCallees: vi.fn(),
     resolveRelationships: vi.fn(),
@@ -45,6 +44,7 @@ describe('AstIndexService', () => {
     service = module.get<AstIndexService>(AstIndexService);
     symbolStore = module.get(SymbolStore);
     codeGraph = module.get(CodeGraphService);
+    codeGraph.extractBatch.mockImplementation((batchFiles) => batchFiles.map(({ path }) => ({ path, symbols: [] })));
   });
 
   afterEach(() => {
@@ -74,12 +74,7 @@ describe('AstIndexService', () => {
         },
       ];
 
-      mockCodeGraph.parseSourceFile.mockReturnValue({
-        path: 'src/auth.ts',
-        content: files[0].content,
-        ast: {},
-      });
-      mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
+      mockCodeGraph.extractBatch.mockReturnValue([{ path: 'src/auth.ts', symbols: mockSymbols }]);
       mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
         for (const s of syms) { s.callers = []; s.callees = []; }
       });
@@ -116,12 +111,7 @@ describe('AstIndexService', () => {
         },
       ];
 
-      mockCodeGraph.parseSourceFile.mockReturnValue({
-        path: 'src/services/user.ts',
-        content: files[0].content,
-        ast: {},
-      });
-      mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
+      mockCodeGraph.extractBatch.mockReturnValue([{ path: 'src/services/user.ts', symbols: mockSymbols }]);
       mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
         for (const s of syms) { s.callers = []; s.callees = []; }
       });
@@ -143,17 +133,12 @@ describe('AstIndexService', () => {
         { path: 'src/auth.ts', content: 'export function authenticate() {}' },
       ];
 
-      mockCodeGraph.parseSourceFile.mockReturnValue({
-        path: 'src/auth.ts',
-        content: files[0].content,
-        ast: {},
-      });
-      mockCodeGraph.extractSymbols.mockReturnValue([]);
+      mockCodeGraph.extractBatch.mockReturnValue([{ path: 'src/auth.ts', symbols: [] }]);
 
       await service.indexCommit(repoId, commitHash, files, projectId);
 
-      expect(mockCodeGraph.parseSourceFile).toHaveBeenCalledTimes(1);
-      expect(mockCodeGraph.parseSourceFile).toHaveBeenCalledWith('src/auth.ts', files[0].content);
+      expect(mockCodeGraph.extractBatch).toHaveBeenCalledTimes(1);
+      expect(mockCodeGraph.extractBatch).toHaveBeenCalledWith(files);
     });
 
     it('AC-6: Symbol.signature should capture parameter types and return type', async () => {
@@ -181,12 +166,7 @@ describe('AstIndexService', () => {
         },
       ];
 
-      mockCodeGraph.parseSourceFile.mockReturnValue({
-        path: 'src/user.ts',
-        content: files[0].content,
-        ast: {},
-      });
-      mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
+      mockCodeGraph.extractBatch.mockReturnValue([{ path: 'src/user.ts', symbols: mockSymbols }]);
       mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
         for (const s of syms) { s.callers = []; s.callees = []; }
       });
@@ -207,12 +187,7 @@ describe('AstIndexService', () => {
         content: `export function func${i}(param: string): number { return 42; }\n`.repeat(50),
       }));
 
-      mockCodeGraph.parseSourceFile.mockImplementation((path, content) => ({
-        path,
-        content,
-        ast: {},
-      }));
-      mockCodeGraph.extractSymbols.mockReturnValue([]);
+      mockCodeGraph.extractBatch.mockImplementation((batchFiles) => batchFiles.map(({ path }) => ({ path, symbols: [] })));
 
       const startTime = Date.now();
       const result = await service.indexCommit(repoId, commitHash, files, projectId);
@@ -232,13 +207,11 @@ describe('AstIndexService', () => {
         { path: 'src/also-good.ts', content: 'export function world() {}' },
       ];
 
-      mockCodeGraph.parseSourceFile.mockImplementation((path) => {
-        if (path === 'src/bad.ts') {
-          throw new Error('Parse error: unexpected token');
-        }
-        return { path, content: '', ast: {} };
-      });
-      mockCodeGraph.extractSymbols.mockReturnValue([]);
+      mockCodeGraph.extractBatch.mockReturnValue([
+        { path: 'src/good.ts', symbols: [] },
+        { path: 'src/bad.ts', error: 'Parse error: unexpected token' },
+        { path: 'src/also-good.ts', symbols: [] },
+      ]);
 
       const result = await service.indexCommit(repoId, commitHash, files, projectId);
 
@@ -357,12 +330,7 @@ describe('AstIndexService', () => {
         },
       ];
 
-      mockCodeGraph.parseSourceFile.mockReturnValue({
-        path: 'src/overload.ts',
-        content: files[0].content,
-        ast: {},
-      });
-      mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
+      mockCodeGraph.extractBatch.mockReturnValue([{ path: 'src/overload.ts', symbols: mockSymbols }]);
       mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
         for (const s of syms) { s.callers = []; s.callees = []; }
       });
@@ -413,16 +381,10 @@ describe('AstIndexService', () => {
         docComment: undefined,
       };
 
-      mockCodeGraph.parseSourceFile.mockImplementation((path: string, content: string) => ({
-        path,
-        content,
-        ast: {},
-      }));
-      mockCodeGraph.extractSymbols.mockImplementation((parsed: { path: string }) => {
-        if (parsed.path === 'src/a.ts') return [symA];
-        if (parsed.path === 'src/b.ts') return [symB];
-        return [];
-      });
+      mockCodeGraph.extractBatch.mockReturnValue([
+        { path: 'src/a.ts', symbols: [symA] },
+        { path: 'src/b.ts', symbols: [symB] },
+      ]);
       mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
         for (const s of syms) { s.callers = []; s.callees = []; }
       });

@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { CodeGraphService, ExtractedSymbol, ResolvedSymbol } from './code-graph.service';
+import { CodeGraphService, ExtractedSymbol, FileExtraction, ResolvedSymbol } from './code-graph.service';
 import { SymbolStore, SymbolData, CallerInfo, CalleeInfo } from './symbol-store';
 import { symbolFullId } from './symbol-id';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -61,27 +61,23 @@ export class AstIndexService {
     const allExtractedSymbols: ResolvedSymbol[] = [];
     const filesToReplace: string[] = [];
 
-    for (const file of files) {
+    const extractions: FileExtraction[] = this.codeGraph.extractBatch(files);
+    for (const extraction of extractions) {
       // Replace, don't merge: a file in this commit loses its old symbols even if
       // its new content fails to parse, so a parse regression cannot leave stale
       // rows behind. Files skipped before this point were never indexed.
-      filesToReplace.push(file.path);
-      try {
-        const parsed = this.codeGraph.parseSourceFile(file.path, file.content);
-        const symbols = this.codeGraph.extractSymbols(parsed);
+      filesToReplace.push(extraction.path);
 
-        for (const sym of symbols) {
-          allExtractedSymbols.push({ ...sym, symbolId: '' });
-        }
-
-        filesIndexed++;
-      } catch (error) {
-        fileErrors.push({
-          path: file.path,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        this.logger.warn(`Failed to parse ${file.path}: ${error}`);
+      if ('error' in extraction) {
+        fileErrors.push({ path: extraction.path, error: extraction.error });
+        this.logger.warn(`Failed to parse ${extraction.path}: ${extraction.error}`);
+        continue;
       }
+
+      for (const sym of extraction.symbols) {
+        allExtractedSymbols.push({ ...sym, symbolId: '' });
+      }
+      filesIndexed++;
     }
 
     this.assignSymbolIds(allExtractedSymbols);
