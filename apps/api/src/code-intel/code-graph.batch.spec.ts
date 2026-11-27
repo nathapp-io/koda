@@ -72,12 +72,18 @@ describe('CodeGraphService.extractBatch()', () => {
       { path: 'src/b.ts', content: b },
     ]);
     const alone = service.extractBatch([{ path: 'src/b.ts', content: b }]);
-    const use = (result: typeof batch) => {
+    const findUse = (result: typeof batch) => {
       const file = result.find((item) => item.path === 'src/b.ts');
-      if (!file || !('symbols' in file)) return undefined;
-      return file.symbols.find((symbol) => symbol.name === 'use')?.signature;
+      expect(file).toBeDefined();
+      if (!file || !('symbols' in file)) throw new Error('src/b.ts did not produce symbols');
+      const symbol = file.symbols.find((candidate) => candidate.name === 'use');
+      expect(symbol).toBeDefined();
+      if (!symbol) throw new Error('use symbol was not extracted');
+      return symbol;
     };
-    expect(use(batch)).toEqual(use(alone));
+    const batchUse = findUse(batch);
+    const standaloneUse = findUse(alone);
+    expect(batchUse.signature).toEqual(standaloneUse.signature);
   });
 
   it('AC-7: matches standalone extraction across supported symbol kinds', () => {
