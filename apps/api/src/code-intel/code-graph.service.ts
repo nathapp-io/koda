@@ -25,6 +25,10 @@ export interface ResolvedSymbol extends ExtractedSymbol {
   symbolId: string;
 }
 
+export type FileExtraction =
+  | { path: string; symbols: ExtractedSymbol[] }
+  | { path: string; error: string };
+
 @Injectable()
 export class CodeGraphService {
   private readonly logger = new Logger(CodeGraphService.name);
@@ -32,15 +36,42 @@ export class CodeGraphService {
   parseSourceFile(path: string, content: string): ParsedSourceFile {
     const project = new Project({ useInMemoryFileSystem: true });
     const sourceFile = project.createSourceFile(path, content);
-    const diagnostics = sourceFile.getPreEmitDiagnostics();
-    const syntaxErrors = diagnostics.filter(
-      (d) => d.getCategory() === 1 && d.getCode() >= 1000 && d.getCode() < 2000,
-    );
+    this.rejectSyntacticErrors(project, sourceFile);
+    return { path, content, ast: sourceFile };
+  }
+
+  extractBatch(files: ReadonlyArray<{ path: string; content: string }>): FileExtraction[] {
+    if (files.length === 0) return [];
+
+    const project = new Project({ useInMemoryFileSystem: true });
+    const results: FileExtraction[] = [];
+
+    for (const { path, content } of files) {
+      let sourceFile: SourceFile | undefined;
+      try {
+        sourceFile = project.createSourceFile(path, content, { overwrite: true });
+        this.rejectSyntacticErrors(project, sourceFile);
+        const parsed = { path, content, ast: sourceFile };
+        results.push({ path, symbols: this.extractSymbols(parsed) });
+      } catch (error) {
+        results.push({ path, error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (sourceFile) project.removeSourceFile(sourceFile);
+      }
+    }
+
+    return results;
+  }
+
+  private rejectSyntacticErrors(project: Project, sourceFile: SourceFile): void {
+    const syntaxErrors = project
+      .getProgram()
+      .getSyntacticDiagnostics(sourceFile)
+      .filter((diagnostic) => diagnostic.getCategory() === 1);
     if (syntaxErrors.length > 0) {
-      const messages = syntaxErrors.map((d) => d.getMessageText().toString()).join('; ');
+      const messages = syntaxErrors.map((diagnostic) => diagnostic.getMessageText().toString()).join('; ');
       throw new Error(`Parse error: ${messages}`);
     }
-    return { path, content, ast: sourceFile };
   }
 
   extractSymbols(parsed: ParsedSourceFile): ExtractedSymbol[] {

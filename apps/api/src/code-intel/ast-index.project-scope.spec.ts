@@ -6,7 +6,7 @@ import type { ITransactionManager } from '@nathapp/nestjs-data';
 
 describe('AstIndexService project-scoped ids (M13)', () => {
   let store: { upsertSymbol: Mock; deleteByFile: Mock };
-  let graph: { parseSourceFile: Mock; extractSymbols: Mock; resolveRelationships: Mock };
+  let graph: { extractBatch: Mock; resolveRelationships: Mock };
   let service: AstIndexService;
   const calls: string[] = [];
 
@@ -17,10 +17,10 @@ describe('AstIndexService project-scoped ids (M13)', () => {
       deleteByFile: vi.fn(async (_p: string, _r: string, file: string) => { calls.push(`delete:${file}`); }),
     };
     graph = {
-      parseSourceFile: vi.fn((path: string) => ({ path })),
-      extractSymbols: vi.fn(({ path }: { path: string }) => [
-        { name: 'alpha', kind: 'function', file: path, startLine: 1, endLine: 2, callers: [], callees: [], symbolId: '' },
-      ]),
+      extractBatch: vi.fn((files: Array<{ path: string }>) => files.map(({ path }) => ({
+        path,
+        symbols: [{ name: 'alpha', kind: 'function', file: path, startLine: 1, endLine: 2, callers: [], callees: [], symbolId: '' }],
+      }))),
       resolveRelationships: vi.fn(),
     };
     const tx = { run: <T>(fn: () => Promise<T>) => fn() } as unknown as ITransactionManager;
@@ -43,9 +43,9 @@ describe('AstIndexService project-scoped ids (M13)', () => {
   });
 
   it('deletes a file\'s old symbols even when its new content fails to parse', async () => {
-    graph.parseSourceFile.mockImplementationOnce(() => {
-      throw new Error('parse error');
-    });
+    graph.extractBatch.mockImplementationOnce(() => [
+      { path: 'src/broken.ts', error: 'parse error' },
+    ]);
 
     const result = await service.indexCommit('acme/widgets', 'c2', [{ path: 'src/broken.ts', content: 'x' }], 'proj-1');
 

@@ -2,7 +2,7 @@ import type { Mocked } from 'vitest';
 import { createMock } from '@golevelup/ts-vitest';
 import { ITransactionManager } from '@nathapp/nestjs-data';
 import { AstIndexService, SourceFile } from './ast-index.service';
-import { CodeGraphService, ExtractedSymbol, ParsedSourceFile, ResolvedSymbol } from './code-graph.service';
+import { CodeGraphService, ExtractedSymbol, ResolvedSymbol } from './code-graph.service';
 import { SymbolStore, SymbolData, CallerInfo, CalleeInfo } from './symbol-store';
 
 function buildExtractedSymbol(overrides: Partial<ExtractedSymbol> = {}): ExtractedSymbol {
@@ -56,8 +56,7 @@ describe('AstIndexService', () => {
   describe('indexCommit()', () => {
     it('calls onIndexed exactly once inside the transaction for nonempty input', async () => {
       const files: SourceFile[] = [{ path: 'src/a.ts', content: 'x' }];
-      codeGraph.parseSourceFile.mockReturnValue({} as ParsedSourceFile);
-      codeGraph.extractSymbols.mockReturnValue([buildExtractedSymbol()]);
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/a.ts', symbols: [buildExtractedSymbol()] }]);
       let inTransaction = false;
       txManager.run.mockImplementation(async (fn) => {
         inTransaction = true;
@@ -84,20 +83,18 @@ describe('AstIndexService', () => {
       expect(result.durationMs).toBeGreaterThanOrEqual(0);
     });
 
-    it('happy path: parses files, assigns ids, calls symbolStore.upsertSymbol', async () => {
+    it('happy path: extracts files, assigns ids, calls symbolStore.upsertSymbol', async () => {
       const files: SourceFile[] = [{ path: 'src/a.ts', content: 'const x = 1;' }];
       const extracted: ExtractedSymbol = buildExtractedSymbol();
-      const fakeParsed = {} as ParsedSourceFile;
 
-      codeGraph.parseSourceFile.mockReturnValue(fakeParsed);
-      codeGraph.extractSymbols.mockReturnValue([extracted]);
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/a.ts', symbols: [extracted] }]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
       symbolStore.upsertSymbol.mockResolvedValue(buildSymbolData());
 
       const result = await service.indexCommit('repo-1', 'abc123', files, 'proj-1');
 
-      expect(codeGraph.parseSourceFile).toHaveBeenCalledWith('src/a.ts', 'const x = 1;');
-      expect(codeGraph.extractSymbols).toHaveBeenCalledWith(fakeParsed);
+      expect(codeGraph.extractBatch).toHaveBeenCalledWith(files);
+      expect(codeGraph.parseSourceFile).not.toHaveBeenCalled();
       expect(codeGraph.resolveRelationships).toHaveBeenCalled();
       expect(symbolStore.upsertSymbol).toHaveBeenCalledTimes(1);
       expect(result.filesIndexed).toBe(1);
@@ -108,9 +105,7 @@ describe('AstIndexService', () => {
     it('records a fileError and skips symbol upsert when parseSourceFile throws', async () => {
       const files: SourceFile[] = [{ path: 'src/bad.ts', content: 'invalid' }];
 
-      codeGraph.parseSourceFile.mockImplementation(() => {
-        throw new Error('parse failed');
-      });
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/bad.ts', error: 'parse failed' }]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
 
       const result = await service.indexCommit('repo-1', 'abc123', files, 'proj-1');
@@ -126,9 +121,7 @@ describe('AstIndexService', () => {
     it('handles non-Error throws during parse gracefully', async () => {
       const files: SourceFile[] = [{ path: 'src/x.ts', content: '' }];
 
-      codeGraph.parseSourceFile.mockImplementation(() => {
-        throw new Error('string error');
-      });
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/x.ts', error: 'string error' }]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
 
       const result = await service.indexCommit('repo-1', 'abc123', files, 'proj-1');
@@ -140,10 +133,7 @@ describe('AstIndexService', () => {
       const files: SourceFile[] = [{ path: 'src/a.ts', content: '' }];
       const sym1: ExtractedSymbol = buildExtractedSymbol({ name: 'myFn', file: 'src/a.ts' });
       const sym2: ExtractedSymbol = buildExtractedSymbol({ name: 'myFn', file: 'src/a.ts' });
-      const fakeParsed = {} as ParsedSourceFile;
-
-      codeGraph.parseSourceFile.mockReturnValue(fakeParsed);
-      codeGraph.extractSymbols.mockReturnValue([sym1, sym2]);
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/a.ts', symbols: [sym1, sym2] }]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
       symbolStore.upsertSymbol.mockResolvedValue(buildSymbolData());
 
@@ -158,10 +148,7 @@ describe('AstIndexService', () => {
     it('builds full symbol id with repoId prefix', async () => {
       const files: SourceFile[] = [{ path: 'src/a.ts', content: '' }];
       const extracted: ExtractedSymbol = buildExtractedSymbol({ name: 'Foo', file: 'src/a.ts' });
-      const fakeParsed = {} as ParsedSourceFile;
-
-      codeGraph.parseSourceFile.mockReturnValue(fakeParsed);
-      codeGraph.extractSymbols.mockReturnValue([extracted]);
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/a.ts', symbols: [extracted] }]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
       symbolStore.upsertSymbol.mockResolvedValue(buildSymbolData());
 
@@ -175,10 +162,7 @@ describe('AstIndexService', () => {
     it('runs upserts inside a transaction', async () => {
       const files: SourceFile[] = [{ path: 'src/a.ts', content: '' }];
       const extracted: ExtractedSymbol = buildExtractedSymbol();
-      const fakeParsed = {} as ParsedSourceFile;
-
-      codeGraph.parseSourceFile.mockReturnValue(fakeParsed);
-      codeGraph.extractSymbols.mockReturnValue([extracted]);
+      codeGraph.extractBatch.mockReturnValue([{ path: 'src/a.ts', symbols: [extracted] }]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
       symbolStore.upsertSymbol.mockResolvedValue(buildSymbolData());
 
@@ -192,13 +176,12 @@ describe('AstIndexService', () => {
         { path: 'src/ok.ts', content: 'function ok() {}' },
         { path: 'src/bad.ts', content: 'broken' },
       ];
-      const fakeParsed = {} as ParsedSourceFile;
       const extracted: ExtractedSymbol = buildExtractedSymbol({ name: 'ok', file: 'src/ok.ts' });
 
-      codeGraph.parseSourceFile
-        .mockReturnValueOnce(fakeParsed)
-        .mockImplementationOnce(() => { throw new Error('syntax error'); });
-      codeGraph.extractSymbols.mockReturnValue([extracted]);
+      codeGraph.extractBatch.mockReturnValue([
+        { path: 'src/ok.ts', symbols: [extracted] },
+        { path: 'src/bad.ts', error: 'syntax error' },
+      ]);
       codeGraph.resolveRelationships.mockReturnValue(undefined);
       symbolStore.upsertSymbol.mockResolvedValue(buildSymbolData());
 
