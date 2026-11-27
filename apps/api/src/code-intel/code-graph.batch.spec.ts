@@ -3,7 +3,25 @@ import { CodeGraphService } from './code-graph.service';
 describe('CodeGraphService.extractBatch()', () => {
   let service: CodeGraphService;
 
+  // The synchronous lazy loader uses the CommonJS export. Wrap it before the service caches it.
+  const morph = require('ts-morph') as { Project: typeof import('ts-morph').Project };
+  const RealProject = morph.Project;
+  let constructions = 0;
+  beforeAll(() => {
+    morph.Project = class extends RealProject {
+      constructor(...args: ConstructorParameters<typeof RealProject>) {
+        super(...args);
+        constructions++;
+      }
+    };
+  });
+
+  afterAll(() => {
+    morph.Project = RealProject;
+  });
+
   beforeEach(() => {
+    constructions = 0;
     service = new CodeGraphService();
   });
 
@@ -80,24 +98,18 @@ describe('CodeGraphService.extractBatch()', () => {
   });
 
   it('AC-8: creates one real Project for all files in a batch', () => {
-    const extract = vi.spyOn(service, 'extractSymbols');
     service.extractBatch([
       { path: 'src/a.ts', content: 'function a() {}' },
       { path: 'src/b.ts', content: 'function b() {}' },
       { path: 'src/c.ts', content: 'function c() {}' },
     ]);
-    const projects = extract.mock.calls.map(([file]) => file.ast.getProject());
-    expect(projects).toHaveLength(3);
-    expect(new Set(projects).size).toBe(1);
+    expect(constructions).toBe(1);
   });
 
   it('AC-9: creates a fresh Project for each batch call', () => {
-    const extract = vi.spyOn(service, 'extractSymbols');
     service.extractBatch([{ path: 'src/a.ts', content: 'function a() {}' }]);
     service.extractBatch([{ path: 'src/b.ts', content: 'function b() {}' }]);
-    const projects = extract.mock.calls.map(([file]) => file.ast.getProject());
-    expect(projects).toHaveLength(2);
-    expect(projects[0]).not.toBe(projects[1]);
+    expect(constructions).toBe(2);
   });
 
   it('AC-10: turns an extraction TypeError into a result and continues', () => {
