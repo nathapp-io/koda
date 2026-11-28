@@ -239,9 +239,9 @@ export class VcsPrSyncService {
     prStatus: VcsPrStatus,
     options: { rethrow: boolean } = { rethrow: false },
   ): Promise<void> {
-    // The snapshot is only a fast rejection; the repository's conditional update rechecks the
-    // live ticket under its write lock before creating any transition records.
-    if (!link.ticket || link.ticket.status !== TicketStatus.IN_PROGRESS) {
+    // Candidate selection may have observed a stale ticket status. The repository's conditional
+    // update rechecks the live status and soft-delete state under its write lock before writing.
+    if (!link.ticket) {
       return;
     }
 

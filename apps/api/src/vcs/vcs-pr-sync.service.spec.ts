@@ -360,15 +360,21 @@ describe('VcsPrSyncService', () => {
       });
     });
 
-    it('should skip transition when ticket is not IN_PROGRESS', async () => {
+    it('delegates eligibility to the live conditional transition when the candidate snapshot is stale', async () => {
       const link = makeTicketLink({
-        ticket: { id: 'ticket-1', status: 'DONE', projectId: 'proj-1', number: 42, externalVcsId: null },
+        ticket: { id: 'ticket-1', status: 'VERIFIED', projectId: 'proj-1', number: 42, externalVcsId: null },
       });
       const prStatus = makePrStatus({ merged: true });
 
       await service.handleMergedPrAutoTransition(link, prStatus);
 
-      expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      expect(mockRepo.applyMergedPrTransition).toHaveBeenCalledWith({
+        ticketId: 'ticket-1',
+        externalRef: link.externalRef,
+        prUrl: prStatus.url,
+        mergedBy: null,
+        mergeSha: null,
+      });
     });
 
     it('should skip transition when link has no ticket', async () => {
@@ -412,10 +418,12 @@ describe('VcsPrSyncService', () => {
       expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
 
-    it('records merged without a transition for a ticket that is not IN_PROGRESS', async () => {
+    it('delegates eligibility to the live repository condition even when the ticket snapshot is not IN_PROGRESS', async () => {
       const link = makeTicketLink({ ticket: { id: 'ticket-1', status: 'CREATED', projectId: 'proj-1', number: 42, externalVcsId: null } });
+      mockRepo.applyMergedPrTransition.mockResolvedValue(false);
       await expect(service.applyMergedPr(link, merged)).resolves.toBe('updated');
-      expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      expect(mockRepo.applyMergedPrTransition).toHaveBeenCalledOnce();
+      expect(mockAuditRecorder.record).toHaveBeenCalledTimes(1);
     });
 
     it('AC-22: both audited calls run as SYSTEM/vcs, whoever the merge was seen by', async () => {
