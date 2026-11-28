@@ -147,7 +147,8 @@ export class CodeGraphService {
       if (initializer) {
         const kindName = initializer.getKindName();
         if (kindName === 'ArrowFunction' || kindName === 'FunctionExpression') {
-          symbols.push(this.extractFunctionSymbol(varDecl, parsed.path));
+          const statement = varDecl.getParent()?.getParent();
+          symbols.push(this.extractFunctionSymbol(initializer, parsed.path, varDecl.getName(), statement));
         }
       }
     }
@@ -251,12 +252,17 @@ export class CodeGraphService {
     };
   }
 
-  private extractFunctionSymbol(func: AnyNode, filePath: string): ExtractedSymbol {
+  private extractFunctionSymbol(
+    func: AnyNode,
+    filePath: string,
+    bindingName?: string,
+    documentationNode: AnyNode = func,
+  ): ExtractedSymbol {
     const signature = this.buildSignature(func);
     const callees = this.findCalledIdentifiers(func);
 
     return {
-      name: func.getName(),
+      name: bindingName ?? func.getName(),
       kind: 'function',
       file: filePath,
       startLine: func.getStartLineNumber(),
@@ -264,7 +270,7 @@ export class CodeGraphService {
       signature,
       callers: [],
       callees,
-      docComment: func.getJsDocs().map((d: AnyNode) => d.getText()).join('\n') || undefined,
+      docComment: documentationNode.getJsDocs().map((d: AnyNode) => d.getText()).join('\n') || undefined,
     };
   }
 
@@ -283,8 +289,11 @@ export class CodeGraphService {
 
   private findCalledIdentifiers(node: AnyNode): string[] {
     try {
-      const identifiers = node.getDescendantsOfKind(300);
-      const names: string[] = identifiers.map((id: AnyNode) => id.getText() as string);
+      const calls = node.getDescendants().filter((descendant: AnyNode) => descendant.getKindName() === 'CallExpression');
+      const names: string[] = calls.map((call: AnyNode) => {
+        const expression = call.getExpression().getText() as string;
+        return expression.split('.').pop() ?? expression;
+      });
       return [...new Set(names)];
     } catch {
       return [];

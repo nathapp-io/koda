@@ -330,6 +330,65 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
     });
   });
 
+  describe('US-001: calls, callable declarations, and reindexing', () => {
+    it('indexes call edges once, excludes references, replaces stored symbols, and isolates malformed siblings', async () => {
+      const repoId = 'repo-us001';
+      const base = `export function helper() {}\nexport function main() { helper(); helper(); const reference = helper; }\nexport function referenceOnly() { const reference = helper; }`;
+      const first = await request(httpServer)
+        .post('/api/code-intel/index')
+        .set('Authorization', `Bearer ${adminAccessToken}`)
+        .send({ repoId, commitHash: 'us001-before', projectSlug, files: [{ path: 'src/calls.ts', content: base }] });
+      expect(first.status).toBe(201);
+
+      const indexed = await request(httpServer)
+        .get('/api/code-intel/symbols/main/callees')
+        .query({ projectSlug })
+        .set('Authorization', `Bearer ${adminAccessToken}`);
+      expect(body<Array<{ name: string }>>(indexed)).toEqual([expect.objectContaining({ name: 'helper' })]);
+      const callers = await request(httpServer)
+        .get('/api/code-intel/symbols/helper/callers')
+        .query({ projectSlug })
+        .set('Authorization', `Bearer ${adminAccessToken}`);
+      expect(body<Array<{ name: string }>>(callers)).toEqual([expect.objectContaining({ name: 'main' })]);
+      const referenceOnly = await request(httpServer)
+        .get('/api/code-intel/symbols/referenceOnly/callees')
+        .query({ projectSlug })
+        .set('Authorization', `Bearer ${adminAccessToken}`);
+      expect(body<Array<{ name: string }>>(referenceOnly)).toEqual([]);
+
+      const revised = `export function first() {}\nexport function second() {}\n/** persisted arrow */\nexport const arrow = (): void => {};`;
+      const reindex = await request(httpServer)
+        .post('/api/code-intel/index')
+        .set('Authorization', `Bearer ${adminAccessToken}`)
+        .send({
+          repoId,
+          commitHash: 'us001-after',
+          projectSlug,
+          files: [
+            { path: 'src/calls.ts', content: revised },
+            { path: 'src/broken.ts', content: 'export function broken( {' },
+            { path: 'src/sibling.ts', content: 'export function sibling() {}' },
+          ],
+        });
+      expect(reindex.status).toBe(201);
+      const result = body<{ symbolsIndexed: number; filesIndexed: number; fileErrors: Array<{ path: string }> }>(reindex);
+      expect(result).toMatchObject({ symbolsIndexed: 4, filesIndexed: 2, fileErrors: [{ path: 'src/broken.ts' }] });
+
+      for (const name of ['first', 'second', 'arrow']) {
+        const symbol = await request(httpServer)
+          .get(`/api/code-intel/symbols/${name}`)
+          .query({ projectSlug })
+          .set('Authorization', `Bearer ${adminAccessToken}`);
+        expect(symbol.status).toBe(200);
+        expect(body<{ name: string }>(symbol).name).toBe(name);
+      }
+      expect(body<Array<{ name: string }>>(await request(httpServer)
+        .get('/api/code-intel/symbols/arrow/callees')
+        .query({ projectSlug })
+        .set('Authorization', `Bearer ${adminAccessToken}`))).toEqual([]);
+    });
+  });
+
   describe('AC-10: parser failures do not prevent other files from being indexed', () => {
     it('should record parse errors in fileErrors and continue indexing', async () => {
       const files = [

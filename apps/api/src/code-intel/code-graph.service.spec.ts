@@ -62,12 +62,16 @@ describe('CodeGraphService', () => {
       expect(symbols.some((s) => s.name === 'Color' && s.kind === 'enum')).toBe(true);
     });
 
-    it('throws when extracting arrow function variable declarations (ts-morph VariableDeclaration lacks getJsDocs)', () => {
-      // VariableDeclaration in ts-morph does not expose getJsDocs(), causing a
-      // TypeError inside extractFunctionSymbol. This test documents the current
-      // known behavior so regressions are caught if the service is fixed.
-      const parsed = parse('const myArrow = () => 42;');
-      expect(() => service.extractSymbols(parsed)).toThrow(TypeError);
+    it('AC-9/10/11: extracts documented callable variables and their signatures', () => {
+      const source = `/** retained docs */\nconst arrow = (value: string): number => helper(value);\nconst expression = function (count: number): string { return helper(count); };\nconst plain = 1;\nfunction helper(value: string | number): never { throw value; }`;
+      const symbols = service.extractSymbols(parse(source));
+      const arrow = symbols.find((symbol) => symbol.name === 'arrow');
+      const expression = symbols.find((symbol) => symbol.name === 'expression');
+      expect(arrow).toMatchObject({ kind: 'function', signature: '(value: string): number', docComment: expect.stringContaining('retained docs') });
+      expect(expression).toMatchObject({ kind: 'function', signature: '(count: number): string' });
+      expect(expression?.docComment).toBeUndefined();
+      expect(arrow?.callees).toEqual(['helper']);
+      expect(expression?.callees).toEqual(['helper']);
     });
 
     it('returns empty array for a file with no extractable symbols', () => {
@@ -123,6 +127,21 @@ describe('CodeGraphService', () => {
 
       expect(callerSym?.callees).toContain('helper');
       expect(helperSym?.callers).toContain('caller');
+    });
+
+    it('AC-4: resolves a direct method call by the existing method-name rule', () => {
+      const symbols = service.extractSymbols(service.parseSourceFile('src/method.ts', `class Worker { run() { this.finish(); } finish() {} }`))
+        .map((symbol, index) => ({ ...symbol, symbolId: `symbol-${index}` })) as ResolvedSymbol[];
+      service.resolveRelationships(symbols);
+      expect(symbols.find((symbol) => symbol.name === 'Worker.run')?.callees).toEqual(['symbol-2']);
+    });
+
+    it('AC-5: extracts and drops a callable self-call', () => {
+      const symbols = service.extractSymbols(service.parseSourceFile('src/self.ts', 'function repeat() { repeat(); }'))
+        .map((symbol) => ({ ...symbol, symbolId: 'repeat-id' })) as ResolvedSymbol[];
+      service.resolveRelationships(symbols);
+      expect(symbols[0].callees).toEqual([]);
+      expect(symbols[0].callers).toEqual([]);
     });
 
     it('skips self-references in callees', () => {
