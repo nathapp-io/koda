@@ -3,7 +3,7 @@
   "feature": "review-1128-memory-hardening",
   "branchName": "feat/review-1128-memory-hardening",
   "createdAt": "2026-11-28T10:23:44.761Z",
-  "updatedAt": "2026-11-28T10:58:36.692Z",
+  "updatedAt": "2026-11-28T11:05:28.228Z",
   "userStories": [
     {
       "id": "US-001",
@@ -170,14 +170,17 @@
         "access-control"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The implementation is a two-reading counter, a socket reader and repeated option wiring across four existing controllers, not a new streaming architecture; strict security TDD remains required because heartbeat ordering controls existing access revalidation and authenticated stream teardown."
+        "reasoning": "The implementation is a two-reading counter, a socket reader and repeated option wiring across four existing controllers, not a new streaming architecture; strict security TDD remains required because heartbeat ordering controls existing access revalidation and authenticated stream teardown.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/live/live-stream.ts",
@@ -195,7 +198,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a3577536c0a7dd4c295b82302857b19824f19a76"
     },
     {
       "id": "US-004",
