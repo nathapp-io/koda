@@ -141,14 +141,17 @@ export class CodeGraphService {
       });
     }
 
-    const variableDeclarations = sourceFile.getVariableDeclarations();
+    const variableDeclarations: AnyNode[] = sourceFile
+      .getDescendants()
+      .filter((descendant: AnyNode) => descendant.getKindName() === 'VariableDeclaration');
     for (const varDecl of variableDeclarations) {
       const initializer = varDecl.getInitializer();
       if (initializer) {
         const kindName = initializer.getKindName();
         if (kindName === 'ArrowFunction' || kindName === 'FunctionExpression') {
           const statement = varDecl.getParent()?.getParent();
-          symbols.push(this.extractFunctionSymbol(initializer, parsed.path, varDecl.getName(), statement));
+          const documentationNode = statement?.getKindName() === 'VariableStatement' ? statement : null;
+          symbols.push(this.extractFunctionSymbol(initializer, parsed.path, varDecl.getName(), documentationNode));
         }
       }
     }
@@ -256,7 +259,7 @@ export class CodeGraphService {
     func: AnyNode,
     filePath: string,
     bindingName?: string,
-    documentationNode: AnyNode = func,
+    documentationNode: AnyNode | null = func,
   ): ExtractedSymbol {
     const signature = this.buildSignature(func);
     const callees = this.findCalledIdentifiers(func);
@@ -270,7 +273,10 @@ export class CodeGraphService {
       signature,
       callers: [],
       callees,
-      docComment: documentationNode.getJsDocs().map((d: AnyNode) => d.getText()).join('\n') || undefined,
+      docComment:
+        documentationNode && typeof documentationNode.getJsDocs === 'function'
+          ? documentationNode.getJsDocs().map((d: AnyNode) => d.getText()).join('\n') || undefined
+          : undefined,
     };
   }
 

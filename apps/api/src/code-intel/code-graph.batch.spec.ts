@@ -112,6 +112,17 @@ describe('CodeGraphService.extractBatch()', () => {
     expect(constructions).toBe(2);
   });
 
+  it('extracts for-loop callable initializers through both single-file and batch paths', () => {
+    const path = 'src/for-callable.ts';
+    const content = 'for (const loopFn = (): void => {}; false;) {}';
+    const single = service.extractSymbols(service.parseSourceFile(path, content));
+    const batch = service.extractBatch([{ path, content }]);
+    expect(batch).toHaveLength(1);
+    if (!('symbols' in batch[0])) throw new Error('for-callable.ts failed extraction');
+    expect(single).toContainEqual(expect.objectContaining({ name: 'loopFn', kind: 'function', signature: '(): void', docComment: undefined }));
+    expect(batch[0].symbols).toEqual(single);
+  });
+
   it('AC-9/10/11/12: extracts and resolves callable variables equally in single-file and batch paths', () => {
     const path = 'src/callables.ts';
     const content = `function helper(value: string): string { return value; }\n/** callable docs */\nconst arrow = (value: string): string => helper(value);\nconst expression = function (value: string): string { return helper(value); };\nconst undocumented = (): void => {};`;

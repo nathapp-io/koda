@@ -62,6 +62,16 @@ describe('CodeGraphService', () => {
       expect(symbols.some((s) => s.name === 'Color' && s.kind === 'enum')).toBe(true);
     });
 
+    it('extracts callable declarations in for-loop initializers without documentation', () => {
+      const symbols = service.extractSymbols(parse('for (const loopFn = (): void => {}; false;) {}'));
+      expect(symbols).toContainEqual(expect.objectContaining({
+        name: 'loopFn',
+        kind: 'function',
+        signature: '(): void',
+        docComment: undefined,
+      }));
+    });
+
     it('AC-9/10/11: extracts documented callable variables and their signatures', () => {
       const source = `/** retained docs */\nconst arrow = (value: string): number => helper(value);\nconst expression = function (count: number): string { return helper(count); };\nconst plain = 1;\nfunction helper(value: string | number): never { throw value; }`;
       const symbols = service.extractSymbols(parse(source));
