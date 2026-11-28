@@ -7,6 +7,7 @@ on:
     paths:
       - "apps/**"
       - "packages/**"
+      - "patches/**"
       - "prisma/**"
       - "scripts/**"
       - "deployments/**"
@@ -66,7 +67,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|deployments/|test/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|openapi-ts\.config\.ts|docker-compose(\.(dev|test))?\.yml|turbo\.json)$|^tsconfig[^/]*\.json$'
+          CODE_PATHS='^(apps/|packages/|patches/|prisma/|scripts/|deployments/|test/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|openapi-ts\.config\.ts|docker-compose(\.(dev|test))?\.yml|turbo\.json)$|^tsconfig[^/]*\.json$'
           # `-z` keeps the paths Git's raw bytes: without it Git C-quotes a non-ASCII path
           # ("deployments/caf\303\251.sh"), which no path pattern matches, so a deployment-only PR would
           # count as no change (review B7). The listing goes to a file first so a Git failure is the step's

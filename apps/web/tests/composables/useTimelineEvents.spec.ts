@@ -1,9 +1,11 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
+import { spawnSync } from 'child_process'
 import { ref } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useTimelineEvents.ts')
+const timelineQueryPath = join(webDir, 'lib', 'timeline-query.ts')
 const useApiModulePath = join(webDir, 'composables', 'useApi.ts')
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +30,25 @@ function applyNuxtGlobals(env: {
 function resetGlobals() {
   const g = globalThis as Record<string, unknown>
   g.useApi = undefined
+}
+
+function buildQueryInTimezone(timezone: string, filters: Record<string, string>) {
+  const script = `
+    const fs = require('fs')
+    const ts = require('typescript')
+    const source = fs.readFileSync(process.argv[1], 'utf8')
+    const js = ts.transpile(source, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 })
+    const loaded = { exports: {} }
+    new Function('exports', 'module', 'require', js)(loaded.exports, loaded, require)
+    console.log(JSON.stringify(loaded.exports.buildTimelineQuery(JSON.parse(process.argv[2]))))
+  `
+  const result = spawnSync(process.execPath, ['-e', script, timelineQueryPath, JSON.stringify(filters)], {
+    cwd: webDir,
+    encoding: 'utf8',
+    env: { ...process.env, TZ: timezone },
+  })
+  if (result.status !== 0) throw new Error(result.stderr || 'Timezone query process failed')
+  return JSON.parse(result.stdout) as Record<string, string>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +135,102 @@ describe('AC5: useTimelineEvents error path', () => {
 // AC6/AC7 — filters populate query.eventTypes / from / to
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('US-008 local calendar date bounds', () => {
+  beforeEach(resetGlobals)
+
+  // A Jest worker ignores a `process.env.TZ` assignment made after it started, so the Kuala Lumpur numbers below only
+  // reproduce in a child process launched with TZ set — the same mechanism AC-4/AC-5 and the B2 regressions use. An
+  // in-process switch passes on a host that already sits at UTC+8 and fails on a UTC runner.
+  test('AC-1: Kuala Lumpur bounds run from local midnight to the last millisecond before the next one', () => {
+    expect(buildQueryInTimezone('Asia/Kuala_Lumpur', { from: '2026-11-28', to: '2026-11-28' }))
+      .toEqual({ from: '2026-11-27T16:00:00.000Z', to: '2026-11-28T15:59:59.999Z' })
+  })
+
+  test('AC-1 / AC-2 / AC-3: the selected day includes both endpoints but excludes the next midnight', async () => {
+    const { buildTimelineQuery } = await import(timelineQueryPath)
+    // Bounds of the selected day as this host's zone measures it, so the fixture sits exactly on both edges whatever
+    // timezone the suite runs in. The exact Kuala Lumpur numbers are pinned by the child-process test above.
+    const { from: expectedFrom = '', to: expectedTo = '' }
+      = buildTimelineQuery({ from: '2026-11-28', to: '2026-11-28' })
+    const fixture = [
+      { id: 'before-from', at: new Date(Date.parse(expectedFrom) - 1).toISOString() },
+      { id: 'from', at: expectedFrom },
+      { id: 'to', at: expectedTo },
+      { id: 'next-midnight', at: new Date(Date.parse(expectedTo) + 1).toISOString() },
+    ]
+    let capturedQuery: Record<string, string> = {}
+    const fetchMock = jest.fn((_url: string, opts?: Record<string, unknown>) => {
+      capturedQuery = (opts?.query ?? {}) as Record<string, string>
+      const from = Date.parse(capturedQuery.from)
+      const to = Date.parse(capturedQuery.to)
+      return Promise.resolve({ data: { events: fixture.filter(event => {
+        const time = Date.parse(event.at)
+        return time >= from && time <= to
+      }).map(event => ({ id: event.id, eventType: 'ticket_event', actorId: 'u', action: event.id, createdAt: event.at })) } })
+    })
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-11-28'
+    tl.toFilter.value = '2026-11-28'
+
+    await tl.loadEvents()
+
+    expect(capturedQuery).toEqual({ from: expectedFrom, to: expectedTo })
+    expect(tl.events.value.map(event => event.id)).toEqual(['from', 'to'])
+  })
+
+  test.each([
+    ['America/New_York', '2026-03-08', 23],
+    ['America/New_York', '2026-11-01', 25],
+  ])('AC-4 / AC-5: %s %s local day spans %i hours', (timezone, date, hours) => {
+    const query = buildQueryInTimezone(timezone, { from: date, to: date })
+    const start = Date.parse(query.from)
+    const exclusiveNextMidnight = Date.parse(query.to) + 1
+    expect((exclusiveNextMidnight - start) / 3_600_000).toBe(hours)
+  })
+
+  // America/Santiago jumps forward at local midnight on 2026-09-06 (00:00 -> 01:00), so that calendar day has no
+  // 00:00 and the day before it ends one hour before a naive "add a day" would say.
+  test.each([
+    ['America/Santiago', '2026-09-05', '2026-09-05T04:00:00.000Z', '2026-09-06T03:59:59.999Z', 24],
+    ['America/Santiago', '2026-09-06', '2026-09-06T04:00:00.000Z', '2026-09-07T02:59:59.999Z', 23],
+  ])('B2 regression: %s %s spans its own local day (%i hours) across the midnight DST jump', (timezone, date, expectedFrom, expectedTo, hours) => {
+    const query = buildQueryInTimezone(timezone, { from: date, to: date })
+    expect(query.from).toBe(expectedFrom)
+    expect(query.to).toBe(expectedTo)
+    // The bound is the instant before the next calendar day starts, so the following day's first hour is excluded.
+    expect((Date.parse(query.to) + 1 - Date.parse(query.from)) / 3_600_000).toBe(hours)
+  })
+
+  test('AC-6 / AC-7: single-sided dates omit the unselected bound', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-01-01'
+    await tl.loadEvents()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query).toEqual({ from: expect.any(String) })
+    tl.fromFilter.value = ''
+    tl.toFilter.value = '2026-01-01'
+    await tl.loadEvents()
+    expect((fetchMock.mock.calls[1][1] as { query: Record<string, string> }).query).toEqual({ to: expect.any(String) })
+  })
+
+  test('AC-8: explicit timestamps pass through unchanged', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-01-01T12:34:56.789Z'
+    tl.toFilter.value = '2026-01-02T00:00:00+03:00'
+    await tl.loadEvents()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query).toEqual({
+      from: '2026-01-01T12:34:56.789Z', to: '2026-01-02T00:00:00+03:00',
+    })
+  })
+})
+
 describe('AC6/AC7: filter inputs populate the timeline query', () => {
   beforeEach(resetGlobals)
 
@@ -135,8 +252,8 @@ describe('AC6/AC7: filter inputs populate the timeline query', () => {
     const query = (opts as { query?: Record<string, string> }).query
     expect(query).toEqual({
       eventTypes: 'ticket_event',
-      from: '2026-01-01',
-      to: '2026-01-31',
+      from: expect.stringMatching(/Z$/),
+      to: expect.stringMatching(/Z$/),
     })
   })
 
@@ -163,7 +280,7 @@ describe('AC6/AC7: filter inputs populate the timeline query', () => {
 describe('AC8: cursor pagination', () => {
   beforeEach(resetGlobals)
 
-  test('loadMore sends cursor and appends events to existing list', async () => {
+  test('AC-9: loadMore preserves filtered bounds, sends cursor, and appends events', async () => {
     const firstPage = {
       data: {
         events: [
@@ -187,6 +304,8 @@ describe('AC8: cursor pagination', () => {
 
     const { useTimelineEvents } = await import(composablePath)
     const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-01-01'
+    tl.toFilter.value = '2026-01-31'
 
     await tl.loadEvents()
     expect(tl.events.value).toHaveLength(1)
@@ -198,10 +317,12 @@ describe('AC8: cursor pagination', () => {
 
     const [, page2Opts] = fetchMock.mock.calls[1]
     const page2Query = (page2Opts as { query?: Record<string, string> }).query
-    expect(page2Query).toEqual({ cursor: 'cursor-1' })
+    const [, page1Opts] = fetchMock.mock.calls[0]
+    const page1Query = (page1Opts as { query?: Record<string, string> }).query
+    expect(page2Query).toEqual({ ...page1Query, cursor: 'cursor-1' })
   })
 
-  test('applyFilters resets the cursor before re-fetching', async () => {
+  test('AC-10: applyFilters clears the prior cursor before re-fetching', async () => {
     const fetchMock = jest.fn()
       .mockResolvedValueOnce({
         data: { events: [{ id: 'e1', eventType: 't', actorId: 'u', action: 'a', createdAt: 'now' }], nextCursor: 'cursor-x' },

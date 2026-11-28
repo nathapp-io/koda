@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { buildTimelineQuery } from '~/lib/timeline-query'
 
 export interface TimelineEvent {
   id: string
@@ -13,27 +14,12 @@ export interface TimelineEvent {
   createdAt: string
 }
 
-export interface TimelineQuery {
-  eventTypes?: string
-  from?: string
-  to?: string
-  cursor?: string
-}
+export type { TimelineQuery } from '~/lib/timeline-query'
+export { buildTimelineQuery } from '~/lib/timeline-query'
 
 export interface TimelineResponse {
   events: TimelineEvent[]
   nextCursor?: string
-}
-
-export function buildTimelineQuery(
-  filters: TimelineQuery,
-): Record<string, string> {
-  const query: Record<string, string> = {}
-  if (filters.eventTypes) query.eventTypes = filters.eventTypes
-  if (filters.from) query.from = filters.from
-  if (filters.to) query.to = filters.to
-  if (filters.cursor) query.cursor = filters.cursor
-  return query
 }
 
 export function useTimelineEvents(slug: string) {

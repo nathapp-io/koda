@@ -1575,6 +1575,96 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('13b. Ticket PATCH — Status Transition', () => {
+    it('US-003 AC-3a..3c: approval stores canonical start result and rejection leaves another ticket untouched', async () => {
+      const prisma = prismaClient();
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const label = await prisma.label.create({ data: { projectId: project.id, name: 'gated-canonical-label', color: '#abcdef' } });
+      const createVerifiedTicket = async (title: string): Promise<{ id: string; ref: string }> => {
+        const ticket = body<{ id: string; ref: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets`).set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ type: 'BUG', title }).expect(201));
+        await prisma.ticket.update({ where: { id: ticket.id }, data: { status: 'VERIFIED' } });
+        await prisma.ticketLabel.create({ data: { ticketId: ticket.id, labelId: label.id } });
+        return ticket;
+      };
+      const policy = await seedWaitPolicy(prisma, 'ticket.transition.start', project.id);
+      try {
+        const approvedTicket = await createVerifiedTicket('Approval canonical result');
+        const pending = body<{ id: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${approvedTicket.ref}/start`)
+          .set('Authorization', `Bearer ${agentApiKey}`).send({}).expect(202));
+        const approvalRow = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: pending.id } });
+        expect(approvalRow.status).toBe('pending');
+        const approved = body<{ status: string; result: { ref: string; labels: Array<{ id: string; projectId: string; name: string; color: string | null }> } }>(
+          await request(httpServer).post(`/api/approvals/${pending.id}/decisions`)
+            .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'approve' }).expect(200),
+        );
+        expect(approved.status).toBe('executed');
+        const fetched = body<{ status: string; ref: string; labels: Array<{ id: string; projectId: string; name: string; color: string | null }> }>(
+          await request(httpServer).get(`/api/projects/${projectSlug}/tickets/${approvedTicket.ref}`)
+            .set('Authorization', `Bearer ${userAccessToken}`).expect(200),
+        );
+        expect(approved.result).toMatchObject({ ref: fetched.ref, labels: fetched.labels });
+        expect(approved.result.labels).toEqual([{ id: label.id, projectId: project.id, name: label.name, color: label.color }]);
+
+        const deniedTicket = await createVerifiedTicket('Approval denial atomicity');
+        const deniedPending = body<{ id: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${deniedTicket.ref}/start`)
+          .set('Authorization', `Bearer ${agentApiKey}`).send({}).expect(202));
+        const denied = await request(httpServer).post(`/api/approvals/${deniedPending.id}/decisions`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'reject' }).expect(200);
+        expect(body<{ status: string }>(denied).status).toBe('rejected');
+        expect((await prisma.ticket.findUniqueOrThrow({ where: { id: deniedTicket.id } })).status).toBe('VERIFIED');
+      } finally {
+        await prisma.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+    it('US-003 AC-1a..1e: status PATCH and start return the canonical persisted ticket', async () => {
+      const prisma = prismaClient();
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await prisma.project.update({ where: { id: project.id }, data: { gitRemoteUrl: 'https://github.com/acme/koda' } });
+      const label = await prisma.label.create({ data: { projectId: project.id, name: 'canonical-label', color: '#123456' } });
+      const fixtures: Array<{ ref: string; id: string }> = [];
+      for (const title of ['Canonical status patch', 'Canonical start']) {
+        const created = body<{ id: string; ref: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets`).set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ type: 'BUG', title }).expect(201));
+        await prisma.ticket.update({ where: { id: created.id }, data: {
+          status: 'VERIFIED', gitRefVersion: 'main', gitRefFile: 'src/index.ts', gitRefLine: 12,
+        } });
+        await prisma.ticketLabel.create({ data: { ticketId: created.id, labelId: label.id } });
+        fixtures.push(created);
+      }
+      const assertCanonical = (ticket: { status: string; ref: string; gitRefUrl: string | null; labels: Array<{ id: string; projectId: string; name: string; color: string | null }> }, status: string) => {
+        expect(ticket.status).toBe(status);
+        expect(ticket.ref).toMatch(/^KT-/);
+        expect(ticket.gitRefUrl).toContain('github.com/acme/koda');
+        expect(ticket.labels).toEqual([{ id: label.id, projectId: project.id, name: label.name, color: label.color }]);
+      };
+      for (const [index, operation] of ['patch', 'start'].entries()) {
+        const fixture = fixtures[index];
+        const before = body<{ status: string; ref: string; gitRefUrl: string | null; labels: Array<{ id: string; projectId: string; name: string; color: string | null }> }>(await request(httpServer).get(`/api/projects/${projectSlug}/tickets/${fixture.ref}`)
+          .set('Authorization', `Bearer ${userAccessToken}`).expect(200));
+        assertCanonical(before, 'VERIFIED');
+        const canonicalFields = { ref: before.ref, gitRefUrl: before.gitRefUrl, labels: before.labels };
+        const write = operation === 'patch'
+          ? await request(httpServer).patch(`/api/projects/${projectSlug}/tickets/${fixture.ref}`)
+            .set('Authorization', `Bearer ${userAccessToken}`).send({ status: 'IN_PROGRESS' }).expect(200)
+          : await request(httpServer).post(`/api/projects/${projectSlug}/tickets/${fixture.ref}/start`)
+            .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(200);
+        const writeTicket = body<{ status: string; ref: string; gitRefUrl: string | null; labels: typeof canonicalFields.labels }>(write);
+        assertCanonical(writeTicket, 'IN_PROGRESS');
+        expect({ ref: writeTicket.ref, gitRefUrl: writeTicket.gitRefUrl, labels: writeTicket.labels }).toEqual(canonicalFields);
+        const readTicket = body<{ status: string; ref: string; gitRefUrl: string | null; labels: typeof canonicalFields.labels }>(await request(httpServer).get(`/api/projects/${projectSlug}/tickets/${fixture.ref}`)
+          .set('Authorization', `Bearer ${userAccessToken}`).expect(200));
+        assertCanonical(readTicket, 'IN_PROGRESS');
+        expect({ ref: readTicket.ref, gitRefUrl: readTicket.gitRefUrl, labels: readTicket.labels }).toEqual(canonicalFields);
+        const editedTicket = body<{ status: string; ref: string; gitRefUrl: string | null; labels: typeof canonicalFields.labels }>(await request(httpServer).patch(`/api/projects/${projectSlug}/tickets/${fixture.ref}`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ title: `${operation} ordinary edit` }).expect(200));
+        assertCanonical(editedTicket, 'IN_PROGRESS');
+        expect({ ref: editedTicket.ref, gitRefUrl: editedTicket.gitRefUrl, labels: editedTicket.labels }).toEqual(canonicalFields);
+      }
+    });
     it('US-007 AC-11/12: root status PATCH returns 200 and persists IN_PROGRESS', async () => {
       const createRes = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)

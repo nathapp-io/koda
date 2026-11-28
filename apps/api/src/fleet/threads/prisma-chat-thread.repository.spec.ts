@@ -48,6 +48,59 @@ function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQ
   return { repo, jobs, notifier };
 }
 
+describe('PrismaChatThreadRepository rejected close retries (US-005)', () => {
+  it.each([{ close: null, refusal: null }, { close: { id: 'effective' }, refusal: 'closing' as const }])(
+    'AC-6: send uses the current lease effective-close query (effective=$refusal)', async ({ close, refusal }) => {
+      const fleetCommandFindFirst = vi.fn(async () => close);
+      const prisma = { client: {
+        fleetJob: { findFirst: vi.fn(async () => ({ id: 'J', state: 'RUNNING', leaseEpoch: 4 })) },
+        fleetRepo: { findFirst: vi.fn(async () => null) },
+        runner: { findUnique: vi.fn(async () => ({ lastSeenAt: new Date(), protocolVersion: 4 })) },
+        fleetCommand: { findFirst: fleetCommandFindFirst },
+        chatMessage: { findFirst: vi.fn(async () => null) },
+      } };
+      const budgets = { snapshot: vi.fn(async () => ({ match: () => null })) };
+      const repo = new PrismaChatThreadRepository(
+        prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, budgets as never,
+        { threadsEnabled: true, runnerOfflineSec: 120 } as never, mockAuditRecorder, new ThreadEventBus(),
+      );
+
+      await expect(repo.sendRefusalOf('P', {
+        id: 'T', kind: 'REPO', status: 'ACTIVE', runnerId: 'R', repoId: 'repo',
+        costUsd: '0', maxCostUsd: '5',
+      } as never)).resolves.toBe(refusal);
+      expect(fleetCommandFindFirst).toHaveBeenCalledWith({ where: expect.objectContaining({
+        jobId: 'J', type: 'THREAD_CLOSE', leaseEpoch: 4,
+        OR: [{ ackResult: null }, { ackedAt: null }, { ackResult: { not: 'rejected' } }],
+      }), select: { id: true } });
+    },
+  );
+
+  it('refuses session control when an effective close is still pending', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' } });
+    const prisma = (repo as unknown as { prisma: { client: { fleetCommand: { findFirst: ReturnType<typeof vi.fn> } } } }).prisma;
+    prisma.client.fleetCommand.findFirst.mockResolvedValue({ id: 'pending-close' });
+
+    await expect(repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'answer' }))
+      .rejects.toMatchObject({ prefix: 'threads.noSession', httpStatus: 409 });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('queues session control after an acknowledged rejected close, scoped to the current lease', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' } });
+    const prisma = (repo as unknown as { prisma: { client: { fleetCommand: { findFirst: ReturnType<typeof vi.fn> } } } }).prisma;
+    prisma.client.fleetCommand.findFirst.mockImplementation(async (query: { where: Record<string, unknown> }) => {
+      expect(query.where).toMatchObject({ jobId: 'J', type: 'THREAD_CLOSE', leaseEpoch: 4 });
+      expect(query.where).toHaveProperty('OR');
+      return null;
+    });
+
+    await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'ready' });
+
+    expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_ANSWER', leaseEpoch: 4 }));
+  });
+});
+
 describe('PrismaChatThreadRepository.command while a PUBLISH or DISCARD job is active (US-004)', () => {
   it('AC-14: answers threads.noSession for an end-session on a live PUBLISH job', async () => {
     const { repo, jobs } = commandRepo({ action: 'PUBLISH' });

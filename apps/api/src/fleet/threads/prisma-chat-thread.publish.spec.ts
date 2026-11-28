@@ -98,6 +98,35 @@ describe('PrismaChatThreadRepository.publish and code-only ask/full changes (B1)
     expect(created[0]?.data).toMatchObject({ action: 'PUBLISH', mode: 'full' });
   });
 
+  it('US-005 AC-9: permits publish into the lease after its only close was rejected', async () => {
+    const { repo, prisma, jobs, commands } = publishRepo({
+      thread: { mode: 'full', writtenPaths: [] },
+      active: { id: 'SJ', state: 'RUNNING', command: 'THREAD', runnerId: 'RN', leaseEpoch: 7, action: 'SESSION' },
+    });
+    prisma.client.fleetCommand.findFirst.mockImplementation(async (query: { where: Record<string, unknown> }) => {
+      expect(query.where).toMatchObject({ jobId: 'SJ', type: 'THREAD_CLOSE', leaseEpoch: 7, OR: [{ ackResult: null }, { ackedAt: null }, { ackResult: { not: 'rejected' } }] });
+      return null;
+    });
+
+    await expect(repo.publish('P', 'T', 'U')).resolves.toEqual({ jobId: null });
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ jobId: 'SJ', type: 'THREAD_PUBLISH', leaseEpoch: 7 });
+    expect(jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('US-005 AC-9: an unacknowledged close still refuses publish into the session', async () => {
+    const { repo, prisma, commands } = publishRepo({
+      thread: { mode: 'full', writtenPaths: [] },
+      active: { id: 'SJ', state: 'RUNNING', command: 'THREAD', runnerId: 'RN', leaseEpoch: 7, action: 'SESSION' },
+    });
+    prisma.client.fleetCommand.findFirst.mockResolvedValue({ id: 'close' });
+
+    await expect(repo.publish('P', 'T', 'U')).rejects.toMatchObject({ prefix: 'threads.closing' });
+
+    expect(commands).toHaveLength(0);
+  });
+
   it('B1: a full thread publishes into an idle live session with no written path (THREAD_PUBLISH, no new job)', async () => {
     const { repo, jobs, commands, notifier } = publishRepo({
       thread: { mode: 'full', writtenPaths: [] },

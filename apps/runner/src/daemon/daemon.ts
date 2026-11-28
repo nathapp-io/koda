@@ -109,7 +109,9 @@ async function pruneJobs(journal: Journal, config: RunnerConfig, log: Logger): P
     }
     try {
       await rm(jobDir, { recursive: true, force: true });
+      journal.completePrune(pruned.jobDir);
     } catch (error) {
+      // Keep the reservation: the next daemon start retries removal, and ASSIGN cannot reuse this path meanwhile.
       log.warn('could not remove a pruned job directory', { jobId: pruned.jobId, error: errorMessage(error) });
     }
   }
@@ -279,7 +281,7 @@ async function startOwnedDaemon(
   // and no thread session survives a restart. This daemon owns the home now, so it kills them before taking work,
   // then records every process its own backends start.
   const hostBoot = await readHostBootId();
-  if (hostBoot === '') log.warn('cannot read the host boot identity; thread backend processes left by an earlier boot are not killed');
+  if (hostBoot === '') log.warn('cannot read the host boot identity; thread backend processes left by an earlier boot are not killed and their rows are kept for a later pass');
   await reapPreviousBootProcesses({ journal, bootId, hostBoot, log });
   const ownedProcesses = new OwnedProcessLedger({ journal, bootId, hostBoot, nowMs: Date.now, log });
   const restoreProcessRecording = installProcessRecording(ownedProcesses);
@@ -301,6 +303,8 @@ async function startOwnedDaemon(
   if (!naxMode) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   approvals.sweepOrphans(journal.activeJobs());
+  // Home ownership excludes the prior daemon's cleanup. Retry its unfinished claims once, before accepting work.
+  journal.rearmPruneCleanup();
   await pruneJobs(journal, config, log);
   // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.

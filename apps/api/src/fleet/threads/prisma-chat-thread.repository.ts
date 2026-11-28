@@ -69,6 +69,14 @@ const scopeWhere = (scope: ThreadScope): Prisma.ChatThreadWhereInput => scope.ki
 const homeProjectInclude = (scope: ThreadScope) => scope.kind === 'workspace'
   ? { project: { select: { slug: true, name: true } } } as const : undefined;
 
+/** A close remains effective until acknowledged; rejected closes can be retried on that exact lease. */
+const effectiveCloseWhere = (jobId: string, leaseEpoch: number) => ({
+  jobId,
+  type: FleetCommandType.THREAD_CLOSE,
+  leaseEpoch,
+  OR: [{ ackResult: null }, { ackedAt: null }, { ackResult: { not: 'rejected' } }],
+});
+
 @Injectable()
 export class PrismaChatThreadRepository implements ChatThreadRepository {
   constructor(
@@ -313,7 +321,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (active && (active.command !== 'THREAD' || active.action !== 'SESSION')) throw new ConflictAppException({}, 'threads.busy');
       const { refusal } = await this.sendRefusalFor(thread, active);
       if (refusal === 'turnRunning') throw new ConflictAppException({}, 'threads.turnRunning');
-      const close = active ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: active.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: active.leaseEpoch }, select: { id: true } }) : null;
+      const close = active ? await this.prisma.client.fleetCommand.findFirst({ where: effectiveCloseWhere(active.id, active.leaseEpoch), select: { id: true } }) : null;
       // Mode changes do not need send budget/runner eligibility, but those earlier send refusals must
       // not hide a queued/running turn. UPLOADING and a close already sent are closing, not new turns.
       const closing = active?.state === 'UPLOADING' || (active?.state === 'RUNNING' && close !== null);
@@ -384,7 +392,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         const turn = await this.prisma.client.fleetThreadTurn.findUnique({ where: { jobId: job.id }, select: { action: true } });
         if (turn?.action === 'PUBLISH' || turn?.action === 'DISCARD') throw new ConflictAppException({}, 'threads.noSession');
       }
-      const closed = await this.prisma.client.fleetCommand.findFirst({ where: { jobId: job.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch }, select: { id: true } });
+      const closed = await this.prisma.client.fleetCommand.findFirst({ where: effectiveCloseWhere(job.id, job.leaseEpoch), select: { id: true } });
       if (closed) throw new ConflictAppException({}, 'threads.noSession');
       // Permissions P1 US-002: an answer steers the live turn, so only the turn's requester may send it.
       if (type === FleetCommandType.THREAD_ANSWER) this.assertOwnLiveSession(job, userId);
@@ -464,7 +472,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const paused = await pausedPolicy;
       if (paused) throw new BudgetPausedException(paused);
       if (active?.command === 'THREAD' && active.action === 'SESSION') {
-        const close = await this.prisma.client.fleetCommand.findFirst({ where: { jobId: active.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: active.leaseEpoch }, select: { id: true } });
+        const close = await this.prisma.client.fleetCommand.findFirst({ where: effectiveCloseWhere(active.id, active.leaseEpoch), select: { id: true } });
         if (active.state === 'UPLOADING' || (active.state === 'RUNNING' && close)) throw new ConflictAppException({}, 'threads.closing');
         const inFlight = await this.prisma.client.chatMessage.findFirst({ where: { threadId, status: { in: ['pending', 'streaming'] } }, select: { id: true } });
         if (active.state === 'QUEUED' || active.state === 'ASSIGNED' || inFlight) throw new ConflictAppException({}, 'threads.turnRunning');
@@ -650,7 +658,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     const pauses = await this.budgets.snapshot(new Date());
     const pausedPolicy = pauses.match(jobGateKeys({ projectId: thread.projectId, repoId: gateRepoId, pinnedRunnerId: thread.runnerId }));
     const runnerRow = thread.runnerId ? await this.prisma.client.runner.findUnique({ where: { id: thread.runnerId }, select: { lastSeenAt: true, protocolVersion: true } }) : null;
-    const closeCommand = job ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: job.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch }, select: { id: true } }) : null;
+    const closeCommand = job ? await this.prisma.client.fleetCommand.findFirst({ where: effectiveCloseWhere(job.id, job.leaseEpoch), select: { id: true } }) : null;
     const turnInFlight = await this.prisma.client.chatMessage.findFirst({ where: { threadId: thread.id, status: { in: ['pending', 'streaming'] } }, select: { id: true } });
     const refusal = sendRefusal({
       threadsEnabled: this.config.threadsEnabled,

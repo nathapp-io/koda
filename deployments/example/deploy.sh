@@ -51,8 +51,8 @@ else
   effective_postgres_password=''
   if [[ -f "$ENV_FILE" ]]; then
     while IFS= read -r env_line || [[ -n "$env_line" ]]; do
-      if [[ "$env_line" =~ ^[[:space:]]*POSTGRES_PASSWORD[[:space:]]*=(.*)$ ]]; then
-        effective_postgres_password="${BASH_REMATCH[1]}"
+      if [[ "$env_line" =~ ^[[:space:]]*(export[[:space:]]+)?POSTGRES_PASSWORD[[:space:]]*=(.*)$ ]]; then
+        effective_postgres_password="${BASH_REMATCH[2]}"
       fi
     done < "$ENV_FILE"
 

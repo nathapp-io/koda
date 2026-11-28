@@ -223,6 +223,42 @@ describe('labelCommand', () => {
   });
 
   describe('label delete', () => {
+    it('prints the exact JSON deletion confirmation and exits zero for an empty 204 response', async () => {
+      (labelsControllerDeleteFromHttp as jest.Mock).mockResolvedValue(undefined);
+      const deleteCmd = program.commands.find((cmd) => cmd.name() === 'label')?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--project', 'koda', '--id', 'abc', '--json']);
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual({ id: 'abc', deleted: true });
+      expect(JSON.stringify(JSON.parse(String(logSpy.mock.calls[0][0])))).toBe('{"id":"abc","deleted":true}');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('preserves the existing text deletion confirmation without --json', async () => {
+      (labelsControllerDeleteFromHttp as jest.Mock).mockResolvedValue(undefined);
+      const deleteCmd = program.commands.find((cmd) => cmd.name() === 'label')?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--project', 'koda', '--id', 'abc']);
+
+      expect(logSpy).toHaveBeenCalledWith("Label 'abc' deleted.");
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it.each([
+      [404, 4], [401, 2], [403, 2], [400, 3], [500, 1], [undefined, 1],
+    ])('preserves error exit mapping and prints no confirmation for status %s', async (status, expectedExit) => {
+      const error = new Error('DELETE failed');
+      if (status !== undefined) (error as Error & { response?: { status: number } }).response = { status };
+      (labelsControllerDeleteFromHttp as jest.Mock).mockRejectedValue(error);
+      const deleteCmd = program.commands.find((cmd) => cmd.name() === 'label')?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--project', 'koda', '--id', 'abc', '--json']);
+
+      expect(exitSpy).toHaveBeenCalledWith(expectedExit);
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
     it('deletes a label by id', async () => {
       (labelsControllerDeleteFromHttp as jest.Mock).mockResolvedValue(undefined);
 

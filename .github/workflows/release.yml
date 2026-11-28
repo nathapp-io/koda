@@ -193,14 +193,6 @@ jobs:
           export LC_ALL=C
           remote_tags=$(git ls-remote --tags --refs origin 'v*')
 
-          if [[ "$TAG" == *"-canary."* ]]; then
-            echo "tags_api=nathapp/koda-api:canary" >> "$GITHUB_OUTPUT"
-            echo "tags_web=nathapp/koda-web:canary" >> "$GITHUB_OUTPUT"
-            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
-            echo "latest=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           # A version component is a canonical decimal string: leading zeros stripped, so `04` and `4` are the
           # same minor. Components are never put through bash arithmetic: `10#08` family tricks are avoidable,
           # and a component past the 64-bit range wraps to a negative number, which compares as older than
@@ -259,6 +251,50 @@ jobs:
             if [[ "$comparison" == -1 ]]; then return 0; fi
             return 1
           }
+
+          compare_canaries() {
+            local left_major left_minor left_patch left_sequence
+            local right_major right_minor right_patch right_sequence comparison
+            IFS=. read -r left_major left_minor left_patch left_sequence <<< "${1#v}"
+            left_patch="${left_patch%-canary}"
+            IFS=. read -r right_major right_minor right_patch right_sequence <<< "${2#v}"
+            right_patch="${right_patch%-canary}"
+            left_major="$(normalize_component "$left_major")"
+            left_minor="$(normalize_component "$left_minor")"
+            left_patch="$(normalize_component "$left_patch")"
+            left_sequence="$(normalize_component "$left_sequence")"
+            right_major="$(normalize_component "$right_major")"
+            right_minor="$(normalize_component "$right_minor")"
+            right_patch="$(normalize_component "$right_patch")"
+            right_sequence="$(normalize_component "$right_sequence")"
+            local left_components=("$left_major" "$left_minor" "$left_patch" "$left_sequence")
+            local right_components=("$right_major" "$right_minor" "$right_patch" "$right_sequence")
+            for index in 0 1 2 3; do
+              comparison="$(compare_components "${left_components[$index]}" "${right_components[$index]}")"
+              if [[ "$comparison" != 0 ]]; then
+                printf '%s' "$comparison"
+                return 0
+              fi
+            done
+            printf '%s' 0
+          }
+
+          if [[ "$TAG" == *"-canary."* ]]; then
+            for remote_ref in $(printf '%s\n' "$remote_tags" | awk -F '\t' '{print $2}'); do
+              remote_tag="${remote_ref#refs/tags/}"
+              [[ "$remote_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+$ ]] || continue
+              if [[ "$(compare_canaries "$TAG" "$remote_tag")" == -1 ]]; then
+                echo "::error::${TAG} is superseded by ${remote_tag}; dispatch the newest canary tag"
+                echo "${TAG} is superseded by ${remote_tag}; refusing to publish stale canary channels."
+                exit 1
+              fi
+            done
+            echo "tags_api=nathapp/koda-api:canary" >> "$GITHUB_OUTPUT"
+            echo "tags_web=nathapp/koda-web:canary" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Minor identity comes from the same canonical components, not from a textual prefix of the version:
           # `v0.04.2` and `v0.4.1` are both minor 0.4 (review B8).

@@ -209,11 +209,11 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      // Should update prState but NOT attempt ticket transition
+      // The candidate snapshot is stale; the repository decides using current ticket status.
       expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged', { expectedState: 'open' });
 
-      // Should NOT call applyMergedPrTransition
-      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      // Delegates eligibility to the repository's live conditional update
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
 
       expect(result.updated).toBe(1);
     });
@@ -236,9 +236,9 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      // Should update prState but NOT transition ticket status
+      // Updates the PR state and delegates ticket eligibility to the live repository condition
       expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalled();
-      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -273,8 +273,8 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      // Should NOT call applyMergedPrTransition (no comment, no activity)
-      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      // Delegates eligibility to the repository's live conditional update (no comment, no activity)
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -309,8 +309,8 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      // Should NOT call applyMergedPrTransition
-      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      // Delegates eligibility to the repository's live conditional update
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -328,8 +328,8 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       // Should update TicketLink prState to merged
       expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged', { expectedState: 'open' });
 
-      // Should NOT call applyMergedPrTransition
-      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      // Delegates eligibility to the repository's live conditional update
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
     });
 
     it('should only update prState without transition for VERIFY_FIX ticket', async () => {
@@ -353,8 +353,8 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       // Should update prState
       expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalled();
 
-      // Should NOT call applyMergedPrTransition
-      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+      // Delegates eligibility to the repository's live conditional update
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -472,7 +472,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr'),
       ).resolves.not.toThrow();
 
-      // Should NOT call applyMergedPrTransition when ticket is null
+      // No ticket relation means there is no transition target.
       expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
 

@@ -6,7 +6,8 @@
     "apps/api/prisma/schema.prisma",
     "packages/eslint-config/**",
     "packages/typescript-config/**",
-    "test/helpers/**"
+    "test/helpers/**",
+    "patches/**"
   ],
   "tasks": {
     "build": {

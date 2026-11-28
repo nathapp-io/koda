@@ -103,6 +103,17 @@ describe('thread mode changes', () => {
     expect(f.jobs.lockById.mock.invocationCallOrder[0]).toBeLessThan(f.client.$queryRaw.mock.invocationCallOrder[0] ?? 0);
     expect(f.notifier.notify).toHaveBeenCalledExactlyOnceWith('R');
   });
+  it('AC-8: changes mode and enqueues one close when the only prior close was rejected', async () => {
+    const f = fixture(); f.live();
+    f.client.fleetCommand.findFirst.mockImplementation(async (query: { where: Record<string, unknown> }) => {
+      expect(query.where).toMatchObject({ jobId: 'J', type: 'THREAD_CLOSE', leaseEpoch: 7, OR: [{ ackResult: null }, { ackedAt: null }, { ackResult: { not: 'rejected' } }] });
+      return null;
+    });
+
+    await f.change();
+
+    expect(f.jobs.createCommand).toHaveBeenCalledExactlyOnceWith({ runnerId: 'R', jobId: 'J', leaseEpoch: 7, type: 'THREAD_CLOSE', payload: {} });
+  });
   it('AC-10: closing session changes mode without a second close', async () => {
     const f = fixture(); f.live(); f.client.fleetCommand.findFirst.mockResolvedValue({ id: 'close' });
     expect(await f.change()).toMatchObject({ mode: 'ask' });

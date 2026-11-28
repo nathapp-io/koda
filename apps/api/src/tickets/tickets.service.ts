@@ -184,6 +184,25 @@ export class TicketsService {
     );
   }
 
+  /** Map a successful state-machine record to the same project-aware contract as ordinary ticket reads. */
+  async toTransitionResponse(projectSlug: string, ticket: TransitionTicketShape): Promise<TicketResponseDto> {
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt || project.id !== ticket.projectId) {
+      throw new NotFoundAppException({}, 'tickets');
+    }
+    const domainTicket = ticket as unknown as TicketDomain;
+    return TicketResponseDto.from(
+      domainTicket,
+      project.key,
+      this.computeGitRefUrl(
+        project.gitRemoteUrl,
+        domainTicket.gitRefVersion,
+        domainTicket.gitRefFile,
+        domainTicket.gitRefLine,
+      ),
+    );
+  }
+
   async findByRef(projectSlug: string, ref: string) {
     const { project, ticket } = await this.loadTicket(projectSlug, ref);
     return TicketResponseDto.from(
@@ -314,7 +333,7 @@ export class TicketsService {
         fields,
         ...(options === undefined ? [] : [options]),
       );
-      return result.ticket;
+      return this.toTransitionResponse(projectSlug, result.ticket);
     }
 
     return this.applyUpdate(projectSlug, ref, updateTicketDto, principal);

@@ -112,20 +112,35 @@ describe('CodeGraphService.extractBatch()', () => {
     expect(constructions).toBe(2);
   });
 
-  it('AC-10: turns an extraction TypeError into a result and continues', () => {
-    const arrow = 'const myArrow = () => 42;';
-    let typeErrorMessage = '';
-    try {
-      service.extractSymbols(service.parseSourceFile('src/arrow.ts', arrow));
-    } catch (error) {
-      typeErrorMessage = error instanceof Error ? error.message : String(error);
+  it('extracts for-loop callable initializers through both single-file and batch paths', () => {
+    const path = 'src/for-callable.ts';
+    const content = 'for (const loopFn = (): void => {}; false;) {}';
+    const single = service.extractSymbols(service.parseSourceFile(path, content));
+    const batch = service.extractBatch([{ path, content }]);
+    expect(batch).toHaveLength(1);
+    if (!('symbols' in batch[0])) throw new Error('for-callable.ts failed extraction');
+    expect(single).toContainEqual(expect.objectContaining({ name: 'loopFn', kind: 'function', signature: '(): void', docComment: undefined }));
+    expect(batch[0].symbols).toEqual(single);
+  });
+
+  it('AC-9/10/11/12: extracts and resolves callable variables equally in single-file and batch paths', () => {
+    const path = 'src/callables.ts';
+    const content = `function helper(value: string): string { return value; }\n/** callable docs */\nconst arrow = (value: string): string => helper(value);\nconst expression = function (value: string): string { return helper(value); };\nconst undocumented = (): void => {};`;
+    const single = service.extractSymbols(service.parseSourceFile(path, content));
+    const batch = service.extractBatch([{ path, content }]);
+    expect(batch).toHaveLength(1);
+    if (!('symbols' in batch[0])) throw new Error('callables.ts failed extraction');
+    expect(batch[0].symbols).toEqual(single);
+    for (const symbols of [single, batch[0].symbols]) {
+      expect(symbols.find(({ name }) => name === 'arrow')).toMatchObject({ name: 'arrow', signature: '(value: string): string', docComment: expect.stringContaining('callable docs'), callees: ['helper'] });
+      expect(symbols.find(({ name }) => name === 'expression')).toMatchObject({ name: 'expression', signature: '(value: string): string', callees: ['helper'] });
+      expect(symbols.find(({ name }) => name === 'undocumented')).toMatchObject({ name: 'undocumented', signature: '(): void' });
+      expect(symbols.find(({ name }) => name === 'undocumented')?.docComment).toBeUndefined();
+      const resolved = symbols.map((symbol, index) => ({ ...symbol, symbolId: `id-${index}` }));
+      service.resolveRelationships(resolved);
+      expect(resolved.find(({ name }) => name === 'arrow')?.callees).toEqual(['id-0']);
+      expect(resolved.find(({ name }) => name === 'expression')?.callees).toEqual(['id-0']);
     }
-    const result = service.extractBatch([
-      { path: 'src/arrow.ts', content: arrow },
-      { path: 'src/ok.ts', content: 'export function ok() {}' },
-    ]);
-    expect(result[0]).toEqual({ path: 'src/arrow.ts', error: typeErrorMessage });
-    expect('symbols' in result[1] && result[1].symbols.map(({ name }) => name)).toEqual(['ok']);
   });
 
   it("AC-11: stringifies non-Error failures", () => {

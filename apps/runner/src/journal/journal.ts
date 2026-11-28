@@ -32,6 +32,17 @@ const toCommand = (r: Row): CommandRecord => ({
   result: r['result'] as CommandRecord['result'], detail: r['detail'] as string | null, appliedAt: r['applied_at'] as string,
 });
 
+/**
+ * review-1128 B1: prune has reserved this job directory until its recursive filesystem removal completes. Contention
+ * is retryable, not a failure: the caller defers the assignment and the server re-sends it once the claim is gone.
+ */
+export class JobDirCleanupPendingError extends Error {
+  constructor(readonly jobDir: string) {
+    super('journal: job directory cleanup is in progress');
+    this.name = 'JobDirCleanupPendingError';
+  }
+}
+
 /** Persist-before-send store (slice 3 design §1.4). Every write commits before the caller reports it. */
 export class Journal {
   private readonly listeners = new Set<() => void>();
@@ -47,6 +58,13 @@ export class Journal {
     // would keep the first one (its ack is the highest contiguous stored seq).
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
     db.exec(SCHEMA_SQL);
+    // Existing reservations must survive the upgrade; only their report state is new.
+    db.transaction(() => {
+      const columns = db.query('PRAGMA table_info(prune_cleanup_claims)').all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === 'reported')) {
+        db.exec('ALTER TABLE prune_cleanup_claims ADD COLUMN reported INTEGER NOT NULL DEFAULT 0');
+      }
+    }).immediate();
     // SEC-1: the journal carries ASSIGN payloads (clone URLs, identity), event sequences and runner metadata;
     // match identity.json's 0o600 so a local user on a multi-tenant host cannot read it. bun:sqlite creates the
     // file using the process umask, and the WAL/SHM siblings are created lazily — best-effort, no throw on EACCES.
@@ -114,14 +132,29 @@ export class Journal {
   }
 
   insertJob(job: NewJob): { row: JobRow; created: boolean } {
-    const stamp = this.now().toISOString();
-    const result = this.db.query(
-      `INSERT OR IGNORE INTO jobs (job_id, lease_epoch, command, state, repo_key, job_dir, assign_json, created_at, updated_at)
-       VALUES (?, ?, ?, 'ASSIGNED', ?, ?, ?, ?, ?)`,
-    ).run(job.assign.jobId, job.leaseEpoch, job.assign.command, job.repoKey, job.jobDir, JSON.stringify(job.assign), stamp, stamp);
-    const row = this.getJob(job.assign.jobId, job.leaseEpoch);
-    if (!row) throw new Error('journal: inserted job row not found');
-    return { row, created: result.changes > 0 };
+    return this.tx(() => {
+      if (this.db.query('SELECT 1 FROM prune_cleanup_claims WHERE job_dir = ?').get(job.jobDir)) {
+        throw new JobDirCleanupPendingError(job.jobDir);
+      }
+      const stamp = this.now().toISOString();
+      const result = this.db.query(
+        `INSERT OR IGNORE INTO jobs (job_id, lease_epoch, command, state, repo_key, job_dir, assign_json, created_at, updated_at)
+         VALUES (?, ?, ?, 'ASSIGNED', ?, ?, ?, ?, ?)`,
+      ).run(job.assign.jobId, job.leaseEpoch, job.assign.command, job.repoKey, job.jobDir, JSON.stringify(job.assign), stamp, stamp);
+      const row = this.getJob(job.assign.jobId, job.leaseEpoch);
+      if (!row) throw new Error('journal: inserted job row not found');
+      return { row, created: result.changes > 0 };
+    });
+  }
+
+  /** Retry unfinished cleanup once on daemon start, while holding exclusive home ownership (never on each prune). */
+  rearmPruneCleanup(): void {
+    this.db.query('UPDATE prune_cleanup_claims SET reported = 0').run();
+  }
+
+  /** Release prune's directory reservation only after recursive filesystem cleanup has completed. */
+  completePrune(jobDir: string): void {
+    this.db.query('DELETE FROM prune_cleanup_claims WHERE job_dir = ?').run(jobDir);
   }
 
   getJob(jobId: string, leaseEpoch: number): JobRow | null {
@@ -284,7 +317,17 @@ export class Journal {
   prune(retentionDays: number): Array<{ jobId: string; leaseEpoch: number; jobDir: string }> {
     const cutoff = new Date(this.now().getTime() - retentionDays * 86_400_000).toISOString();
     return this.tx(() => {
-      const old = this.db.query('SELECT job_id, lease_epoch, job_dir FROM jobs WHERE done_at IS NOT NULL AND done_at < ?').all(cutoff) as Row[];
+      // Delivery is lease-scoped: an expired job is eligible only when every event in that exact epoch is acked.
+      // Keep selection, deletion and directory authorization in this transaction so a cleanup result never races a
+      // retained epoch that shares the same filesystem directory.
+      const old = this.db.query(
+        `SELECT j.job_id, j.lease_epoch, j.job_dir FROM jobs j
+         WHERE j.done_at IS NOT NULL AND j.done_at < ?
+           AND NOT EXISTS (
+             SELECT 1 FROM events e
+             WHERE e.job_id = j.job_id AND e.lease_epoch = j.lease_epoch AND e.acked = 0
+           )`,
+      ).all(cutoff) as Row[];
       for (const r of old) {
         const key: [string, number] = [r['job_id'] as string, r['lease_epoch'] as number];
         this.db.query('DELETE FROM events WHERE job_id = ? AND lease_epoch = ?').run(...key);
@@ -293,7 +336,20 @@ export class Journal {
         this.db.query('DELETE FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?').run(...key);
       }
       this.db.query('DELETE FROM applied_commands WHERE applied_at < ?').run(cutoff);
-      return old.map((r) => ({ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir: r['job_dir'] as string }));
+      const dirs = new Set<string>();
+      for (const r of old) {
+        const jobDir = r['job_dir'] as string;
+        if (dirs.has(jobDir) || this.db.query('SELECT 1 FROM jobs WHERE job_dir = ? LIMIT 1').get(jobDir)) continue;
+        dirs.add(jobDir);
+        this.db.query('INSERT OR IGNORE INTO prune_cleanup_claims (job_dir, job_id, lease_epoch) VALUES (?, ?, ?)')
+          .run(jobDir, r['job_id'] as string, r['lease_epoch'] as number);
+      }
+      // Report once, but retain the reservation across async removal so insertJob still defers an assignment onto
+      // this path. A crash or filesystem failure is retried only after daemon startup explicitly re-arms the claims.
+      // Persist the report in this transaction: another prune (even on another connection) must not return it again.
+      const cleanup = this.db.query('SELECT job_id, lease_epoch, job_dir FROM prune_cleanup_claims WHERE reported = 0 ORDER BY job_id, lease_epoch').all() as Row[];
+      this.db.query('UPDATE prune_cleanup_claims SET reported = 1 WHERE reported = 0').run();
+      return cleanup.map((r) => ({ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir: r['job_dir'] as string }));
     });
   }
 

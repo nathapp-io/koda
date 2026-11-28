@@ -1,9 +1,10 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
-import { Journal } from './journal';
+import { Journal, JobDirCleanupPendingError } from './journal';
 
 const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
 
@@ -169,20 +170,127 @@ describe('persistence and retention', () => {
     expect(b.getMeta('missing')).toBeNull();
     b.close();
   });
-  test('prune uses done_at (journal state), not file times, and returns the job dirs to delete', () => {
-    j.insertJob(job('old', 1));
-    j.insertJob(job('fresh', 1));
-    j.insertJob(job('running', 1));
-    j.appendEvent('old', 1, 'log', { stream: 'run', text: 'x' });
-    j.markDone('old', 1);
+  test('AC-1/2/3: unacknowledged expired event is retained and replayable after reopening SQLite', async () => {
+    const path = join(await tmp.make('prune-undelivered'), 'journal.db');
+    const writer = Journal.open(path, now);
+    writer.insertJob(job('undelivered', 1));
+    writer.appendEvent('undelivered', 1, 'lifecycle', { level: 'info', message: 'terminal' });
+    writer.markDone('undelivered', 1);
+    clock = new Date('2026-10-09T00:00:00.000Z');
+
+    expect(writer.prune(7)).toEqual([]);
+    expect(writer.getJob('undelivered', 1)).not.toBeNull();
+    writer.close();
+
+    const reopened = Journal.open(path, now);
+    expect(reopened.pendingEvents('undelivered', 1, 5)).toMatchObject([{ seq: 1, type: 'lifecycle', payload: { message: 'terminal' } }]);
+    reopened.close();
+  });
+
+  test('AC-4/5/6/7: partial acknowledgements protect a job and cleanup happens once after final ack', () => {
+    j.insertJob(job('partial', 1));
+    j.appendEvent('partial', 1, 'log', { stream: 'run', text: 'first' });
+    j.appendEvent('partial', 1, 'lifecycle', { level: 'info', message: 'terminal' });
+    j.markDone('partial', 1);
+    clock = new Date('2026-10-09T00:00:00.000Z');
+    j.ackThrough('partial', 1, 1);
+
+    expect(j.prune(7)).toEqual([]);
+    expect(j.getJob('partial', 1)).not.toBeNull();
+    expect(j.pendingEvents('partial', 1, 5).map((event) => event.seq)).toEqual([2]);
+
+    j.ackThrough('partial', 1, 2);
+    expect(j.prune(7)).toEqual([{ jobId: 'partial', leaseEpoch: 1, jobDir: '/w/.jobs/partial' }]);
+    expect(j.getJob('partial', 1)).toBeNull();
+    expect(j.prune(7)).toEqual([]); // reporting is once-only even before filesystem cleanup finishes
+    j.completePrune('/w/.jobs/partial');
+    expect(j.prune(7)).toEqual([]);
+  });
+
+  test('AC-8/9/10: younger and active jobs survive while an eligible lease is removed independently', () => {
+    j.insertJob(job('young', 1));
+    j.insertJob(job('active', 1));
+    j.insertJob(job('eligible', 1));
+    j.appendEvent('eligible', 1, 'lifecycle', { level: 'info', message: 'terminal' });
+    j.markDone('eligible', 1);
     clock = new Date('2026-10-05T00:00:00.000Z');
-    j.markDone('fresh', 1);
-    clock = new Date('2026-10-09T00:00:00.000Z'); // old is 8 days done, fresh 4
-    expect(j.prune(7)).toEqual([{ jobId: 'old', leaseEpoch: 1, jobDir: '/w/.jobs/old' }]);
-    expect(j.getJob('old', 1)).toBeNull();
-    expect(j.pendingEvents('old', 1, 5)).toEqual([]);
-    expect(j.getJob('fresh', 1)).not.toBeNull();
-    expect(j.getJob('running', 1)).not.toBeNull();
+    j.markDone('young', 1);
+    clock = new Date('2026-10-09T00:00:00.000Z');
+    j.ackThrough('eligible', 1, 1);
+
+    expect(j.prune(7)).toEqual([{ jobId: 'eligible', leaseEpoch: 1, jobDir: '/w/.jobs/eligible' }]);
+    expect(j.getJob('young', 1)).not.toBeNull();
+    expect(j.getJob('active', 1)).not.toBeNull();
+    expect(j.getJob('eligible', 1)).toBeNull();
+  });
+
+  test('AC-11 regression: an authorized cleanup blocks a new lease from claiming its directory until cleanup completes', async () => {
+    const path = join(await tmp.make('prune-claim'), 'journal.db');
+    const writer = Journal.open(path, now);
+    writer.insertJob(job('reused', 1));
+    writer.markDone('reused', 1);
+    clock = new Date('2026-10-09T00:00:00.000Z');
+    const cleanup = writer.prune(7);
+    expect(cleanup).toEqual([{ jobId: 'reused', leaseEpoch: 1, jobDir: '/w/.jobs/reused' }]);
+    writer.close();
+
+    const reopened = Journal.open(path, now);
+    // The refusal is a structured, retryable contention — never a bare failure a caller could turn into a job FAILED.
+    expect(() => reopened.insertJob(job('reused', 2))).toThrow(JobDirCleanupPendingError);
+    expect(reopened.prune(7)).toEqual([]); // opening another connection must not re-report an in-flight cleanup
+    reopened.rearmPruneCleanup(); // only daemon startup, under home ownership, retries unfinished cleanup
+    expect(() => reopened.insertJob(job('reused', 2))).toThrow(JobDirCleanupPendingError);
+    expect(reopened.prune(7)).toEqual(cleanup);
+    expect(reopened.prune(7)).toEqual([]);
+
+    reopened.completePrune('/w/.jobs/reused');
+    reopened.rearmPruneCleanup();
+    expect(reopened.prune(7)).toEqual([]); // completed claims never return on restart
+    expect(reopened.insertJob(job('reused', 2)).created).toBe(true);
+    reopened.close();
+  });
+
+  test('legacy cleanup reservations migrate without releasing their directories and report only once', async () => {
+    const path = join(await tmp.make('prune-legacy'), 'journal.db');
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`CREATE TABLE prune_cleanup_claims (job_dir TEXT PRIMARY KEY, job_id TEXT NOT NULL, lease_epoch INTEGER NOT NULL);
+      INSERT INTO prune_cleanup_claims VALUES ('/w/.jobs/legacy', 'legacy', 1);`);
+    legacy.close();
+
+    const migrated = Journal.open(path, now);
+    const other = Journal.open(path, now);
+    try {
+      expect(() => migrated.insertJob(job('legacy', 2))).toThrow(JobDirCleanupPendingError);
+      expect(migrated.prune(7)).toEqual([{ jobId: 'legacy', leaseEpoch: 1, jobDir: '/w/.jobs/legacy' }]);
+      expect(other.prune(7)).toEqual([]);
+      expect(() => other.insertJob(job('legacy', 2))).toThrow(JobDirCleanupPendingError);
+      migrated.completePrune('/w/.jobs/legacy');
+      expect(other.insertJob(job('legacy', 2)).created).toBe(true);
+    } finally {
+      other.close();
+      migrated.close();
+    }
+  });
+
+  test('AC-11/12: shared job directory is protected by retained epochs and returned once when both expire', () => {
+    j.insertJob(job('shared', 1));
+    j.insertJob({ ...job('shared', 2), jobDir: '/w/.jobs/shared' });
+    j.appendEvent('shared', 1, 'lifecycle', { level: 'info', message: 'one' });
+    j.appendEvent('shared', 2, 'lifecycle', { level: 'info', message: 'two' });
+    j.markDone('shared', 1);
+    j.markDone('shared', 2);
+    clock = new Date('2026-10-09T00:00:00.000Z');
+    j.ackThrough('shared', 1, 1);
+
+    expect(j.prune(7)).toEqual([]);
+    expect(j.getJob('shared', 1)).toBeNull();
+    expect(j.getJob('shared', 2)).not.toBeNull();
+    j.ackThrough('shared', 2, 1);
+    expect(j.prune(7)).toEqual([{ jobId: 'shared', leaseEpoch: 2, jobDir: '/w/.jobs/shared' }]);
+    expect(j.prune(7)).toEqual([]);
+    expect(() => j.insertJob(job('shared', 3))).toThrow(JobDirCleanupPendingError);
+    j.completePrune('/w/.jobs/shared');
+    expect(j.prune(7)).toEqual([]);
   });
 });
 

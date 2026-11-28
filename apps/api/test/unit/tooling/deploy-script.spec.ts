@@ -41,6 +41,54 @@ afterEach(() => {
 describe('deploy.sh', () => {
   const lines = (extra: string) => `POSTGRES_PASSWORD=pw\n${extra}`;
 
+  it('AC-1a: accepts a bare valid POSTGRES_PASSWORD assignment', () => {
+    const run = runDeployScript('deploy.sh', ['--no-backup'], { envFile: 'POSTGRES_PASSWORD=valid_pw-1\n' });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.dockerCalls.some(({ argv }) => argv.includes('config'))).toBe(true);
+  });
+
+  it('AC-1b: accepts an export-prefixed valid POSTGRES_PASSWORD assignment', () => {
+    const run = runDeployScript('deploy.sh', ['--no-backup'], { envFile: 'export POSTGRES_PASSWORD=valid_pw-1\n' });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.dockerCalls.some(({ argv }) => argv.includes('config'))).toBe(true);
+  });
+
+  it('AC-1c: gives an explicitly set shell password precedence over the .env assignment', () => {
+    const run = runDeployScript('deploy.sh', ['--no-backup'], {
+      envFile: 'export POSTGRES_PASSWORD=valid_pw-1\n',
+      env: { POSTGRES_PASSWORD: 'invalid/password' },
+    });
+
+    expect(run.status).not.toBe(0);
+    expect(run.dockerCalls).toEqual([]);
+  });
+
+  it('AC-2a: refuses an absent password before invoking Docker', () => {
+    const run = runDeployScript('deploy.sh', ['--no-backup']);
+
+    expect(run.status).not.toBe(0);
+    expect(run.dockerCalls).toEqual([]);
+  });
+
+  it('AC-2b: refuses an invalid supplied password before Docker without printing it', () => {
+    const secret = 'invalid/password-secret';
+    const run = runDeployScript('deploy.sh', ['--no-backup'], { envFile: `POSTGRES_PASSWORD=${secret}\n` });
+
+    expect(run.status).not.toBe(0);
+    expect(run.dockerCalls).toEqual([]);
+    expect(run.output).not.toContain(secret);
+  });
+
+  it('AC-2c: never prints a supplied password when preflight succeeds', () => {
+    const secret = 'private_pw-1';
+    const run = runDeployScript('deploy.sh', ['--no-backup'], { envFile: `export POSTGRES_PASSWORD=${secret}\n` });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.output).not.toContain(secret);
+  });
+
   it('AC-1: exits 1 when .env assigns DATABASE_URL', () => {
     expect(runDeployScript('deploy.sh', [], { envFile: lines('DATABASE_URL=postgresql://db.example/koda') }).status).toBe(1);
   });
