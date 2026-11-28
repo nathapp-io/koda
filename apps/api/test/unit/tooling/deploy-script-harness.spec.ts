@@ -142,6 +142,17 @@ describe('deploy script harness', () => {
     expect(readdirSync(run.tmpDir)).toEqual([]);
   });
 
+  it('captures a successful export-prefixed deploy preflight without exposing its password', () => {
+    const secret = 'exported_secret-1';
+    const run = runDeployScript('deploy.sh', ['--no-backup'], {
+      envFile: `export POSTGRES_PASSWORD=${secret}\n`,
+    });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.dockerCalls.some(({ argv }) => argv.includes('config'))).toBe(true);
+    expect(run.output).not.toContain(secret);
+  });
+
   it('writes a gzip stream the script has to reject when the dump is corrupt', () => {
     const run = runDeployScript('backup-db.sh', [], { env: { KODA_DEPLOY_HARNESS_GZIP_CORRUPT: '1' } });
 
