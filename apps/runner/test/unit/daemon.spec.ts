@@ -235,6 +235,34 @@ describe('startDaemon', () => {
     }
   });
 
+  test('startup retries an already reported cleanup claim and releases it only after directory removal', async () => {
+    const server = fakeServer();
+    const s = await setup(server);
+    await mkdir(s.home.dir, { recursive: true });
+    const oldDir = join(s.config.workspaceRoot, '.jobs', 'unfinished');
+    await mkdir(oldDir, { recursive: true });
+    await writeFile(join(oldDir, 'marker'), 'cleanup was interrupted');
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const old = Journal.open(s.home.journalPath, () => clock);
+    const newJob = { assign: assignFor('RUN', { jobId: 'unfinished' }) as AssignPayload, leaseEpoch: 1, repoKey: 'acme/app', jobDir: oldDir };
+    old.insertJob(newJob);
+    old.markDone('unfinished', 1);
+    clock = new Date('2026-01-09T00:00:00.000Z');
+    expect(old.prune(1)).toEqual([{ jobId: 'unfinished', leaseEpoch: 1, jobDir: oldDir }]);
+    expect(old.prune(1)).toEqual([]);
+    old.close(); // died before recursive removal or completePrune
+
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
+    try {
+      await expect(stat(oldDir)).rejects.toThrow();
+      expect(daemon.journal.prune(1)).toEqual([]);
+      expect(daemon.journal.insertJob({ ...newJob, leaseEpoch: 2 }).created).toBe(true);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
   test('ENH-3: a pruned job whose nax-out still has files is logged before removal, and the dir is still removed', async () => {
     const server = fakeServer();
     const s = await setup(server);

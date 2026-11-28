@@ -111,7 +111,7 @@ async function pruneJobs(journal: Journal, config: RunnerConfig, log: Logger): P
       await rm(jobDir, { recursive: true, force: true });
       journal.completePrune(pruned.jobDir);
     } catch (error) {
-      // Keep the journal's cleanup claim: prune will retry the removal, and ASSIGN cannot reuse this path meanwhile.
+      // Keep the reservation: the next daemon start retries removal, and ASSIGN cannot reuse this path meanwhile.
       log.warn('could not remove a pruned job directory', { jobId: pruned.jobId, error: errorMessage(error) });
     }
   }
@@ -303,6 +303,8 @@ async function startOwnedDaemon(
   if (!naxMode) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   approvals.sweepOrphans(journal.activeJobs());
+  // Home ownership excludes the prior daemon's cleanup. Retry its unfinished claims once, before accepting work.
+  journal.rearmPruneCleanup();
   await pruneJobs(journal, config, log);
   // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.

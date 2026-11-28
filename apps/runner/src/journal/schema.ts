@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS pending_asks (
 CREATE TABLE IF NOT EXISTS prune_cleanup_claims (
   job_dir TEXT PRIMARY KEY,
   job_id TEXT NOT NULL,
-  lease_epoch INTEGER NOT NULL
+  lease_epoch INTEGER NOT NULL,
+  reported INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS owned_processes (
   pid INTEGER NOT NULL,

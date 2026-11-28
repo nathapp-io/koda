@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
@@ -201,6 +202,7 @@ describe('persistence and retention', () => {
     j.ackThrough('partial', 1, 2);
     expect(j.prune(7)).toEqual([{ jobId: 'partial', leaseEpoch: 1, jobDir: '/w/.jobs/partial' }]);
     expect(j.getJob('partial', 1)).toBeNull();
+    expect(j.prune(7)).toEqual([]); // reporting is once-only even before filesystem cleanup finishes
     j.completePrune('/w/.jobs/partial');
     expect(j.prune(7)).toEqual([]);
   });
@@ -235,11 +237,39 @@ describe('persistence and retention', () => {
     const reopened = Journal.open(path, now);
     // The refusal is a structured, retryable contention — never a bare failure a caller could turn into a job FAILED.
     expect(() => reopened.insertJob(job('reused', 2))).toThrow(JobDirCleanupPendingError);
-    expect(reopened.prune(7)).toEqual(cleanup); // a filesystem failure or restart keeps the reservation retryable
+    expect(reopened.prune(7)).toEqual([]); // opening another connection must not re-report an in-flight cleanup
+    reopened.rearmPruneCleanup(); // only daemon startup, under home ownership, retries unfinished cleanup
+    expect(() => reopened.insertJob(job('reused', 2))).toThrow(JobDirCleanupPendingError);
+    expect(reopened.prune(7)).toEqual(cleanup);
+    expect(reopened.prune(7)).toEqual([]);
 
     reopened.completePrune('/w/.jobs/reused');
+    reopened.rearmPruneCleanup();
+    expect(reopened.prune(7)).toEqual([]); // completed claims never return on restart
     expect(reopened.insertJob(job('reused', 2)).created).toBe(true);
     reopened.close();
+  });
+
+  test('legacy cleanup reservations migrate without releasing their directories and report only once', async () => {
+    const path = join(await tmp.make('prune-legacy'), 'journal.db');
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`CREATE TABLE prune_cleanup_claims (job_dir TEXT PRIMARY KEY, job_id TEXT NOT NULL, lease_epoch INTEGER NOT NULL);
+      INSERT INTO prune_cleanup_claims VALUES ('/w/.jobs/legacy', 'legacy', 1);`);
+    legacy.close();
+
+    const migrated = Journal.open(path, now);
+    const other = Journal.open(path, now);
+    try {
+      expect(() => migrated.insertJob(job('legacy', 2))).toThrow(JobDirCleanupPendingError);
+      expect(migrated.prune(7)).toEqual([{ jobId: 'legacy', leaseEpoch: 1, jobDir: '/w/.jobs/legacy' }]);
+      expect(other.prune(7)).toEqual([]);
+      expect(() => other.insertJob(job('legacy', 2))).toThrow(JobDirCleanupPendingError);
+      migrated.completePrune('/w/.jobs/legacy');
+      expect(other.insertJob(job('legacy', 2)).created).toBe(true);
+    } finally {
+      other.close();
+      migrated.close();
+    }
   });
 
   test('AC-11/12: shared job directory is protected by retained epochs and returned once when both expire', () => {
@@ -257,6 +287,8 @@ describe('persistence and retention', () => {
     expect(j.getJob('shared', 2)).not.toBeNull();
     j.ackThrough('shared', 2, 1);
     expect(j.prune(7)).toEqual([{ jobId: 'shared', leaseEpoch: 2, jobDir: '/w/.jobs/shared' }]);
+    expect(j.prune(7)).toEqual([]);
+    expect(() => j.insertJob(job('shared', 3))).toThrow(JobDirCleanupPendingError);
     j.completePrune('/w/.jobs/shared');
     expect(j.prune(7)).toEqual([]);
   });
