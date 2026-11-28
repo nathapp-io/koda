@@ -1,9 +1,11 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
+import { spawnSync } from 'child_process'
 import { ref } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useTimelineEvents.ts')
+const timelineQueryPath = join(webDir, 'lib', 'timeline-query.ts')
 const useApiModulePath = join(webDir, 'composables', 'useApi.ts')
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +30,25 @@ function applyNuxtGlobals(env: {
 function resetGlobals() {
   const g = globalThis as Record<string, unknown>
   g.useApi = undefined
+}
+
+function buildQueryInTimezone(timezone: string, filters: Record<string, string>) {
+  const script = `
+    const fs = require('fs')
+    const ts = require('typescript')
+    const source = fs.readFileSync(process.argv[1], 'utf8')
+    const js = ts.transpile(source, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 })
+    const loaded = { exports: {} }
+    new Function('exports', 'module', 'require', js)(loaded.exports, loaded, require)
+    console.log(JSON.stringify(loaded.exports.buildTimelineQuery(JSON.parse(process.argv[2]))))
+  `
+  const result = spawnSync(process.execPath, ['-e', script, timelineQueryPath, JSON.stringify(filters)], {
+    cwd: webDir,
+    encoding: 'utf8',
+    env: { ...process.env, TZ: timezone },
+  })
+  if (result.status !== 0) throw new Error(result.stderr || 'Timezone query process failed')
+  return JSON.parse(result.stdout) as Record<string, string>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -162,22 +183,11 @@ describe('US-008 local calendar date bounds', () => {
   test.each([
     ['America/New_York', '2026-03-08', 23],
     ['America/New_York', '2026-11-01', 25],
-  ])('AC-4 / AC-5: %s %s local day spans %i hours', async (timezone, date, hours) => {
-    await withTimezone(timezone, async () => {
-      const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
-      applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
-      const { useTimelineEvents } = await import(composablePath)
-      const tl = useTimelineEvents('acme')
-      tl.fromFilter.value = date
-      tl.toFilter.value = date
-      await tl.loadEvents()
-
-      const [, opts] = fetchMock.mock.calls[0]
-      const query = (opts as { query: Record<string, string> }).query
-      const start = Date.parse(query.from)
-      const exclusiveNextMidnight = Date.parse(query.to) + 1
-      expect((exclusiveNextMidnight - start) / 3_600_000).toBe(hours)
-    })
+  ])('AC-4 / AC-5: %s %s local day spans %i hours', (timezone, date, hours) => {
+    const query = buildQueryInTimezone(timezone, { from: date, to: date })
+    const start = Date.parse(query.from)
+    const exclusiveNextMidnight = Date.parse(query.to) + 1
+    expect((exclusiveNextMidnight - start) / 3_600_000).toBe(hours)
   })
 
   test('AC-6 / AC-7: single-sided dates omit the unselected bound', async () => {
