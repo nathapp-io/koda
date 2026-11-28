@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { getAgentRuntime, setAgentRuntime, type AgentRuntime } from '@nathapp/nax-agent';
 import { errorMessage } from '../errors';
-import { readProcessStart, REGISTRATION_SLACK_MS } from '../executor/pid-registry';
+import { isNoSuchProcess, probeProcessStart, REGISTRATION_SLACK_MS, type ProcessStartProbe } from '../executor/pid-registry';
 import type { Journal } from '../journal/journal';
 import type { OwnedProcessSource } from '../journal/types';
 import type { Logger } from '../logger';
@@ -140,10 +140,11 @@ export interface ReapDeps {
   readonly journal: Pick<Journal, 'ownedProcessesOutside' | 'forgetOwnedProcess'>;
   /** This boot: its own rows are never touched. */
   readonly bootId: string;
-  /** This host boot (`readHostBootId()`); '' signals nothing. */
+  /** This host boot (`readHostBootId()`); '' signals nothing and keeps every known-host row for a later pass. */
   readonly hostBoot: string;
   readonly log: Logger;
-  readonly startedAt?: (pid: number) => Promise<Date | null>;
+  /** US-006: the identity probe for one pid; the production `ps` probe by default, injectable for tests. */
+  readonly probe?: (pid: number) => Promise<ProcessStartProbe>;
   readonly kill?: (target: number, signal: NodeJS.Signals) => void;
   readonly selfPid?: number;
 }
@@ -154,27 +155,68 @@ export interface ReapDeps {
  * and its process started no later than the row (plus the nax pid reaper's slack): a pid recycled after the
  * original exited starts later and is skipped (D37). A wall clock stepped backwards within one host boot can still
  * defeat the start-time check; that is the same residual risk the nax pid reaper accepts.
+ *
+ * US-006: a row is forgotten only when the cleanup established what became of the process — it is definitively gone,
+ * its pid was reused, it belongs to another host boot, it is protected, or it was signalled. An inconclusive probe or
+ * a refused signal keeps the row, so the next boot pass retries against a freshly read identity instead of losing the
+ * only record that the backend exists.
  */
 export async function reapPreviousBootProcesses(deps: ReapDeps): Promise<number[]> {
-  const startedAt = deps.startedAt ?? readProcessStart;
+  const probe = deps.probe ?? probeProcessStart;
   const kill = deps.kill ?? ((target: number, signal: NodeJS.Signals) => { process.kill(target, signal); });
   const selfPid = deps.selfPid ?? process.pid;
   const killed: number[] = [];
   for (const row of deps.journal.ownedProcessesOutside(deps.bootId)) {
-    // A row of another host boot names a pid the reboot already freed; an unknown host boot proves nothing.
-    const sameHostBoot = deps.hostBoot !== '' && row.hostBoot === deps.hostBoot;
-    if (sameHostBoot && row.pid > 1 && row.pid !== selfPid) {
-      const started = await startedAt(row.pid).catch(() => null);
-      if (started !== null && started.getTime() <= row.spawnedAtMs + REGISTRATION_SLACK_MS) {
-        try {
-          kill(row.group ? -row.pid : row.pid, 'SIGKILL');
-          killed.push(row.pid);
-        } catch (error) {
-          deps.log.warn('could not kill a process left by an earlier runner boot', { pid: row.pid, error: errorMessage(error) });
-        }
-      }
+    // Init and this daemon are never signalled, and their earlier-boot row answers nothing a later pass could use.
+    if (row.pid <= 1 || row.pid === selfPid) {
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+      continue;
     }
-    deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+    // Without a recorded host boot no pass can ever match the row again, so keeping it would only leak.
+    if (row.hostBoot === '') {
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+      continue;
+    }
+    // This daemon could not read the host's boot identity: that says nothing about the process, so keep the row.
+    if (deps.hostBoot === '') {
+      deps.log.warn('could not read the host boot identity; keeping an earlier-boot process row for a later pass', { pid: row.pid });
+      continue;
+    }
+    // A row of another host boot names a pid the reboot already freed; the kernel may have reused it since.
+    if (row.hostBoot !== deps.hostBoot) {
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+      continue;
+    }
+
+    const observation = await probe(row.pid).catch((error: unknown): ProcessStartProbe => (
+      { outcome: 'indeterminate', reason: errorMessage(error) }
+    ));
+    if (observation.outcome === 'indeterminate') {
+      deps.log.warn('could not identify a process left by an earlier runner boot; keeping its ownership row', { pid: row.pid, reason: observation.reason });
+      continue;
+    }
+    if (observation.outcome === 'absent') {
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+      continue;
+    }
+    // The pid answers, but with a process that started after this row was written: a recycled pid, not our backend.
+    if (observation.startedAt.getTime() > row.spawnedAtMs + REGISTRATION_SLACK_MS) {
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+      continue;
+    }
+    try {
+      kill(row.group ? -row.pid : row.pid, 'SIGKILL');
+      killed.push(row.pid);
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+    } catch (error) {
+      if (!isNoSuchProcess(error)) {
+        // A refused signal (EPERM, an unreadable group, …) leaves the process alive: keep the row to retry.
+        deps.log.warn('could not signal a process left by an earlier runner boot; keeping its ownership row', { pid: row.pid, error: errorMessage(error) });
+        continue;
+      }
+      // ESRCH: the process ended between the probe and the signal, so the record is settled.
+      deps.journal.forgetOwnedProcess(row.pid, row.spawnedAtMs);
+    }
   }
   if (killed.length > 0) deps.log.warn('killed thread backend processes left by an earlier runner boot', { pids: killed });
   return killed;

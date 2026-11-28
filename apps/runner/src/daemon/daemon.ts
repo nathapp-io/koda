@@ -281,7 +281,7 @@ async function startOwnedDaemon(
   // and no thread session survives a restart. This daemon owns the home now, so it kills them before taking work,
   // then records every process its own backends start.
   const hostBoot = await readHostBootId();
-  if (hostBoot === '') log.warn('cannot read the host boot identity; thread backend processes left by an earlier boot are not killed');
+  if (hostBoot === '') log.warn('cannot read the host boot identity; thread backend processes left by an earlier boot are not killed and their rows are kept for a later pass');
   await reapPreviousBootProcesses({ journal, bootId, hostBoot, log });
   const ownedProcesses = new OwnedProcessLedger({ journal, bootId, hostBoot, nowMs: Date.now, log });
   const restoreProcessRecording = installProcessRecording(ownedProcesses);
