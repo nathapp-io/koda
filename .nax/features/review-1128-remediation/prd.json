@@ -3,7 +3,7 @@
   "feature": "review-1128-remediation",
   "branchName": "feat/review-1128-remediation",
   "createdAt": "2026-11-28T04:12:55.840Z",
-  "updatedAt": "2026-11-28T05:26:23.291Z",
+  "updatedAt": "2026-11-28T05:39:53.696Z",
   "userStories": [
     {
       "id": "US-001",
@@ -245,14 +245,17 @@
         "finding-3"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Existing transactional SQLite pruning needs a lease-specific delivery guard and shared-directory deduplication; real persistence and epoch fixtures exercise the change without new protocols."
+        "reasoning": "Existing transactional SQLite pruning needs a lease-specific delivery guard and shared-directory deduplication; real persistence and epoch fixtures exercise the change without new protocols.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/journal/journal.ts",
@@ -273,7 +276,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d88cf3fd48f1efc2f77f934af2ea2cb3dd3967ea"
     },
     {
       "id": "US-005",
