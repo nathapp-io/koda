@@ -330,9 +330,10 @@ describe('release workflow channels', () => {
   it('AC-6: stable tags do not affect canary eligibility or outputs', () => {
     const canaryTags = ['v0.5.0-canary.2', 'v0.5.0-canary.10'];
     const requested = 'v0.5.0-canary.10';
-    expect(runChannels(requested, canaryTags).lines).toEqual(
-      runChannels(requested, [...canaryTags, 'v999.999.999']).lines,
-    );
+    const withoutStable = runChannels(requested, canaryTags);
+    const withStable = runChannels(requested, [...canaryTags, 'v999.999.999']);
+    expect(withoutStable.status).toBe(withStable.status);
+    expect(withoutStable.lines).toEqual(withStable.lines);
   });
 
   it('AC-7: a failed remote listing prevents canary publication', () => {
