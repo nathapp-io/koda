@@ -41,6 +41,10 @@ export class EntityStore {
     projectEntities.set(entity.id, { ...entity });
   }
 
+  removeEntity(projectId: string, id: string): void {
+    this.entities.get(projectId)?.delete(id);
+  }
+
   private *projectEntities(projectId: string): IterableIterator<Entity> {
     yield* this.entities.get(projectId)?.values() ?? [];
     yield* this.moduleEntities.get(projectId)?.values() ?? [];
@@ -127,12 +131,21 @@ export class EntityStore {
       }
     } else if (event.eventType === 'ticket_event') {
       const payload = event.payload as {
+        action?: unknown;
         ticketId?: string;
         projectId?: string;
         actorId?: string;
         data?: Record<string, unknown>;
         ticket?: { id: string; ref: string; title: string; type: string };
       };
+      if (
+        payload.action === 'TICKET_DELETED' &&
+        typeof payload.ticketId === 'string' &&
+        typeof payload.projectId === 'string'
+      ) {
+        this.removeEntity(payload.projectId, payload.ticketId);
+        return;
+      }
       if (payload.ticket) {
         this.indexEntity(payload.projectId ?? '', {
           id: payload.ticket.id,
