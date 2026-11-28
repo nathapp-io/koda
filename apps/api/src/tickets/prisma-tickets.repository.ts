@@ -114,6 +114,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
       labels: row.labels?.map((tl) => ({
         label: {
           id: tl.label.id,
+          projectId: tl.label.projectId,
           name: tl.label.name,
           color: tl.label.color,
         },

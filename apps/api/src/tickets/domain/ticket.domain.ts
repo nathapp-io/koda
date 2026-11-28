@@ -16,6 +16,7 @@ export interface TicketProject {
 export interface TicketLabel {
   label: {
     id: string;
+    projectId: string;
     name: string;
     color: string | null;
   };

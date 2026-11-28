@@ -103,46 +103,53 @@ export class TicketRouteCommands implements OnModuleInit {
       run: (principal, input) => this.service.assign(input.slug, input.ref, input.assignee, principal),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['verify']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, TicketResponseDto>({
       key: 'ticket.transition.verify', variant: TICKET_ROUTE_VARIANTS.verify,
       parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
-      run: async (principal, input) => (await this.transitions.verify(input.slug, input.ref, input.body, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.verify(input.slug, input.ref, input.body, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string }, Awaited<ReturnType<TicketTransitionsService['start']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string }, TicketResponseDto>({
       key: 'ticket.transition.start', variant: TICKET_ROUTE_VARIANTS.start,
       parse: (input) => parseRouteInput(input, ['slug', 'ref']),
-      run: async (principal, input) => (await this.transitions.start(input.slug, input.ref, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.start(input.slug, input.ref, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['fix']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, TicketResponseDto>({
       key: 'ticket.transition.fix', variant: TICKET_ROUTE_VARIANTS.fix,
       parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
-      run: async (principal, input) => (await this.transitions.fix(input.slug, input.ref, input.body, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.fix(input.slug, input.ref, input.body, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['verifyFix']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, TicketResponseDto>({
       key: 'ticket.transition.verify-fix.approve', variant: TICKET_ROUTE_VARIANTS.verifyFix,
       parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
-      run: async (principal, input) => (await this.transitions.verifyFix(input.slug, input.ref, input.body, true, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.verifyFix(input.slug, input.ref, input.body, true, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['verifyFix']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, TicketResponseDto>({
       key: 'ticket.transition.verify-fix.return', variant: TICKET_ROUTE_VARIANTS.verifyFix,
       parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
-      run: async (principal, input) => (await this.transitions.verifyFix(input.slug, input.ref, input.body, false, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.verifyFix(input.slug, input.ref, input.body, false, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['close']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, TicketResponseDto>({
       key: 'ticket.transition.close', variant: TICKET_ROUTE_VARIANTS.close,
       parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
-      run: async (principal, input) => (await this.transitions.close(input.slug, input.ref, input.body, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.close(input.slug, input.ref, input.body, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['reject']>>['ticket']>({
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, TicketResponseDto>({
       key: 'ticket.transition.reject', variant: TICKET_ROUTE_VARIANTS.reject,
       parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
-      run: async (principal, input) => (await this.transitions.reject(input.slug, input.ref, input.body, principal)).ticket,
+      run: async (principal, input) => this.service.toTransitionResponse(input.slug,
+        (await this.transitions.reject(input.slug, input.ref, input.body, principal)).ticket),
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<{ slug: string; ref: string }, Awaited<ReturnType<TicketsService['softDelete']>>>({

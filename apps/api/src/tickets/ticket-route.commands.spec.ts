@@ -11,6 +11,57 @@ import { TICKET_EDGE_KEYS } from './state-machine/transition-keys';
 const allowsAll = () => ({ can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) });
 
 describe('TicketRouteCommands', () => {
+  it('AC-6/7/8: maps all seven transition results before returning and storing them', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'agent-canonical' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const rawTicket = { id: 't1', number: 7, status: 'IN_PROGRESS' };
+    const canonicalTicket = {
+      id: 't1', ref: 'KODA-7', gitRefUrl: 'https://example.test/tree/main/src/a.ts',
+      labels: [{ id: 'l1', projectId: 'p1', name: 'bug', color: '#123456' }],
+    };
+    const service = { toTransitionResponse: vi.fn().mockResolvedValue(canonicalTicket) };
+    const transitions = {
+      verify: vi.fn().mockResolvedValue({ ticket: rawTicket }),
+      start: vi.fn().mockResolvedValue({ ticket: rawTicket }),
+      fix: vi.fn().mockResolvedValue({ ticket: rawTicket }),
+      verifyFix: vi.fn().mockResolvedValue({ ticket: rawTicket }),
+      close: vi.fn().mockResolvedValue({ ticket: rawTicket }),
+      reject: vi.fn().mockResolvedValue({ ticket: rawTicket }),
+    };
+    new TicketRouteCommands(registry, service as unknown as TicketsService,
+      transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader,
+      allowsAll() as unknown as PermissionService).onModuleInit();
+
+    const cases = [
+      ['ticket.transition.verify', TICKET_ROUTE_VARIANTS.verify, { slug: 'koda', ref: 'KODA-7', body: 'ok' }],
+      ['ticket.transition.start', TICKET_ROUTE_VARIANTS.start, { slug: 'koda', ref: 'KODA-7' }],
+      ['ticket.transition.fix', TICKET_ROUTE_VARIANTS.fix, { slug: 'koda', ref: 'KODA-7', body: 'fixed' }],
+      ['ticket.transition.verify-fix.approve', TICKET_ROUTE_VARIANTS.verifyFix, { slug: 'koda', ref: 'KODA-7', body: 'approved' }],
+      ['ticket.transition.verify-fix.return', TICKET_ROUTE_VARIANTS.verifyFix, { slug: 'koda', ref: 'KODA-7', body: 'return' }],
+      ['ticket.transition.close', TICKET_ROUTE_VARIANTS.close, { slug: 'koda', ref: 'KODA-7', body: 'closed' }],
+      ['ticket.transition.reject', TICKET_ROUTE_VARIANTS.reject, { slug: 'koda', ref: 'KODA-7', body: 'rejected' }],
+    ] as const;
+    for (const [key, variant, input] of cases) {
+      const command = registry.get(key, variant);
+      if (!command) throw new Error(`Missing command ${key}`);
+      const result = await command.execute(command.parse(input));
+      expect(result).toEqual(canonicalTicket);
+      expect(command.toResult?.(result)).toEqual(canonicalTicket);
+    }
+    expect(service.toTransitionResponse).toHaveBeenCalledTimes(7);
+    expect(service.toTransitionResponse).toHaveBeenCalledWith('koda', rawTicket);
+
+    service.toTransitionResponse.mockResolvedValue({ ...canonicalTicket, labels: [] });
+    for (const [key, variant, input] of cases) {
+      const command = registry.get(key, variant);
+      if (!command) throw new Error(`Missing command ${key}`);
+      const result = await command.execute(command.parse(input));
+      expect(result).toMatchObject({ labels: [] });
+      expect(command.toResult?.(result)).toMatchObject({ labels: [] });
+    }
+    expect(service.toTransitionResponse).toHaveBeenCalledTimes(14);
+  });
   it('AC-8/9/10: registers and executes gated transition commands', async () => {
     const registry = new ApprovalCommandRegistry();
     const principal = { id: 'agent-1' };
@@ -21,7 +72,7 @@ describe('TicketRouteCommands', () => {
       start: vi.fn().mockResolvedValue({ ticket: resultTicket }),
       fix: vi.fn().mockResolvedValue({ ticket: resultTicket }),
     };
-    const service = {};
+    const service = { toTransitionResponse: vi.fn(async (_slug: string, ticket: unknown) => ticket) };
     new TicketRouteCommands(registry, service as unknown as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
     for (const [key, variant] of [
       ['ticket.transition.verify', 'rest:tickets.verify'],
@@ -72,7 +123,8 @@ describe('TicketRouteCommands', () => {
       close: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'CLOSED' } }),
       reject: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'REJECTED' } }),
     };
-    new TicketRouteCommands(registry, {} as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
+    const service = { toTransitionResponse: vi.fn(async (_slug: string, ticket: unknown) => ticket) };
+    new TicketRouteCommands(registry, service as unknown as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
     const approve = registry.get('ticket.transition.verify-fix.approve', 'rest:tickets.verify-fix');
     const returning = registry.get('ticket.transition.verify-fix.return', 'rest:tickets.verify-fix');
     expect(approve).toBeDefined();
