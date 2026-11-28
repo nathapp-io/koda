@@ -8,15 +8,24 @@ import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { ImpactAnalysisService } from './impact-analysis.service';
 import { CodeIntelController } from './code-intel.controller';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
+import { CodeExtractor } from './code-extractor';
+import { ChildProcessCodeExtractor } from './child-process-code-extractor';
 
 describe('CodeIntelModule (DI wiring)', () => {
   let moduleRef: TestingModule;
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     if (moduleRef) {
       await moduleRef.close();
       moduleRef = undefined as unknown as TestingModule;
     }
+  });
+
+  it('AC-6: selects the child extractor from the stubbed environment without spawning', async () => {
+    vi.stubEnv('CODE_INTEL_EXTRACTION_MODE', 'child');
+    moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, CodeIntelModule] }).compile();
+    expect(moduleRef.get(CodeExtractor)).toBeInstanceOf(ChildProcessCodeExtractor);
   });
 
   it('compiles with the global stub providers and no database', async () => {

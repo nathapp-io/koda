@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AstIndexService, SymbolIndexResult, CallerInfo, CalleeInfo } from '../../src/code-intel/ast-index.service';
 import { SymbolStore } from '../../src/code-intel/symbol-store';
 import { CodeGraphService } from '../../src/code-intel/code-graph.service';
+import { CodeExtractor } from '../../src/code-intel/code-extractor';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
 describe('AstIndexService', () => {
@@ -35,6 +36,7 @@ describe('AstIndexService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AstIndexService,
+        { provide: CodeExtractor, useValue: { extract: (files: Array<{ path: string; content: string }>) => Promise.resolve(mockCodeGraph.extractBatch(files)) } },
         { provide: SymbolStore, useValue: mockSymbolStore },
         { provide: CodeGraphService, useValue: mockCodeGraph },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },

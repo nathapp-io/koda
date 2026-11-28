@@ -21,7 +21,7 @@ describe('AstIndexService batch indexing', () => {
     };
     const store = { deleteByFile: vi.fn(async () => undefined), upsertSymbol: vi.fn(async () => undefined) };
     const tx = { run: <T>(callback: () => Promise<T>) => callback() } as ITransactionManager;
-    const service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx);
+    const service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx, { extract: async (batch) => graph.extractBatch(batch) });
 
     const result = await service.indexCommit('acme/widgets', 'c1', files, 'proj-1');
 
@@ -44,7 +44,7 @@ describe('AstIndexService batch indexing', () => {
       upsertSymbol: vi.fn(async (_symbol: SymbolData) => undefined),
     };
     const tx = { run: <T>(callback: () => Promise<T>) => callback() } as ITransactionManager;
-    const service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx);
+    const service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx, { extract: async (batch) => graph.extractBatch(batch) });
 
     const result = await service.indexCommit('acme/widgets', 'c1', files, 'proj-1');
 
@@ -68,7 +68,7 @@ describe('AstIndexService batch indexing', () => {
     };
     const store = { deleteByFile: vi.fn(async () => undefined), upsertSymbol: vi.fn(async () => undefined) };
     const tx = { run: <T>(callback: () => Promise<T>) => callback() } as ITransactionManager;
-    const service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx);
+    const service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx, { extract: async (batch) => graph.extractBatch(batch) });
     const warn = vi.spyOn((service as unknown as { logger: { warn: (message: string) => void } }).logger, 'warn');
     warn.mockClear();
 
@@ -87,7 +87,7 @@ describe('AstIndexService batch indexing', () => {
       upsertSymbol: vi.fn(async (symbol: SymbolData) => { saved.push(symbol); }),
     };
     const tx = { run: <T>(callback: () => Promise<T>) => callback() } as ITransactionManager;
-    const service = new AstIndexService(graph, store as unknown as SymbolStore, tx);
+    const service = new AstIndexService(graph, store as unknown as SymbolStore, tx, { extract: async (batch) => graph.extractBatch(batch) });
     const content = "declare function Inject(_t: string): ParameterDecorator;\nclass Svc { constructor(@Inject('X') private readonly x: string) {} run(): number { return 1; } }";
 
     const result = await service.indexCommit('acme/widgets', 'c1', [{ path: 'src/svc.ts', content }], 'proj-1');

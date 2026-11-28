@@ -50,7 +50,7 @@ describe('AstIndexService', () => {
     // Default: txManager.run executes the callback immediately
     txManager.run.mockImplementation((fn) => fn());
 
-    service = new AstIndexService(codeGraph, symbolStore, txManager);
+    service = new AstIndexService(codeGraph, symbolStore, txManager, { extract: async (files) => codeGraph.extractBatch(files) });
   });
 
   describe('indexCommit()', () => {
