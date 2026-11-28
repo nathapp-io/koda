@@ -114,14 +114,24 @@ export class Journal {
   }
 
   insertJob(job: NewJob): { row: JobRow; created: boolean } {
-    const stamp = this.now().toISOString();
-    const result = this.db.query(
-      `INSERT OR IGNORE INTO jobs (job_id, lease_epoch, command, state, repo_key, job_dir, assign_json, created_at, updated_at)
-       VALUES (?, ?, ?, 'ASSIGNED', ?, ?, ?, ?, ?)`,
-    ).run(job.assign.jobId, job.leaseEpoch, job.assign.command, job.repoKey, job.jobDir, JSON.stringify(job.assign), stamp, stamp);
-    const row = this.getJob(job.assign.jobId, job.leaseEpoch);
-    if (!row) throw new Error('journal: inserted job row not found');
-    return { row, created: result.changes > 0 };
+    return this.tx(() => {
+      if (this.db.query('SELECT 1 FROM prune_cleanup_claims WHERE job_dir = ?').get(job.jobDir)) {
+        throw new Error('journal: job directory cleanup is in progress');
+      }
+      const stamp = this.now().toISOString();
+      const result = this.db.query(
+        `INSERT OR IGNORE INTO jobs (job_id, lease_epoch, command, state, repo_key, job_dir, assign_json, created_at, updated_at)
+         VALUES (?, ?, ?, 'ASSIGNED', ?, ?, ?, ?, ?)`,
+      ).run(job.assign.jobId, job.leaseEpoch, job.assign.command, job.repoKey, job.jobDir, JSON.stringify(job.assign), stamp, stamp);
+      const row = this.getJob(job.assign.jobId, job.leaseEpoch);
+      if (!row) throw new Error('journal: inserted job row not found');
+      return { row, created: result.changes > 0 };
+    });
+  }
+
+  /** Release prune's directory reservation only after recursive filesystem cleanup has completed. */
+  completePrune(jobDir: string): void {
+    this.db.query('DELETE FROM prune_cleanup_claims WHERE job_dir = ?').run(jobDir);
   }
 
   getJob(jobId: string, leaseEpoch: number): JobRow | null {
@@ -304,12 +314,17 @@ export class Journal {
       }
       this.db.query('DELETE FROM applied_commands WHERE applied_at < ?').run(cutoff);
       const dirs = new Set<string>();
-      return old.flatMap((r) => {
+      for (const r of old) {
         const jobDir = r['job_dir'] as string;
-        if (dirs.has(jobDir) || this.db.query('SELECT 1 FROM jobs WHERE job_dir = ? LIMIT 1').get(jobDir)) return [];
+        if (dirs.has(jobDir) || this.db.query('SELECT 1 FROM jobs WHERE job_dir = ? LIMIT 1').get(jobDir)) continue;
         dirs.add(jobDir);
-        return [{ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir }];
-      });
+        this.db.query('INSERT OR IGNORE INTO prune_cleanup_claims (job_dir, job_id, lease_epoch) VALUES (?, ?, ?)')
+          .run(jobDir, r['job_id'] as string, r['lease_epoch'] as number);
+      }
+      // Unfinished claims are returned again after a crash or filesystem error. insertJob rejects their path until
+      // the daemon acknowledges successful removal, closing the prune/assignment race across async cleanup.
+      return (this.db.query('SELECT job_id, lease_epoch, job_dir FROM prune_cleanup_claims ORDER BY job_id, lease_epoch').all() as Row[])
+        .map((r) => ({ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir: r['job_dir'] as string }));
     });
   }
 

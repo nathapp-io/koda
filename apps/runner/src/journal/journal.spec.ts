@@ -201,6 +201,7 @@ describe('persistence and retention', () => {
     j.ackThrough('partial', 1, 2);
     expect(j.prune(7)).toEqual([{ jobId: 'partial', leaseEpoch: 1, jobDir: '/w/.jobs/partial' }]);
     expect(j.getJob('partial', 1)).toBeNull();
+    j.completePrune('/w/.jobs/partial');
     expect(j.prune(7)).toEqual([]);
   });
 
@@ -221,6 +222,25 @@ describe('persistence and retention', () => {
     expect(j.getJob('eligible', 1)).toBeNull();
   });
 
+  test('AC-11 regression: an authorized cleanup blocks a new lease from claiming its directory until cleanup completes', async () => {
+    const path = join(await tmp.make('prune-claim'), 'journal.db');
+    const writer = Journal.open(path, now);
+    writer.insertJob(job('reused', 1));
+    writer.markDone('reused', 1);
+    clock = new Date('2026-10-09T00:00:00.000Z');
+    const cleanup = writer.prune(7);
+    expect(cleanup).toEqual([{ jobId: 'reused', leaseEpoch: 1, jobDir: '/w/.jobs/reused' }]);
+    writer.close();
+
+    const reopened = Journal.open(path, now);
+    expect(() => reopened.insertJob(job('reused', 2))).toThrow();
+    expect(reopened.prune(7)).toEqual(cleanup); // a filesystem failure or restart keeps the reservation retryable
+
+    reopened.completePrune('/w/.jobs/reused');
+    expect(reopened.insertJob(job('reused', 2)).created).toBe(true);
+    reopened.close();
+  });
+
   test('AC-11/12: shared job directory is protected by retained epochs and returned once when both expire', () => {
     j.insertJob(job('shared', 1));
     j.insertJob({ ...job('shared', 2), jobDir: '/w/.jobs/shared' });
@@ -236,6 +256,7 @@ describe('persistence and retention', () => {
     expect(j.getJob('shared', 2)).not.toBeNull();
     j.ackThrough('shared', 2, 1);
     expect(j.prune(7)).toEqual([{ jobId: 'shared', leaseEpoch: 2, jobDir: '/w/.jobs/shared' }]);
+    j.completePrune('/w/.jobs/shared');
     expect(j.prune(7)).toEqual([]);
   });
 });

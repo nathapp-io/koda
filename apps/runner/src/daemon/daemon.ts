@@ -109,7 +109,9 @@ async function pruneJobs(journal: Journal, config: RunnerConfig, log: Logger): P
     }
     try {
       await rm(jobDir, { recursive: true, force: true });
+      journal.completePrune(pruned.jobDir);
     } catch (error) {
+      // Keep the journal's cleanup claim: prune will retry the removal, and ASSIGN cannot reuse this path meanwhile.
       log.warn('could not remove a pruned job directory', { jobId: pruned.jobId, error: errorMessage(error) });
     }
   }
