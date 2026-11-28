@@ -19,6 +19,7 @@ export interface LiveStreamOptions<E extends LiveStreamEvent = LiveEvent> {
   subscribe: (key: string, listener: (event: E) => void) => () => void;
   stillAllowed: () => Promise<boolean>;
   onClose: () => void;
+  isStalled?: () => boolean;
 }
 
 /**
@@ -32,6 +33,7 @@ export function createLiveStream<E extends LiveStreamEvent = LiveEvent>(options:
   return new Observable<MessageEvent>((subscriber) => {
     let done = false;
     let checking = false;
+    let consecutiveStalledTicks = 0;
     const finish = (): void => {
       if (done) return;
       done = true;
@@ -47,6 +49,14 @@ export function createLiveStream<E extends LiveStreamEvent = LiveEvent>(options:
     // 2^31-1 ms to 1 ms, which would hammer the access check.
     const heartbeat = setInterval(() => {
       if (done || checking) return;
+      if (options.isStalled) {
+        if (options.isStalled()) consecutiveStalledTicks += 1;
+        else consecutiveStalledTicks = 0;
+        if (consecutiveStalledTicks >= 2) {
+          finish();
+          return;
+        }
+      }
       checking = true;
       options
         .stillAllowed()

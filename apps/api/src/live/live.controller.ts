@@ -11,6 +11,7 @@ import { ILiveConfig, LIVE_CFG } from '../config/live.config';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { decodeJwtPayload, tokenExpiryMs } from './jwt-payload';
 import { createLiveStream } from './live-stream';
+import { socketHasBacklog } from './socket-backlog';
 import { LiveStreamRegistry } from './live-stream-registry';
 import { ProjectEventBus } from './project-event-bus';
 import { Requires } from '../permissions/requires.decorator';
@@ -52,6 +53,7 @@ export class LiveController {
       heartbeatMs: this.config.heartbeatMs,
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,
+      isStalled: socketHasBacklog(req),
       subscribe: (id, listener) => this.bus.subscribe(id, listener),
       stillAllowed: () => this.stillAllowed(projectId, jwtPayload),
       onClose: () => this.streams.release(principal.id),

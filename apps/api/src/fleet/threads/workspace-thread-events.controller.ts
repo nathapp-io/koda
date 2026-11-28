@@ -10,6 +10,7 @@ import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ILiveConfig, LIVE_CFG } from '../../config/live.config';
 import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
 import { createLiveStream } from '../../live/live-stream';
+import { socketHasBacklog } from '../../live/socket-backlog';
 import { LiveStreamRegistry } from '../../live/live-stream-registry';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../live/thread-event-bus';
 import { WorkspaceThreadsService } from './workspace-threads.service';
@@ -90,6 +91,7 @@ export class WorkspaceThreadEventsController {
       heartbeatMs: this.config.heartbeatMs,
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,
+      isStalled: socketHasBacklog(req),
       subscribe: (id, listener) => this.bus.subscribe(id, listener),
       stillAllowed: async () => {
         const fresh = await this.jwtAuth.getPrincipal(jwtPayload);
