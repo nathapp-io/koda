@@ -568,6 +568,28 @@ describe('ticketCommand', () => {
   });
 
   describe('ticket list', () => {
+    it('describes --assigned-to as a user ID or self in generated help', () => {
+      const listCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'list');
+
+      expect(listCmd?.helpInformation()).toContain('--assigned-to <user-id>');
+      expect(listCmd?.helpInformation()).toContain('user ID or self');
+      expect(listCmd?.helpInformation()).not.toContain('--assigned-to <slug>');
+    });
+
+    it('preserves self shorthand in the assigned-to request mapping', async () => {
+      (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false },
+      });
+      const listCmd = program.commands.find((cmd) => cmd.name() === 'ticket')?.commands.find((cmd) => cmd.name() === 'list');
+
+      await listCmd?.parseAsync(['node', 'test', '--project', 'koda', '--assigned-to', 'self']);
+
+      expect(ticketsControllerFindAll).toHaveBeenCalledWith(expect.objectContaining({
+        query: expect.objectContaining({ assignedTo: 'self' }),
+      }));
+    });
+
     it('lists tickets for a project', async () => {
       const mockTickets = [
         {
@@ -711,7 +733,7 @@ describe('ticketCommand', () => {
       );
     });
 
-    it('filters tickets by assignee', async () => {
+    it('passes an ordinary assignee user ID unchanged to the SDK', async () => {
       const mockTickets = [
         {
           id: 'ticket-1',
@@ -738,11 +760,11 @@ describe('ticketCommand', () => {
         '--project',
         'test-project',
         '--assigned-to',
-        'agent-1',
+        'user-123',
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({ query: expect.objectContaining({ assignedTo: 'agent-1' })})
+        expect.objectContaining({ query: expect.objectContaining({ assignedTo: 'user-123' })})
       );
     });
 

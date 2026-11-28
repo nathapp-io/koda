@@ -176,7 +176,7 @@ export function ticketCommand(program: Command): void {
     .option('--status <status>', 'Filter by status')
     .option('--type <type>', 'Filter by type')
     .option('--priority <priority>', 'Filter by priority')
-    .option('--assigned-to <slug>', 'Filter by assignee')
+    .option('--assigned-to <user-id>', 'Filter by user ID or self')
     .option('--unassigned', 'Show only unassigned tickets')
     .option('--page <number>', 'Page number (1-based)', parsePositiveInt, 1)
     .option('--size <number>', 'Tickets per page (1-100)', parsePositiveInt, 20)

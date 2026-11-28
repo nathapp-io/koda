@@ -89,7 +89,11 @@ export function labelCommand(program: Command): void {
 
         await labelsControllerDeleteFromHttp({ path: { slug: ctx.projectSlug, id: options.id }});
 
-        console.log(`Label '${options.id}' deleted.`);
+        if (options.json) {
+          console.log(JSON.stringify({ id: options.id, deleted: true }, null, 2));
+        } else {
+          console.log(`Label '${options.id}' deleted.`);
+        }
         return finishSuccess();
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Label not found: ${options.id}` });
