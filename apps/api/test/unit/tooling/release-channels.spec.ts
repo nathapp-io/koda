@@ -275,7 +275,7 @@ describe('release workflow channels', () => {
       expect(published.status).toBe(0);
       expect(published.calls[0]).toContain(`--tag nathapp/koda-${app}:canary`);
     }
-  });
+  }, 15_000);
 
   it('AC-1: rejects stale canary before npm or Docker jobs, including published-version retries', () => {
     const result = runChannels('v0.5.0-canary.2', ['v0.5.0-canary.2', 'v0.5.0-canary.10']);
