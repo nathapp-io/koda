@@ -3,7 +3,7 @@
   "feature": "review-1128-remediation",
   "branchName": "feat/review-1128-remediation",
   "createdAt": "2026-11-28T04:12:55.840Z",
-  "updatedAt": "2026-11-28T06:11:33.229Z",
+  "updatedAt": "2026-11-28T06:22:36.130Z",
   "userStories": [
     {
       "id": "US-001",
@@ -502,14 +502,17 @@
         "finding-13"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A localized query-builder correction uses existing Nuxt/Jest seams, with timezone, DST and pagination boundaries rather than new API logic."
+        "reasoning": "A localized query-builder correction uses existing Nuxt/Jest seams, with timezone, DST and pagination boundaries rather than new API logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useTimelineEvents.ts",
@@ -529,7 +532,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "849f873999d4fa4496d7dee36ef83fde28f892eb"
     },
     {
       "id": "US-009",
