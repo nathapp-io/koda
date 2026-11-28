@@ -267,10 +267,11 @@ describe('release workflow channels', () => {
 
   it('AC-2/AC-3: newest canary sends both Docker aliases and npm canary action', () => {
     const channels = runChannels('v0.5.0-canary.10', ['v0.5.0-canary.2', 'v0.5.0-canary.10']);
-    const values = Object.fromEntries(channels.lines.map((line) => line.split('=')));
-    expect(values.npm_tag).toBe('canary');
+    expect(channels.lines).toContain('npm_tag=canary');
     for (const app of ['api', 'web'] as const) {
-      const published = runDockerPublish(values[`tags_${app}`]!, app);
+      const tags = channels.lines.find((line) => line.startsWith(`tags_${app}=`))?.slice(`tags_${app}=`.length) ?? '';
+      expect(tags).toBe(`nathapp/koda-${app}:canary`);
+      const published = runDockerPublish(tags, app);
       expect(published.status).toBe(0);
       expect(published.calls[0]).toContain(`--tag nathapp/koda-${app}:canary`);
     }
@@ -307,9 +308,9 @@ describe('release workflow channels', () => {
 
   it('AC-9: stable backport Docker publish keeps only its version tag', () => {
     const channels = runChannels('v0.4.1', ['v0.4.0', 'v0.4.1', 'v0.4.2']);
-    const tags = channels.lines.find((line) => line.startsWith('tags_api='))?.slice('tags_api='.length);
+    const tags = channels.lines.find((line) => line.startsWith('tags_api='))?.slice('tags_api='.length) ?? '';
     expect(tags).toBe('nathapp/koda-api:v0.4.1');
-    const publish = runDockerPublish(tags!, 'api');
+    const publish = runDockerPublish(tags, 'api');
     expect(publish.status).toBe(0);
     expect(publish.calls[0]).toContain('--tag nathapp/koda-api:v0.4.1');
     expect(publish.calls[0]).not.toContain(':0.4');
@@ -328,8 +329,9 @@ describe('release workflow channels', () => {
 
   it('AC-6: stable tags do not affect canary eligibility or outputs', () => {
     const canaryTags = ['v0.5.0-canary.2', 'v0.5.0-canary.10'];
-    expect(runChannels(canaryTags[1]!, canaryTags).lines).toEqual(
-      runChannels(canaryTags[1]!, [...canaryTags, 'v999.999.999']).lines,
+    const requested = 'v0.5.0-canary.10';
+    expect(runChannels(requested, canaryTags).lines).toEqual(
+      runChannels(requested, [...canaryTags, 'v999.999.999']).lines,
     );
   });
 
