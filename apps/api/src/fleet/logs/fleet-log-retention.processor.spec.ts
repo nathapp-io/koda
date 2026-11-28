@@ -39,9 +39,12 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
   const before = new Date('2026-10-01T04:45:00.000Z');
 
   beforeEach(() => {
+    artifacts.delete.mockReset();
+    jobs.lockById.mockReset();
+    logStore.deletePrefix.mockReset();
     // Neither pass has work unless a test says so.
-    repo.findCandidates.mockResolvedValue([]);
-    repo.findRetiredCleanups.mockResolvedValue([]);
+    repo.findCandidates.mockReset().mockResolvedValue([]);
+    repo.findRetiredCleanups.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
