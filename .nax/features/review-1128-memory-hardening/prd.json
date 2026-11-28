@@ -3,7 +3,7 @@
   "feature": "review-1128-memory-hardening",
   "branchName": "feat/review-1128-memory-hardening",
   "createdAt": "2026-11-28T10:23:44.761Z",
-  "updatedAt": "2026-11-28T10:46:19.768Z",
+  "updatedAt": "2026-11-28T10:58:36.692Z",
   "userStories": [
     {
       "id": "US-001",
@@ -95,14 +95,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "US-001 supplies the abstraction and process lifecycle; this story adds standard mode parsing, one Nest factory and an awaited delegate within code-intel, plus mechanical constructor-fixture migration, without changing authentication, encryption or transaction internals."
+        "reasoning": "US-001 supplies the abstraction and process lifecycle; this story adds standard mode parsing, one Nest factory and an awaited delegate within code-intel, plus mechanical constructor-fixture migration, without changing authentication, encryption or transaction internals.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/code-intel/ast-index.service.ts",
@@ -138,7 +141,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d1ce2da340ce09f8b5a772f4a8473a2456a70646"
     },
     {
       "id": "US-003",
