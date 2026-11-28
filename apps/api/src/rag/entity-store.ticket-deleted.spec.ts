@@ -90,7 +90,8 @@ describe('EntityStore ticket deletion', () => {
   });
 
   it('AC-8 treats deletion of an unknown ticket as an idempotent no-op', async () => {
-    const store = new EntityStore();
+    const repository = { findTicketById: vi.fn().mockResolvedValue({ id: 'unknown', title: 'Deleted ticket' }) };
+    const store = new EntityStore(repository as never);
     store.indexEntity('p1', ticket('t2'));
 
     await expect(store.handleOutboxEvent({
@@ -98,6 +99,7 @@ describe('EntityStore ticket deletion', () => {
       payload: { action: 'TICKET_DELETED', ticketId: 'unknown', projectId: 'p1' },
     })).resolves.toBeUndefined();
 
+    expect(repository.findTicketById).not.toHaveBeenCalled();
     expect(store.getAllEntities('p1').map(entity => entity.id)).toEqual(['t2']);
   });
 });
