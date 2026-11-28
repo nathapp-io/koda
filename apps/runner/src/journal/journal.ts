@@ -284,7 +284,17 @@ export class Journal {
   prune(retentionDays: number): Array<{ jobId: string; leaseEpoch: number; jobDir: string }> {
     const cutoff = new Date(this.now().getTime() - retentionDays * 86_400_000).toISOString();
     return this.tx(() => {
-      const old = this.db.query('SELECT job_id, lease_epoch, job_dir FROM jobs WHERE done_at IS NOT NULL AND done_at < ?').all(cutoff) as Row[];
+      // Delivery is lease-scoped: an expired job is eligible only when every event in that exact epoch is acked.
+      // Keep selection, deletion and directory authorization in this transaction so a cleanup result never races a
+      // retained epoch that shares the same filesystem directory.
+      const old = this.db.query(
+        `SELECT j.job_id, j.lease_epoch, j.job_dir FROM jobs j
+         WHERE j.done_at IS NOT NULL AND j.done_at < ?
+           AND NOT EXISTS (
+             SELECT 1 FROM events e
+             WHERE e.job_id = j.job_id AND e.lease_epoch = j.lease_epoch AND e.acked = 0
+           )`,
+      ).all(cutoff) as Row[];
       for (const r of old) {
         const key: [string, number] = [r['job_id'] as string, r['lease_epoch'] as number];
         this.db.query('DELETE FROM events WHERE job_id = ? AND lease_epoch = ?').run(...key);
@@ -293,7 +303,13 @@ export class Journal {
         this.db.query('DELETE FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?').run(...key);
       }
       this.db.query('DELETE FROM applied_commands WHERE applied_at < ?').run(cutoff);
-      return old.map((r) => ({ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir: r['job_dir'] as string }));
+      const dirs = new Set<string>();
+      return old.flatMap((r) => {
+        const jobDir = r['job_dir'] as string;
+        if (dirs.has(jobDir) || this.db.query('SELECT 1 FROM jobs WHERE job_dir = ? LIMIT 1').get(jobDir)) return [];
+        dirs.add(jobDir);
+        return [{ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir }];
+      });
     });
   }
 
