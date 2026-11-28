@@ -1575,6 +1575,50 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('13b. Ticket PATCH — Status Transition', () => {
+    it('US-003 AC-3a..3c: approval stores canonical start result and rejection leaves another ticket untouched', async () => {
+      const prisma = prismaClient();
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const label = await prisma.label.create({ data: { projectId: project.id, name: 'gated-canonical-label', color: '#abcdef' } });
+      const createVerifiedTicket = async (title: string): Promise<{ id: string; ref: string }> => {
+        const ticket = body<{ id: string; ref: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets`).set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ type: 'BUG', title }).expect(201));
+        await prisma.ticket.update({ where: { id: ticket.id }, data: { status: 'VERIFIED' } });
+        await prisma.ticketLabel.create({ data: { ticketId: ticket.id, labelId: label.id } });
+        return ticket;
+      };
+      const policy = await seedWaitPolicy(prisma, 'ticket.transition.start', project.id);
+      try {
+        const approvedTicket = await createVerifiedTicket('Approval canonical result');
+        const pending = body<{ id: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${approvedTicket.ref}/start`)
+          .set('Authorization', `Bearer ${agentApiKey}`).send({}).expect(202));
+        const approvalRow = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: pending.id } });
+        expect(approvalRow.status).toBe('pending');
+        const approved = body<{ status: string; result: { ref: string; labels: Array<{ id: string; projectId: string; name: string; color: string | null }> } }>(
+          await request(httpServer).post(`/api/approvals/${pending.id}/decisions`)
+            .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'approve' }).expect(200),
+        );
+        expect(approved.status).toBe('executed');
+        const fetched = body<{ status: string; ref: string; labels: Array<{ id: string; projectId: string; name: string; color: string | null }> }>(
+          await request(httpServer).get(`/api/projects/${projectSlug}/tickets/${approvedTicket.ref}`)
+            .set('Authorization', `Bearer ${userAccessToken}`).expect(200),
+        );
+        expect(approved.result).toMatchObject({ ref: fetched.ref, labels: fetched.labels });
+        expect(approved.result.labels).toEqual([{ id: label.id, projectId: project.id, name: label.name, color: label.color }]);
+
+        const deniedTicket = await createVerifiedTicket('Approval denial atomicity');
+        const deniedPending = body<{ id: string }>(await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${deniedTicket.ref}/start`)
+          .set('Authorization', `Bearer ${agentApiKey}`).send({}).expect(202));
+        const denied = await request(httpServer).post(`/api/approvals/${deniedPending.id}/decisions`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'reject' }).expect(200);
+        expect(body<{ status: string }>(denied).status).toBe('rejected');
+        expect((await prisma.ticket.findUniqueOrThrow({ where: { id: deniedTicket.id } })).status).toBe('VERIFIED');
+      } finally {
+        await prisma.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
     it('US-003 AC-1a..1e: status PATCH and start return the canonical persisted ticket', async () => {
       const prisma = prismaClient();
       const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
