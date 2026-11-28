@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
-import type { SupervisorDeps } from '../../src/supervisor/supervisor';
+import type { Supervisor, SupervisorDeps } from '../../src/supervisor/supervisor';
 import * as threadPrune from '../../src/thread/thread-prune';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
@@ -195,6 +195,19 @@ describe('project code daemon prune', () => {
   });
 });
 
+/**
+ * `ThreadJobRun` writes RUNNING before its stream exists, and a command that lands in that window is rejected
+ * `session_not_ready` (src/thread/thread-job-run.ts `command`; see `ready()` in supervisor-thread-jobs.spec.ts, where
+ * RUNNING alone is not command readiness). The server re-sends such a close, so this does the same instead of assuming
+ * the first attempt is on time — a loaded CI box otherwise leaves the run RUNNING over a close that arrived too early.
+ */
+async function closeThread(supervisor: Supervisor, jobId: string): Promise<void> {
+  await waitFor(async () => {
+    const ack = await supervisor.threadCommand({ commandId: 'c', type: 'THREAD_CLOSE', jobId, leaseEpoch: 1, payload: {} });
+    return ack.result === 'ok';
+  }, { intervalMs: 5, message: 'the thread run never accepted its THREAD_CLOSE (session_not_ready until the timeout)' });
+}
+
 describe('startDaemon thread wiring (US-007)', () => {
   for (const retire of ['stop', 'crash'] as const) {
     test(`a timed-out thread retains the home through backend cleanup on ${retire}`, async () => {
@@ -226,7 +239,7 @@ describe('startDaemon thread wiring (US-007)', () => {
         f.fleet.queue.push({ commandId: 'a', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1,
           payload: f.assign('j1', { kind: 'WORKSPACE', initialMessage: null, backend: { kind: 'native', model: 'openai/gpt-5' } }) });
         await waitFor(() => daemon.journal.getJob('j1', 1)?.state === 'RUNNING');
-        await daemon.supervisor.threadCommand({ commandId: 'c', type: 'THREAD_CLOSE', jobId: 'j1', leaseEpoch: 1, payload: {} });
+        await closeThread(daemon.supervisor, 'j1');
         await waitFor(() => closing && daemon.journal.getJob('j1', 1)?.state === 'COMPLETED');
         void daemon[retire]();
         await expect(f.daemon()).rejects.toMatchObject({ kind: 'occupied' });
