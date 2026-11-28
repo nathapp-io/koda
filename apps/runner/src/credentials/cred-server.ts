@@ -45,6 +45,7 @@ interface Replies<T> {
  */
 export function serveRequest<T>(socket: RequestSocket, request: (line: string) => Promise<T> | null, replies: Replies<T>): void {
   let buffered = '';
+  let received = false;   // US-006: the request line is settled (dispatched or refused); later chunks are not ours
   let answered = false;
   const answer = (value: T): void => {
     if (answered) return;
@@ -54,14 +55,23 @@ export function serveRequest<T>(socket: RequestSocket, request: (line: string) =
   socket.setEncoding('utf8');
   socket.on('error', () => undefined);   // a client that hangs up early is not our problem
   socket.on('data', (chunk: string) => {
-    if (answered) return;
+    // The receipt fence is separate from the answered one: a reply still pending must not let a second line dispatch
+    // another request, nor buffer chunks nothing will ever read (US-006).
+    if (received) return;
     buffered += chunk;
     const newline = buffered.indexOf('\n');
     if (newline < 0) {
-      if (Buffer.byteLength(buffered, 'utf8') > MAX_REQUEST_BYTES) answer(replies.badRequest);
+      if (Buffer.byteLength(buffered, 'utf8') > MAX_REQUEST_BYTES) {
+        received = true;
+        buffered = '';
+        answer(replies.badRequest);
+      }
       return;
     }
-    const pending = request(buffered.slice(0, newline).trim());
+    received = true;
+    const line = buffered.slice(0, newline).trim();
+    buffered = '';
+    const pending = request(line);
     if (pending === null) {
       answer(replies.badRequest);
       return;

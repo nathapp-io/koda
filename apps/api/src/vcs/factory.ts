@@ -36,10 +36,13 @@ async function httpError(response: Response): Promise<Error> {
   return error;
 }
 
+export const VCS_HTTP_TIMEOUT_MS = 30_000;
+
 /**
  * Create a default HTTP client using native fetch API
  */
-function createDefaultHttpClient(): HttpClient {
+export function createDefaultHttpClient(options?: { timeoutMs?: number }): HttpClient {
+  const timeoutMs = options?.timeoutMs ?? VCS_HTTP_TIMEOUT_MS;
   return {
     async get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown; headers?: Record<string, string> }> {
       const urlObj = new URL(url);
@@ -51,6 +54,8 @@ function createDefaultHttpClient(): HttpClient {
 
       const response = await fetch(urlObj.toString(), {
         method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
         headers: config.headers,
       });
 
@@ -64,6 +69,8 @@ function createDefaultHttpClient(): HttpClient {
     async post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }> {
       const response = await fetch(url, {
         method: 'POST',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
         headers: {
           'Content-Type': 'application/json',
           ...config.headers,

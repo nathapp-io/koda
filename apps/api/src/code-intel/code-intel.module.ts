@@ -17,6 +17,8 @@ import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { CODE_INTEL_REPOSITORY } from './domain/code-intel.domain';
 import { OutboxModule } from '../outbox/outbox.module';
 import { CodeIntelOutboxSubscriber } from './code-intel-outbox.subscriber';
+import { CodeExtractor } from './code-extractor';
+import { createCodeExtractor, readCodeIntelConfig } from './code-intel.config';
 
 @Module({
   imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ConfigModule, EntityGraphModule, OutboxModule, RagModule, ProjectAccessModule],
@@ -28,6 +30,7 @@ import { CodeIntelOutboxSubscriber } from './code-intel-outbox.subscriber';
     CodeIntelRouteCommands,
     SymbolStore,
     CodeGraphService,
+    { provide: CodeExtractor, useFactory: (graph: CodeGraphService) => createCodeExtractor(readCodeIntelConfig(process.env), graph), inject: [CodeGraphService] },
     CodeCommitOutboxHandler,
     ImpactAnalysisService,
     CodeIntelOutboxSubscriber,

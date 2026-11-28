@@ -8,15 +8,32 @@ import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { ImpactAnalysisService } from './impact-analysis.service';
 import { CodeIntelController } from './code-intel.controller';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
+import { CodeExtractor } from './code-extractor';
+import { ChildProcessCodeExtractor } from './child-process-code-extractor';
+
+const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
+  spawn: spawnMock,
+}));
 
 describe('CodeIntelModule (DI wiring)', () => {
   let moduleRef: TestingModule;
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     if (moduleRef) {
       await moduleRef.close();
       moduleRef = undefined as unknown as TestingModule;
     }
+  });
+
+  it('AC-6: selects the child extractor from the stubbed environment without spawning', async () => {
+    vi.stubEnv('CODE_INTEL_EXTRACTION_MODE', 'child');
+    spawnMock.mockClear();
+    moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, CodeIntelModule] }).compile();
+    expect(moduleRef.get(CodeExtractor)).toBeInstanceOf(ChildProcessCodeExtractor);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('compiles with the global stub providers and no database', async () => {

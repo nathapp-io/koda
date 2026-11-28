@@ -1,6 +1,10 @@
 import type { Mock, Mocked } from 'vitest';
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { AstIndexService } from './ast-index.service';
+import { CodeGraphService } from './code-graph.service';
+import { SymbolStore } from './symbol-store';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { IVcsProvider } from '../vcs/vcs-provider';
 import { IVcsConfig } from '../config/vcs.config';
@@ -223,6 +227,31 @@ describe('CodeCommitOutboxHandler', () => {
         changedFiles: ['src/a.ts'], projectId: 'proj-1',
       }, onIndexed);
       expect(mockAstIndex.indexCommit).toHaveBeenCalledWith('repo-1', 'abc123', sourceFiles, 'proj-1', onIndexed);
+    });
+
+    it('AC-8: routes fetched commit files through the injected extractor', async () => {
+      const sourceFiles: SourceFile[] = [{ path: 'src/a.ts', content: 'A' }];
+      mockProvider = createMockVcsProvider({ fetchCommitFiles: vi.fn().mockResolvedValue(sourceFiles) });
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
+      const extractor = { extract: vi.fn(async (files: ReadonlyArray<SourceFile>) => files.map(({ path }) => ({ path, symbols: [] }))) };
+      const txManager = { run: vi.fn((callback: () => Promise<unknown>) => callback()) };
+      const astIndex = new AstIndexService(
+        new CodeGraphService(),
+        { deleteByFile: vi.fn(async () => undefined), upsertSymbol: vi.fn(async () => undefined) } as unknown as SymbolStore,
+        txManager as unknown as ITransactionManager,
+        extractor,
+      );
+      handler = new CodeCommitOutboxHandler(
+        createMockCodeIntelRepository(defaultConnection), astIndex, createMockVcsConfig('enc-key'),
+      );
+
+      await handler.process({
+        repoId: 'acme/widgets', commitHash: 'c1', ref: 'refs/heads/main',
+        projectId: 'p1', changedFiles: ['src/a.ts'],
+      });
+
+      expect(extractor.extract).toHaveBeenCalledTimes(1);
+      expect(extractor.extract).toHaveBeenCalledWith(sourceFiles);
     });
 
     it('happy path: should fetch files and call AstIndexService.indexCommit', async () => {

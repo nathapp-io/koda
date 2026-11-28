@@ -3,6 +3,7 @@ import { CodeGraphService, ExtractedSymbol, FileExtraction, ResolvedSymbol } fro
 import { SymbolStore, SymbolData, CallerInfo, CalleeInfo } from './symbol-store';
 import { symbolFullId } from './symbol-id';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { CodeExtractor } from './code-extractor';
 
 export type { CallerInfo, CalleeInfo } from './symbol-store';
 
@@ -44,6 +45,7 @@ export class AstIndexService {
     private readonly codeGraph: CodeGraphService,
     private readonly symbolStore: SymbolStore,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly extractor: CodeExtractor,
   ) {}
 
   async indexCommit(
@@ -61,7 +63,7 @@ export class AstIndexService {
     const allExtractedSymbols: ResolvedSymbol[] = [];
     const filesToReplace: string[] = [];
 
-    const extractions: FileExtraction[] = this.codeGraph.extractBatch(files);
+    const extractions: FileExtraction[] = await this.extractor.extract(files);
     for (const extraction of extractions) {
       // Replace, don't merge: a file in this commit loses its old symbols even if
       // its new content fails to parse, so a parse regression cannot leave stale

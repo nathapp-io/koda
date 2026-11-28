@@ -24,7 +24,7 @@ describe('AstIndexService project-scoped ids (M13)', () => {
       resolveRelationships: vi.fn(),
     };
     const tx = { run: <T>(fn: () => Promise<T>) => fn() } as unknown as ITransactionManager;
-    service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx);
+    service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx, { extract: async (batch) => graph.extractBatch(batch) });
   });
 
   it('puts the project id in the symbol id', async () => {

@@ -312,6 +312,13 @@ describe('HostExecutor FIX outcome reader (US-011)', () => {
     const w = await fixWorld();
     expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'none', logPath: null, pushedSha: null, fixReady: null, stderrLine: null });
   });
+
+  test('AC-8: the first non-blank stderr line behind two blank lines and 20,000 more', async () => {
+    const w = await fixWorld();
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), `\n\nfatal: push rejected\n${'trace: another line\n'.repeat(20_000)}`);
+    expect((await w.ex.readFixOutcome(w.row)).stderrLine).toBe('fatal: push rejected');
+  });
 });
 
 describe('HostExecutor process lookups are injected (US-001)', () => {

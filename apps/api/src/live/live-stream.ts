@@ -19,6 +19,12 @@ export interface LiveStreamOptions<E extends LiveStreamEvent = LiveEvent> {
   subscribe: (key: string, listener: (event: E) => void) => () => void;
   stillAllowed: () => Promise<boolean>;
   onClose: () => void;
+  isStalled?: () => boolean;
+  /**
+   * Called right before a stalled stream completes: the caller drops the client's connection, because completing
+   * the producer alone leaves Nest holding the events it already queued for a client that is not reading.
+   */
+  onStalled?: () => void;
 }
 
 /**
@@ -32,6 +38,7 @@ export function createLiveStream<E extends LiveStreamEvent = LiveEvent>(options:
   return new Observable<MessageEvent>((subscriber) => {
     let done = false;
     let checking = false;
+    let consecutiveStalledTicks = 0;
     const finish = (): void => {
       if (done) return;
       done = true;
@@ -47,6 +54,17 @@ export function createLiveStream<E extends LiveStreamEvent = LiveEvent>(options:
     // 2^31-1 ms to 1 ms, which would hammer the access check.
     const heartbeat = setInterval(() => {
       if (done || checking) return;
+      if (options.isStalled) {
+        if (options.isStalled()) consecutiveStalledTicks += 1;
+        else consecutiveStalledTicks = 0;
+        if (consecutiveStalledTicks >= 2) {
+          // Completing alone is not enough: Nest's write pipeline still waits for the events already queued for a
+          // client that is not draining. The caller drops the connection, which discards that queue (review B1).
+          options.onStalled?.();
+          finish();
+          return;
+        }
+      }
       checking = true;
       options
         .stillAllowed()

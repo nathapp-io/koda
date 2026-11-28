@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "bun@1.4.5",
   "scripts": {
-    "build": "nest build && bun scripts/check-dist-requires.ts && bun --no-env-file scripts/check-compiler-load.cjs",
+    "build": "nest build && bun scripts/check-dist-requires.ts && bun --no-env-file scripts/check-compiler-load.cjs && bun --no-env-file scripts/check-extraction-child.cjs",
     "build:generate": "prisma generate && bun run build",
     "dev": "nest start --watch",
     "start": "nest start --env-file=.env",

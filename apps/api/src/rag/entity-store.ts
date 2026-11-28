@@ -20,12 +20,24 @@ export interface ScoredEntity extends Entity {
   score: number;
 }
 
+/** One ticket reread in flight: a deletion that lands before it answers marks it so its row is not indexed. */
+interface PendingTicketRead {
+  deleted: boolean;
+}
+
+/** The same ticket id can be indexed for more than one project, so the project is part of the key. */
+function ticketReadKey(projectId: string, ticketId: string): string {
+  return `${projectId}\u0000${ticketId}`;
+}
+
 @Injectable()
 export class EntityStore {
   private readonly entities = new Map<string, Map<string, Entity>>();
   private readonly moduleEntities = new Map<string, Map<string, Entity>>();
   private readonly refreshLock = new KeyedMutex();
   private readonly pendingRefreshes = new Map<string, symbol>();
+  /** Rereads in flight (review B2); a key is dropped as soon as its last reread settles, so this stays bounded. */
+  private readonly pendingTicketReads = new Map<string, Set<PendingTicketRead>>();
 
   constructor(
     @Optional() private readonly ragRepository?: PrismaRagRepository,
@@ -39,6 +51,14 @@ export class EntityStore {
       index.set(projectId, projectEntities);
     }
     projectEntities.set(entity.id, { ...entity });
+  }
+
+  removeEntity(projectId: string, id: string): void {
+    this.entities.get(projectId)?.delete(id);
+    // Review B2: a reread that is already in flight may answer with the row it read before this deletion, so it is
+    // told not to index it. A reread that starts later gets no row at all (the repository excludes soft-deleted
+    // tickets).
+    for (const read of this.pendingTicketReads.get(ticketReadKey(projectId, id)) ?? []) read.deleted = true;
   }
 
   private *projectEntities(projectId: string): IterableIterator<Entity> {
@@ -127,12 +147,21 @@ export class EntityStore {
       }
     } else if (event.eventType === 'ticket_event') {
       const payload = event.payload as {
+        action?: unknown;
         ticketId?: string;
         projectId?: string;
         actorId?: string;
         data?: Record<string, unknown>;
         ticket?: { id: string; ref: string; title: string; type: string };
       };
+      if (
+        payload.action === 'TICKET_DELETED' &&
+        typeof payload.ticketId === 'string' &&
+        typeof payload.projectId === 'string'
+      ) {
+        this.removeEntity(payload.projectId, payload.ticketId);
+        return;
+      }
       if (payload.ticket) {
         this.indexEntity(payload.projectId ?? '', {
           id: payload.ticket.id,
@@ -182,8 +211,15 @@ export class EntityStore {
   private async indexTicketEntity(ticketId: string, projectId: string): Promise<void> {
     if (!this.ragRepository) return;
 
-    const ticket = await this.ragRepository.findTicketById(ticketId);
-    if (ticket) {
+    const key = ticketReadKey(projectId, ticketId);
+    const read: PendingTicketRead = { deleted: false };
+    const reads = this.pendingTicketReads.get(key) ?? new Set<PendingTicketRead>();
+    reads.add(read);
+    this.pendingTicketReads.set(key, reads);
+    try {
+      // The repository answers null for a soft-deleted ticket, so a retried update cannot restore its entity.
+      const ticket = await this.ragRepository.findTicketById(ticketId);
+      if (!ticket || read.deleted) return;
       this.indexEntity(projectId, {
         id: ticket.id,
         label: ticket.title,
@@ -191,6 +227,9 @@ export class EntityStore {
         source: 'ticket',
         sourceId: ticket.id,
       });
+    } finally {
+      reads.delete(read);
+      if (reads.size === 0 && this.pendingTicketReads.get(key) === reads) this.pendingTicketReads.delete(key);
     }
   }
 

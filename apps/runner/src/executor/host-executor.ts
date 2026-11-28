@@ -14,6 +14,7 @@ import type { JobLogSources } from '../logs/types';
 import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
 import { checkPlanPrd, type PlanCheck } from '../verdict/plan-verdict';
+import { scanLines } from '../verdict/scan-lines';
 import { readPlanCost } from '../verdict/plan-cost';
 import { fixBudgetRemainder } from '../verdict/fix-budget';
 import type { StatusView } from '../verdict/status-view';
@@ -401,15 +402,19 @@ export class HostExecutor implements JobExecutor {
     }
 
     let stderrLine: string | null = null;
-    try {
-      const stderr = await readFile(join(jobDir, 'fix.stderr'), 'utf8');
-      const firstLine = stderr.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== '');
-      const sanitized = firstLine === undefined || /^\p{Cc}+$/u.test(firstLine)
-        ? '' : sanitizeDiagnostic(firstLine).slice(0, 200);
-      stderrLine = sanitized || null;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+    const selected: string[] = [];
+    // US-006: the scan ends at the first non-blank line, so a long fix.stderr costs only the lines before it.
+    await scanLines(join(jobDir, 'fix.stderr'), (line) => {
+      const trimmed = line.trim();
+      if (trimmed === '') return undefined;
+      selected.push(trimmed);
+      return 'stop';
+    });
+    // A control-only line is not a diagnostic, and a later line is never chosen in its place.
+    const firstLine = selected[0];
+    const sanitized = firstLine === undefined || /^\p{Cc}+$/u.test(firstLine)
+      ? '' : sanitizeDiagnostic(firstLine).slice(0, 200);
+    stderrLine = sanitized || null;
     return { ...result, pushedSha: fixState?.pushedSha ?? null, fixReady: fixState?.fixReady ?? null, stderrLine };
   }
 
