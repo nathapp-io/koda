@@ -215,6 +215,44 @@ describeIntegration('fleet project thread send (PG, US-004)', () => {
     expect(event.costUsd.toString()).toBe('0.0123');
   });
 
+  it('US-005 AC-1/AC-2: a ready lease accepts a send and close retry after the rejected close', async () => {
+    const runner = await enrollRunner(server, world.tokens.root, `rejected-close-${++seq}`);
+    const { project, threadId, job } = await sentProjectThread();
+    await prisma.fleetJob.update({ where: { id: job.id }, data: {
+      state: 'RUNNING', runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(),
+    } });
+    await prisma.chatMessage.updateMany({ where: { threadId, status: 'pending' }, data: { status: 'complete' } });
+    await prisma.fleetCommand.create({ data: {
+      runnerId: runner.runnerId, jobId: job.id, leaseEpoch: 1, type: 'THREAD_CLOSE', payload: {},
+      ackedAt: new Date(), ackResult: 'rejected',
+    } });
+
+    const sent = await send(project.slug, threadId, `retry-message-${++seq}`).expect(201);
+    expect(data<{ message: { status: string }; jobId: string | null }>(sent)).toMatchObject({ message: { status: 'pending' }, jobId: null });
+    await request(server).post(`/api/projects/${project.slug}/threads/${threadId}/end-session`).set(asDev()).send().expect(200);
+    expect(await prisma.fleetCommand.count({ where: { jobId: job.id, leaseEpoch: 1, type: 'THREAD_CLOSE' } })).toBe(2);
+    await send(project.slug, threadId, `blocked-message-${++seq}`).expect(409);
+    await request(server).post(`/api/projects/${project.slug}/threads/${threadId}/end-session`).set(asDev()).send().expect(409);
+  });
+
+  it('US-005 AC-2: concurrent close retries enqueue at most one replacement after rejection', async () => {
+    const runner = await enrollRunner(server, world.tokens.root, `concurrent-close-${++seq}`);
+    const { project, threadId, job } = await sentProjectThread();
+    await prisma.fleetJob.update({ where: { id: job.id }, data: {
+      state: 'RUNNING', runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(),
+    } });
+    await prisma.chatMessage.updateMany({ where: { threadId, status: 'pending' }, data: { status: 'complete' } });
+    await prisma.fleetCommand.create({ data: {
+      runnerId: runner.runnerId, jobId: job.id, leaseEpoch: 1, type: 'THREAD_CLOSE', payload: {},
+      ackedAt: new Date(), ackResult: 'rejected',
+    } });
+
+    const responses = await Promise.all([1, 2].map(() => request(server)
+      .post(`/api/projects/${project.slug}/threads/${threadId}/end-session`).set(asDev()).send()));
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(await prisma.fleetCommand.count({ where: { jobId: job.id, leaseEpoch: 1, type: 'THREAD_CLOSE' } })).toBe(2);
+  });
+
   it('AC-14: a REPO send still creates a THREAD job on the thread repo', async () => {
     const created = data<{ id: string }>(await request(server).post('/api/projects/web/threads').set(asDev())
       .send({ repoId: world.repoId, feature: `repo-send-${++seq}`, title: 'Repo thread', backend: { kind: 'native', model: 'm1' } }).expect(201));

@@ -157,7 +157,7 @@ describeDb('US-005 thread send HTTP guards', () => {
       createdById: world.ids.root,
     } });
     const job = await db.fleetJob.create({ data: { projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'RUNNING', leaseEpoch: 2, runnerId: runner.id, threadId: thread.id } });
-    await db.fleetCommand.create({ data: { jobId: job.id, runnerId: runner.id, leaseEpoch: 2, type: 'THREAD_CLOSE', payload: {} } });
+    await db.fleetCommand.create({ data: { jobId: job.id, runnerId: runner.id, leaseEpoch: 2, type: 'THREAD_CLOSE', payload: {}, ackedAt: new Date(), ackResult: 'ok' } });
     const res = await send(thread.id).expect(409);
     expect(res.body.message).toContain('closing');
   });
