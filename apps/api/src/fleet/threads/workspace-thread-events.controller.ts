@@ -1,4 +1,4 @@
-import { CanActivate, Controller, ExecutionContext, Inject, Injectable, MessageEvent, Param, Req, Sse, UseGuards } from '@nestjs/common';
+import { CanActivate, Controller, ExecutionContext, Inject, Injectable, MessageEvent, Param, Req, Res, Sse, UseGuards } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import { ForbiddenAppException, ThrottleAppException } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
@@ -10,7 +10,7 @@ import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ILiveConfig, LIVE_CFG } from '../../config/live.config';
 import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
 import { createLiveStream } from '../../live/live-stream';
-import { destroyRequestSocket, socketHasBacklog } from '../../live/socket-backlog';
+import { destroyRequestSocket, RawResponse, socketHasBacklog } from '../../live/socket-backlog';
 import { LiveStreamRegistry } from '../../live/live-stream-registry';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../live/thread-event-bus';
 import { WorkspaceThreadsService } from './workspace-threads.service';
@@ -79,6 +79,7 @@ export class WorkspaceThreadEventsController {
     @Param('id') threadId: string,
     @Principal() principal: KodaPrincipal,
     @Req() req: WorkspaceThreadEventsRequest,
+    @Res({ passthrough: true }) reply?: RawResponse,
   ): Promise<Observable<MessageEvent>> {
     const authorized = req.workspaceThreadEvents;
     if (!authorized) {
@@ -91,7 +92,7 @@ export class WorkspaceThreadEventsController {
       heartbeatMs: this.config.heartbeatMs,
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,
-      isStalled: socketHasBacklog(req),
+      isStalled: socketHasBacklog(req, reply?.raw),
       onStalled: () => destroyRequestSocket(req),
       subscribe: (id, listener) => this.bus.subscribe(id, listener),
       stillAllowed: async () => {

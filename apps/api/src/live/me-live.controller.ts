@@ -1,4 +1,4 @@
-import { Controller, Inject, MessageEvent, Req, Sse } from '@nestjs/common';
+import { Controller, Inject, MessageEvent, Req, Res, Sse } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import { Observable } from 'rxjs';
 import { ForbiddenAppException, ThrottleAppException } from '@nathapp/nestjs-common';
@@ -10,7 +10,7 @@ import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal
 import { ILiveConfig, LIVE_CFG } from '../config/live.config';
 import { decodeJwtPayload, tokenExpiryMs } from './jwt-payload';
 import { createLiveStream } from './live-stream';
-import { destroyRequestSocket, socketHasBacklog } from './socket-backlog';
+import { destroyRequestSocket, RawResponse, socketHasBacklog } from './socket-backlog';
 import { LiveStreamRegistry } from './live-stream-registry';
 import { UserEventBus, UserLiveEvent } from './user-event-bus';
 import { Requires } from '../permissions/requires.decorator';
@@ -33,7 +33,7 @@ export class MeLiveController {
   @Requires('notification.read', { enforcedBy: 'service' })
   @SkipThrottle()
   @ApiExcludeEndpoint()
-  async events(@Principal() principal: KodaPrincipal, @Req() req: unknown): Promise<Observable<MessageEvent>> {
+  async events(@Principal() principal: KodaPrincipal, @Req() req: unknown, @Res({ passthrough: true }) reply?: RawResponse): Promise<Observable<MessageEvent>> {
     if (!principal || !isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'live');
     const jwtPayload = decodeJwtPayload(kodaTokenExtractor(req));
     if (!jwtPayload) throw new ForbiddenAppException({}, 'live');
@@ -45,7 +45,7 @@ export class MeLiveController {
       heartbeatMs: this.config.heartbeatMs,
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,
-      isStalled: socketHasBacklog(req),
+      isStalled: socketHasBacklog(req, reply?.raw),
       onStalled: () => destroyRequestSocket(req),
       subscribe: (userId, listener) => this.bus.subscribe(userId, listener),
       stillAllowed: async () => !(await this.jwtAuth.getPrincipal(jwtPayload)).revoked,

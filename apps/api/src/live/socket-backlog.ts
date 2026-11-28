@@ -3,6 +3,11 @@ interface SocketLike {
   destroy?: () => unknown;
 }
 
+/** The Fastify reply, as far as this module needs it: its raw Node response. */
+export interface RawResponse {
+  raw?: unknown;
+}
+
 interface RequestLike {
   raw?: { socket?: SocketLike };
   socket?: SocketLike;
@@ -19,12 +24,20 @@ function requestSocket(req: unknown): SocketLike | undefined {
   return request.raw?.socket ?? request.socket;
 }
 
-/** Return a live check of the request socket's queued, unsent bytes. */
-export function socketHasBacklog(req: unknown): () => boolean {
-  return () => {
-    const socket = requestSocket(req);
-    return typeof socket?.writableLength === 'number' && socket.writableLength > 0;
-  };
+/**
+ * Return a live check of one client's queued, unsent bytes. `res` is the request's raw HTTP response:
+ * the api runs under Bun in production, where a response buffers its own writes and the socket's
+ * `writableLength` stays 0 however much is queued (koda #538), so the response is read first and the
+ * socket stays the reading the spec names for a plain Node request.
+ */
+export function socketHasBacklog(req: unknown, res?: unknown): () => boolean {
+  return () => hasUnsentBytes(res) || hasUnsentBytes(requestSocket(req));
+}
+
+function hasUnsentBytes(target: unknown): boolean {
+  if (!isRecord(target)) return false;
+  const length = (target as SocketLike).writableLength;
+  return typeof length === 'number' && length > 0;
 }
 
 /**
