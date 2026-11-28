@@ -57,9 +57,9 @@ Measured on 2026-11-28 with Bun 1.4.5 on macOS arm64:
 **Stalled live stream (US-003).**
 
 - `LiveStreamOptions` gains an optional `isStalled: () => boolean`. On each heartbeat tick that passes the existing `done` and `checking` guard, `createLiveStream` reads it first; a tick that guard skips is not counted. When it returns true on two consecutive ticks, the stream completes on the second tick without checking access and without sending a ping. A false reading resets the count. Without `isStalled` the stream behaves as today.
-- `socketHasBacklog(req)` returns a function that reports whether the request's socket has unsent bytes: `req.raw.socket.writableLength > 0` for a Fastify request, `req.socket.writableLength > 0` for a plain Node request, and false when neither socket is present. It reads the socket on every call.
-- A socket has unsent bytes only while the kernel send buffer is full, so two readings one heartbeat apart (25 s by default) mean the client is not reading. A browser `EventSource` reconnects by itself.
-- The four SSE routes pass `isStalled: socketHasBacklog(req)`.
+- `socketHasBacklog(req, res)` returns a function that reports whether the client has unsent bytes. It reads the raw HTTP response first — `res.writableLength > 0`, passed by the route from `@Res({ passthrough: true })` — and then the request's socket: `req.raw.socket.writableLength > 0` for a Fastify request, `req.socket.writableLength > 0` for a plain Node request, and false when neither is present. It reads both on every call. The response reading is the one that works on the runtime the api ships on (koda #538): the container runs Bun, which buffers an HTTP response's writes on the response and leaves the socket's `writableLength` at 0 however much is queued.
+- A connection has unsent bytes only while the client's send buffer is full, so two readings one heartbeat apart (25 s by default) mean the client is not reading. A browser `EventSource` reconnects by itself.
+- The four SSE routes pass `isStalled: socketHasBacklog(req, reply?.raw)`, with `reply` from `@Res({ passthrough: true })`.
 
 **VCS HTTP client (US-004).**
 
@@ -197,7 +197,7 @@ Patterns to follow:
 - US-006 only: where `scanLines` cuts a line longer than the cap when the cut falls inside a multi-byte UTF-8 character; the three callers match ASCII markers at the start of a line.
 - US-001 only: a test of the `extraction-child.ts` entry script's exit code 1 on a throw; `runExtractionRequest` is tested directly and the build check covers the success path.
 - US-003 only: a test of a heartbeat tick that the `checking` guard skips; the rule is stated in Design and the counted ticks are tested.
-- US-003 only: confirming under Bun in a deployed container that a stalled client's socket reports unsent bytes; that is a manual live check after deploy.
+- US-003 only: confirming under Bun in a deployed container that a stalled client's connection reports unsent bytes; that is a manual live check after deploy. The same check run locally against Bun 1.4.5 and the Fastify adapter (finishing this feature, koda #538) found the socket reading dead on that runtime — 131 MB queued for a non-reading client with `socket.writableLength` still 0, while the response reported 12.5 MB — so `socketHasBacklog` now reads the response first. Only the deployed confirmation is still deferred.
 - US-005 only: an entity of another source (for example a `code_module`) that shares a ticket's id; `removeEntity` removes ticket entities only.
 - US-006 only: authenticating the peer of a credential socket; by ruling of 2026-11-01 job placement is the isolation control.
 - US-006 only: any change to which token a credential socket answers with, or to its expiry handling.
