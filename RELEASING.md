@@ -89,7 +89,7 @@ koda's own OCI labels (`org.opencontainers.image.version`, `.revision` = the tag
 time, `.source`), replacing the ones it would inherit from the bun base image. Deployments pin the exact
 `:vX.Y.Z` tag, never `:latest` or `:canary`.
 
-A canary is the safe way to exercise the whole pipeline: it moves only `:canary` and npm `canary`.
+A canary is the safe way to exercise the whole pipeline: it moves only `:canary` and npm `canary`. Before any publish job starts, `info` compares a requested canary with remote canary tags (base major, minor, patch, then canary sequence, numerically). A canary older than any remote canary is rejected, including on a full workflow re-dispatch; dispatch the newest canary instead. Stable tags do not affect this ordering. The check runs in `info`, so a full re-dispatch recomputes eligibility; re-running only a downstream job does not.
 
 ## When something fails
 
