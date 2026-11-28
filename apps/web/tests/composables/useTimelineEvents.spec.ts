@@ -138,46 +138,46 @@ describe('AC5: useTimelineEvents error path', () => {
 describe('US-008 local calendar date bounds', () => {
   beforeEach(resetGlobals)
 
-  async function withTimezone<T>(timezone: string, run: () => Promise<T> | T): Promise<T> {
-    const previous = process.env.TZ
-    process.env.TZ = timezone
-    try {
-      return await run()
-    }
-    finally {
-      if (previous === undefined) delete process.env.TZ
-      else process.env.TZ = previous
-    }
-  }
+  // A Jest worker ignores a `process.env.TZ` assignment made after it started, so the Kuala Lumpur numbers below only
+  // reproduce in a child process launched with TZ set — the same mechanism AC-4/AC-5 and the B2 regressions use. An
+  // in-process switch passes on a host that already sits at UTC+8 and fails on a UTC runner.
+  test('AC-1: Kuala Lumpur bounds run from local midnight to the last millisecond before the next one', () => {
+    expect(buildQueryInTimezone('Asia/Kuala_Lumpur', { from: '2026-11-28', to: '2026-11-28' }))
+      .toEqual({ from: '2026-11-27T16:00:00.000Z', to: '2026-11-28T15:59:59.999Z' })
+  })
 
-  test('AC-1 / AC-2 / AC-3: Kuala Lumpur date bounds include both endpoints but exclude next midnight', async () => {
-    await withTimezone('Asia/Kuala_Lumpur', async () => {
-      let capturedQuery: Record<string, string> = {}
-      const fixture = [
-        { id: 'from', at: '2026-11-27T16:00:00.000Z' },
-        { id: 'to', at: '2026-11-28T15:59:59.999Z' },
-        { id: 'next-midnight', at: '2026-11-28T16:00:00.000Z' },
-      ]
-      const fetchMock = jest.fn((_url: string, opts?: Record<string, unknown>) => {
-        capturedQuery = (opts?.query ?? {}) as Record<string, string>
-        const from = Date.parse(capturedQuery.from)
-        const to = Date.parse(capturedQuery.to)
-        return Promise.resolve({ data: { events: fixture.filter(event => {
-          const time = Date.parse(event.at)
-          return time >= from && time <= to
-        }).map(event => ({ id: event.id, eventType: 'ticket_event', actorId: 'u', action: event.id, createdAt: event.at })) } })
-      })
-      applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
-      const { useTimelineEvents } = await import(composablePath)
-      const tl = useTimelineEvents('acme')
-      tl.fromFilter.value = '2026-11-28'
-      tl.toFilter.value = '2026-11-28'
-
-      await tl.loadEvents()
-
-      expect(capturedQuery).toEqual({ from: '2026-11-27T16:00:00.000Z', to: '2026-11-28T15:59:59.999Z' })
-      expect(tl.events.value.map(event => event.id)).toEqual(['from', 'to'])
+  test('AC-1 / AC-2 / AC-3: the selected day includes both endpoints but excludes the next midnight', async () => {
+    const { buildTimelineQuery } = await import(timelineQueryPath)
+    // Bounds of the selected day as this host's zone measures it, so the fixture sits exactly on both edges whatever
+    // timezone the suite runs in. The exact Kuala Lumpur numbers are pinned by the child-process test above.
+    const { from: expectedFrom = '', to: expectedTo = '' }
+      = buildTimelineQuery({ from: '2026-11-28', to: '2026-11-28' })
+    const fixture = [
+      { id: 'before-from', at: new Date(Date.parse(expectedFrom) - 1).toISOString() },
+      { id: 'from', at: expectedFrom },
+      { id: 'to', at: expectedTo },
+      { id: 'next-midnight', at: new Date(Date.parse(expectedTo) + 1).toISOString() },
+    ]
+    let capturedQuery: Record<string, string> = {}
+    const fetchMock = jest.fn((_url: string, opts?: Record<string, unknown>) => {
+      capturedQuery = (opts?.query ?? {}) as Record<string, string>
+      const from = Date.parse(capturedQuery.from)
+      const to = Date.parse(capturedQuery.to)
+      return Promise.resolve({ data: { events: fixture.filter(event => {
+        const time = Date.parse(event.at)
+        return time >= from && time <= to
+      }).map(event => ({ id: event.id, eventType: 'ticket_event', actorId: 'u', action: event.id, createdAt: event.at })) } })
     })
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-11-28'
+    tl.toFilter.value = '2026-11-28'
+
+    await tl.loadEvents()
+
+    expect(capturedQuery).toEqual({ from: expectedFrom, to: expectedTo })
+    expect(tl.events.value.map(event => event.id)).toEqual(['from', 'to'])
   })
 
   test.each([
