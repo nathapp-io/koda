@@ -114,6 +114,100 @@ describe('AC5: useTimelineEvents error path', () => {
 // AC6/AC7 — filters populate query.eventTypes / from / to
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('US-008 local calendar date bounds', () => {
+  beforeEach(resetGlobals)
+
+  async function withTimezone<T>(timezone: string, run: () => Promise<T> | T): Promise<T> {
+    const previous = process.env.TZ
+    process.env.TZ = timezone
+    try {
+      return await run()
+    }
+    finally {
+      if (previous === undefined) delete process.env.TZ
+      else process.env.TZ = previous
+    }
+  }
+
+  test('AC-1 / AC-2 / AC-3: Kuala Lumpur date bounds include both endpoints but exclude next midnight', async () => {
+    await withTimezone('Asia/Kuala_Lumpur', async () => {
+      let capturedQuery: Record<string, string> = {}
+      const fixture = [
+        { id: 'from', at: '2026-11-27T16:00:00.000Z' },
+        { id: 'to', at: '2026-11-28T15:59:59.999Z' },
+        { id: 'next-midnight', at: '2026-11-28T16:00:00.000Z' },
+      ]
+      const fetchMock = jest.fn((_url: string, opts?: Record<string, unknown>) => {
+        capturedQuery = (opts?.query ?? {}) as Record<string, string>
+        const from = Date.parse(capturedQuery.from)
+        const to = Date.parse(capturedQuery.to)
+        return Promise.resolve({ data: { events: fixture.filter(event => {
+          const time = Date.parse(event.at)
+          return time >= from && time <= to
+        }).map(event => ({ id: event.id, eventType: 'ticket_event', actorId: 'u', action: event.id, createdAt: event.at })) } })
+      })
+      applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+      const { useTimelineEvents } = await import(composablePath)
+      const tl = useTimelineEvents('acme')
+      tl.fromFilter.value = '2026-11-28'
+      tl.toFilter.value = '2026-11-28'
+
+      await tl.loadEvents()
+
+      expect(capturedQuery).toEqual({ from: '2026-11-27T16:00:00.000Z', to: '2026-11-28T15:59:59.999Z' })
+      expect(tl.events.value.map(event => event.id)).toEqual(['from', 'to'])
+    })
+  })
+
+  test.each([
+    ['America/New_York', '2026-03-08', 23],
+    ['America/New_York', '2026-11-01', 25],
+  ])('AC-4 / AC-5: %s %s local day spans %i hours', async (timezone, date, hours) => {
+    await withTimezone(timezone, async () => {
+      const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
+      applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+      const { useTimelineEvents } = await import(composablePath)
+      const tl = useTimelineEvents('acme')
+      tl.fromFilter.value = date
+      tl.toFilter.value = date
+      await tl.loadEvents()
+
+      const [, opts] = fetchMock.mock.calls[0]
+      const query = (opts as { query: Record<string, string> }).query
+      const start = Date.parse(query.from)
+      const exclusiveNextMidnight = Date.parse(query.to) + 1
+      expect((exclusiveNextMidnight - start) / 3_600_000).toBe(hours)
+    })
+  })
+
+  test('AC-6 / AC-7: single-sided dates omit the unselected bound', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-01-01'
+    await tl.loadEvents()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query).toEqual({ from: expect.any(String) })
+    tl.fromFilter.value = ''
+    tl.toFilter.value = '2026-01-01'
+    await tl.loadEvents()
+    expect((fetchMock.mock.calls[1][1] as { query: Record<string, string> }).query).toEqual({ to: expect.any(String) })
+  })
+
+  test('AC-8: explicit timestamps pass through unchanged', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-01-01T12:34:56.789Z'
+    tl.toFilter.value = '2026-01-02T00:00:00+03:00'
+    await tl.loadEvents()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query).toEqual({
+      from: '2026-01-01T12:34:56.789Z', to: '2026-01-02T00:00:00+03:00',
+    })
+  })
+})
+
 describe('AC6/AC7: filter inputs populate the timeline query', () => {
   beforeEach(resetGlobals)
 
@@ -135,8 +229,8 @@ describe('AC6/AC7: filter inputs populate the timeline query', () => {
     const query = (opts as { query?: Record<string, string> }).query
     expect(query).toEqual({
       eventTypes: 'ticket_event',
-      from: '2026-01-01',
-      to: '2026-01-31',
+      from: expect.stringMatching(/Z$/),
+      to: expect.stringMatching(/Z$/),
     })
   })
 
@@ -163,7 +257,7 @@ describe('AC6/AC7: filter inputs populate the timeline query', () => {
 describe('AC8: cursor pagination', () => {
   beforeEach(resetGlobals)
 
-  test('loadMore sends cursor and appends events to existing list', async () => {
+  test('AC-9: loadMore preserves filtered bounds, sends cursor, and appends events', async () => {
     const firstPage = {
       data: {
         events: [
@@ -187,6 +281,8 @@ describe('AC8: cursor pagination', () => {
 
     const { useTimelineEvents } = await import(composablePath)
     const tl = useTimelineEvents('acme')
+    tl.fromFilter.value = '2026-01-01'
+    tl.toFilter.value = '2026-01-31'
 
     await tl.loadEvents()
     expect(tl.events.value).toHaveLength(1)
@@ -198,10 +294,12 @@ describe('AC8: cursor pagination', () => {
 
     const [, page2Opts] = fetchMock.mock.calls[1]
     const page2Query = (page2Opts as { query?: Record<string, string> }).query
-    expect(page2Query).toEqual({ cursor: 'cursor-1' })
+    const [, page1Opts] = fetchMock.mock.calls[0]
+    const page1Query = (page1Opts as { query?: Record<string, string> }).query
+    expect(page2Query).toEqual({ ...page1Query, cursor: 'cursor-1' })
   })
 
-  test('applyFilters resets the cursor before re-fetching', async () => {
+  test('AC-10: applyFilters clears the prior cursor before re-fetching', async () => {
     const fetchMock = jest.fn()
       .mockResolvedValueOnce({
         data: { events: [{ id: 'e1', eventType: 't', actorId: 'u', action: 'a', createdAt: 'now' }], nextCursor: 'cursor-x' },
