@@ -15,7 +15,7 @@ import { Requires } from '../../permissions/requires.decorator';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
 import { createLiveStream } from '../../live/live-stream';
-import { socketHasBacklog } from '../../live/socket-backlog';
+import { destroyRequestSocket, socketHasBacklog } from '../../live/socket-backlog';
 import { LiveStreamRegistry } from '../../live/live-stream-registry';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../live/thread-event-bus';
 
@@ -100,6 +100,7 @@ export class ThreadEventsController {
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,
       isStalled: socketHasBacklog(req),
+      onStalled: () => destroyRequestSocket(req),
       subscribe: (id, listener) => this.bus.subscribe(id, listener),
       stillAllowed: async () => {
         const fresh = await this.jwtAuth.getPrincipal(jwtPayload);

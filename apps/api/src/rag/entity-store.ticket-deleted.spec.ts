@@ -102,4 +102,66 @@ describe('EntityStore ticket deletion', () => {
     expect(repository.findTicketById).not.toHaveBeenCalled();
     expect(store.getAllEntities('p1').map(entity => entity.id)).toEqual(['t2']);
   });
+
+  /**
+   * Review B2: the outbox re-delivers a whole event after a handler failure, so an update queued before the deletion
+   * can be handled after it. The repository excludes soft-deleted tickets, so that retry answers nothing to index.
+   */
+  it('B2: a retried update after the deletion adds no entity back', async () => {
+    const repository = { findTicketById: vi.fn().mockResolvedValue(null) };
+    const store = new EntityStore(repository as never);
+    store.indexEntity('p1', ticket('t1', 'Login bug'));
+
+    await store.handleOutboxEvent({
+      eventType: 'ticket_event',
+      payload: { action: 'TICKET_DELETED', ticketId: 't1', projectId: 'p1' },
+    });
+    await store.handleOutboxEvent({
+      eventType: 'ticket_event',
+      payload: { action: 'TICKET_UPDATED', ticketId: 't1', projectId: 'p1' },
+    });
+
+    expect(repository.findTicketById).toHaveBeenCalledWith('t1');
+    expect(store.getAllEntities('p1')).toEqual([]);
+  });
+
+  /** Review B2: a reread already in flight when the deletion lands must not put the row it read back. */
+  it('B2: a reread that answers after the deletion is discarded', async () => {
+    let answer: (ticket: { id: string; title: string }) => void = () => undefined;
+    const repository = {
+      findTicketById: vi.fn(() => new Promise<{ id: string; title: string }>((resolve) => { answer = resolve; })),
+    };
+    const store = new EntityStore(repository as never);
+    store.indexEntity('p1', ticket('t1', 'Login bug'));
+
+    const update = store.handleOutboxEvent({
+      eventType: 'ticket_event',
+      payload: { action: 'TICKET_UPDATED', ticketId: 't1', projectId: 'p1' },
+    });
+    await store.handleOutboxEvent({
+      eventType: 'ticket_event',
+      payload: { action: 'TICKET_DELETED', ticketId: 't1', projectId: 'p1' },
+    });
+    expect(store.getAllEntities('p1')).toEqual([]);
+
+    answer({ id: 't1', title: 'Login bug' });
+    await update;
+
+    expect(store.getAllEntities('p1')).toEqual([]);
+  });
+
+  /** Review B2: the fence is per project, so a deletion in one project does not drop another project's reread. */
+  it('B2: a deletion in one project does not discard the same ticket id in another', async () => {
+    const repository = { findTicketById: vi.fn().mockResolvedValue({ id: 't1', title: 'Login bug' }) };
+    const store = new EntityStore(repository as never);
+
+    const reread = store.handleOutboxEvent({
+      eventType: 'ticket_event',
+      payload: { action: 'TICKET_UPDATED', ticketId: 't1', projectId: 'p2' },
+    });
+    store.removeEntity('p1', 't1');
+    await reread;
+
+    expect(store.getAllEntities('p2').map(entity => entity.id)).toEqual(['t1']);
+  });
 });

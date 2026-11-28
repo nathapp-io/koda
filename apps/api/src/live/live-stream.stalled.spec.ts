@@ -1,5 +1,8 @@
 import type { MessageEvent } from '@nestjs/common';
 import type { Observable } from 'rxjs';
+import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
+import { RouterResponseController } from '@nestjs/core/router/router-response-controller';
 import { createLiveStream, type LiveStreamOptions } from './live-stream';
 import type { LiveEvent } from './live-event';
 import { LiveController } from './live.controller';
@@ -33,6 +36,31 @@ function streamOptions(overrides: Partial<LiveStreamOptions> = {}): LiveStreamOp
     subscribe: vi.fn(() => vi.fn()), stillAllowed: vi.fn().mockResolvedValue(true), onClose: vi.fn(),
     ...overrides,
   };
+}
+
+/** A client socket that stopped reading: it reports unsent bytes and drops the connection when destroyed. */
+class StalledSocket extends EventEmitter {
+  writableLength = 5;
+  destroyed = false;
+  setKeepAlive(): void {}
+  setNoDelay(): void {}
+  setTimeout(): void {}
+  override destroy(): void {
+    this.destroyed = true;
+    this.emit('close');
+  }
+}
+
+/** A response that never drains: every write stays pending, as one to a client that stopped reading does. */
+class StalledResponse extends Writable {
+  statusCode = 200;
+  writeHead(): this {
+    return this;
+  }
+  flushHeaders(): void {}
+  override _write(): void {
+    // Never calls back: the socket's send buffer stays full.
+  }
 }
 
 describe('createLiveStream stalled-client handling', () => {
@@ -135,5 +163,31 @@ describe('SSE controller stalled-client wiring', () => {
     const controller = new WorkspaceThreadEventsController(new ThreadEventBus(), streams, { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
     const req = { workspaceThreadEvents: { jwtPayload: { sub: 'u1', exp: 1_800_000_000 } }, raw: { socket: { writableLength: 5 } } };
     await completesAfterTwoHeartbeats(() => controller.events('t1', principal, req));
+  });
+});
+
+/**
+ * Review B1: completing the producer is not enough. Nest's SSE pipeline (`concatMap` over one write per event) waits
+ * for the writes already queued for a client that is not draining, so the queue and the connection survive the
+ * stream's completion. Driven through the installed `RouterResponseController` with a writable that never drains.
+ */
+describe('stalled SSE teardown through Nest response handling', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('B1: the connection is dropped and the response settles instead of retaining queued events', async () => {
+    const access = { findProjectIdBySlug: vi.fn().mockResolvedValue('p1'), assertProjectMembership: vi.fn().mockResolvedValue(undefined) };
+    const controller = new LiveController(access as unknown as ProjectAccessService, new ProjectEventBus(), new LiveStreamRegistry(), { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
+    const socket = new StalledSocket();
+    const req = { headers: { authorization: bearer }, raw: { socket } };
+    const response = new StalledResponse();
+    const router = new RouterResponseController({} as never);
+
+    const served = router.sse(controller.events('p1', principal as KodaPrincipal, req), response, req as never, {});
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(socket.destroyed).toBe(true);
+    await expect(served).resolves.toBeUndefined();
+    expect(response.writableEnded).toBe(true);
   });
 });

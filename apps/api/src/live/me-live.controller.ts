@@ -10,7 +10,7 @@ import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal
 import { ILiveConfig, LIVE_CFG } from '../config/live.config';
 import { decodeJwtPayload, tokenExpiryMs } from './jwt-payload';
 import { createLiveStream } from './live-stream';
-import { socketHasBacklog } from './socket-backlog';
+import { destroyRequestSocket, socketHasBacklog } from './socket-backlog';
 import { LiveStreamRegistry } from './live-stream-registry';
 import { UserEventBus, UserLiveEvent } from './user-event-bus';
 import { Requires } from '../permissions/requires.decorator';
@@ -46,6 +46,7 @@ export class MeLiveController {
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,
       isStalled: socketHasBacklog(req),
+      onStalled: () => destroyRequestSocket(req),
       subscribe: (userId, listener) => this.bus.subscribe(userId, listener),
       stillAllowed: async () => !(await this.jwtAuth.getPrincipal(jwtPayload)).revoked,
       onClose: () => this.streams.release(principal.id),

@@ -200,9 +200,14 @@ export class PrismaRagRepository implements IRagRepository {
     }, { isolationLevel: 'RepeatableRead', timeout: GRAPH_TX_TIMEOUT_MS });
   }
 
+  /**
+   * Review B2: a soft-deleted ticket has no entity. Filtering here is what stops a delayed or retried ticket event
+   * (the outbox re-delivers a whole event after a handler failure) from indexing a ticket that was deleted after it
+   * was queued.
+   */
   async findTicketById(ticketId: string): Promise<RagTicketRecord | null> {
-    return this.prisma.client.ticket.findUnique({
-      where: { id: ticketId },
+    return this.prisma.client.ticket.findFirst({
+      where: { id: ticketId, deletedAt: null },
       select: { id: true, title: true },
     });
   }

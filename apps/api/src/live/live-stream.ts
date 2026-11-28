@@ -20,6 +20,11 @@ export interface LiveStreamOptions<E extends LiveStreamEvent = LiveEvent> {
   stillAllowed: () => Promise<boolean>;
   onClose: () => void;
   isStalled?: () => boolean;
+  /**
+   * Called right before a stalled stream completes: the caller drops the client's connection, because completing
+   * the producer alone leaves Nest holding the events it already queued for a client that is not reading.
+   */
+  onStalled?: () => void;
 }
 
 /**
@@ -53,6 +58,9 @@ export function createLiveStream<E extends LiveStreamEvent = LiveEvent>(options:
         if (options.isStalled()) consecutiveStalledTicks += 1;
         else consecutiveStalledTicks = 0;
         if (consecutiveStalledTicks >= 2) {
+          // Completing alone is not enough: Nest's write pipeline still waits for the events already queued for a
+          // client that is not draining. The caller drops the connection, which discards that queue (review B1).
+          options.onStalled?.();
           finish();
           return;
         }

@@ -60,3 +60,28 @@ test('AC-14: an empty file resolves true and never calls onLine', async () => {
   expect(resolved).toBe(true);
   expect(seen).toEqual([]);
 });
+
+/** Review B3: only the file read may answer "it does not exist"; a callback failure is the caller's own error. */
+test('B3: an ENOENT thrown by onLine rejects with that error instead of resolving false', async () => {
+  const path = await fileWith('scan-callback-enoent', 'a\nb\n');
+  const failure = Object.assign(new Error('callback exploded'), { code: 'ENOENT' });
+  let caught: unknown;
+  try {
+    await scanLines(path, () => { throw failure; });
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBe(failure);
+});
+
+test('B3: a callback failure on the last line without a terminator is not swallowed', async () => {
+  const path = await fileWith('scan-callback-last-line', 'a\nb');
+  const failure = new Error('callback exploded');
+  let caught: unknown;
+  try {
+    await scanLines(path, (line) => { if (line === 'b') throw failure; });
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBe(failure);
+});
