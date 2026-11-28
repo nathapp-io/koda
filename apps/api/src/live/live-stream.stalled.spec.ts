@@ -119,50 +119,73 @@ describe('createLiveStream stalled-client handling', () => {
   });
 });
 
-describe('SSE controller stalled-client wiring', () => {
-  beforeEach(() => vi.useFakeTimers());
+describe.each([
+  { source: 'socket', socketBytes: 5, responseBytes: 0 },
+  // Bun buffers on the response only: omitting reply.raw must break every route's case.
+  { source: 'response (Bun)', socketBytes: 0, responseBytes: 5 },
+])('SSE controller stalled-client wiring: $source backlog', ({ socketBytes, responseBytes }) => {
+  let streams: LiveStreamRegistry;
+  let socket: { writableLength: number; destroy: ReturnType<typeof vi.fn> };
+  let reply: { raw: { writableLength: number } };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    streams = new LiveStreamRegistry();
+    socket = { writableLength: socketBytes, destroy: vi.fn() };
+    reply = { raw: { writableLength: responseBytes } };
+  });
   afterEach(() => vi.useRealTimers());
 
   async function completesAfterTwoHeartbeats(makeStream: () => Promise<Observable<MessageEvent>>) {
     const stream = await makeStream();
     const observed = observe(stream);
-    await vi.advanceTimersByTimeAsync(20);
-    expect(observed.completed()).toBe(true);
-    observed.unsubscribe();
+    try {
+      expect(streams.activeFor(principal.id)).toBe(1);
+      await vi.advanceTimersByTimeAsync(cfg.heartbeatMs);
+      expect(observed.completed()).toBe(false);
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(streams.activeFor(principal.id)).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(cfg.heartbeatMs);
+      expect(observed.completed()).toBe(true);
+      expect(socket.destroy).toHaveBeenCalledTimes(1);
+      expect(streams.activeFor(principal.id)).toBe(0);
+    } finally {
+      observed.unsubscribe();
+    }
   }
 
-  it('AC-10: LiveController.events closes for a socket with persistent backlog', async () => {
+  it('AC-10: LiveController.events closes for persistent backlog', async () => {
     const access = { findProjectIdBySlug: vi.fn().mockResolvedValue('p1'), assertProjectMembership: vi.fn().mockResolvedValue(undefined) };
-    const controller = new LiveController(access as unknown as ProjectAccessService, new ProjectEventBus(), new LiveStreamRegistry(), { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
-    const req = { headers: { authorization: bearer }, raw: { socket: { writableLength: 5 } } };
-    await completesAfterTwoHeartbeats(() => controller.events('p1', principal as KodaPrincipal, req));
+    const controller = new LiveController(access as unknown as ProjectAccessService, new ProjectEventBus(), streams, { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
+    const req = { headers: { authorization: bearer }, raw: { socket } };
+    await completesAfterTwoHeartbeats(() => controller.events('p1', principal as KodaPrincipal, req, reply));
   });
 
-  it('AC-11: MeLiveController.events closes for a socket with persistent backlog', async () => {
-    const controller = new MeLiveController(new UserEventBus(), new LiveStreamRegistry(), { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
-    const req = { headers: { authorization: bearer }, raw: { socket: { writableLength: 5 } } };
-    await completesAfterTwoHeartbeats(() => controller.events(principal, req));
+  it('AC-11: MeLiveController.events closes for persistent backlog', async () => {
+    const controller = new MeLiveController(new UserEventBus(), streams, { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
+    const req = { headers: { authorization: bearer }, raw: { socket } };
+    await completesAfterTwoHeartbeats(() => controller.events(principal, req, reply));
   });
 
-  it('AC-12: ThreadEventsController.events closes for a socket with persistent backlog', async () => {
-    const streams = new LiveStreamRegistry();
-    streams.tryAcquire('u1', 5);
+  it('AC-12: ThreadEventsController.events closes for persistent backlog', async () => {
+    streams.tryAcquire(principal.id, cfg.maxStreamsPerUser);
     const controller = new ThreadEventsController(
       { assertProjectMembership: vi.fn().mockResolvedValue(undefined) } as unknown as ProjectAccessService,
       new ThreadEventBus(), streams,
       { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider,
       cfg, { can: vi.fn().mockResolvedValue({ allowed: true }) } as unknown as PermissionService,
     );
-    const req = { threadEvents: { projectId: 'p1', jwtPayload: { sub: 'u1', exp: 1_800_000_000 } }, raw: { socket: { writableLength: 5 } } };
-    await completesAfterTwoHeartbeats(() => controller.events('t1', principal, req));
+    const req = { params: { slug: 'p1', id: 't1' }, threadEvents: { projectId: 'p1', jwtPayload: { sub: 'u1', exp: 1_800_000_000 } }, raw: { socket } };
+    await completesAfterTwoHeartbeats(() => controller.events('t1', principal, req, reply));
   });
 
-  it('AC-13: WorkspaceThreadEventsController.events closes for a socket with persistent backlog', async () => {
-    const streams = new LiveStreamRegistry();
-    streams.tryAcquire('u1', 5);
+  it('AC-13: WorkspaceThreadEventsController.events closes for persistent backlog', async () => {
+    streams.tryAcquire(principal.id, cfg.maxStreamsPerUser);
     const controller = new WorkspaceThreadEventsController(new ThreadEventBus(), streams, { getPrincipal: vi.fn().mockResolvedValue({ revoked: false }) } as unknown as JwtAuthProvider, cfg);
-    const req = { workspaceThreadEvents: { jwtPayload: { sub: 'u1', exp: 1_800_000_000 } }, raw: { socket: { writableLength: 5 } } };
-    await completesAfterTwoHeartbeats(() => controller.events('t1', principal, req));
+    const req = { params: { id: 't1' }, workspaceThreadEvents: { jwtPayload: { sub: 'u1', exp: 1_800_000_000 } }, raw: { socket } };
+    await completesAfterTwoHeartbeats(() => controller.events('t1', principal, req, reply));
   });
 });
 
