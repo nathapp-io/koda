@@ -22,7 +22,7 @@
     },
     "apps/api": {
       "name": "@nathapp/koda-api",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "dependencies": {
         "@casl/ability": "^6.8.1",
         "@fastify/helmet": "^13.0.0",
@@ -94,7 +94,7 @@
     },
     "apps/cli": {
       "name": "@nathapp/koda-cli",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "bin": {
         "koda": "./dist/index.js",
       },
@@ -129,7 +129,7 @@
     },
     "apps/web": {
       "name": "@nathapp/koda-web",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "dependencies": {
         "@nathapp/fleet-protocol": "workspace:*",
         "@nuxtjs/color-mode": "^4.0.1",
