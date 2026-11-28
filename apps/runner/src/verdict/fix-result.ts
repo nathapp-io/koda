@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
-import { open, readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { scanLines } from './scan-lines';
 
 export interface FixResult {
   readonly kind: 'pushed' | 'nothing' | 'none';
@@ -30,27 +31,20 @@ const SHA = /^[0-9a-f]{40}$/;
 
 /** Reads only line-start markers and accepts a result for the assigned PR. */
 export async function readFixResult(stdoutPath: string, prNumber: number): Promise<FixResult> {
-  let stdout: string;
-  try {
-    stdout = await readFile(stdoutPath, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'none', logPath: null };
-    throw error;
-  }
-
   let kind: FixResult['kind'] = 'none';
   let logPath: string | null = null;
-  for (const line of stdout.split(/\r?\n/)) {
+  const prefix = `nax bot fix: PR #${prNumber} — `;
+  // US-006: the file is scanned, not read: neither the first marker nor the last result line needs the whole log.
+  await scanLines(stdoutPath, (line) => {
     if (logPath === null && line.startsWith(LOG_MARKER)) {
       const path = line.slice(LOG_MARKER.length).trim();
       if (path !== '') logPath = path;
     }
-    const prefix = `nax bot fix: PR #${prNumber} — `;
-    if (!line.startsWith(prefix)) continue;
+    if (!line.startsWith(prefix)) return;
     const result = line.slice(prefix.length);
     if (result.startsWith('pushed ')) kind = 'pushed';
     else if (result.startsWith('nothing to fix')) kind = 'nothing';
-  }
+  });
   return { kind, logPath };
 }
 
