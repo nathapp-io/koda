@@ -3,7 +3,7 @@
   "feature": "review-1128-memory-hardening",
   "branchName": "feat/review-1128-memory-hardening",
   "createdAt": "2026-11-28T10:23:44.761Z",
-  "updatedAt": "2026-11-28T11:11:01.893Z",
+  "updatedAt": "2026-11-28T11:25:47.526Z",
   "userStories": [
     {
       "id": "US-001",
@@ -273,14 +273,17 @@
         "outbox"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "One production-file additive map deletion and event branch, with existing fan-out registration reused unchanged and straightforward database-free assertions."
+        "reasoning": "One production-file additive map deletion and event branch, with existing fan-out registration reused unchanged and straightforward database-free assertions.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/rag/entity-store.ts",
@@ -297,7 +300,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1927b4c17aba54b2f8488ab9287ba185acee609c"
     },
     {
       "id": "US-006",
