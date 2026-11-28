@@ -3,7 +3,7 @@
   "feature": "review-1128-memory-hardening",
   "branchName": "feat/review-1128-memory-hardening",
   "createdAt": "2026-11-28T10:23:44.761Z",
-  "updatedAt": "2026-11-28T11:05:28.228Z",
+  "updatedAt": "2026-11-28T11:11:01.893Z",
   "userStories": [
     {
       "id": "US-001",
@@ -221,14 +221,17 @@
         "credentials"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Only factory.ts changes at runtime: export the existing function, add an optional timeout and two standard fetch options while retaining httpError; strict security TDD is mandatory because redirect handling protects provider tokens."
+        "reasoning": "Only factory.ts changes at runtime: export the existing function, add an optional timeout and two standard fetch options while retaining httpError; strict security TDD is mandatory because redirect handling protects provider tokens.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/vcs/factory.ts",
@@ -246,7 +249,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6890c5c8aece3885f1ad5a60f0ced859d677a6dc"
     },
     {
       "id": "US-005",
