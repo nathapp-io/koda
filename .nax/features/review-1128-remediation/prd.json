@@ -1,0 +1,650 @@
+{
+  "project": "koda",
+  "feature": "review-1128-remediation",
+  "branchName": "feat/review-1128-remediation",
+  "createdAt": "2026-11-28T04:12:55.840Z",
+  "updatedAt": "2026-11-28T04:12:55.840Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Index TypeScript calls and callable variables",
+      "description": "**Goal** — Restore call relationships and variable-bound callable symbols during TypeScript indexing, correcting findings 6 and 7.\n\n**Motivation** — The PostgreSQL controls reproduced missing code relationships, symbol loss, a missed ticket transition and inconsistent API responses.\n\n**Approach** — CodeGraphService currently selects a numeric syntax kind and requests JSDoc from a variable declaration. Traverse call-expression nodes by named kind. Read callable bodies and parameters from the initializer and documentation from its owning variable statement. Keep batch isolation and the existing name resolver.\n\n**Scope** — In: extend code-graph.service.ts and the existing code-graph.service.spec.ts, code-graph.batch.spec.ts and test/e2e/ast-index.e2e.spec.ts; preserve lazy compiler loading, valid-file isolation and existing deduplication/self-edge behavior. Exercise public graph routes together with PostgreSQL state, including reindexing previously stored symbols. Replace the deliberately expected arrow exception with successful extraction. Out: live PR transitions and ticket response mapping belong to US-002/US-003. Adding semantic TypeScript resolution, historical reindex migrations or new graph endpoints.\n\n**Interface** — No new interface declaration is specified. Preserve parseSourceFile, extractSymbols, extractBatch and resolveRelationships and the existing callers/callees HTTP routes; return the same symbol shapes, now populated from real calls and callable initializers.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] When a file containing main calling helper twice is indexed, then the callers HTTP read for helper returns main exactly once.",
+        "AC-1b [integration] When that file is indexed, then the callees HTTP read for main returns helper exactly once.",
+        "AC-1c [integration] When main references helper without calling it, then indexing adds no main-to-helper edge.",
+        "AC-2a [unit] When a direct method call is extracted and resolved, then its target resolves by the existing method-name rule.",
+        "AC-2b [unit] When a callable calls itself, then relationship resolution produces no self edge.",
+        "AC-3a [integration] Given an indexed file containing two declarations, when it is reindexed with a new documented top-level arrow, then all three symbols are durably queryable.",
+        "AC-3b [integration] When the two-declaration file is reindexed with the valid documented top-level arrow, then its indexing result has no file error.",
+        "AC-3c [integration] When one sibling file has a syntax error, then a valid sibling still indexes.",
+        "AC-4a [unit] When arrow-function and function-expression variables are extracted through either single-file or batch extraction, then each symbol has its binding name and callable signature.",
+        "AC-4b [unit] When a documented callable binding is extracted through either path, then its docComment retains the JSDoc text.",
+        "AC-4c [unit] When an undocumented callable binding is extracted through either path, then it has no docComment.",
+        "AC-4d [unit] When helper is called inside either an arrow or function-expression initializer, then relationship resolution resolves that call to the helper symbol."
+      ],
+      "tags": [
+        "review-remediation",
+        "api",
+        "code-intelligence",
+        "findings-6-7"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized ts-morph extraction fixes use existing symbol and resolver contracts; extend unit/batch and PostgreSQL HTTP regressions without introducing a new architecture."
+      },
+      "contextFiles": [
+        "apps/api/src/code-intel/code-graph.service.ts",
+        "apps/api/src/code-intel/code-graph.service.spec.ts",
+        "apps/api/src/code-intel/code-graph.batch.spec.ts",
+        "apps/api/test/e2e/ast-index.e2e.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/code-intel/code-graph.service.ts",
+          "reason": "Extract calls and variable-bound functions."
+        },
+        {
+          "path": "apps/api/src/code-intel/code-graph.service.spec.ts",
+          "reason": "Replace the expected arrow exception with successful extraction assertions."
+        },
+        {
+          "path": "apps/api/src/code-intel/code-graph.batch.spec.ts",
+          "reason": "Pin isolation of genuinely malformed siblings and equality for valid arrow extraction."
+        },
+        {
+          "path": "apps/api/test/e2e/ast-index.e2e.spec.ts",
+          "reason": "Verify durable symbols and both HTTP graph reads."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Apply polled merges to the live ticket",
+      "description": "**Goal** — Base merged-PR auto-transition eligibility on the live ticket rather than the candidate snapshot, correcting finding 8.\n\n**Motivation** — The PostgreSQL controls reproduced missing code relationships, symbol loss, a missed ticket transition and inconsistent API responses.\n\n**Approach** — VcsPrSyncService checks a status captured during candidate selection. Delegate eligibility at merge time to the existing conditional transition in applyMergedPrTransition. Preserve the transaction that records the winning status change, FIX_REPORT, VCS_PR_MERGED activity and audit entry.\n\n**Scope** — In: remove the stale status rejection in vcs-pr-sync.service.ts while retaining missing-ticket handling, conditional winning merge application, system-writer context and isolated versus strict failure behavior. Extend vcs-pr-sync.service.spec.ts, test/integration/vcs/vcs-pr-sync-auto-transition.spec.ts and test/integration/vcs/vcs-merge-step.integration.spec.ts. Exercise candidate selection, HTTP start, synthetic provider result, real merge application and persisted reads in that order; exercise polling and webhook delivery through their shared merge step. The existing auto-transition integration-named file uses mocks today; add real database behavior rather than relying on mock call counts. Out: response canonicalization belongs to US-003; thread-close and runner retention behavior belong to US-005/US-004.\n\n**Interface** — No new interface declaration is specified. Preserve applyMergedPr's existing link-write result and applyMergedPrTransition's boolean transition outcome. The latter's existing conditional update admits only a non-deleted IN_PROGRESS ticket; retain the existing transaction/audit boundary rather than adding a second transition implementation.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] Given an open PR selected while its ticket is VERIFIED, when the ticket starts through HTTP before the merged provider result is processed and applied, then the persisted link reads merged.",
+        "AC-1b [integration] Given that same selection-then-HTTP-start-then-merged-result ordering, when merge application completes, then the ticket read reports VERIFY_FIX.",
+        "AC-1c [integration] Given that same selection-then-HTTP-start-then-merged-result ordering, when merge application completes, then the ticket has exactly one FIX_REPORT.",
+        "AC-2a [integration] When a ticket leaves IN_PROGRESS before merge application, then it receives zero merge reports.",
+        "AC-2b [integration] When a ticket leaves IN_PROGRESS before merge application, then application retains its live status.",
+        "AC-2c [integration] When a linked ticket has been soft-deleted before merge application, then it receives zero merge reports.",
+        "AC-3a [integration] When the same merge is delivered through polling and webhook handling, then the eligible ticket advances exactly once.",
+        "AC-3b [integration] When the same merge is delivered through polling and webhook handling, then exactly one VCS_PR_MERGED activity is persisted for the ticket.",
+        "AC-3c [integration] When the same merge is delivered through polling and webhook handling, then exactly one FIX_REPORT is persisted for the ticket.",
+        "AC-3d [integration] When the same merge is delivered through polling and webhook handling, then exactly one system.vcs.pr-merge-transition ticket-transition audit entry is persisted."
+      ],
+      "tags": [
+        "review-remediation",
+        "api",
+        "vcs",
+        "transactions",
+        "finding-8"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Remove a stale service-level status guard and reuse the existing conditional repository transaction and shared merge step; extend existing unit and PostgreSQL ordering/replay fixtures without introducing new concurrency machinery."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-pr-sync.service.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts",
+        "apps/api/src/vcs/vcs-pr-sync.service.spec.ts",
+        "apps/api/test/integration/vcs/vcs-pr-sync-auto-transition.spec.ts",
+        "apps/api/test/integration/vcs/vcs-merge-step.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-pr-sync.service.ts",
+          "reason": "Move eligibility to the live merge application."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-pr-sync.service.spec.ts",
+          "reason": "Replace stale snapshot call-count expectations."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-pr-sync-auto-transition.spec.ts",
+          "reason": "Exercise selection/start/application ordering."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-merge-step.integration.spec.ts",
+          "reason": "Verify a single durable transition under repeated delivery."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Return canonical tickets from status changes",
+      "description": "**Goal** — Return the canonical project-scoped ticket representation from status PATCH and all transition commands, including stored approval results and embedded label project IDs, correcting findings 9 and 17.\n\n**Motivation** — The PostgreSQL controls reproduced missing code relationships, symbol loss, a missed ticket transition and inconsistent API responses.\n\n**Approach** — The status PATCH and transition route commands return raw transition records. Use the project-aware response mapping used by ordinary edits, inside the command execution boundary so stored approval results also carry the mapped ticket. Carry projectId through TicketLabel.label in the domain contract and repository projection.\n\n**Scope** — In: modify tickets.service.ts, ticket-route.commands.ts, domain/ticket.domain.ts and prisma-tickets.repository.ts; extend ticket-route.commands.spec.ts and test/e2e/api-endpoint/endpoint.e2e.spec.ts. Cover all seven executions: verify, start, fix, verify-fix approve, verify-fix return, close and reject. Share existing project-key/gitRefUrl/flat-label mapping without moving it solely into HTTP serialization; both immediate execute results and approval toResult storage must be canonical. Preserve principal reloading, ticket.update companion permission rechecks, gated edge checks and denial atomicity. Exercise public writes and reads together with PostgreSQL fixtures, including labelled and unlabelled tickets. Out: live merge eligibility belongs to US-002; CLI help/deletion and web dates belong to US-007/US-008. Changing the configured verification approval policy (review item 1). Deduplicating simultaneous independent approval requests (item 2).\n\n**Interface** — No new public signature is specified. Preserve existing routes and TicketResponseDto; TicketLabel.label must carry required projectId alongside id, name and color. Restore the existing documented mutation response rather than inventing a distinct raw-transition response contract.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] Given two labelled VERIFIED tickets with project gitRemoteUrl and ticket gitRefFile, when one starts via status PATCH and the other via POST start, then each write result reports IN_PROGRESS as persisted by GET.",
+        "AC-1b [integration] Given those fixtures, when status PATCH, POST start, GET and an ordinary edit return a ticket, then each returns that ticket's project-prefixed ref consistently.",
+        "AC-1c [integration] Given those fixtures, when status PATCH, POST start, GET and an ordinary edit return a ticket, then each returns the same non-null resolved gitRefUrl for that ticket.",
+        "AC-1d [integration] Given those fixtures, when status PATCH, POST start, GET and an ordinary edit return a ticket, then each returns the same flat labels including id, projectId, name and color.",
+        "AC-1e [integration] Given the two labelled VERIFIED fixtures, when reading each ticket before its start and comparing its start mutation, subsequent GET and ordinary non-status edit responses, then status is VERIFIED before start and IN_PROGRESS in every response after start.",
+        "AC-2a [unit] Given project-scoped fixtures for verify, start, fix, verify-fix approve, verify-fix return, close and reject, when each registered command variant succeeds, then its result has the project-key-prefixed ref, resolved gitRefUrl and flat label fields of the canonical ticket response, rather than the raw transition ticket.",
+        "AC-2b [unit] When any of the seven registered transition command variants succeeds for an unlabelled ticket, then its result contains labels: [].",
+        "AC-2c [unit] When a successful result from any of the seven registered transition command variants is serialized for approval storage, then the serialized result retains that same project-key-prefixed ref, resolved gitRefUrl and flat labels, including labels: [] when unlabelled.",
+        "AC-3a [integration] When a gated transition is requested, then its initial response identifies a pending approval.",
+        "AC-3b [integration] When that gated transition is approved, then its stored result contains the same ref and label fields as GET of the ticket.",
+        "AC-3c [integration] When a gated transition is denied, then the ticket remains untouched."
+      ],
+      "tags": [
+        "review-remediation",
+        "api",
+        "tickets",
+        "approvals",
+        "security",
+        "findings-9-17"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reuse the existing ticket DTO mapper across service/command results and propagate one already-loaded label field; the changes are standard but approval execution and permission rechecks require strict security TDD isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/domain/ticket.domain.ts",
+        "apps/api/src/tickets/prisma-tickets.repository.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/tickets.service.ts",
+          "reason": "Format successful status updates like ordinary edits."
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.ts",
+          "reason": "Return mapped responses from all seven transition variants."
+        },
+        {
+          "path": "apps/api/src/tickets/domain/ticket.domain.ts",
+          "reason": "Require the project ID in the embedded label type."
+        },
+        {
+          "path": "apps/api/src/tickets/prisma-tickets.repository.ts",
+          "reason": "Preserve projectId in flat embedded labels."
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.spec.ts",
+          "reason": "Exercise each command variant and its serialized result."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "Compare persisted ticket and label fields across HTTP writes and reads."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Retain undelivered journal events",
+      "description": "**Goal** — Prevent retention pruning from deleting undelivered lease-scoped events or directories still used by retained epochs, correcting finding 3.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — Journal.prune deletes all events for done jobs past retention and returns directories for cleanup. Make eligibility conditional on absence of unacknowledged events for the exact job and lease in the same SQLite transaction. Age alone never settles delivery. The daemon removes directories returned by prune, and epochs of one job share a directory. Return a directory for cleanup only after its final retained row is gone.\n\n**Scope** — In: modify journal/journal.ts and extend journal/journal.spec.ts using real SQLite, an injected clock and a file reopened after pruning. Preserve the prune return shape, exact job/lease acknowledgement boundary, partial-ack behavior and existing applied-command retention. Deduplicate cleanup directories only after all referencing job rows have been removed; eligible leases can disappear independently while their shared directory stays protected. Out: process ownership retries belong to US-006 and rejected thread closes to US-005. Introducing a new lease reconciliation protocol or modifying the server silence sweeper.\n\n**Interface** — No new signature is specified. Keep Journal.prune(retentionDays) returning cleanup records with jobId, leaseEpoch and jobDir, and keep pendingEvents, jobsWithPending and ackThrough compatible with existing sync replay. A returned record authorizes the daemon's recursive directory deletion; omitted records must protect retained rows.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] Given seven-day retention and a done job eight days old, when prune runs with an unacknowledged terminal event, then that event is retained.",
+        "AC-1b [integration] Given that undelivered expired job, when prune runs, then its directory is omitted from cleanup results.",
+        "AC-1c [integration] When SQLite is reopened after pruning that undelivered expired job, then the terminal event is still exposed for replay.",
+        "AC-2a [integration] Given an expired done job whose events are only partially acknowledged, when prune runs, then its job row is retained.",
+        "AC-2b [integration] Given that partial acknowledgement, when prune runs, then its directory is omitted from cleanup results.",
+        "AC-2c [integration] When the last event of that expired job is acknowledged and prune runs again, then the expired job is removed.",
+        "AC-2d [integration] Given the expired job's directory has no retained referencing row, when the first prune after the final acknowledgement and subsequent prunes run, then the directory appears once in the first cleanup result and never in subsequent results.",
+        "AC-3a [integration] When prune runs, then a younger completed job survives.",
+        "AC-3b [integration] When prune runs, then an active job survives.",
+        "AC-3c [integration] Given another expired fully acknowledged lease, when prune runs, then that eligible lease is removed independently while ineligible leases remain retained.",
+        "AC-3d [integration] Given multiple epochs sharing a job directory, when at least one epoch is retained, then the shared directory is omitted from cleanup results.",
+        "AC-3e [integration] Given two expired epochs sharing a job directory, when both become eligible for removal, then prune returns the shared directory exactly once."
+      ],
+      "tags": [
+        "review-remediation",
+        "runner",
+        "sqlite",
+        "delivery",
+        "finding-3"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Existing transactional SQLite pruning needs a lease-specific delivery guard and shared-directory deduplication; real persistence and epoch fixtures exercise the change without new protocols."
+      },
+      "contextFiles": [
+        "apps/runner/src/journal/journal.ts",
+        "apps/runner/src/journal/journal.spec.ts",
+        "apps/runner/src/daemon/daemon.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/journal/journal.ts",
+          "reason": "Protect undelivered events during lease-scoped pruning."
+        },
+        {
+          "path": "apps/runner/src/journal/journal.spec.ts",
+          "reason": "Verify SQLite retention, replay and acknowledgement boundaries."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Allow retry after a rejected thread close",
+      "description": "**Goal** — Allow a ready running thread lease to accept messages and another close after an acknowledged rejected close, correcting finding 4.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — Use the same effective-close predicate for send refusal, session control, mode changes and publish in PrismaChatThreadRepository. Include unacknowledged closes explicitly because a nullable ackResult may fail a SQL inequality. Ignore acknowledged rejected closes for that job and lease. Preserve the treatment of other outcomes, locks, readiness, pending approvals and lease fencing.\n\n**Scope** — In: update all four close lookup sites in prisma-chat-thread.repository.ts with a consistent lease-scoped effective-close rule. Extend prisma-chat-thread.repository.spec.ts, test/e2e/fleet/thread-send-guards.e2e.spec.ts and test/integration/fleet/fleet-project-thread-send.integration.spec.ts. Retain current job/thread locking and authorization, reread under the locks, and exercise mixed command histories, current versus previous leases, real HTTP guards and serialized concurrent retry requests. Exclude only acknowledged rejected closes; pending NULL acknowledgements and existing non-rejected outcomes remain effective. Observe this through sends, session-command results and enqueued commands: a genuine mode change queues a replacement close after rejection but no duplicate when an effective close exists; it need not reject the mode change itself. Out: runner journal retention belongs to US-004 and orphan-process cleanup to US-006. Do not change the runner readiness protocol or implement acceptance of close during startup as a substitute.\n\n**Interface** — No new public interface is specified. Preserve repository command, send refusal, mode-change and publish contracts and existing errors; a rejected close with session_not_ready must not permanently mark a later-ready lease as closing.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] Given a RUNNING lease whose close was acknowledged rejected with session_not_ready, when that same lease becomes ready, then sending a message succeeds without a restart.",
+        "AC-1b [integration] Given that ready lease after the rejected close, when a new close is requested, then it is accepted without a restart.",
+        "AC-2a [integration] Given an earlier rejected close followed by a pending or applied close on the same lease, when a message is sent, then the existing closing response still blocks the send.",
+        "AC-2b [integration] Given an earlier rejected close followed by a pending or applied close on the same lease, when another close is requested, then the existing HTTP 409 threads.noSession refusal still blocks the duplicate close.",
+        "AC-2c [integration] Given a ready lease with only a rejected close, when two close retries run concurrently, then at most one new close command is enqueued.",
+        "AC-3a [unit] Given an otherwise send-eligible RUNNING active lease, when a send is attempted against its close history, then pending or applied closes produce threads.closing while a history containing only acknowledged rejected closes permits the send.",
+        "AC-3b [unit] Given an otherwise eligible RUNNING active session and a valid session-control request, when the request is made against its close history, then pending or applied closes produce threads.noSession while a history containing only acknowledged rejected closes permits enqueueing the requested command for that lease.",
+        "AC-3c [unit] Given an otherwise eligible idle RUNNING REPO session, when its mode genuinely changes, then the number of additional THREAD_CLOSE commands enqueued for the active lease is one if its only closes were acknowledged rejected, and zero if a pending or applied close already exists.",
+        "AC-3d [unit] Given an otherwise publish-eligible RUNNING active session, when publish is requested against its close history, then pending or applied closes produce threads.closing while a history containing only acknowledged rejected closes permits enqueueing THREAD_PUBLISH for that lease.",
+        "AC-3e [unit] Given a ready current lease and no effective close on that lease, when send, session control, a genuine mode change or publish is requested with only a previous lease's close in history, then that previous close does not refuse the request or suppress a close command required by the mode change."
+      ],
+      "tags": [
+        "review-remediation",
+        "api",
+        "fleet",
+        "sessions",
+        "security",
+        "finding-4"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Apply one effective-close predicate at four existing lookups within a single repository while retaining its current locks; session-control and authorization paths still require strict three-session TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+        "apps/api/test/e2e/fleet/thread-send-guards.e2e.spec.ts",
+        "apps/api/test/integration/fleet/fleet-project-thread-send.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+          "reason": "Apply one effective-close rule to all four lookup sites."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+          "reason": "Cover close histories with mixed acknowledgements."
+        },
+        {
+          "path": "apps/api/test/e2e/fleet/thread-send-guards.e2e.spec.ts",
+          "reason": "Exercise the guard using a ready lease after rejection."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-project-thread-send.integration.spec.ts",
+          "reason": "Verify serialized retries and subsequent message acceptance."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Retry indeterminate orphan cleanup",
+      "description": "**Goal** — Preserve process ownership after inconclusive inspection or failed signalling so a later startup pass can retry safely, correcting finding 5.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — The startup reaper forgets ownership even when inspection or signalling fails. Distinguish positive absence from an inconclusive identity probe in production as well as injected tests. Keep existing host-boot and PID guards and conditional deletion by pid and recorded timestamp. Preserve readProcessStart’s Date-or-null contract for its existing executor callers.\n\n**Scope** — In: modify daemon/owned-processes.ts and executor/pid-registry.ts and extend test/unit/owned-processes.spec.ts. Add enough production probe information to distinguish a definitively absent process from malformed ps output, launch failure or denied inspection; test the production path with controlled process-command outputs as well as injected operations. Preserve UTC timestamp parsing, registration slack, same-host identity and PID-reuse checks, group versus individual signalling and conditional ledger deletion. Reread identity on every retry. Clear protected PIDs, rows with no recorded host and rows from a confirmed different host; if current host identity is temporarily unreadable, retain known-recorded-host rows for retry, overriding the old clear-on-unknown expectation. Never touch the current daemon boot's own rows. Out: lease journal pruning belongs to US-004 and server-side session close eligibility belongs to US-005. Do not change existing executor/nax PID-reaping contracts or add session readoption.\n\n**Interface** — Preserve readProcessStart(pid) as the existing Date-or-null asynchronous API for executor callers. The richer observation seam is internal to the existing files; no new public protocol is specified. reapPreviousBootProcesses continues to return the PIDs it successfully signalled and forgets rows only by pid plus recorded timestamp when cleanup or obsolescence is established.",
+      "acceptanceCriteria": [
+        "AC-1a [unit] When process inspection fails during startup cleanup, the reaper retains the ownership row and sends no signal.",
+        "AC-1b [unit] Given a row retained after inspection failure, when a subsequent boot pass rereads matching process identity and signalling succeeds, then cleanup signals the original recorded process or group and clears that ownership row.",
+        "AC-2a [unit] When signalling is denied, then the ownership row is retained.",
+        "AC-2b [unit] Given a row retained after denied signalling, when a later identity probe shows PID reuse, then the obsolete record is cleared without signalling the reused PID.",
+        "AC-2c [unit] When a process is confirmed absent, then its ownership row is cleared.",
+        "AC-2d [unit] When signalling reports ESRCH, then its ownership row is cleared.",
+        "AC-3a [unit] When cleanup positively identifies the recorded process and signalling succeeds, then the recorded process or group is signalled exactly once.",
+        "AC-3b [unit] When cleanup encounters protected PIDs, then their earlier-boot rows are cleared without signalling.",
+        "AC-3c [unit] When cleanup encounters an entry with no recorded host identity, then the entry is cleared without signalling.",
+        "AC-3d [unit] When cleanup confirms that an entry comes from a different host boot, then the entry is cleared without signalling.",
+        "AC-3e [unit] Given a row with known recorded host identity, when the current host identity is temporarily unreadable, then the row is retained for retry without signalling.",
+        "AC-3f [unit] When previous-boot cleanup runs, then the current daemon's own rows stay untouched.",
+        "AC-4a [integration] Exercise the production probe separately with a malformed timestamp, a process-command launch failure and denied process inspection. In each case cleanup retains the ownership row and sends no signal.",
+        "AC-4b [integration] Given a definitively absent PID, when the production probe is used for cleanup, then its row is cleared without signalling."
+      ],
+      "tags": [
+        "review-remediation",
+        "runner",
+        "process-ownership",
+        "recovery",
+        "security",
+        "finding-5"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Production process observation must distinguish absence from uncertainty while protecting PID identity and ownership-authorized signalling; strict isolation is warranted for destructive process-control safety."
+      },
+      "contextFiles": [
+        "apps/runner/src/daemon/owned-processes.ts",
+        "apps/runner/src/executor/pid-registry.ts",
+        "apps/runner/test/unit/owned-processes.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/daemon/owned-processes.ts",
+          "reason": "Keep ownership rows after indeterminate cleanup."
+        },
+        {
+          "path": "apps/runner/src/executor/pid-registry.ts",
+          "reason": "Expose enough probe information to distinguish disappearance from lookup failure."
+        },
+        {
+          "path": "apps/runner/test/unit/owned-processes.spec.ts",
+          "reason": "Retry against freshly validated identity using injected process operations."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Correct CLI assignee help and label deletion output",
+      "description": "**Goal** — Describe supported assignee values accurately and emit machine-readable label deletion confirmations, correcting findings 12 and 18.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — Name the ordinary assignee argument as a user ID and document the self shorthand. Emit a JSON confirmation for a successful empty DELETE response, using the requested label ID.\n\n**Scope** — In: modify commands/ticket.ts and commands/label.ts and extend their existing Jest specs. Keep generated SDK calls, query mapping, project/auth context, finishSuccess and existing error handling unchanged. Capture generated Commander help and compare user-ID/self calls at the SDK boundary. For successful HTTP 204, print exactly the requested id and deleted:true in JSON mode without attempting to unwrap the empty body; retain the existing text sentence otherwise. Out: canonical API ticket responses belong to US-003 and release-channel selection to US-010. Do not add arbitrary-agent assignee selection. Changing JSON evaluation exit codes (item 10). Paginating `ticket mine` beyond its documented first page (item 11).\n\n**Interface** — Preserve ticket list --assigned-to request semantics and label delete --id/--json options. The success JSON contract is exactly {\"id\":\"abc\",\"deleted\":true} for --id abc; no generated client changes are required.",
+      "acceptanceCriteria": [
+        "AC-1a [cli] When ticket list --help is displayed, then --assigned-to describes a user ID or self rather than a slug.",
+        "AC-1b [cli] When ticket list --assigned-to user-123 is run, then ticketsControllerFindAll receives query.assignedTo='user-123', preserving its current user-ID request mapping.",
+        "AC-1c [cli] When ticket list --assigned-to self is run, then ticketsControllerFindAll receives query.assignedTo='self', preserving its current self-shorthand request mapping.",
+        "AC-2a [cli] Given HTTP 204, when label delete --id abc --json succeeds, then stdout parses as exactly {\"id\":\"abc\",\"deleted\":true}.",
+        "AC-2b [cli] Given HTTP 204, when label delete --id abc --json succeeds, then the command exits zero.",
+        "AC-2c [cli] Given HTTP 204, when label delete --id abc succeeds without --json, then it prints the existing text confirmation: Label 'abc' deleted.",
+        "AC-3a [cli] When label DELETE fails, then the command preserves its current handleApiError exit mapping: 404 exits 4, 401/403 exits 2, 400 exits 3 and server or unknown errors exit 1.",
+        "AC-3b [cli] When label DELETE fails, then it emits no deletion confirmation."
+      ],
+      "tags": [
+        "review-remediation",
+        "cli",
+        "output",
+        "findings-12-18"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two small command changes retain SDK and context semantics; existing Jest help, output and error fixtures provide direct behavioral checks."
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/ticket.ts",
+        "apps/cli/src/commands/ticket.spec.ts",
+        "apps/cli/src/commands/label.ts",
+        "apps/cli/src/commands/label.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/ticket.ts",
+          "reason": "Describe accepted assignee values in generated help."
+        },
+        {
+          "path": "apps/cli/src/commands/ticket.spec.ts",
+          "reason": "Check help and ordinary versus self request mappings."
+        },
+        {
+          "path": "apps/cli/src/commands/label.ts",
+          "reason": "Format a successful empty delete response according to --json."
+        },
+        {
+          "path": "apps/cli/src/commands/label.spec.ts",
+          "reason": "Check machine output, text output and failure behavior."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Filter timeline events by the browser's calendar day",
+      "description": "**Goal** — Convert date-only timeline picker inputs into inclusive local-calendar timestamp bounds at the web request boundary, correcting finding 13.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — Convert date-only picker values at the web request boundary. Encode local midnight for from and the last millisecond before the following local midnight for inclusive to. Advance one calendar date in local time. The API already compares inclusive millisecond timestamps.\n\n**Scope** — In: modify composables/useTimelineEvents.ts and extend tests/composables/useTimelineEvents.spec.ts. Use the existing buildTimelineQuery path for initial and paginated requests, preserve explicit timestamps and omitted empty bounds, and retain applyFilters cursor reset and stale-request protection. Construct local dates by calendar components, not UTC date-only parsing; advance the calendar date rather than adding a fixed 24-hour duration. Use timezone-controlled fixtures and an inclusive request-boundary fixture for both endpoints and the next-midnight negative. Out: API response mapping belongs to US-003; do not change API inclusive comparisons, page layout or backend timeline contracts.\n\n**Interface** — No new interface declaration is specified. Preserve TimelineQuery, buildTimelineQuery and useTimelineEvents; only date-only from/to values become UTC ISO instants representing the browser's local-day boundaries.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] In Asia/Kuala_Lumpur, when both picker fields select 2026-11-28, then the outgoing query sends from=2026-11-27T16:00:00.000Z and to=2026-11-28T15:59:59.999Z.",
+        "AC-1b [integration] Given an inclusive fixture queried with those bounds, when events lie at either endpoint, then both endpoints are returned.",
+        "AC-1c [integration] Given that inclusive fixture, when an event lies at the following local midnight, then it is excluded.",
+        "AC-2a [unit] In America/New_York, when the selected date is 2026-03-08, then the interval from its start through the exclusive next midnight spans 23 hours.",
+        "AC-2b [unit] In America/New_York, when the selected date is 2026-11-01, then the interval from its start through the exclusive next midnight spans 25 hours.",
+        "AC-3a [unit] When only from is selected, then the outgoing query omits to.",
+        "AC-3b [unit] When only to is selected, then the outgoing query omits from.",
+        "AC-3c [unit] When an explicit timestamp is supplied as either bound, then that timestamp passes through unchanged.",
+        "AC-3d [unit] When a filtered timeline is paginated, then the next request carries the same bounds.",
+        "AC-3e [unit] When a filter changes and is applied, then the request clears the prior cursor."
+      ],
+      "tags": [
+        "review-remediation",
+        "web",
+        "timeline",
+        "timezone",
+        "finding-13"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A localized query-builder correction uses existing Nuxt/Jest seams, with timezone, DST and pagination boundaries rather than new API logic."
+      },
+      "contextFiles": [
+        "apps/web/composables/useTimelineEvents.ts",
+        "apps/web/tests/composables/useTimelineEvents.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useTimelineEvents.ts",
+          "reason": "Convert picker dates when constructing the outgoing query."
+        },
+        {
+          "path": "apps/web/tests/composables/useTimelineEvents.spec.ts",
+          "reason": "Exercise timezone boundaries, DST and cursor reuse."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Run CI and invalidate cache for Bun patches",
+      "description": "**Goal** — Ensure tracked Bun dependency-patch changes select CI and invalidate dependent Turbo task hashes, correcting finding 14.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — Include the tracked patches directory in main push paths, the PR change classifier and Turbo globalDependencies. The global input trades broader cache invalidation for coverage of every dependent task.\n\n**Scope** — In: modify .github/workflows/ci.yml and turbo.json; extend apps/api/test/unit/tooling/ci-change-filter.spec.ts. Discover both tracked patches through package.json patchedDependencies, execute the actual PR filter against isolated Git histories and compare main push-path selection using the real configured patterns. Use a disposable checkout and real Turbo dry runs for the runner test task hash; modify only patch contents and restore them. Preserve NUL-delimited Git paths, required PR check behavior and existing path parity. Out: canary publication gating belongs to US-010 and exported deployment credentials to US-011. Do not upgrade dependencies or narrow the requested global cache input to runner-only tasks.\n\n**Interface** — No new runtime interface is specified. Keep the changes job's code=true/false output and Turbo task identities; add patches/** as a global dependency and corresponding push/PR selection so every dependent task observes patch contents.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] For each patch declared in package.json, when the actual PR filter evaluates a patch-only Git diff, then it yields code=true.",
+        "AC-1b [integration] For each patch declared in package.json, when its patch-only Git diff is evaluated against main push paths, then it matches the push filter.",
+        "AC-1c [integration] When the actual PR filter evaluates a README-only control diff, then it yields code=false.",
+        "AC-1d [integration] When a README-only control diff is evaluated against main push paths, then it does not match the push filter.",
+        "AC-2a [cli] Given the runner test task hash from a Turbo dry run in a disposable checkout, when only the contents of either declared patch change, then the task hash differs from baseline.",
+        "AC-2b [cli] Given a changed patch in that disposable checkout, when its original contents are restored, then the runner test task hash returns to baseline."
+      ],
+      "tags": [
+        "review-remediation",
+        "ci",
+        "turbo",
+        "dependency-patches",
+        "finding-14"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Root configuration changes have observable CI-selection and cache-key behavior; existing tooling harnesses and real dry runs make TDD appropriate rather than no-test."
+      },
+      "contextFiles": [
+        ".github/workflows/ci.yml",
+        "turbo.json",
+        "package.json",
+        "apps/api/test/unit/tooling/ci-change-filter.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "reason": "Select patch paths for pushes and pull requests."
+        },
+        {
+          "path": "turbo.json",
+          "reason": "Include patch contents in cache keys."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/ci-change-filter.spec.ts",
+          "reason": "Exercise patch-only Git diffs and runner task hashes."
+        }
+      ],
+      "workdirSource": "defaulted"
+    },
+    {
+      "id": "US-010",
+      "title": "Reject stale canary release retries",
+      "description": "**Goal** — Fail stale canary tag pushes and full redispatches before any registry writes while retaining newest-canary retry and stable-channel behavior, correcting finding 15.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — On tag push or full redispatch, compare the requested canary to remote canary tags in the info job before registry writes. Order the three base components then the canary sequence numerically using decimal-string comparison. Fail the run when a newer canary exists. Keep the current version's published-package skip and stable tagging policy.\n\n**Scope** — In: modify .github/workflows/release.yml, update RELEASING.md and extend apps/api/test/unit/tooling/release-channels.spec.ts. Reuse normalized decimal-string comparison with length then C-locale byte ordering for arbitrarily large major/minor/patch/sequence values. Evaluate only remote canary tags for canary ordering; fail closed on listing failure. Keep the check in info before dependent publish jobs, preserve inline workflow compatibility with old tag checkouts, and retain existing CI/main gating, queue policy, npm existence skip and stable alias/backport selection. Exercise extracted workflow scripts with isolated Git histories/stubbed remote tags and intercepted npm/Docker commands; capture actions as well as channel outputs. Out: patch CI/cache inputs belong to US-009 and deployment parsing to US-011. Coordinating concurrent registry publication across runs or repairing historical registry state.\n\n**Interface** — No new interface declaration is specified. Preserve info outputs consumed by downstream jobs: newest eligible canaries still select nathapp/koda-api:canary, nathapp/koda-web:canary and npm canary; superseded canaries fail the workflow instead of publishing selected aliases. A full redispatch recomputes eligibility; do not imply that an isolated downstream-job rerun gains a new info check.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] Given remote canary.2 and canary.10 on the same base, when canary.2 is pushed or fully redispatched, then the run fails before any npm or Docker registry write, whether or not npm already contains canary.2.",
+        "AC-1b [integration] Given remote canary.2 and canary.10 on the same base, when canary.10 is requested, then channel selection includes both Docker canary tags.",
+        "AC-1c [integration] Given those remote canaries, when canary.10 is requested, then channel selection uses the npm canary channel.",
+        "AC-2a [integration] Given two remote canaries whose higher base version has a smaller sequence, when each is requested through the info job's channels step, then the lower-base request fails before publication and the higher-base request selects the existing Docker and npm canary channels, with major, minor and patch compared numerically in that order.",
+        "AC-2b [integration] Given otherwise equal canaries differing in one decimal component, including 9 versus 9223372036854775808 and 9223372036854775808 versus 9223372036854775809, when each is requested with both present remotely for each of major, minor, patch and sequence in turn, then the numerically older request fails and the newer request selects canary channels without machine-integer overflow.",
+        "AC-2c [integration] Given a fixed requested canary and fixed remote canaries, when stable tags are added to the remote listing, then the channels step's exit status and selected canary channel outputs remain unchanged.",
+        "AC-2d [integration] When remote tag listing fails, then publication is prevented.",
+        "AC-3a [integration] Given the newest canary is already published on npm, when it is retried, then the existing npm published-package skip is retained, as observed through registry stubs.",
+        "AC-3b [integration] Given a stable patch with a newer stable patch on the same minor, when the older patch is retried, then Docker retains version-only tags, as observed through registry stubs."
+      ],
+      "tags": [
+        "review-remediation",
+        "release",
+        "canary",
+        "delivery",
+        "finding-15"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extend the workflow's existing decimal-string helpers and channels branch, preserving downstream job dependencies; the existing extracted-script harness can verify stale refusal, stubbed registry actions and stable retry policy without a new release subsystem."
+      },
+      "contextFiles": [
+        ".github/workflows/release.yml",
+        "RELEASING.md",
+        "apps/api/test/unit/tooling/release-channels.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": ".github/workflows/release.yml",
+          "reason": "Reject superseded canaries before publish jobs run."
+        },
+        {
+          "path": "RELEASING.md",
+          "reason": "Document canary ordering and redispatch behavior."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/release-channels.spec.ts",
+          "reason": "Exercise current and stale publication selection with stubbed tags."
+        }
+      ],
+      "workdir": ".",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Accept exported deployment credentials",
+      "description": "**Goal** — Accept export-prefixed POSTGRES_PASSWORD assignments in the example deployment's .env preflight without weakening validation or exposing credentials, correcting finding 16.\n\n**Motivation** — SQLite and controlled process, client and workflow fixtures isolated runner recovery, calendar, CLI and delivery defects.\n\n**Approach** — Extend the example wrapper's existing assignment reader to recognize the optional export prefix in .env. Keep shell precedence, quoting support, URL-safe validation and the preflight check before Docker operations.\n\n**Scope** — In: modify deployments/example/deploy.sh and extend apps/api/test/unit/tooling/deploy-script.spec.ts and deploy-script-harness.spec.ts. Exercise the actual wrapper in isolated copied fixtures with stubbed Docker and captured stdout/stderr. Preserve explicitly set shell values over .env, existing supported quote/comment handling, invalid/absent effective-password refusal and pre-Docker validation ordering. Match optional export syntax in the existing reader, not by sourcing or evaluating .env. Out: CI/cache selection belongs to US-009 and release channels to US-010; do not redesign deployment secret storage, Docker Compose configuration or the separate DATABASE_URL refusal.\n\n**Interface** — No new public signature or deployment option is specified. Both POSTGRES_PASSWORD=value and export POSTGRES_PASSWORD=value are accepted assignment forms; the existing environment precedence and URL-safe password policy remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1a [integration] Given the same valid test password, when the example script reads a bare POSTGRES_PASSWORD assignment from .env, then preflight passes.",
+        "AC-1b [integration] Given that valid test password, when the example script reads an export-prefixed POSTGRES_PASSWORD assignment from .env, then preflight passes.",
+        "AC-1c [integration] Given both a shell override and a .env assignment, when preflight determines the effective password, then the existing shell override takes precedence.",
+        "AC-2a [integration] When the effective password is absent, then the script fails before Docker is invoked.",
+        "AC-2b [integration] When the effective password is invalid, then the script fails before Docker is invoked.",
+        "AC-2c [integration] When preflight succeeds or fails with a supplied password, then captured stdout and stderr never contain that password."
+      ],
+      "tags": [
+        "review-remediation",
+        "deployment",
+        "credentials",
+        "security",
+        "finding-16"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The parser change is localized, but credential precedence, validation, secret-free output and pre-deployment refusal are security-critical and require strict three-session TDD."
+      },
+      "contextFiles": [
+        "deployments/example/deploy.sh",
+        "apps/api/test/unit/tooling/deploy-script.spec.ts",
+        "apps/api/test/unit/tooling/deploy-script-harness.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "deployments/example/deploy.sh",
+          "reason": "Recognize export-prefixed password assignments during preflight."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/deploy-script.spec.ts",
+          "reason": "Cover password precedence and validation outcomes."
+        },
+        {
+          "path": "apps/api/test/unit/tooling/deploy-script-harness.spec.ts",
+          "reason": "Exercise the wrapper against stubbed Docker and inspect captured output."
+        }
+      ],
+      "workdir": ".",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository and evidence: This is corrective maintenance of fourteen confirmed defects at review baseline d4538dd4e, not greenfield development. The revised review records nine P2 and five P3 findings and distinguishes actual PostgreSQL/SQLite checks from simulated VCS, registry and deployment operations (docs/20261128-review-whole-repo.md:5, docs/20261128-review-whole-repo.md:82). Its original finding numbers must remain attached to these eleven independent stories. Codebase-memory MCP is unavailable in this session; discovery used direct reads and literal/explicit-regex searches instead. No implementation or tests were run while drafting or auditing this PRD. The implementation must establish the stated behavior rather than treating the review's historical test results as current verification. Adversarial refinement checked all 33 original acceptance criteria: US-001 AC-1 through AC-4; US-002 AC-1 through AC-3; US-003 AC-1 through AC-3; US-004 AC-1 through AC-3; US-005 AC-1 through AC-3; US-006 AC-1 through AC-4; US-007 AC-1 through AC-3; US-008 AC-1 through AC-3; US-009 AC-1 through AC-2; US-010 AC-1 through AC-3; US-011 AC-1 through AC-2. Each is preserved within its original story as the correspondingly numbered letter-suffixed assertions, including existing-method resolution, same-lease/no-restart recovery, current CLI mappings/text/errors, timestamp passthrough, already-published npm skip and stable tagging regression anchors. Every story already contains a spec-derived negative case, so none required invented acceptance criteria. All seven feature exclusions and all eleven binding IDs/workdirs/empty dependency lists remain intact. Observable outcomes replace internal predicate-use wording; root delivery work extends existing scripts/harnesses rather than introducing new integrations.\n\nArchitecture and conventions: Bun workspaces and Turbo orchestrate the repository (package.json:5, turbo.json:11). The API is NestJS/Fastify with Prisma/PostgreSQL and Vitest, the runner is Bun/SQLite with bun:test, and the CLI is Commander with Jest. Contrary to the detected Next.js label in the supplied inventory, the web app is Nuxt 4/Vue and uses Nuxt-native composables (.nax/mono/apps/web/context.md:21). Read each app's source-of-truth context before local changes. Generated AGENTS.md and CLI SDK files must not be hand-edited. Keep domain rules and workflow transitions in the API, HTTP envelopes intact, runner networking in sync transports, and client fixes at the request/output boundaries. No story creates a new file, shared schema, migration, endpoint or protocol. Extend the named implementation and existing regression suites; expectedFiles is empty for every story. All dependencies are empty. US-009 through US-011 genuinely span root-owned delivery files and API tooling tests, so omit workdir for those stories.\n\nUS-001 / findings 6 and 7: CodeGraphService lazy-loads ts-morph when parsing (apps/api/src/code-intel/code-graph.service.ts:34); do not add an eager compiler runtime import. extractBatch creates one Project, rejects only syntactic errors, catches errors per file and removes each SourceFile in finally (apps/api/src/code-intel/code-graph.service.ts:51). Variable initializers are recognized as ArrowFunction/FunctionExpression but their VariableDeclaration is incorrectly passed into extraction that calls getParameters/getReturnType/getJsDocs (apps/api/src/code-intel/code-graph.service.ts:144, apps/api/src/code-intel/code-graph.service.ts:253). findCalledIdentifiers currently uses numeric kind 300 and raw node text rather than named call-expression traversal (apps/api/src/code-intel/code-graph.service.ts:283). Preserve resolveRelationships' full/short-name map, self exclusion and edge deduplication (apps/api/src/code-intel/code-graph.service.ts:163). Method calls must continue resolving through that existing method-name rule, not semantic TypeScript resolution. AstIndexService consumes these extractions (apps/api/src/code-intel/ast-index.service.ts:44), so extraction failure can replace a previously indexed file with no symbols; durable reindex and both public graph reads matter. Routes already exist at symbols/:symbolId/callers and symbols/:symbolId/callees (apps/api/src/code-intel/code-intel.controller.ts:107, apps/api/src/code-intel/code-intel.controller.ts:123). Existing tests deliberately encode the arrow exception and must be corrected, not retained as compatibility requirements (apps/api/src/code-intel/code-graph.service.spec.ts:65, apps/api/src/code-intel/code-graph.batch.spec.ts:111). Extend those two suites and apps/api/test/e2e/ast-index.e2e.spec.ts:34; keep malformed-file isolation, single/batch equivalence, and lazy compiler loading. Historic reindex migrations are excluded.\n\nUS-002 / finding 8: Candidate links carry a ticket-status snapshot across provider fetches. applyPrStatuses selects the merge step and applyMergedPr conditionally records the winning link state before invoking auto-transition (apps/api/src/vcs/vcs-pr-sync.service.ts:120, apps/api/src/vcs/vcs-pr-sync.service.ts:205). handleMergedPrAutoTransition incorrectly rejects a snapshot whose ticket was not IN_PROGRESS (apps/api/src/vcs/vcs-pr-sync.service.ts:244). PrismaVcsRepository.applyMergedPrTransition already owns the live conditional update with status IN_PROGRESS and deletedAt:null and creates its FIX_REPORT/activity in txManager.run (apps/api/src/vcs/prisma-vcs.repository.ts:409). Remove the stale status eligibility decision without bypassing that repository condition, winning-link protection, system-writer audit context, or deferred execution rollback behavior. The existing audit wrapper records the ticket entry only when the repository returns true (apps/api/src/vcs/vcs-pr-sync.service.ts:256). Do not mistake the separate link audit for the single ticket transition audit being asserted. VcsWebhookService also calls applyMergedPr (apps/api/src/vcs/vcs-webhook.service.ts:406), so polling/webhook replay must share idempotency. Update service unit expectations that currently assert no repository attempt for a non-IN_PROGRESS snapshot (apps/api/src/vcs/vcs-pr-sync.service.spec.ts:371). The auto-transition file under test/integration currently uses a mocked repository, despite its name (apps/api/test/integration/vcs/vcs-pr-sync-auto-transition.spec.ts:40); add genuine DB-backed ordering behavior rather than claiming that mock proves persistence. Extend the real PG merge-step fixture (apps/api/test/integration/vcs/vcs-merge-step.integration.spec.ts:37) with HTTP start/read, soft-delete and repeat-delivery controls.\n\nUS-003 / findings 9 and 17: TicketsService.update routes status PATCH through executeTransitionPublic but returns result.ticket raw (apps/api/src/tickets/tickets.service.ts:281, apps/api/src/tickets/tickets.service.ts:317). Ordinary edits resolve the project, compute gitRefUrl and call TicketResponseDto.from (apps/api/src/tickets/tickets.service.ts:372, apps/api/src/tickets/tickets.service.ts:409). Seven registered transition executions likewise expose raw tickets: verify, start, fix, verify-fix approve, verify-fix return, close, reject (apps/api/src/tickets/ticket-route.commands.ts:104). Reuse project-aware response mapping inside command execution; merely formatting in a controller would leave deferred ApprovalRequest.result inconsistent. routeCommand.execute delegates to spec.run, whereas toResult determines stored approval output (apps/api/src/approvals/route/route-command.ts:32, apps/api/src/approvals/route/route-command.ts:55). Preserve principal reload, assertMayUpdate and all edge permission checks (apps/api/src/tickets/ticket-route.commands.ts:61). TicketsController selects these existing command variants for both PATCH and named transitions (apps/api/src/tickets/tickets.controller.ts:249, apps/api/src/tickets/tickets.controller.ts:360). TicketLabel's domain contract lacks projectId (apps/api/src/tickets/domain/ticket.domain.ts:16), although the Prisma label row and shared include already load it (apps/api/src/tickets/prisma-tickets.repository.ts:42, apps/api/src/tickets/prisma-tickets.repository.ts:79); toDomain drops it (apps/api/src/tickets/prisma-tickets.repository.ts:114). Add the required field and propagate it through fixtures as necessary. DTO mapping already flattens labels and returns resolved gitRefUrl/ref fields (apps/api/src/tickets/dto/ticket-response.dto.ts:105, apps/api/src/tickets/dto/ticket-response.dto.ts:130). This restores the published response, not a new API shape. Extend ticket-route.commands.spec.ts:14 for all seven variants and serialized results, and endpoint.e2e.spec.ts:23 using its real approval fixtures. If implementation actually changes controller/DTO contracts rather than restoring them, regenerate OpenAPI and CLI from the root; never manually patch generated clients. Approval and authorization adjacency requires strict three-session TDD.\n\nUS-004 / finding 3: Journal stores events by exact (jobId, leaseEpoch), acknowledges only a seq prefix and exposes pending replay keys (apps/runner/src/journal/journal.ts:165, apps/runner/src/journal/journal.ts:186). prune currently deletes every event of an expired done row inside one SQLite transaction and returns every removed row's jobDir (apps/runner/src/journal/journal.ts:287). Guard eligibility with absence of unacknowledged events for that same lease inside that transaction; do not infer delivery from age or terminal state. Multiple epochs are separate rows but share a job directory (apps/runner/src/journal/journal.spec.ts:15, apps/runner/src/journal/journal.spec.ts:35). After removing eligible rows, emit a cleanup candidate only if no retained row uses that directory, deduplicated per directory. Keep the public return shape. This is safety-critical because daemon pruneJobs recursively removes each returned directory (apps/runner/src/daemon/daemon.ts:100). Preserve ordinary applied-command retention and explicit abandon behavior; no new server reconciliation or silence policy. Extend the real SQLite persistence/retention suite, whose existing age-only pruning test includes an unacknowledged event (apps/runner/src/journal/journal.spec.ts:158, apps/runner/src/journal/journal.spec.ts:171), and reopen an actual database file for replay assertions.\n\nUS-005 / finding 4: Four FleetCommand lookups treat any THREAD_CLOSE for the current job/lease as effective: mode change, session command, publish and sendRefusalFor (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:316, apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:387, apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:467, apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:653). Use one effective-close rule that ignores only acknowledged rejected closes and searches all matching history, not merely the newest/rejected row. FleetCommand.ackedAt and ackResult are nullable; ackResult values include ok/rejected/withdrawn/stale (apps/api/prisma/schema.prisma:1545). Include unacknowledged closes explicitly rather than relying on SQL inequality against NULL. Preserve other outcome behavior, job/lease scoping, readiness, pending approvals and the current job-then-thread lock order, including rereads under lock (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:302, apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:359). Do not add runner startup-close acceptance as an alternate fix. Existing tests cover command ownership and unrelated pending-question ordering (apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts:20); retain those guards while adding mixed-close histories across all four decisions. HTTP guards have seeded fleet worlds (apps/api/test/e2e/fleet/thread-send-guards.e2e.spec.ts:32), and the project-thread suite supplies real PG request/lease fixtures (apps/api/test/integration/fleet/fleet-project-thread-send.integration.spec.ts:35). Use them to prove ready-lease recovery and serialized concurrent retries. Strict three-session TDD applies because session-control and authorization paths are involved.\n\nUS-006 / finding 5: OwnedProcessLedger records process identities at spawn and conditionally forgets by pid plus spawnedAtMs (apps/runner/src/daemon/owned-processes.ts:46, apps/runner/src/journal/journal.ts:237). The startup reaper catches an inspection exception as null, catches signal errors, and then unconditionally forgets each previous-boot row (apps/runner/src/daemon/owned-processes.ts:158). Production readProcessStart discards ps exit status/stderr and conflates empty/malformed output with absence (apps/runner/src/executor/pid-registry.ts:56). Introduce richer process-observation information within existing files so production can distinguish positive absence from inconclusive inspection; making injected failures retryable alone is insufficient. Preserve readProcessStart(pid): Promise<Date | null> and PS_PROCESS_INFO for existing executor callers (apps/runner/src/executor/pid-registry.ts:75), UTC parsing and REGISTRATION_SLACK_MS (apps/runner/src/executor/pid-registry.ts:33). On retry, reread process identity before signalling; never carry a stale successful probe forward. Keep same-host boot and PID-reuse guards, negative pid for a recorded group, protected PIDs, and conditional deletion. Spec AC-3 intentionally changes the old documented/tested behavior when the current host boot is unreadable: retain rows whose recorded host is known; still clear rows with no recorded host or a confirmed different boot. Existing tests explicitly expect clearing in the unreadable-current-host case and must change (apps/runner/test/unit/owned-processes.spec.ts:137). Extend that suite for production command outputs and injected EPERM/ESRCH/inspection failure plus later success/reuse. Daemon startup invokes this reaper before accepting work (apps/runner/src/daemon/daemon.ts:283). Do not modify nax PID reaping or session recovery. Use strict isolation for ownership-based process signalling and ensure tests never signal uncontrolled host PIDs.\n\nUS-007 / findings 12 and 18: ticket list advertises --assigned-to <slug> but forwards its string as assignedTo; ticket mine uses assignedTo:'self' (apps/cli/src/commands/ticket.ts:179, apps/cli/src/commands/ticket.ts:190, apps/cli/src/commands/ticket.ts:230). Fix help to describe ordinary user IDs and the self shorthand without changing SDK query mappings or adding arbitrary-agent lookup. label delete already awaits the generated DELETE operation but always logs prose, even with --json (apps/cli/src/commands/label.ts:78). Branch successful output to the exact {id,deleted:true} confirmation using the requested ID; do not unwrap an empty 204 body. Keep finishSuccess and handleApiError/not-found semantics. Both existing Jest suites mock the generated SDK and spy output/exit behavior (apps/cli/src/commands/ticket.spec.ts:27, apps/cli/src/commands/label.spec.ts:27, apps/cli/src/commands/label.spec.ts:62). No SDK regeneration or backend change is needed.\n\nUS-008 / finding 13: buildTimelineQuery currently passes picker values directly through, and every page request uses that builder (apps/web/composables/useTimelineEvents.ts:28, apps/web/composables/useTimelineEvents.ts:57). applyFilters clears cursor and loadMore appends with the current bounds; latestRequestId prevents stale responses replacing newer ones (apps/web/composables/useTimelineEvents.ts:43, apps/web/composables/useTimelineEvents.ts:84). Convert date-only strings at this outgoing query seam using local numeric calendar components, not the UTC interpretation of new Date('YYYY-MM-DD'). For inclusive to, advance the local calendar date to the following midnight and subtract one millisecond; adding 86400000 would break DST. Preserve explicit timestamps and empty-bound omission. The API already uses gte/from and lte/to (apps/api/src/memory/timeline.service.ts:67); the spec's inclusive end overrides the older review's exclusive-boundary wording. No API or page layout change is needed. The timeline page consumes this composable (apps/web/pages/[project]/timeline.vue:40). Existing Jest tests currently assert unconverted dates and provide Nuxt $api globals; extend their intercepted request fixtures, filter reset, pagination and stale-response regressions (apps/web/tests/composables/useTimelineEvents.spec.ts:121, apps/web/tests/composables/useTimelineEvents.spec.ts:163). Run explicit timezone-controlled cases without leaking TZ state between tests.\n\nUS-009 / finding 14: Both patch files are declared in package.json:45: patches/@nathapp%2Fnax-agent@0.92.15.patch and patches/@nathapp%2Fnax-agent-acp@0.92.15.patch. The main push allowlist omits patches and the PR CODE_PATHS classifier independently omits them (.github/workflows/ci.yml:8, .github/workflows/ci.yml:69). Add patches/** to the former and the matching directory class to the latter; preserve PR required-check behavior, fail-loud Git execution and NUL-delimited path matching. Turbo globalDependencies currently omit patches (turbo.json:3). A global patches/** input deliberately invalidates all dependent tasks, not only the runner; do not narrow it to one task. ci-change-filter.spec.ts extracts and executes the actual workflow block, already has a real temporary Git history example and push/PR parity checks (apps/api/test/unit/tooling/ci-change-filter.spec.ts:10, apps/api/test/unit/tooling/ci-change-filter.spec.ts:106, apps/api/test/unit/tooling/ci-change-filter.spec.ts:139). Extend it for each manifest-declared patch, a README-only negative, and real Turbo runner-test dry-run hashes in an isolated checkout. Keep patch edits temporary and restore contents; no dependency upgrade is requested.\n\nUS-010 / finding 15: Release info computes channels from git ls-remote; its canary branch currently exits with floating tags before the stable decimal-string helpers are used (.github/workflows/release.yml:179, .github/workflows/release.yml:192). Reject a requested canary when any remote canary is newer by normalized numeric (major, minor, patch, sequence) ordering; compare digit lengths then bytewise equal-length digits under LC_ALL=C, never shell arithmetic or lexicographic whole-tag sorting. Reuse the existing normalization/comparison policy, including values beyond machine integer range (.github/workflows/release.yml:206). A failed remote tag listing must fail closed before channel assignments/publication. Keep the guard in info for tag pushes and full workflow redispatch; inline workflow logic must remain usable against old checked-out tags (.github/workflows/release.yml:101). The existing release concurrency queue, main/CI checks, immutable stable-version/backport aliases and npm published-version skip are not being redesigned (.github/workflows/release.yml:35, .github/workflows/release.yml:341). cli depends on info, and docker-build depends on info and cli (.github/workflows/release.yml:388). Tests must verify zero downstream registry writes on stale failure, whether or not npm contains that version; newest already-published canaries retain npm skip and both Docker canary tags. release-channels.spec.ts already extracts the real channels step and stubs git/remote failure (apps/api/test/unit/tooling/release-channels.spec.ts:20), with stable numeric and backport controls (apps/api/test/unit/tooling/release-channels.spec.ts:79). Extend the existing suite to capture npm/Docker actions as well as output variables. Update the retry/channel documentation (RELEASING.md:60, RELEASING.md:77, RELEASING.md:100). No registry calls, historical repair or cross-run race protocol belongs in these tests.\n\nUS-011 / finding 16: Example deploy preflight gives an explicitly set shell POSTGRES_PASSWORD precedence over .env, reads assignments without sourcing, strips supported quotes/comments, validates URL-safe characters and rejects before Docker operations (deployments/example/deploy.sh:43, deployments/example/deploy.sh:48, deployments/example/deploy.sh:54, deployments/example/deploy.sh:87, deployments/example/deploy.sh:139). Extend only the existing assignment recognizer to allow an optional export prefix. Do not source/eval the file or bypass password validation; preserve shell precedence including invalid/empty shell overrides. The separate DATABASE_URL reader already understands optional export and guards quoted multiline values; retain that behavior (deployments/example/deploy.sh:95). Existing tooling tests execute copies of the actual wrapper with intercepted Docker calls and isolated environments (apps/api/test/unit/tooling/deploy-script.spec.ts:41, apps/api/test/unit/tooling/deploy-script-harness.spec.ts:66, apps/api/test/unit/tooling/deploy-script-harness.spec.ts:76). Extend both named suites; captured stdout and stderr must never contain the supplied password. This is credential-handling code, so strict three-session TDD applies.\n\nVerification and delivery: Each story ships independently; sequencing here is organizational, not a dependency chain. Prefer public HTTP mutations/reads plus real durable state for API indexing, PR merge and ticket-response work; mocking provider responses is permitted but mocking the state under assertion is not. Reuse canRunDbTests gates, real test Prisma clients, action-context fixtures, and existing bootHttpApp listeners. DB-backed scoped runs require host PostgreSQL and must actually execute, not merely skip; API test:scoped automatically chooses DB mode for integration/e2e paths (apps/api/package.json:12, apps/api/package.json:19; .nax/mono/apps/api/context.md:166). Do not run destructive DB suites concurrently against one database. SQLite replay tests need real reopened files and do not require Postgres. Reaper tests inject process observation and signals; real host checks use the shared sandbox gate only when genuinely host-dependent. CLI/web tests retain their existing Jest boundaries. Root delivery tests live in the existing API tooling harness and must use isolated Git histories, real Turbo dry runs, stub registries and stub Docker/deployment commands, never real publication/deployment. Test strategy routing records the required TDD isolation; the story descriptions also identify the regression suites to extend. No migration or coordinated rollout is needed: the fixes restore existing contracts, and normal future reindexing will use the corrected extractor. Preserved pending events/ownership rows may increase local retention during prolonged outages; that is intentional and cannot be resolved by age alone.",
+  "outOfScope": [
+    "Changing the configured verification approval policy (review item 1).",
+    "Deduplicating simultaneous independent approval requests (item 2).",
+    "Changing JSON evaluation exit codes (item 10).",
+    "Paginating `ticket mine` beyond its documented first page (item 11).",
+    "Introducing a new lease reconciliation protocol or modifying the server silence sweeper.",
+    "Adding semantic TypeScript resolution, historical reindex migrations or new graph endpoints.",
+    "Coordinating concurrent registry publication across runs or repairing historical registry state."
+  ],
+  "routingProfile": "native-codex-ds"
+}
