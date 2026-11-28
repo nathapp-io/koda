@@ -209,7 +209,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      // Should update prState but NOT attempt ticket transition
+      // The candidate snapshot is stale; the repository decides using current ticket status.
       expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged', { expectedState: 'open' });
 
       // Delegates eligibility to the repository's live conditional update
@@ -472,7 +472,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr'),
       ).resolves.not.toThrow();
 
-      // Delegates eligibility to the repository's live conditional update when ticket is null
+      // No ticket relation means there is no transition target.
       expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
 
