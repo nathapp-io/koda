@@ -190,6 +190,19 @@ describe('US-008 local calendar date bounds', () => {
     expect((exclusiveNextMidnight - start) / 3_600_000).toBe(hours)
   })
 
+  // America/Santiago jumps forward at local midnight on 2026-09-06 (00:00 -> 01:00), so that calendar day has no
+  // 00:00 and the day before it ends one hour before a naive "add a day" would say.
+  test.each([
+    ['America/Santiago', '2026-09-05', '2026-09-05T04:00:00.000Z', '2026-09-06T03:59:59.999Z', 24],
+    ['America/Santiago', '2026-09-06', '2026-09-06T04:00:00.000Z', '2026-09-07T02:59:59.999Z', 23],
+  ])('B2 regression: %s %s spans its own local day (%i hours) across the midnight DST jump', (timezone, date, expectedFrom, expectedTo, hours) => {
+    const query = buildQueryInTimezone(timezone, { from: date, to: date })
+    expect(query.from).toBe(expectedFrom)
+    expect(query.to).toBe(expectedTo)
+    // The bound is the instant before the next calendar day starts, so the following day's first hour is excluded.
+    expect((Date.parse(query.to) + 1 - Date.parse(query.from)) / 3_600_000).toBe(hours)
+  })
+
   test('AC-6 / AC-7: single-sided dates omit the unselected bound', async () => {
     const fetchMock = jest.fn(() => Promise.resolve({ data: { events: [] } }))
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })

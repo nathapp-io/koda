@@ -1,7 +1,8 @@
 import { CANCEL_CUTOFF_DETAIL, type CommandAck, type FleetCommandOut } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
 import { errorMessage } from '../errors';
-import type { Journal } from '../journal/journal';
+import { JobDirCleanupPendingError, type Journal } from '../journal/journal';
+import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
 import { jobDirFor } from '../paths/safe-segment';
 import type { Now } from '../time';
@@ -233,7 +234,7 @@ export class CommandHandler {
     if (row && row.state === 'ASSIGNED' && row.pid === null && row.doneAt === null) this.deps.supervisor.begin(row, 'reprepare');
   }
 
-  private async assign(command: FleetCommandOut): Promise<Outcome> {
+  private async assign(command: FleetCommandOut): Promise<Outcome | null> {
     const { journal, supervisor, workspaceRoot } = this.deps;
     const parsed = parseAssign(command, { allowLocalCloneUrls: this.deps.allowLocalCloneUrls === true });
     if (!parsed.ok) {
@@ -242,11 +243,24 @@ export class CommandHandler {
       return outcome;
     }
     const { assign } = parsed;
-    const inserted = journal.tx(() => {
-      const result = journal.insertJob({ assign, leaseEpoch: command.leaseEpoch, repoKey: `${assign.repo.owner}/${assign.repo.name}`, jobDir: jobDirFor(workspaceRoot, assign.jobId) });
-      this.record(command, { result: 'ok' });
-      return result;
-    });
+    const jobDir = jobDirFor(workspaceRoot, assign.jobId);
+    let inserted: { row: JobRow; created: boolean };
+    try {
+      inserted = journal.tx(() => {
+        const result = journal.insertJob({ assign, leaseEpoch: command.leaseEpoch, repoKey: `${assign.repo.owner}/${assign.repo.name}`, jobDir });
+        this.record(command, { result: 'ok' });
+        return result;
+      });
+    } catch (error) {
+      // review-1128 B1: prune reserved this directory while its recursive removal runs. That is contention, not a
+      // failure: the assignment is deferred with no ack and no journaled rejection, so the server re-sends the
+      // still-pending ASSIGN instead of marking the job FAILED. The claim is cleared when the removal completes.
+      if (!(error instanceof JobDirCleanupPendingError)) throw error;
+      this.deps.log.info('assignment deferred: job directory cleanup is in progress', {
+        commandId: command.commandId, jobId: assign.jobId, leaseEpoch: command.leaseEpoch, jobDir,
+      });
+      return null;
+    }
     if (!inserted.created) {
       this.resumeStranded(assign.jobId, command.leaseEpoch);
       return { result: 'ok' };

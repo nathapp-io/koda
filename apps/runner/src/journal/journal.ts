@@ -32,6 +32,17 @@ const toCommand = (r: Row): CommandRecord => ({
   result: r['result'] as CommandRecord['result'], detail: r['detail'] as string | null, appliedAt: r['applied_at'] as string,
 });
 
+/**
+ * review-1128 B1: prune has reserved this job directory until its recursive filesystem removal completes. Contention
+ * is retryable, not a failure: the caller defers the assignment and the server re-sends it once the claim is gone.
+ */
+export class JobDirCleanupPendingError extends Error {
+  constructor(readonly jobDir: string) {
+    super('journal: job directory cleanup is in progress');
+    this.name = 'JobDirCleanupPendingError';
+  }
+}
+
 /** Persist-before-send store (slice 3 design §1.4). Every write commits before the caller reports it. */
 export class Journal {
   private readonly listeners = new Set<() => void>();
@@ -116,7 +127,7 @@ export class Journal {
   insertJob(job: NewJob): { row: JobRow; created: boolean } {
     return this.tx(() => {
       if (this.db.query('SELECT 1 FROM prune_cleanup_claims WHERE job_dir = ?').get(job.jobDir)) {
-        throw new Error('journal: job directory cleanup is in progress');
+        throw new JobDirCleanupPendingError(job.jobDir);
       }
       const stamp = this.now().toISOString();
       const result = this.db.query(
@@ -321,8 +332,9 @@ export class Journal {
         this.db.query('INSERT OR IGNORE INTO prune_cleanup_claims (job_dir, job_id, lease_epoch) VALUES (?, ?, ?)')
           .run(jobDir, r['job_id'] as string, r['lease_epoch'] as number);
       }
-      // Unfinished claims are returned again after a crash or filesystem error. insertJob rejects their path until
-      // the daemon acknowledges successful removal, closing the prune/assignment race across async cleanup.
+      // Unfinished claims are returned again after a crash or filesystem error. insertJob defers (never fails) an
+      // assignment onto a claimed path until the daemon acknowledges successful removal, closing the prune/assignment
+      // race across async cleanup.
       return (this.db.query('SELECT job_id, lease_epoch, job_dir FROM prune_cleanup_claims ORDER BY job_id, lease_epoch').all() as Row[])
         .map((r) => ({ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir: r['job_dir'] as string }));
     });

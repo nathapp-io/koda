@@ -147,6 +147,29 @@ describe('ASSIGN', () => {
     expect(b.ex.calls).toEqual([]);
     expect(b.journal.getCommand('c11')).toMatchObject({ result: 'rejected', detail: 'invalid handoff' });
   });
+  test('B1: a directory reserved by prune cleanup defers the assignment and it starts once cleanup completes', async () => {
+    const b = build();
+    b.ex.dieAfterTicks(1);
+    // The previous attempt of this job left its directory behind: retention expires it and reserves the path.
+    b.journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: '/work/space/.jobs/j1' });
+    b.journal.markDone('j1', 1);
+    b.time.advance(8 * 86_400_000);
+    expect(b.journal.prune(7)).toEqual([{ jobId: 'j1', leaseEpoch: 1, jobDir: '/work/space/.jobs/j1' }]);
+
+    // Contention is retryable: no ack (the server re-sends the still-pending ASSIGN) and no journaled rejection,
+    // which the server turns into a FAILED job.
+    expect(await b.handler.handle([assignCmd('c1')])).toEqual([]);
+    expect(b.journal.getJob('j1', 1)).toBeNull();
+    expect(b.journal.getCommand('c1')).toBeNull();
+    expect(b.ex.calls).toEqual([]);
+
+    // The daemon's recursive removal finished, so the redelivered ASSIGN applies and the job starts.
+    b.journal.completePrune('/work/space/.jobs/j1');
+    expect(await b.handler.handle([assignCmd('c1')])).toEqual([{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }]);
+    await b.supervisor.idle();
+    expect(b.ex.calls).toContain('prepare:j1');
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ command: 'RUN', state: expect.any(String) });
+  });
 });
 
 describe('requeue ASSIGN retires older epochs without blocking (K11)', () => {

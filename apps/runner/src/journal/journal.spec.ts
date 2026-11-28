@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
-import { Journal } from './journal';
+import { Journal, JobDirCleanupPendingError } from './journal';
 
 const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
 
@@ -233,7 +233,8 @@ describe('persistence and retention', () => {
     writer.close();
 
     const reopened = Journal.open(path, now);
-    expect(() => reopened.insertJob(job('reused', 2))).toThrow();
+    // The refusal is a structured, retryable contention — never a bare failure a caller could turn into a job FAILED.
+    expect(() => reopened.insertJob(job('reused', 2))).toThrow(JobDirCleanupPendingError);
     expect(reopened.prune(7)).toEqual(cleanup); // a filesystem failure or restart keeps the reservation retryable
 
     reopened.completePrune('/w/.jobs/reused');
