@@ -158,4 +158,97 @@ describe('CI change filter workflow step', () => {
       expect(pushBlock).toContain(`- "${path}"`);
     }
   });
+
+  function declaredPatches(): string[] {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      patchedDependencies: Record<string, string>;
+    };
+    return Object.values(manifest.patchedDependencies);
+  }
+
+  function makeGitHistory(changedPath: string): { base: string; head: string; cwd: string } {
+    const cwd = join(tempRoot, 'history');
+    mkdirSync(cwd);
+    const git = (...args: string[]) => execFileSync('git', [
+      '-c', 'user.name=CI Test', '-c', 'user.email=test@example.invalid', ...args,
+    ], { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } }).toString().trim();
+    git('init', '--quiet', '--template=');
+    writeFileSync(join(cwd, 'README.md'), 'fixture readme\n');
+    for (const patch of declaredPatches()) {
+      mkdirSync(join(cwd, patch, '..'), { recursive: true });
+      writeFileSync(join(cwd, patch), 'initial patch content\n');
+    }
+    git('add', '.');
+    git('commit', '--quiet', '-m', 'base');
+    const base = git('rev-parse', 'HEAD');
+    writeFileSync(join(cwd, changedPath), `${readFileSync(join(cwd, changedPath), 'utf8')}changed\n`);
+    git('add', changedPath);
+    git('commit', '--quiet', '-m', 'change');
+    return { base, head: git('rev-parse', 'HEAD'), cwd };
+  }
+
+  function runActualFilter(history: { base: string; head: string; cwd: string }): string {
+    const output = join(tempRoot, 'actual-output');
+    execFileSync('/bin/bash', ['-e', '-c', body], {
+      cwd: history.cwd,
+      env: { ...process.env, EVENT_NAME: 'pull_request', BASE_SHA: history.base, HEAD_SHA: history.head, GITHUB_OUTPUT: output },
+    });
+    return readFileSync(output, 'utf8').trim();
+  }
+
+  function pushPatterns(): string[] {
+    const pushBlock = workflow.slice(workflow.indexOf('  push:'), workflow.indexOf('  # No workflow-level path filter'));
+    return [...pushBlock.matchAll(/^      - "([^"]+)"$/gm)].map((match) => match[1]);
+  }
+
+  function matchesPushPath(path: string): boolean {
+    return pushPatterns().some((pattern) => {
+      const expression = pattern.split('**').map((part) => part.split('*').map((segment) => segment.replace(/[.+?^${}()|[\\]\\]/g, '\\$&')).join('[^/]*')).join('.*');
+      return new RegExp(`^${expression}$`).test(path);
+    });
+  }
+
+  it.each(declaredPatches())('actual PR filter selects patch-only change %s', (patch) => {
+    expect(runActualFilter(makeGitHistory(patch))).toBe('code=true');
+  });
+
+  it('actual PR filter rejects README-only control diff', () => {
+    expect(runActualFilter(makeGitHistory('README.md'))).toBe('code=false');
+  });
+
+  it.each(declaredPatches())('main push paths select patch-only change %s', (patch) => {
+    expect(matchesPushPath(patch)).toBe(true);
+  });
+
+  it('main push paths reject README-only control diff', () => {
+    expect(matchesPushPath('README.md')).toBe(false);
+  });
+
+  it.each(declaredPatches())('runner test hash changes for %s and returns after restoration', (patch) => {
+    const worktree = join(tempRoot, 'worktree');
+    execFileSync('git', ['worktree', 'add', '--detach', worktree, 'HEAD'], { cwd: repoRoot });
+    try {
+      // Test the configured rule even before it has been committed into the worktree's HEAD.
+      writeFileSync(join(worktree, 'turbo.json'), readFileSync(join(repoRoot, 'turbo.json')));
+      const turbo = join(repoRoot, 'node_modules/.bin/turbo');
+      const taskHash = () => {
+        const output = execFileSync(turbo, ['run', 'test', '--filter=@nathapp/koda-runner', '--dry=json'], {
+          cwd: worktree,
+          env: { ...process.env, TURBO_TELEMETRY_DISABLED: '1' },
+        }).toString();
+        const plan = JSON.parse(output) as { tasks: Array<{ taskId: string; hash: string }> };
+        const task = plan.tasks.find(({ taskId }) => taskId === '@nathapp/koda-runner#test');
+        if (!task) throw new Error('Runner test task missing from Turbo dry run');
+        return task.hash;
+      };
+      const baselineContents = readFileSync(join(worktree, patch));
+      const baseline = taskHash();
+      writeFileSync(join(worktree, patch), Buffer.concat([baselineContents, Buffer.from('\nchanged patch content\n')]));
+      expect(taskHash()).not.toBe(baseline);
+      writeFileSync(join(worktree, patch), baselineContents);
+      expect(taskHash()).toBe(baseline);
+    } finally {
+      execFileSync('git', ['worktree', 'remove', '--force', worktree], { cwd: repoRoot });
+    }
+  });
 });
